@@ -11,10 +11,13 @@ import { memberRoutes } from './routes/members.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
+import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { biometricRoutes } from './routes/biometric.js';
 import { handleRazorpayWebhook } from './routes/billing.js';
+import { deviceAttendanceRoutes } from './routes/deviceAttendance.js';
+import { deviceRoutes } from './routes/devices.js';
 import { requireActiveSubscription, resolveTenant } from './tenant.js';
 
 export function createApp() {
@@ -44,6 +47,11 @@ export function createApp() {
     handleRazorpayWebhook,
   );
 
+  // Fixed paths dictated by the fingerprint terminal's own firmware
+  // convention — not tenant-subdomain-routed (see deviceAttendance.js for
+  // why), so mounted here alongside the Razorpay webhook.
+  app.use('/iclock', deviceAttendanceRoutes);
+
   app.use(express.json({ limit: '1mb' }));
 
   // Tenant-agnostic: uptime monitors and load balancers must get 200 even
@@ -62,12 +70,14 @@ export function createApp() {
   app.use(requireActiveSubscription);
 
   app.use('/api/staff', staffRoutes);
+  app.use('/api/devices', deviceRoutes);
   app.use('/api/members', memberRoutes);
   app.use('/api/plans', planRoutes);
   app.use('/api/subscriptions', subscriptionRoutes);
   app.use('/api/payments', paymentRoutes);
   app.use('/api/attendance', attendanceRoutes);
   app.use('/api/biometric', biometricRoutes);
+  app.use('/api/qr', qrRoutes);
   app.use('/api/classes', classRoutes);
   app.use('/api/bookings', bookingRoutes);
   app.use('/api/equipment', equipmentRoutes);

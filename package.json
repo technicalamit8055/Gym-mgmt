@@ -11,10 +11,12 @@
     "start": "node --no-warnings=ExperimentalWarning src/server.js",
     "dev": "node --no-warnings=ExperimentalWarning --watch src/server.js",
     "seed": "node --no-warnings=ExperimentalWarning scripts/seed.js",
-    "test": "node --no-warnings=ExperimentalWarning --test \"tests/**/*.test.js\""
+    "test": "node --no-warnings=ExperimentalWarning --test \"tests/**/*.test.js\"",
+    "vendor:jsqr": "node scripts/vendor-jsqr.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "qrcode": "^1.5.4"
   }
 }

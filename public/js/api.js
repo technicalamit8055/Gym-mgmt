@@ -108,6 +108,12 @@ export const api = {
   biometricCredentials: (memberId) => request('GET', `/biometric/${memberId}/credentials`),
   biometricDeleteCredential: (memberId, id) => request('DELETE', `/biometric/${memberId}/credentials/${id}`),
 
+  qrCard: (memberId) => request('GET', `/qr/member/${memberId}`),
+  qrReissue: (memberId) => request('POST', `/qr/member/${memberId}/reissue`),
+  qrCards: (ids) => request('GET', `/qr/cards${query({ ids: ids.join(',') })}`),
+  qrLookup: (code) => request('POST', '/qr/lookup', { code }),
+  qrCheckIn: (code) => request('POST', '/qr/check-in', { code }),
+
   classes: (params) => request('GET', `/classes${query(params)}`),
   schedule: (params) => request('GET', `/classes/schedule${query(params)}`),
   createClass: (payload) => request('POST', '/classes', payload),
@@ -126,6 +132,10 @@ export const api = {
   staff: (params) => request('GET', `/staff${query(params)}`),
   createStaff: (payload) => request('POST', '/staff', payload),
   updateStaff: (id, payload) => request('PATCH', `/staff/${id}`, payload),
+
+  devices: () => request('GET', '/devices'),
+  createDevice: (payload) => request('POST', '/devices', payload),
+  deleteDevice: (serial) => request('DELETE', `/devices/${encodeURIComponent(serial)}`),
 
   revenueReport: (params) => request('GET', `/reports/revenue${query(params)}`),
   attendanceReport: (params) => request('GET', `/reports/attendance${query(params)}`),

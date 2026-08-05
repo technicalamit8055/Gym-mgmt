@@ -152,6 +152,27 @@ CREATE INDEX IF NOT EXISTS idx_biometric_member ON biometric_credentials(member_
 CREATE INDEX IF NOT EXISTS idx_biometric_cred ON biometric_credentials(credential_id);
 `;
 
+/** Append-only: CREATE TABLE IF NOT EXISTS never retrofits columns onto an
+ * already-created tenant file, so each future schema change becomes one more
+ * guarded ALTER TABLE here — mirrors tenants.js's own migration list. */
+function ensureColumn(db, table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
+const MIGRATIONS = [
+  (db) => ensureColumn(db, 'members', 'device_pin', 'INTEGER'),
+  (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_members_device_pin ON members(device_pin)'),
+  // Secret printed on the member's QR ID card. Deliberately not derived from
+  // the member code (which is sequential and guessable) so a card cannot be
+  // forged, and rotatable so a lost card can be revoked on its own.
+  (db) => ensureColumn(db, 'members', 'qr_token', 'TEXT'),
+  (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_members_qr_token ON members(qr_token)'),
+  (db) => ensureColumn(db, 'members', 'qr_issued_at', 'TEXT'),
+];
+
 // Carries the current request's tenant DB file through the async call chain,
 // so getDb() below can pick the right one without every caller threading a
 // tenant argument through. Set by src/tenant.js's resolveTenant middleware.
@@ -171,6 +192,7 @@ function openHandle(file) {
   handle.exec('PRAGMA journal_mode = WAL');
   handle.exec('PRAGMA foreign_keys = ON');
   handle.exec(SCHEMA);
+  for (const migrate of MIGRATIONS) migrate(handle);
   handles.set(resolved, handle);
   return handle;
 }

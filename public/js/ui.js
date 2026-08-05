@@ -128,6 +128,18 @@ export const STATUS_TONE = {
   no_show: 'red',
 };
 
+/** Badge colour per check-in channel, so the desk can see at a glance how
+ * people are getting in. */
+export const SOURCE_TONE = {
+  biometric: 'violet',
+  qr: 'blue',
+  device: 'green',
+  desk: 'grey',
+};
+
+export const sourceBadge = (source) =>
+  h('span', { class: `badge ${SOURCE_TONE[source] || 'grey'}` }, source);
+
 export const statusBadge = (status) =>
   h('span', { class: `badge ${STATUS_TONE[status] || 'grey'}` }, String(status || '').replace('_', ' '));
 

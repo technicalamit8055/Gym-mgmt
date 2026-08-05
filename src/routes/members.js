@@ -8,7 +8,7 @@ import { parse, toInt } from '../validate.js';
 export const memberRoutes = Router();
 memberRoutes.use(requireAuth);
 
-const MEMBER_SELECT = `
+export const MEMBER_SELECT = `
   SELECT m.*,
     active_sub.plan_name        AS plan_name,
     active_sub.end_date         AS membership_end,
@@ -50,12 +50,26 @@ const MEMBER_FIELDS = {
   photo_url: { type: 'string', max: 500 },
   joined_on: { type: 'date' },
   status: { type: 'enum', values: ['active', 'inactive', 'frozen'] },
+  // The numeric ID a fingerprint terminal (e.g. a Realtime/eSSL device)
+  // enrolls this member under — matched against physical check-in punches.
+  device_pin: { type: 'int' },
 };
 
 const optional = (fields) =>
   Object.fromEntries(
     Object.entries(fields).map(([key, spec]) => [key, { ...spec, required: false }]),
   );
+
+/**
+ * MEMBER_SELECT is `m.*`, which would otherwise spray the member's QR card
+ * secret through every list response. Callers get a flag instead; the token
+ * itself is only served by the /api/qr endpoints that need to render a card.
+ */
+export function publicMember(row) {
+  if (!row) return row;
+  const { qr_token, ...rest } = row;
+  return { ...rest, has_qr: Boolean(qr_token) };
+}
 
 function nextMemberCode() {
   const row = get("SELECT MAX(CAST(substr(code, 3) AS INTEGER)) AS n FROM members WHERE code LIKE 'GM%'");
@@ -120,14 +134,21 @@ memberRoutes.get('/', (req, res) => {
   );
   const { total } = get(`SELECT COUNT(*) AS total FROM (${MEMBER_SELECT} ${clause})`, params);
 
-  res.json({ items, total, page, limit, pages: Math.max(Math.ceil(total / limit), 1) });
+  res.json({
+    items: items.map(publicMember),
+    total,
+    page,
+    limit,
+    pages: Math.max(Math.ceil(total / limit), 1),
+  });
 });
 
 memberRoutes.get('/:id', (req, res) => {
   expireOverdueSubscriptions();
   const id = Number(req.params.id);
-  const member = get(`${MEMBER_SELECT} WHERE m.id = ?`, [id]);
-  if (!member) throw notFound('Member not found');
+  const row = get(`${MEMBER_SELECT} WHERE m.id = ?`, [id]);
+  if (!row) throw notFound('Member not found');
+  const member = publicMember(row);
 
   member.subscriptions = all(
     `SELECT s.*, p.name AS plan_name, p.duration_days
@@ -157,6 +178,9 @@ memberRoutes.post('/', (req, res) => {
   if (body.email && get('SELECT id FROM members WHERE email = ?', [body.email])) {
     throw conflict('A member with that email already exists');
   }
+  if (body.device_pin && get('SELECT id FROM members WHERE device_pin = ?', [body.device_pin])) {
+    throw conflict('Another member is already enrolled with that device PIN');
+  }
 
   const columns = Object.keys(body);
   const info = tx(() => {
@@ -167,7 +191,7 @@ memberRoutes.post('/', (req, res) => {
     );
   });
 
-  res.status(201).json(get(`${MEMBER_SELECT} WHERE m.id = ?`, [info.lastInsertRowid]));
+  res.status(201).json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [info.lastInsertRowid])));
 });
 
 memberRoutes.patch('/:id', (req, res) => {
@@ -181,12 +205,15 @@ memberRoutes.patch('/:id', (req, res) => {
   if (body.email && get('SELECT id FROM members WHERE email = ? AND id != ?', [body.email, id])) {
     throw conflict('Another member already uses that email');
   }
+  if (body.device_pin && get('SELECT id FROM members WHERE device_pin = ? AND id != ?', [body.device_pin, id])) {
+    throw conflict('Another member is already enrolled with that device PIN');
+  }
 
   run(
     `UPDATE members SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`,
     [...columns.map((c) => body[c]), id],
   );
-  res.json(get(`${MEMBER_SELECT} WHERE m.id = ?`, [id]));
+  res.json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [id])));
 });
 
 memberRoutes.delete('/:id', requireRole(...MANAGES_BILLING), (req, res) => {

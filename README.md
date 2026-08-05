@@ -58,6 +58,37 @@ refusal that says why (no active membership, frozen, sessions used up). Session
 plans decrement on check-in. Repeat scans the same day are recognised rather than
 duplicated. Live list of who is in the gym, with check-out.
 
+**QR ID cards** — every member gets a printable card carrying a QR code. Print
+one from the member's page, or tick several on the members list and print a sheet
+of them; cards are laid out at CR80 size (3.375in × 2.125in) so they line up with
+standard card stock and laminate pouches. There is also a downloadable PNG for
+sending a member their card over WhatsApp or email.
+
+At the desk, scanning a card shows who it is — photo, plan, expiry, sessions left,
+outstanding dues, and whether they are already inside — and checks them in from
+that panel. Two ways to scan:
+
+- **Camera** on the desk device — works on every modern browser. Where the
+  platform provides a native barcode engine (Android, ChromeOS, macOS) that gets
+  used for free; everywhere else, including Chrome and Edge on Windows and Linux,
+  the desk falls back to a vendored decoder fetched on first use
+  ([public/js/vendor/jsqr.min.js](public/js/vendor/jsqr.min.js), ~46 KB gzipped,
+  regenerate with `npm run vendor:jsqr`).
+- **Handheld scanner** pointed at the member-code box, which these scanners type
+  into like a keyboard. Nothing to install.
+
+Camera access needs a secure origin, so the desk must be on HTTPS or localhost —
+over plain http on a LAN address the browser refuses regardless of hardware, and
+the desk says exactly that rather than blaming the browser. A handheld scanner
+works either way.
+
+The code on a card is a random 128-bit secret, not the member code — member codes
+run GM0001, GM0002…, so deriving cards from them would let anyone print a working
+card. A payload that arrives carrying the card prefix is matched against issued
+cards only, which is what stops a hand-made QR reading `GB1:GM0042` from checking
+in whoever owns that code. Lost a card? Reissue from the member's page: the old
+one stops working immediately.
+
 **Classes** — weekly timetable with trainers, rooms, capacity and live seat
 counts. Book members into a class; the server enforces capacity, the right
 weekday and no double-booking, and lets a cancelled seat be re-booked. Mark
@@ -103,6 +134,62 @@ All optional — sensible defaults apply.
 | `TRUST_PROXY` | `false` | Set to `true` only when actually deployed behind a reverse proxy — enables correct client IP/HTTPS detection |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MS` / `LOGIN_LOCKOUT_MS` | `5` / `900000` / `900000` | Failed-login lockout: attempts, window, lockout duration |
 | `SIGNUP_MAX_ATTEMPTS` / `SIGNUP_WINDOW_MS` / `SIGNUP_LOCKOUT_MS` | `10` / `3600000` / `3600000` | Same, for `/api/platform/signup` (per IP) |
+| `ROOT_DOMAIN` | — | The exact production hostname (e.g. `yourapp.fly.dev`, later a real domain) — needed so a subdomain of it is read as a tenant slug instead of guessed from label count |
+
+## Deploy (Fly.io)
+
+Fly.io was chosen over a bare VPS because it handles HTTPS and reverse-proxying for
+you, and over serverless hosts (Vercel etc.) because this app needs a real, persistent
+disk for its SQLite files — serverless filesystems don't survive between requests.
+
+```bash
+fly auth login                                    # opens your browser, one-time
+
+fly apps create <pick-a-unique-name>
+fly volumes create gymbook_data -a <app-name> -r sin -s 1
+fly secrets set AUTH_SECRET=$(openssl rand -hex 32) -a <app-name>
+fly deploy -a <app-name>
+
+# Only after the first deploy do you know the assigned hostname:
+fly secrets set ROOT_DOMAIN=<app-name>.fly.dev -a <app-name>
+fly deploy -a <app-name>                          # redeploy so it takes effect
+```
+
+Update `app = "CHANGE-ME"` in `fly.toml` to match the name you picked, and
+`primary_region` to whichever [Fly region](https://fly.io/docs/reference/regions/)
+is closest to your users.
+
+`fly.toml`'s `auto_stop_machines = "suspend"` is the cheapest setting — it scales to
+near-zero cost when idle, at the cost of a cold-start delay on the first request after
+idle, and a real risk that a Razorpay webhook arrives while the machine is asleep.
+Once real paying gyms depend on webhooks landing promptly, change this to
+`min_machines_running = 1` (small constant cost, no cold starts, no missed webhooks).
+
+Not yet covered by this deploy: a custom domain and wildcard DNS for real per-gym
+subdomains (Fly's shared `fly.dev` domain can't do this — only a domain you own can),
+and real Razorpay credentials.
+
+## Physical fingerprint devices (eSSL/Realtime/ZKTeco-family)
+
+Members can check in on a physical terminal (tested against a Realtime T-52) instead
+of only the front desk or WebAuthn. This talks to the device's own "push"/ADMS
+protocol, which is community-reverse-engineered, not an official spec — expect to
+verify/adjust it against your actual unit rather than trusting it blind.
+
+1. Register the device's serial number (found on a label on the unit) so incoming
+   punches are attributed to the right gym:
+   ```
+   POST /api/devices   { "serial": "RSS1110031760", "label": "Front desk" }
+   ```
+2. On the device's own menu, set its "Cloud Server"/ADMS server address to your
+   deployed domain (e.g. `https://<your-app>.fly.dev`) — exact menu wording varies
+   by firmware, check the device's manual.
+3. For each member, set `device_pin` (via the normal member edit form/API) to the
+   numeric ID you enroll their fingerprint under on the device.
+4. Every request the device makes is logged server-side (prefixed `[iclock]`) —
+   useful for confirming it's actually connecting, and essential if a punch isn't
+   registering as expected, since the handshake/response format may need tuning
+   for your specific firmware.
 
 ## Backups
 
@@ -151,11 +238,14 @@ tests/api.test.js  API test suite
 npm test
 ```
 
-31 tests over a throwaway database cover authentication and token tampering,
+114 tests over throwaway databases cover authentication and token tampering,
 validation, member codes and duplicate detection, membership end-date maths,
 overlap rejection, renewal start dates, dues, check-in rules and idempotency,
 freeze/resume day credits, class capacity and weekday enforcement, role
-permissions, dashboard aggregates and CSV export.
+permissions, dashboard aggregates and CSV export, multi-tenant isolation,
+trial/billing lifecycle and webhook signatures, login lockout, fingerprint
+terminal uploads, WebAuthn enrollment and check-in against a software
+authenticator, and QR card issuing, scanning, reissue and forgery rejection.
 
 ## Notes on the design
 

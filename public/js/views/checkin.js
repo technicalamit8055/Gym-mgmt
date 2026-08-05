@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { clear, date, fullName, h, initials, table, time, toast, today } from '../ui.js';
+import { clear, date, fullName, h, initials, money, sourceBadge, statusBadge, table, time, toast, today } from '../ui.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -21,6 +21,103 @@ function bufferToBase64url(buffer) {
 
 function supportsWebAuthn() {
   return Boolean(window.PublicKeyCredential);
+}
+
+/* ── QR card helpers ───────────────────────────────────────────────── */
+
+/** Marks a value as coming off a printed GymBook card rather than being typed;
+ * must match QR_PREFIX in src/qr.js. */
+const QR_PREFIX = 'GB1:';
+
+const looksLikeCard = (value) => value.slice(0, QR_PREFIX.length).toUpperCase() === QR_PREFIX;
+
+/**
+ * Can this device open a camera at all? getUserMedia is only exposed in a
+ * secure context, so plain http on a LAN address fails here even though the
+ * hardware is present — worth distinguishing, because the fix is a URL change
+ * rather than a different browser.
+ */
+function cameraAvailability() {
+  if (!window.isSecureContext) {
+    return {
+      ok: false,
+      reason:
+        'Camera scanning needs a secure connection. Open the desk over HTTPS (or on localhost) to scan with the camera — a handheld scanner works into the box above either way.',
+    };
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return {
+      ok: false,
+      reason: 'This browser will not give the page camera access. Use a handheld scanner into the box above.',
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Picks a QR decoder.
+ *
+ * The native BarcodeDetector is preferred — it's hardware-accelerated and costs
+ * no download — but it is far from universal: it ships on Android, ChromeOS and
+ * macOS, and is absent from Chrome and Edge on Windows and Linux as well as from
+ * Safari and Firefox. So the fallback is a vendored decoder, fetched only when
+ * it's actually needed.
+ *
+ * Both branches return the same shape: a function taking the <video> and
+ * resolving to a decoded string, or null when nothing is in frame.
+ */
+async function loadQrDecoder() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        return async (video) => {
+          const [found] = await detector.detect(video);
+          return found?.rawValue ?? null;
+        };
+      }
+    } catch {
+      // Present but unusable on this platform — fall through to jsQR.
+    }
+  }
+
+  await loadJsQr();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  return async (video) => {
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    // Frames arrive before the stream reports dimensions; nothing to read yet.
+    if (!width || !height) return null;
+
+    canvas.width = width;
+    canvas.height = height;
+    ctx.drawImage(video, 0, 0, width, height);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    // Cards are held upright at a desk, so don't pay for inverted-image passes.
+    return window.jsQR(data, width, height, { inversionAttempts: 'dontInvert' })?.data ?? null;
+  };
+}
+
+let jsQrLoad;
+
+/** Fetches the vendored decoder once per page, on first use. */
+function loadJsQr() {
+  if (window.jsQR) return Promise.resolve();
+  jsQrLoad ??= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/js/vendor/jsqr.min.js';
+    script.onload = () => (window.jsQR ? resolve() : reject(new Error('QR decoder loaded but did not register')));
+    script.onerror = () => {
+      // Let a later attempt retry rather than caching the failure forever.
+      jsQrLoad = undefined;
+      reject(new Error('Could not load the QR decoder'));
+    };
+    document.head.append(script);
+  });
+  return jsQrLoad;
 }
 
 export async function renderCheckIn({ setActions }) {
@@ -61,7 +158,7 @@ export async function renderCheckIn({ setActions }) {
                     'Check out',
                   ),
           },
-          { label: 'Via', render: (row) => h('span', { class: `badge ${row.source === 'biometric' ? 'violet' : 'grey'}` }, row.source) },
+          { label: 'Via', render: (row) => sourceBadge(row.source) },
         ],
         visits,
         { empty: 'No check-ins yet today' },
@@ -159,13 +256,197 @@ export async function renderCheckIn({ setActions }) {
     input.value = '';
 
     try {
-      const result = await api.checkIn({ code });
+      // A handheld scanner types the card payload into this same box. Route it
+      // by shape so the visit records the channel it actually came through
+      // instead of logging every scan as a desk entry.
+      const result = looksLikeCard(code) ? await api.qrCheckIn(code) : await api.checkIn({ code });
       showResult(result);
     } catch (err) {
       showError(err);
     }
     input.focus();
   }
+
+  /* ── QR card scanning ─────────────────────────────────────────────── */
+
+  const scanPanel = h('div', {});
+  const video = h('video', { muted: true, playsinline: 'true' });
+  const scanStage = h('div', { class: 'scan-video-wrap', style: 'display:none' }, video, h('div', { class: 'scan-reticle' }));
+  let scanStream;
+  let scanning = false;
+
+  function stopScan() {
+    scanning = false;
+    for (const track of scanStream?.getTracks() ?? []) track.stop();
+    scanStream = undefined;
+    video.srcObject = null;
+    scanStage.style.display = 'none';
+    scanButton.disabled = false;
+    scanButton.textContent = '📷 Scan a card';
+    scanButton.classList.remove('scanning');
+  }
+
+  /** Shows who was just scanned and lets staff admit them. Read-only until
+   * they press the button, so an expiry or an unpaid balance can be spotted
+   * before the member is waved through. */
+  function showScanned(code, info) {
+    const member = info.member;
+
+    const admit = h(
+      'button',
+      {
+        class: 'btn primary',
+        onclick: async () => {
+          admit.disabled = true;
+          try {
+            showResult(await api.qrCheckIn(code));
+          } catch (err) {
+            showError(err);
+          }
+        },
+      },
+      // Named, because the desk box on the same screen also has a "Check in"
+      // button — the scanned member's name makes it obvious which is which.
+      info.already_in ? `Check in ${member.first_name} again` : `Check in ${member.first_name}`,
+    );
+
+    clear(scanPanel).append(
+      h(
+        'div',
+        { class: 'checkin-result ok' },
+        h(
+          'div',
+          { class: 'row', style: 'gap:12px;align-items:flex-start' },
+          member.photo_url
+            ? h('img', { class: 'scan-result-photo', src: member.photo_url, alt: '' })
+            : h('div', { class: 'avatar lg' }, initials(member.first_name, member.last_name)),
+          h(
+            'div',
+            { style: 'min-width:0' },
+            h('div', { style: 'font-size:17px;font-weight:700' }, fullName(member)),
+            h('div', { class: 'muted', style: 'font-size:12px' }, member.code),
+            h(
+              'div',
+              { class: 'row', style: 'gap:6px;margin-top:8px;flex-wrap:wrap' },
+              statusBadge(member.status),
+              info.subscription
+                ? h('span', { class: 'badge green' }, `${info.subscription.plan_name} to ${date(info.subscription.end_date)}`)
+                : h('span', { class: 'badge red' }, 'No active membership'),
+              info.sessions_left !== null && info.sessions_left !== undefined
+                ? h('span', { class: 'badge blue' }, `${info.sessions_left} sessions left`)
+                : null,
+              member.balance_due > 0 ? h('span', { class: 'badge amber' }, `${money(member.balance_due)} due`) : null,
+              info.already_in ? h('span', { class: 'badge violet' }, 'Already in the gym') : null,
+            ),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'row', style: 'gap:8px;margin-top:12px' },
+          admit,
+          h('a', { class: 'btn ghost sm', href: `#/members/${member.id}` }, 'Open profile'),
+        ),
+      ),
+    );
+  }
+
+  async function handleScanned(code) {
+    try {
+      showScanned(code, await api.qrLookup(code));
+    } catch (err) {
+      clear(scanPanel);
+      showError(err);
+    }
+  }
+
+  async function startScan() {
+    clear(scanPanel);
+    clear(feedback);
+
+    scanButton.disabled = true;
+    scanButton.textContent = 'Starting camera…';
+
+    let decode;
+    try {
+      // Decoder first: on a browser needing the fallback this fetches it, and
+      // failing here means never lighting up the camera for nothing.
+      decode = await loadQrDecoder();
+      scanStream = await navigator.mediaDevices.getUserMedia({
+        // Rear camera on a tablet; a desktop webcam ignores facingMode. The
+        // resolution hint keeps full-frame software decoding cheap without
+        // starving it of detail — these are treated as preferences, not
+        // requirements, so a webcam that can't oblige still opens.
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+    } catch (err) {
+      scanButton.disabled = false;
+      scanButton.textContent = '📷 Scan a card';
+      toast(
+        err?.name === 'NotAllowedError'
+          ? 'Camera access was blocked — allow it in the browser, or scan into the box above'
+          : err?.message || 'Could not start the camera',
+        'error',
+      );
+      return;
+    }
+
+    scanButton.disabled = false;
+    video.srcObject = scanStream;
+    await video.play().catch(() => {});
+    scanStage.style.display = 'block';
+    scanButton.textContent = '■ Stop scanning';
+    scanButton.classList.add('scanning');
+    scanning = true;
+
+    const tick = async () => {
+      // The router swaps views without a teardown hook, so the loop watches
+      // for its own video being detached and releases the camera itself.
+      if (!scanning || !video.isConnected) {
+        stopScan();
+        return;
+      }
+      try {
+        const value = await decode(video);
+        if (value) {
+          stopScan();
+          await handleScanned(value.trim());
+          return;
+        }
+      } catch {
+        // A transient decode failure (e.g. a frame arriving before the video
+        // reports its dimensions) isn't fatal — keep sampling.
+      }
+      // ~8 fps: fast enough to feel instant at the desk, and on the jsQR path
+      // it leaves the main thread time to breathe between full-frame decodes.
+      setTimeout(tick, 120);
+    };
+    tick();
+  }
+
+  const scanButton = h(
+    'button',
+    { class: 'btn primary block', onclick: () => (scanning ? stopScan() : startScan()) },
+    '📷 Scan a card',
+  );
+
+  const camera = cameraAvailability();
+
+  const qrCard = h(
+    'div',
+    { class: 'card qr-card' },
+    h('h3', {}, '🎟️ Member QR card'),
+    h(
+      'p',
+      { class: 'muted', style: 'font-size:13px;margin:0 0 14px' },
+      camera.ok
+        ? 'Point the camera at the QR on the member’s card to see their details, then check them in.'
+        : camera.reason,
+    ),
+    camera.ok ? scanButton : null,
+    scanStage,
+    scanPanel,
+  );
 
   /* ── Biometric check-in flow ──────────────────────────────────────── */
 
@@ -282,9 +563,15 @@ export async function renderCheckIn({ setActions }) {
         { class: 'card checkin-box' },
         h('h3', {}, 'Scan or type a member code'),
         input,
+        h(
+          'div',
+          { class: 'muted', style: 'font-size:12px;margin-top:6px' },
+          'A handheld QR scanner can type straight into this box.',
+        ),
         h('button', { class: 'btn primary block', style: 'margin-top:12px', onclick: submit }, 'Check in'),
         feedback,
       ),
+      qrCard,
       bioCard,
       h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h3', {}, 'In the gym now')), openList),
     ),

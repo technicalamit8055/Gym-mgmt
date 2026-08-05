@@ -9,6 +9,7 @@ import {
   initials,
   money,
   personCell,
+  sourceBadge,
   statusBadge,
   table,
   time,
@@ -16,6 +17,7 @@ import {
   today,
 } from '../ui.js';
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
+import { downloadCardPng, idCardNode, printCards } from '../qrcard.js';
 
 const FILTERS = [
   { value: '', label: 'All memberships' },
@@ -31,7 +33,39 @@ export async function renderMembers({ setActions, navigate }) {
   const container = h('div', {});
   const results = h('div', {});
 
+  /* Ticked members carried across pages, so a print run can be assembled from
+     more than one screen of results. */
+  const selected = new Set();
+
+  const printButton = h(
+    'button',
+    {
+      class: 'btn',
+      disabled: true,
+      onclick: async () => {
+        printButton.disabled = true;
+        printButton.textContent = 'Building cards…';
+        try {
+          const { items } = await api.qrCards([...selected]);
+          if (!items.length) throw new Error('None of the selected members could be found');
+          printCards(items);
+        } catch (err) {
+          toast(err.message || 'Could not build the cards', 'error');
+        } finally {
+          syncPrintButton();
+        }
+      },
+    },
+    '🖨️ Print cards',
+  );
+
+  function syncPrintButton() {
+    printButton.disabled = selected.size === 0;
+    printButton.textContent = selected.size ? `🖨️ Print ${selected.size} card${selected.size === 1 ? '' : 's'}` : '🖨️ Print cards';
+  }
+
   setActions(
+    printButton,
     h('button', { class: 'btn', onclick: () => api.download('members').catch((e) => toast(e.message, 'error')) }, '⇩ Export CSV'),
     h(
       'button',
@@ -111,7 +145,39 @@ export async function renderMembers({ setActions, navigate }) {
     clear(results).append(h('div', { class: 'empty' }, 'Loading…'));
     const data = await api.members(state);
 
+    const selectAll = h('input', {
+      type: 'checkbox',
+      title: 'Select every member on this page',
+      onclick: (event) => {
+        for (const row of data.items) {
+          if (event.target.checked) selected.add(row.id);
+          else selected.delete(row.id);
+        }
+        syncPrintButton();
+        load();
+      },
+    });
+    selectAll.checked = data.items.length > 0 && data.items.every((row) => selected.has(row.id));
+
     const columns = [
+      {
+        label: selectAll,
+        render: (row) => {
+          const box = h('input', {
+            type: 'checkbox',
+            title: 'Select for card printing',
+            // Row clicks open the member; a tick must not navigate away.
+            onclick: (event) => {
+              event.stopPropagation();
+              if (event.target.checked) selected.add(row.id);
+              else selected.delete(row.id);
+              syncPrintButton();
+            },
+          });
+          box.checked = selected.has(row.id);
+          return box;
+        },
+      },
       { label: 'Member', render: (row) => personCell(row) },
       { label: 'Contact', render: (row) => h('div', {}, h('div', {}, row.phone || '—'), h('div', { class: 'muted', style: 'font-size:12px' }, row.email || '')) },
       { label: 'Plan', render: (row) => row.plan_name || h('span', { class: 'muted' }, 'None') },
@@ -271,6 +337,8 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       h('dd', {}, member.emergency_contact ? `${member.emergency_contact} · ${member.emergency_phone || ''}` : '—'),
       h('dt', {}, 'Health notes'),
       h('dd', {}, member.health_notes || '—'),
+      h('dt', {}, 'Device PIN'),
+      h('dd', {}, member.device_pin ?? h('span', { class: 'muted' }, 'Not enrolled')),
     ),
     h(
       'div',
@@ -599,6 +667,92 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
 
   loadBiometrics();
 
+  /* ── QR ID card ──────────────────────────────────────────────────── */
+
+  const qrBody = h('div', { class: 'empty', style: 'padding:16px' }, 'Loading card…');
+  let card;
+
+  function renderQrCard() {
+    clear(qrBody).append(
+      h(
+        'div',
+        { class: 'qr-preview' },
+        idCardNode(card),
+        h(
+          'div',
+          { class: 'grid', style: 'gap:8px;align-content:start' },
+          h('button', { class: 'btn primary sm', onclick: () => printCards([card]) }, '🖨️ Print card'),
+          h(
+            'button',
+            {
+              class: 'btn sm',
+              onclick: async (event) => {
+                event.target.disabled = true;
+                try {
+                  await downloadCardPng(card);
+                } catch (err) {
+                  toast(err.message || 'Could not build the image', 'error');
+                } finally {
+                  event.target.disabled = false;
+                }
+              },
+            },
+            '⬇️ Download image',
+          ),
+          h(
+            'button',
+            {
+              class: 'btn ghost sm',
+              onclick: () =>
+                confirmDialog({
+                  title: 'Reissue this QR card?',
+                  message:
+                    "The member's current card stops working immediately — reissue only when a card is lost, then print and hand over the new one.",
+                  confirmLabel: 'Reissue card',
+                  danger: true,
+                  onConfirm: async () => {
+                    card = await api.qrReissue(member.id);
+                    renderQrCard();
+                    toast('New card issued — the old one no longer works');
+                  },
+                }),
+            },
+            'Reissue',
+          ),
+          card.issued_at
+            ? h('div', { class: 'muted', style: 'font-size:12px' }, `Issued ${date(card.issued_at, { withTime: true })}`)
+            : null,
+        ),
+      ),
+    );
+  }
+
+  async function loadQrCard() {
+    try {
+      card = await api.qrCard(member.id);
+      renderQrCard();
+    } catch (err) {
+      clear(qrBody).append(
+        h('div', { class: 'muted', style: 'padding:12px;font-size:13px' }, err.message || 'Could not load the QR card'),
+      );
+    }
+  }
+
+  const qrCardSection = h(
+    'div',
+    { class: 'card qr-card' },
+    h(
+      'div',
+      { class: 'card-head' },
+      h('h3', {}, '🎟️ QR ID card'),
+      h('div', { class: 'spacer' }),
+      h('span', { class: 'muted', style: 'font-size:12px' }, 'Print it, or send the image to the member'),
+    ),
+    qrBody,
+  );
+
+  loadQrCard();
+
   /* ── History section ─────────────────────────────────────────────── */
 
   const history = h(
@@ -643,7 +797,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           { label: 'Date', render: (row) => date(row.check_in) },
           { label: 'In', render: (row) => time(row.check_in.slice(11)) },
           { label: 'Out', render: (row) => (row.check_out ? time(row.check_out.slice(11)) : h('span', { class: 'badge green' }, 'In gym')) },
-          { label: 'Via', render: (row) => h('span', { class: `badge ${row.source === 'biometric' ? 'violet' : 'muted'}` }, row.source) },
+          { label: 'Via', render: (row) => sourceBadge(row.source) },
         ],
         member.attendance,
         { empty: 'No visits recorded' },
@@ -671,6 +825,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     { class: 'grid', style: 'gap:16px' },
     h('a', { href: '#/members', class: 'muted', style: 'font-size:13px' }, '← Back to members'),
     h('div', { class: 'grid cols-3' }, profileCard, membershipCard, accountCard),
+    qrCardSection,
     biometricCard,
     history,
   );
