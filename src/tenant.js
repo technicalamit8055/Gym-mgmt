@@ -1,11 +1,30 @@
-import { DEFAULT_TENANT_SLUG } from './config.js';
+import { config, DEFAULT_TENANT_SLUG } from './config.js';
 import { tenantStorage } from './db.js';
 import { paymentRequired } from './errors.js';
 import { expireOverdueTrials, findTenantBySlug, isValidSlug, tenantDbPath, RESERVED_SLUGS } from './tenants.js';
 
-function extractSlug(hostHeader) {
+/** Exported for direct unit testing — no server/network needed to verify
+ * the root-domain-matching logic. */
+export function extractSlug(hostHeader) {
   if (!hostHeader) return null;
   const hostname = hostHeader.split(':')[0].toLowerCase();
+
+  // Once deployed, the production hostname is known exactly (e.g.
+  // "yourapp.fly.dev") — match against it directly rather than inferring
+  // from label count, since a host like "<app>.fly.dev" has the same shape
+  // (3 labels) as a real "<slug>.yourdomain.com" tenant subdomain would.
+  if (config.rootDomain) {
+    const root = config.rootDomain.toLowerCase();
+    if (hostname === root) return null;
+    if (!hostname.endsWith(`.${root}`)) return null;
+    const candidate = hostname.slice(0, -(root.length + 1));
+    if (candidate.includes('.')) return null; // only one label deep
+    if (!isValidSlug(candidate) || RESERVED_SLUGS.has(candidate)) return null;
+    return candidate;
+  }
+
+  // No ROOT_DOMAIN configured (local dev, tests): fall back to inferring
+  // from label count, so "<slug>.localhost" dev-testing keeps working.
   const labels = hostname.split('.');
   if (labels.length < 2) return null; // "localhost", "127.0.0.1"-ish bare hosts
   if (labels.length === 2 && labels[1] !== 'localhost') return null; // bare root domain

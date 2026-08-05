@@ -1,0 +1,27 @@
+# CHANGE-ME: set to the app name you pick with `fly apps create`.
+app = "CHANGE-ME"
+primary_region = "sin"
+
+[env]
+  NODE_ENV = "production"
+  DB_FILE = "/data/gym.db"
+  PLATFORM_DB_FILE = "/data/platform.db"
+  TENANTS_DIR = "/data/tenants"
+  TRUST_PROXY = "true"
+  # ROOT_DOMAIN is set via `fly secrets set` after the first deploy, once the
+  # assigned <app-name>.fly.dev hostname is known — see README.
+
+[mounts]
+  source = "gymbook_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Cheapest option: scales to ~0 cost when idle, at the price of a cold-start
+  # delay on the first request after idle and a risk of a slow-to-arrive
+  # Razorpay webhook. Switch to min_machines_running = 1 (small constant
+  # cost, no cold starts) once real paying gyms depend on this.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0

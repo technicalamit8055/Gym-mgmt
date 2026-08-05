@@ -31,6 +31,13 @@ export function openMemberForm({ member, onSaved }) {
         { name: 'phone', label: 'Phone', value: member?.phone, placeholder: '9876543210' },
         { name: 'email', label: 'Email', type: 'email', value: member?.email },
         {
+          name: 'device_pin',
+          label: 'Fingerprint device PIN',
+          type: 'number',
+          value: member?.device_pin,
+          hint: 'The numeric ID this member is enrolled under on your fingerprint terminal, if any',
+        },
+        {
           name: 'gender',
           label: 'Gender',
           type: 'select',

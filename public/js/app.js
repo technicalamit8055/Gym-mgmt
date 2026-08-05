@@ -8,6 +8,7 @@ import { renderBilling } from './views/billing.js';
 import { renderClasses } from './views/classes.js';
 import { renderEquipment } from './views/equipment.js';
 import { renderStaff } from './views/staff.js';
+import { renderDevices } from './views/devices.js';
 import { renderReports } from './views/reports.js';
 
 const NAV = [
@@ -22,6 +23,7 @@ const NAV = [
   { section: 'Operations' },
   { path: '/classes', label: 'Classes', icon: '🧘' },
   { path: '/equipment', label: 'Equipment', icon: '🏋️' },
+  { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
   { path: '/staff', label: 'Staff', icon: '👥' },
 ];
 
@@ -35,6 +37,7 @@ const ROUTES = [
   { pattern: /^\/reports$/, title: 'Reports', view: renderReports },
   { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
   { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
+  { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
   { pattern: /^\/staff$/, title: 'Staff', view: renderStaff },
 ];
 

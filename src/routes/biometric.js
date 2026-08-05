@@ -7,9 +7,9 @@ import {
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
 import { requireAuth } from '../auth.js';
-import { all, get, run, tx } from '../db.js';
-import { badRequest, notFound } from '../errors.js';
-import { expireOverdueSubscriptions } from '../maintenance.js';
+import { performCheckIn } from '../checkin.js';
+import { all, get, run } from '../db.js';
+import { badRequest, conflict, notFound } from '../errors.js';
 import { config } from '../config.js';
 
 export const biometricRoutes = Router();
@@ -114,13 +114,19 @@ biometricRoutes.post('/register/verify', requireAuth, async (req, res) => {
   const { credential: regCredential, credentialDeviceType, credentialBackedUp } =
     verification.registrationInfo;
 
+  if (get('SELECT id FROM biometric_credentials WHERE credential_id = ?', [regCredential.id])) {
+    throw conflict('That biometric is already enrolled');
+  }
+
   run(
     `INSERT INTO biometric_credentials
        (member_id, credential_id, public_key, sign_count, device_type, backed_up, device_name)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
       memberId,
-      Buffer.from(regCredential.id).toString('base64url'),
+      // regCredential.id is already a base64url string — re-encoding it here
+      // would not match the id the browser sends back at authentication time.
+      regCredential.id,
       Buffer.from(regCredential.publicKey).toString('base64url'),
       regCredential.counter,
       credentialDeviceType || 'singleDevice',
@@ -188,58 +194,11 @@ biometricRoutes.post('/authenticate/verify', async (req, res) => {
     [verification.authenticationInfo.newCounter, stored.id],
   );
 
-  // ── Perform the check-in (mirroring the attendance route logic) ──────
-
   const member = get('SELECT * FROM members WHERE id = ?', [stored.member_id]);
   if (!member) throw badRequest('The member associated with this biometric was not found');
-  if (member.status === 'frozen') throw badRequest(`${member.first_name}'s membership is frozen`);
-  if (member.status === 'inactive') throw badRequest(`${member.first_name}'s membership is inactive`);
 
-  expireOverdueSubscriptions();
-  const sub = get(
-    "SELECT * FROM subscriptions WHERE member_id = ? AND status = 'active' AND date('now') BETWEEN start_date AND end_date ORDER BY end_date DESC LIMIT 1",
-    [member.id],
-  );
-  if (!sub) throw badRequest(`${member.first_name} has no active membership — renew before checking in`);
-  if (sub.sessions_total !== null && sub.sessions_used >= sub.sessions_total) {
-    throw badRequest(`${member.first_name} has used all ${sub.sessions_total} sessions on this plan`);
-  }
-
-  const openVisit = get(
-    "SELECT * FROM attendance WHERE member_id = ? AND check_out IS NULL AND date(check_in) = date('now')",
-    [member.id],
-  );
-
-  const VISIT_SELECT = `
-    SELECT a.*, m.code AS member_code, m.first_name, m.last_name, m.photo_url
-    FROM attendance a JOIN members m ON m.id = a.member_id
-  `;
-
-  if (openVisit) {
-    return res.status(200).json({
-      already_in: true,
-      visit: get(`${VISIT_SELECT} WHERE a.id = ?`, [openVisit.id]),
-    });
-  }
-
-  const visitId = tx(() => {
-    const info = run('INSERT INTO attendance (member_id, source) VALUES (?, ?)', [member.id, 'biometric']);
-    if (sub.sessions_total !== null) {
-      run('UPDATE subscriptions SET sessions_used = sessions_used + 1 WHERE id = ?', [sub.id]);
-    }
-    return info.lastInsertRowid;
-  });
-
-  return res.status(201).json({
-    already_in: false,
-    visit: get(`${VISIT_SELECT} WHERE a.id = ?`, [visitId]),
-    membership: {
-      plan_id: sub.plan_id,
-      end_date: sub.end_date,
-      sessions_total: sub.sessions_total,
-      sessions_left: sub.sessions_total === null ? null : sub.sessions_total - (sub.sessions_used + 1),
-    },
-  });
+  const result = performCheckIn(member, 'biometric');
+  return res.status(result.already_in ? 200 : 201).json(result);
 });
 
 /* ── Credential management (staff-only) ───────────────────────────────── */

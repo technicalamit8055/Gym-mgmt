@@ -20,6 +20,16 @@ CREATE TABLE IF NOT EXISTS tenants (
   suspended_reason TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
+
+CREATE TABLE IF NOT EXISTS biometric_devices (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  serial_number TEXT NOT NULL UNIQUE,
+  tenant_slug   TEXT NOT NULL,
+  label         TEXT,
+  last_seen_at  TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_serial ON biometric_devices(serial_number);
 `;
 
 /** Append-only: CREATE TABLE IF NOT EXISTS never retrofits columns onto an
@@ -153,6 +163,38 @@ export function applyWebhookStatus(subscriptionId, { status, reason, eventCreate
       )
       .run(status, status, reason ?? null, eventCreatedAt, subscriptionId, eventCreatedAt).changes > 0
   );
+}
+
+export function findTenantSlugByDeviceSerial(serial) {
+  const row = getRegistryDb()
+    .prepare('SELECT tenant_slug FROM biometric_devices WHERE serial_number = ?')
+    .get(serial);
+  return row?.tenant_slug;
+}
+
+export function registerDevice(tenantSlug, { serial, label } = {}) {
+  getRegistryDb()
+    .prepare('INSERT INTO biometric_devices (serial_number, tenant_slug, label) VALUES (?, ?, ?)')
+    .run(serial, tenantSlug, label ?? null);
+}
+
+export function touchDeviceLastSeen(serial) {
+  getRegistryDb()
+    .prepare("UPDATE biometric_devices SET last_seen_at = datetime('now') WHERE serial_number = ?")
+    .run(serial);
+}
+
+export function listDevicesForTenant(slug) {
+  return getRegistryDb()
+    .prepare('SELECT * FROM biometric_devices WHERE tenant_slug = ? ORDER BY created_at')
+    .all(slug)
+    .map(plain);
+}
+
+export function removeDevice(tenantSlug, serial) {
+  return getRegistryDb()
+    .prepare('DELETE FROM biometric_devices WHERE tenant_slug = ? AND serial_number = ?')
+    .run(tenantSlug, serial).changes;
 }
 
 export function closeRegistryDb() {
