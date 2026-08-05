@@ -22,6 +22,26 @@ CREATE TABLE IF NOT EXISTS tenants (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
 `;
 
+/** Append-only: CREATE TABLE IF NOT EXISTS never retrofits columns onto an
+ * already-created table, so each future registry column change becomes one
+ * more guarded ALTER TABLE here. */
+function ensureColumn(db, table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
+const MIGRATIONS = [
+  (db) => ensureColumn(db, 'tenants', 'razorpay_customer_id', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'razorpay_subscription_id', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'razorpay_checkout_url', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'razorpay_last_event_at', 'INTEGER'),
+  (db) => db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_razorpay_subscription ON tenants(razorpay_subscription_id)',
+  ),
+];
+
 let registryDb;
 
 function getRegistryDb() {
@@ -30,6 +50,7 @@ function getRegistryDb() {
   registryDb = new DatabaseSync(config.platformDbFile);
   registryDb.exec('PRAGMA journal_mode = WAL');
   registryDb.exec(SCHEMA);
+  for (const migrate of MIGRATIONS) migrate(registryDb);
   return registryDb;
 }
 
@@ -59,14 +80,14 @@ export function listTenants() {
   return getRegistryDb().prepare('SELECT * FROM tenants ORDER BY created_at').all().map(plain);
 }
 
-export function createTenant({ slug, displayName, gymName, currency = 'INR' }) {
+export function createTenant({ slug, displayName, gymName, currency = 'INR', trialEndsOn } = {}) {
   if (!isValidSlug(slug)) throw new Error(`Invalid tenant slug "${slug}"`);
   const dbFile = `tenants/${slug}.db`;
   getRegistryDb()
     .prepare(
-      'INSERT INTO tenants (slug, display_name, gym_name, currency, db_file) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO tenants (slug, display_name, gym_name, currency, db_file, trial_ends_on) VALUES (?, ?, ?, ?, ?, ?)',
     )
-    .run(slug, displayName, gymName ?? displayName, currency, dbFile);
+    .run(slug, displayName, gymName ?? displayName, currency, dbFile, trialEndsOn ?? null);
   return findTenantBySlug(slug);
 }
 
@@ -79,6 +100,59 @@ export function setTenantStatus(slug, status, reason) {
        WHERE slug = ?`,
     )
     .run(status, status, reason ?? null, slug);
+}
+
+export function findTenantBySubscriptionId(subscriptionId) {
+  return plain(
+    getRegistryDb().prepare('SELECT * FROM tenants WHERE razorpay_subscription_id = ?').get(subscriptionId),
+  );
+}
+
+export function setTenantBilling(slug, { customerId, subscriptionId, checkoutUrl } = {}) {
+  getRegistryDb()
+    .prepare(
+      `UPDATE tenants
+         SET razorpay_customer_id     = COALESCE(?, razorpay_customer_id),
+             razorpay_subscription_id = COALESCE(?, razorpay_subscription_id),
+             razorpay_checkout_url    = COALESCE(?, razorpay_checkout_url)
+       WHERE slug = ?`,
+    )
+    .run(customerId ?? null, subscriptionId ?? null, checkoutUrl ?? null, slug);
+  return findTenantBySlug(slug);
+}
+
+/** Lazily flips lapsed trials to 'suspended', mirroring maintenance.js's
+ * lazy-expiry pattern — no scheduler, just a cheap UPDATE before any read
+ * that cares about tenant status. */
+export function expireOverdueTrials() {
+  return getRegistryDb()
+    .prepare(
+      `UPDATE tenants SET status = 'suspended', suspended_at = datetime('now'), suspended_reason = 'trial expired'
+       WHERE status = 'trial' AND trial_ends_on IS NOT NULL AND trial_ends_on < date('now')`,
+    )
+    .run().changes;
+}
+
+/**
+ * Applies a webhook-reported status change atomically, guarded against
+ * out-of-order redelivery via the event's own timestamp — a single UPDATE,
+ * no read-then-write gap, so concurrent/duplicate/out-of-order webhooks
+ * can't corrupt status.
+ */
+export function applyWebhookStatus(subscriptionId, { status, reason, eventCreatedAt }) {
+  return (
+    getRegistryDb()
+      .prepare(
+        `UPDATE tenants
+           SET status = ?,
+               suspended_at = CASE WHEN ? = 'suspended' THEN datetime('now') ELSE suspended_at END,
+               suspended_reason = ?,
+               razorpay_last_event_at = ?
+         WHERE razorpay_subscription_id = ?
+           AND (razorpay_last_event_at IS NULL OR razorpay_last_event_at <= ?)`,
+      )
+      .run(status, status, reason ?? null, eventCreatedAt, subscriptionId, eventCreatedAt).changes > 0
+  );
 }
 
 export function closeRegistryDb() {

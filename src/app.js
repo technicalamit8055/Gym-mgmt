@@ -14,11 +14,24 @@ import { platformRoutes } from './routes/platform.js';
 import { reportRoutes } from './routes/reports.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { biometricRoutes } from './routes/biometric.js';
-import { resolveTenant } from './tenant.js';
+import { handleRazorpayWebhook } from './routes/billing.js';
+import { requireActiveSubscription, resolveTenant } from './tenant.js';
 
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+
+  // Razorpay signs the RAW request body, so this path needs the bytes before
+  // express.json() below parses (and thereby consumes) them. Mounted before
+  // resolveTenant too: Razorpay calls one fixed URL with no tenant subdomain
+  // context — the handler resolves its own tenant via razorpay_subscription_id
+  // and must not be subject to resolveTenant's unknown/cancelled-tenant response.
+  app.post(
+    '/api/platform/webhooks/razorpay',
+    express.raw({ type: 'application/json', limit: '1mb' }),
+    handleRazorpayWebhook,
+  );
+
   app.use(express.json({ limit: '1mb' }));
 
   // Tenant-agnostic: uptime monitors and load balancers must get 200 even
@@ -29,8 +42,13 @@ export function createApp() {
 
   app.use(resolveTenant);
 
+  // Signup, login, and billing must stay reachable even while a tenant is
+  // suspended (lapsed trial/payment) — the gate below only applies past here.
   app.use('/api/platform', platformRoutes);
   app.use('/api/auth', authRoutes);
+
+  app.use(requireActiveSubscription);
+
   app.use('/api/staff', staffRoutes);
   app.use('/api/members', memberRoutes);
   app.use('/api/plans', planRoutes);

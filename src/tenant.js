@@ -1,6 +1,7 @@
 import { DEFAULT_TENANT_SLUG } from './config.js';
 import { tenantStorage } from './db.js';
-import { findTenantBySlug, isValidSlug, tenantDbPath, RESERVED_SLUGS } from './tenants.js';
+import { paymentRequired } from './errors.js';
+import { expireOverdueTrials, findTenantBySlug, isValidSlug, tenantDbPath, RESERVED_SLUGS } from './tenants.js';
 
 function extractSlug(hostHeader) {
   if (!hostHeader) return null;
@@ -29,14 +30,39 @@ export function resolveTenant(req, res, next) {
     return tenantStorage.run({ slug: DEFAULT_TENANT_SLUG, dbFile: undefined }, next);
   }
 
+  // Only once we know this is a real registry lookup — calling this any
+  // earlier would force-create data/platform.db on every plain single-tenant
+  // dev/test request, which never touches the registry today.
+  expireOverdueTrials();
+
   const tenant = findTenantBySlug(slug);
   if (!tenant) {
     return res.status(404).json({ error: `No gym found for "${slug}"` });
   }
-  if (tenant.status === 'suspended' || tenant.status === 'cancelled') {
+  // 'suspended' (lapsed trial/payment) is recoverable — login and billing
+  // must stay reachable so the owner can pay to reactivate. 'cancelled' is a
+  // deliberate platform-side action and stays a hard block on everything.
+  if (tenant.status === 'cancelled') {
     return res.status(403).json({ error: 'This account is not currently active. Contact support.' });
   }
 
   req.tenant = tenant;
   return tenantStorage.run({ slug: tenant.slug, dbFile: tenantDbPath(tenant.slug) }, next);
+}
+
+/**
+ * Gates gym-operational routes behind an active trial/subscription. Mounted
+ * after /api/platform and /api/auth in app.js so signup, login, and billing
+ * stay reachable while suspended. 'cancelled' tenants never reach here —
+ * resolveTenant already hard-blocked them. Dev/single-tenant mode (no
+ * registry row, no status field) always passes.
+ */
+export function requireActiveSubscription(req, _res, next) {
+  if (req.tenant?.slug === DEFAULT_TENANT_SLUG) return next();
+  if (req.tenant?.status === 'trial' || req.tenant?.status === 'active') return next();
+  return next(
+    paymentRequired("This gym's subscription is not active. Sign in and subscribe to restore access.", {
+      status: req.tenant?.status ?? null,
+    }),
+  );
 }

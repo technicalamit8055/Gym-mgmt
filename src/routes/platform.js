@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import { ensureAdminAccount } from '../bootstrap.js';
+import { config } from '../config.js';
 import { tenantStorage } from '../db.js';
 import { badRequest, conflict } from '../errors.js';
 import { createTenant, findTenantBySlug, isValidSlug, tenantDbPath, RESERVED_SLUGS } from '../tenants.js';
-import { parse } from '../validate.js';
+import { addDays, parse, today } from '../validate.js';
+import { billingRoutes } from './billing.js';
 
 export const platformRoutes = Router();
+platformRoutes.use('/billing', billingRoutes);
 
 platformRoutes.post('/signup', (req, res) => {
   const body = parse(req.body, {
@@ -23,7 +26,12 @@ platformRoutes.post('/signup', (req, res) => {
   }
   if (findTenantBySlug(slug)) throw conflict('That gym address is already taken');
 
-  const tenant = createTenant({ slug, displayName: body.gym_name, currency: body.currency });
+  const tenant = createTenant({
+    slug,
+    displayName: body.gym_name,
+    currency: body.currency,
+    trialEndsOn: addDays(today(), config.trialDays),
+  });
 
   const created = tenantStorage.run({ slug: tenant.slug, dbFile: tenantDbPath(tenant.slug) }, () =>
     ensureAdminAccount({ email: body.admin_email, password: body.admin_password, name: body.admin_name }),

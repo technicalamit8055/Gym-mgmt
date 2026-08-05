@@ -19,6 +19,19 @@ export const config = {
   // single-tenant/dev fallback database.
   platformDbFile: process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'),
   tenantsDir: process.env.TENANTS_DIR || path.join(ROOT, 'data', 'tenants'),
+  trialDays: Number(process.env.TRIAL_DAYS || 7),
+  razorpay: {
+    keyId: process.env.RAZORPAY_KEY_ID || '',
+    keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+    planId: process.env.RAZORPAY_PLAN_ID || '',
+    // Razorpay requires a finite total_count on subscription create; there's
+    // no "forever" option. This is a large-but-finite stand-in (~10 years of
+    // monthly cycles) — revisit against Razorpay's actual max once real
+    // dashboard access exists. If exhausted, Razorpay auto-completes the
+    // subscription and the gym would need to hit /subscribe again.
+    totalCount: Number(process.env.RAZORPAY_TOTAL_COUNT || 120),
+  },
 };
 
 /** Pseudo-slug used whenever a request resolves to no real tenant (dev/single-gym mode). */

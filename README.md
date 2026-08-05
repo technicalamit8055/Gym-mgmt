@@ -94,6 +94,12 @@ All optional — sensible defaults apply.
 | `CURRENCY` | `INR` | Currency for all money formatting |
 | `GYM_NAME` | `GymBook` | Name shown in the UI |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | — | First-run admin account |
+| `PLATFORM_DB_FILE` | `data/platform.db` | Multi-tenant registry (which gyms exist, their billing status) |
+| `TENANTS_DIR` | `data/tenants` | Per-gym SQLite files live here, one per tenant |
+| `TRIAL_DAYS` | `7` | Free trial length for a newly signed-up gym |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | — | Razorpay API credentials — billing is disabled until both are set |
+| `RAZORPAY_WEBHOOK_SECRET` | — | Verifies that `/api/platform/webhooks/razorpay` calls really come from Razorpay |
+| `RAZORPAY_PLAN_ID` | — | The single monthly plan created in the Razorpay dashboard |
 
 ## Layout
 
