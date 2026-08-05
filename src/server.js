@@ -1,8 +1,10 @@
 import { createApp } from './app.js';
 import { ensureAdminAccount } from './bootstrap.js';
-import { config } from './config.js';
+import { assertProductionReady, config } from './config.js';
 import { closeDb } from './db.js';
 import { closeRegistryDb } from './tenants.js';
+
+assertProductionReady();
 
 const created = ensureAdminAccount();
 const app = createApp();

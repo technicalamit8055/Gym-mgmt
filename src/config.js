@@ -32,7 +32,25 @@ export const config = {
     // subscription and the gym would need to hit /subscribe again.
     totalCount: Number(process.env.RAZORPAY_TOTAL_COUNT || 120),
   },
+  // Opt-in only: trusting X-Forwarded-For without a real proxy in front lets
+  // a client spoof its own IP and dodge the rate limiter below.
+  trustProxy: process.env.TRUST_PROXY === 'true',
+  loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS || 5),
+  loginWindowMs: Number(process.env.LOGIN_WINDOW_MS || 15 * 60_000),
+  loginLockoutMs: Number(process.env.LOGIN_LOCKOUT_MS || 15 * 60_000),
+  signupMaxAttempts: Number(process.env.SIGNUP_MAX_ATTEMPTS || 10),
+  signupWindowMs: Number(process.env.SIGNUP_WINDOW_MS || 60 * 60_000),
+  signupLockoutMs: Number(process.env.SIGNUP_LOCKOUT_MS || 60 * 60_000),
 };
 
 /** Pseudo-slug used whenever a request resolves to no real tenant (dev/single-gym mode). */
 export const DEFAULT_TENANT_SLUG = 'default';
+
+/** Refuses to start with the dev-only secret in production — the single
+ * most damaging misconfiguration, since every tenant's session tokens would
+ * be signed with a publicly-known key. Call at process startup. */
+export function assertProductionReady(env = process.env) {
+  if (env.NODE_ENV === 'production' && !env.AUTH_SECRET) {
+    throw new Error('Refusing to start: AUTH_SECRET must be set when NODE_ENV=production (see README).');
+  }
+}

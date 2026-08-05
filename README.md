@@ -100,6 +100,25 @@ All optional — sensible defaults apply.
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | — | Razorpay API credentials — billing is disabled until both are set |
 | `RAZORPAY_WEBHOOK_SECRET` | — | Verifies that `/api/platform/webhooks/razorpay` calls really come from Razorpay |
 | `RAZORPAY_PLAN_ID` | — | The single monthly plan created in the Razorpay dashboard |
+| `TRUST_PROXY` | `false` | Set to `true` only when actually deployed behind a reverse proxy — enables correct client IP/HTTPS detection |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MS` / `LOGIN_LOCKOUT_MS` | `5` / `900000` / `900000` | Failed-login lockout: attempts, window, lockout duration |
+| `SIGNUP_MAX_ATTEMPTS` / `SIGNUP_WINDOW_MS` / `SIGNUP_LOCKOUT_MS` | `10` / `3600000` / `3600000` | Same, for `/api/platform/signup` (per IP) |
+
+## Backups
+
+Every tenant is a single SQLite file, so backups are just file copies. Run:
+
+```bash
+node scripts/backup.js
+```
+
+This snapshots the platform registry and every tenant's database into a timestamped
+folder under `backups/` (override with `BACKUP_DIR`), using SQLite's `VACUUM INTO` —
+safe to run against a live server, no downtime. Schedule it with cron or Windows Task
+Scheduler; the app itself never runs this automatically.
+
+To restore: stop the server, copy the wanted backup file back over the original
+path (e.g. `data/tenants/acme.db`), start the server again.
 
 ## Layout
 

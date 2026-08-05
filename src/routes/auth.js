@@ -1,13 +1,30 @@
 import { Router } from 'express';
 import { hashPassword, issueToken, requireAuth, requireRole, verifyPassword } from '../auth.js';
-import { DEFAULT_TENANT_SLUG } from '../config.js';
+import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { all, get, run } from '../db.js';
-import { badRequest, conflict, notFound, unauthorized } from '../errors.js';
+import { badRequest, conflict, notFound, tooManyRequests, unauthorized } from '../errors.js';
+import { createLimiter } from '../rateLimit.js';
 import { parse } from '../validate.js';
 
 export const authRoutes = Router();
 
+const loginLimiter = createLimiter({
+  maxAttempts: config.loginMaxAttempts,
+  windowMs: config.loginWindowMs,
+  lockoutMs: config.loginLockoutMs,
+});
+
 authRoutes.post('/login', (req, res) => {
+  const tenantSlug = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
+  const emailForKey = String(req.body?.email || '').trim().toLowerCase();
+  const limiterKey = `${tenantSlug}:${req.ip}:${emailForKey}`;
+
+  const gate = loginLimiter.check(limiterKey);
+  if (gate.locked) {
+    res.set('Retry-After', String(gate.retryAfterSeconds));
+    throw tooManyRequests('Too many failed attempts. Try again later.');
+  }
+
   const body = parse(req.body, {
     email: { type: 'email', required: true },
     password: { type: 'string', required: true },
@@ -15,12 +32,14 @@ authRoutes.post('/login', (req, res) => {
 
   const user = get('SELECT * FROM users WHERE email = ?', [body.email]);
   if (!user || !verifyPassword(body.password, user.password_hash)) {
+    loginLimiter.recordAttempt(limiterKey);
     throw unauthorized('Email or password is incorrect');
   }
   if (!user.active) throw unauthorized('This account has been deactivated');
 
+  loginLimiter.recordSuccess(limiterKey);
   res.json({
-    token: issueToken(user, req.tenant?.slug ?? DEFAULT_TENANT_SLUG),
+    token: issueToken(user, tenantSlug),
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });

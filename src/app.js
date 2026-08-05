@@ -1,6 +1,6 @@
 import path from 'node:path';
 import express from 'express';
-import { ROOT } from './config.js';
+import { config, ROOT } from './config.js';
 import { HttpError } from './errors.js';
 import { attendanceRoutes } from './routes/attendance.js';
 import { authRoutes, staffRoutes } from './routes/auth.js';
@@ -20,6 +20,18 @@ import { requireActiveSubscription, resolveTenant } from './tenant.js';
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  // Opt-in (config.trustProxy, TRUST_PROXY env var): only correct once a real
+  // reverse proxy is actually in front — otherwise a client's own
+  // X-Forwarded-For would be trusted, spoofing req.ip and req.protocol.
+  app.set('trust proxy', config.trustProxy);
+
+  app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'no-referrer');
+    if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    next();
+  });
 
   // Razorpay signs the RAW request body, so this path needs the bytes before
   // express.json() below parses (and thereby consumes) them. Mounted before

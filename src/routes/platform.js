@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { ensureAdminAccount } from '../bootstrap.js';
 import { config } from '../config.js';
 import { tenantStorage } from '../db.js';
-import { badRequest, conflict } from '../errors.js';
+import { badRequest, conflict, tooManyRequests } from '../errors.js';
+import { createLimiter } from '../rateLimit.js';
 import { createTenant, findTenantBySlug, isValidSlug, tenantDbPath, RESERVED_SLUGS } from '../tenants.js';
 import { addDays, parse, today } from '../validate.js';
 import { billingRoutes } from './billing.js';
@@ -10,7 +11,22 @@ import { billingRoutes } from './billing.js';
 export const platformRoutes = Router();
 platformRoutes.use('/billing', billingRoutes);
 
+// IP-keyed, not per-slug: each signup provisions a real SQLite file, so this
+// guards against spam-tenant creation, not credential guessing.
+const signupLimiter = createLimiter({
+  maxAttempts: config.signupMaxAttempts,
+  windowMs: config.signupWindowMs,
+  lockoutMs: config.signupLockoutMs,
+});
+
 platformRoutes.post('/signup', (req, res) => {
+  const gate = signupLimiter.check(req.ip);
+  if (gate.locked) {
+    res.set('Retry-After', String(gate.retryAfterSeconds));
+    throw tooManyRequests('Too many signups from this address. Try again later.');
+  }
+  signupLimiter.recordAttempt(req.ip);
+
   const body = parse(req.body, {
     slug: { type: 'string', required: true, min: 3, max: 40 },
     gym_name: { type: 'string', required: true, min: 2, max: 120 },
