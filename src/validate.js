@@ -1,0 +1,109 @@
+import { badRequest } from './errors.js';
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Tiny schema checker. Each field maps to a spec:
+ *   { type, required, min, max, values, default }
+ * Unknown keys in the payload are ignored so the API stays forgiving.
+ */
+export function parse(payload, schema) {
+  const body = payload && typeof payload === 'object' ? payload : {};
+  const out = {};
+  const errors = {};
+
+  for (const [field, spec] of Object.entries(schema)) {
+    let value = body[field];
+
+    if (value === undefined || value === null || value === '') {
+      if (spec.required) {
+        errors[field] = 'is required';
+      } else if (spec.default !== undefined) {
+        out[field] = spec.default;
+      } else if (value === '' && spec.type === 'string') {
+        out[field] = '';
+      } else if (field in body) {
+        out[field] = null;
+      }
+      continue;
+    }
+
+    switch (spec.type) {
+      case 'string': {
+        value = String(value).trim();
+        if (spec.min && value.length < spec.min) errors[field] = `must be at least ${spec.min} characters`;
+        if (spec.max && value.length > spec.max) errors[field] = `must be at most ${spec.max} characters`;
+        break;
+      }
+      case 'email': {
+        value = String(value).trim().toLowerCase();
+        if (!EMAIL_RE.test(value)) errors[field] = 'must be a valid email address';
+        break;
+      }
+      case 'int': {
+        const n = Number(value);
+        if (!Number.isInteger(n)) errors[field] = 'must be a whole number';
+        else value = n;
+        break;
+      }
+      case 'number': {
+        const n = Number(value);
+        if (!Number.isFinite(n)) errors[field] = 'must be a number';
+        else value = n;
+        break;
+      }
+      case 'boolean': {
+        value = value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
+        break;
+      }
+      case 'date': {
+        value = String(value).trim();
+        if (!DATE_RE.test(value) || Number.isNaN(Date.parse(value))) {
+          errors[field] = 'must be a date formatted YYYY-MM-DD';
+        }
+        break;
+      }
+      case 'time': {
+        value = String(value).trim();
+        if (!TIME_RE.test(value)) errors[field] = 'must be a time formatted HH:MM';
+        break;
+      }
+      case 'enum': {
+        value = String(value).trim();
+        if (!spec.values.includes(value)) errors[field] = `must be one of: ${spec.values.join(', ')}`;
+        break;
+      }
+      default:
+        throw new Error(`Unknown field type "${spec.type}" for ${field}`);
+    }
+
+    if (spec.type === 'int' || spec.type === 'number') {
+      if (spec.min !== undefined && value < spec.min) errors[field] = `must be at least ${spec.min}`;
+      if (spec.max !== undefined && value > spec.max) errors[field] = `must be at most ${spec.max}`;
+    }
+
+    if (!errors[field]) out[field] = value;
+  }
+
+  if (Object.keys(errors).length) {
+    throw badRequest('Some fields need attention', errors);
+  }
+  return out;
+}
+
+export function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function addDays(isoDate, days) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export function toInt(value, fallback) {
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
