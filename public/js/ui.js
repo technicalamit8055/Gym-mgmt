@@ -143,6 +143,15 @@ export const sourceBadge = (source) =>
 export const statusBadge = (status) =>
   h('span', { class: `badge ${STATUS_TONE[status] || 'grey'}` }, String(status || '').replace('_', ' '));
 
+/**
+ * A toolbar control with its caption attached — "From [date]".
+ *
+ * Pairing them in one flex box is what keeps the caption from being orphaned on
+ * the line above its input when a toolbar wraps on a narrow screen.
+ */
+export const labelledControl = (text, control) =>
+  h('label', { class: 'toolbar-pair' }, h('span', { class: 'muted' }, text), control);
+
 export const personCell = (person) =>
   h(
     'div',

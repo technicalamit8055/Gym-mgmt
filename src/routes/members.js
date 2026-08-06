@@ -15,8 +15,12 @@ export const MEMBER_SELECT = `
     active_sub.id               AS subscription_id,
     COALESCE(billed.total, 0) - COALESCE(paid.total, 0) AS balance_due,
     visits.last_visit           AS last_visit,
-    COALESCE(visits.count, 0)   AS visit_count
+    COALESCE(visits.count, 0)   AS visit_count,
+    gym_session.name            AS session_name,
+    gym_session.start_time      AS session_start,
+    gym_session.end_time        AS session_end
   FROM members m
+  LEFT JOIN sessions gym_session ON gym_session.id = m.session_id
   LEFT JOIN (
     SELECT s.member_id, s.id, s.end_date, p.name AS plan_name,
            ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.end_date DESC, s.id DESC) AS rn
@@ -53,6 +57,10 @@ const MEMBER_FIELDS = {
   // The numeric ID a fingerprint terminal (e.g. a Realtime/eSSL device)
   // enrolls this member under — matched against physical check-in punches.
   device_pin: { type: 'int' },
+  // Which daily gym shift this member is expected to attend — drives
+  // auto-checkout once that shift's end time has passed (see
+  // autoCloseFinishedVisits() in maintenance.js). Leave unset to opt out.
+  session_id: { type: 'int' },
 };
 
 const optional = (fields) =>
@@ -181,6 +189,9 @@ memberRoutes.post('/', (req, res) => {
   if (body.device_pin && get('SELECT id FROM members WHERE device_pin = ?', [body.device_pin])) {
     throw conflict('Another member is already enrolled with that device PIN');
   }
+  if (body.session_id && !get('SELECT id FROM sessions WHERE id = ?', [body.session_id])) {
+    throw notFound('Session not found');
+  }
 
   const columns = Object.keys(body);
   const info = tx(() => {
@@ -207,6 +218,9 @@ memberRoutes.patch('/:id', (req, res) => {
   }
   if (body.device_pin && get('SELECT id FROM members WHERE device_pin = ? AND id != ?', [body.device_pin, id])) {
     throw conflict('Another member is already enrolled with that device PIN');
+  }
+  if (body.session_id && !get('SELECT id FROM sessions WHERE id = ?', [body.session_id])) {
+    throw notFound('Session not found');
   }
 
   run(

@@ -166,14 +166,21 @@ describe('check-in', () => {
   it('checks a member in by code and reports the membership', async () => {
     const res = await call('POST', '/api/attendance/check-in', { code: 'GM0001' });
     assert.equal(res.status, 201);
-    assert.equal(res.body.already_in, false);
+    assert.equal(res.body.action, 'checked_in');
     assert.equal(res.body.membership.end_date, addDays(today(), 29));
   });
 
-  it('is idempotent for the same day', async () => {
+  it('toggles to checked-out on a rescan the same day', async () => {
     const res = await call('POST', '/api/attendance/check-in', { code: 'gm0001' });
     assert.equal(res.status, 200);
-    assert.equal(res.body.already_in, true);
+    assert.equal(res.body.action, 'checked_out');
+    assert.ok(res.body.visit.check_out);
+  });
+
+  it('starts a fresh visit on a further scan', async () => {
+    const res = await call('POST', '/api/attendance/check-in', { code: 'GM0001' });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.action, 'checked_in');
   });
 
   it('refuses a member with no active membership', async () => {
@@ -182,10 +189,96 @@ describe('check-in', () => {
     assert.match(res.body.error, /no active membership/);
   });
 
-  it('checks out an open visit', async () => {
+  it('checks out an open visit via the explicit endpoint', async () => {
     const res = await call('POST', '/api/attendance/check-out', { member_id: 1 });
     assert.equal(res.status, 200);
     assert.ok(res.body.check_out);
+  });
+
+  it('lets a member check out on rescan even while frozen', async () => {
+    const checkedIn = await call('POST', '/api/attendance/check-in', { code: 'GM0001' });
+    assert.equal(checkedIn.status, 201);
+
+    assert.equal((await call('PATCH', '/api/members/1', { status: 'frozen' })).status, 200);
+
+    const res = await call('POST', '/api/attendance/check-in', { code: 'GM0001' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.action, 'checked_out');
+
+    // Restore, so later tests checking GM0001 in again aren't blocked.
+    assert.equal((await call('PATCH', '/api/members/1', { status: 'active' })).status, 200);
+  });
+});
+
+describe('gym sessions', () => {
+  it('seeds a default morning and evening session on first boot', async () => {
+    const res = await call('GET', '/api/sessions');
+    assert.equal(res.status, 200);
+    const names = res.body.items.map((s) => s.name);
+    assert.ok(names.includes('Morning'));
+    assert.ok(names.includes('Evening'));
+  });
+
+  it('creates, updates and deletes a session', async () => {
+    const created = await call('POST', '/api/sessions', { name: 'Late Night', start_time: '21:00', end_time: '23:00' });
+    assert.equal(created.status, 201);
+
+    const updated = await call('PATCH', `/api/sessions/${created.body.id}`, { name: 'Night Shift' });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.name, 'Night Shift');
+
+    assert.equal((await call('DELETE', `/api/sessions/${created.body.id}`)).status, 200);
+  });
+
+  it('rejects a session whose end time is not after its start time', async () => {
+    const res = await call('POST', '/api/sessions', { name: 'Bad', start_time: '10:00', end_time: '09:00' });
+    assert.equal(res.status, 400);
+  });
+
+  it('rejects assigning a member to a session that does not exist', async () => {
+    const res = await call('PATCH', '/api/members/2', { session_id: 999999 });
+    assert.equal(res.status, 404);
+  });
+
+  it('refuses to delete a session members are still assigned to', async () => {
+    const created = await call('POST', '/api/sessions', { name: 'Assigned', start_time: '06:00', end_time: '08:00' });
+    assert.equal((await call('PATCH', '/api/members/2', { session_id: created.body.id })).status, 200);
+
+    const res = await call('DELETE', `/api/sessions/${created.body.id}`);
+    assert.equal(res.status, 409);
+
+    assert.equal((await call('PATCH', '/api/members/2', { session_id: '' })).status, 200);
+  });
+
+  it('auto-checks a member out once their assigned session has ended', async () => {
+    const past = new Date(Date.now() - 5 * 60_000);
+    const endTime = `${String(past.getHours()).padStart(2, '0')}:${String(past.getMinutes()).padStart(2, '0')}`;
+
+    const session = await call('POST', '/api/sessions', { name: 'Already Over', start_time: '00:00', end_time: endTime });
+    assert.equal(session.status, 201);
+
+    assert.equal((await call('POST', '/api/subscriptions', { member_id: 2, plan_id: 1 })).status, 201);
+    assert.equal((await call('PATCH', '/api/members/2', { session_id: session.body.id })).status, 200);
+
+    const checkedIn = await call('POST', '/api/attendance/check-in', { member_id: 2 });
+    assert.equal(checkedIn.status, 201);
+    assert.equal(checkedIn.body.action, 'checked_in');
+
+    // The sweep runs lazily on the next read, not inside the same call that
+    // just opened the visit.
+    const open = await call('GET', '/api/attendance?member_id=2&open=true');
+    assert.equal(open.body.items.length, 0);
+
+    const latest = await call('GET', '/api/attendance?member_id=2&limit=1');
+    assert.ok(latest.body.items[0].check_out);
+    // check_out is stored in UTC; endTime was the session's end in local wall-
+    // clock time, so compare instants rather than the raw HH:MM text — with
+    // slack for the minute-level (no seconds) precision of a session's end_time.
+    const closedAt = new Date(`${latest.body.items[0].check_out.replace(' ', 'T')}Z`);
+    assert.ok(
+      Math.abs(closedAt.getTime() - past.getTime()) < 65_000,
+      `expected check_out near ${past.toISOString()}, got ${closedAt.toISOString()}`,
+    );
   });
 });
 

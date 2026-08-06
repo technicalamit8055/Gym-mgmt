@@ -13,6 +13,7 @@ import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
 import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
+import { sessionRoutes } from './routes/sessions.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { biometricRoutes } from './routes/biometric.js';
 import { handleRazorpayWebhook } from './routes/billing.js';
@@ -76,6 +77,7 @@ export function createApp() {
   app.use('/api/subscriptions', subscriptionRoutes);
   app.use('/api/payments', paymentRoutes);
   app.use('/api/attendance', attendanceRoutes);
+  app.use('/api/sessions', sessionRoutes);
   app.use('/api/biometric', biometricRoutes);
   app.use('/api/qr', qrRoutes);
   app.use('/api/classes', classRoutes);

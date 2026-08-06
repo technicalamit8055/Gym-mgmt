@@ -19,8 +19,10 @@ function datalist(id, options) {
 
 /* ------------------------------------------------------------ member form */
 
-export function openMemberForm({ member, onSaved }) {
+export async function openMemberForm({ member, onSaved }) {
   const editing = Boolean(member);
+  const { items: sessions } = await api.sessions({ active: 'true' });
+
   openModal({
     title: editing ? `Edit ${member.first_name} ${member.last_name}` : 'Add a new member',
     wide: true,
@@ -36,6 +38,17 @@ export function openMemberForm({ member, onSaved }) {
           type: 'number',
           value: member?.device_pin,
           hint: 'The numeric ID this member is enrolled under on your fingerprint terminal, if any',
+        },
+        {
+          name: 'session_id',
+          label: 'Gym session',
+          type: 'select',
+          value: member?.session_id || '',
+          options: [
+            { value: '', label: 'No assigned session' },
+            ...sessions.map((s) => ({ value: s.id, label: `${s.name} (${s.start_time}–${s.end_time})` })),
+          ],
+          hint: 'Auto-checks this member out once their session ends, if they never scan or tap out themselves',
         },
         {
           name: 'gender',

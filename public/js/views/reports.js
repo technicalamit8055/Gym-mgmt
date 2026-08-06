@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { addDays, barChart, clear, date, fullName, h, lineChart, money, table, today, toast } from '../ui.js';
+import { addDays, barChart, clear, date, fullName, h, labelledControl, lineChart, money, table, today, toast } from '../ui.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -251,10 +251,8 @@ export async function renderReports({ setActions }) {
     h(
       'div',
       { class: 'toolbar' },
-      h('span', { class: 'muted', style: 'font-size:13px' }, 'From'),
-      fromInput,
-      h('span', { class: 'muted', style: 'font-size:13px' }, 'to'),
-      toInput,
+      labelledControl('From', fromInput),
+      labelledControl('to', toInput),
       groupSelect,
     ),
     body,

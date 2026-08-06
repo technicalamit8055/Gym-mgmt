@@ -28,12 +28,18 @@ body {
   color: var(--text);
   font: 15px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* A long email, note or QR token must wrap rather than widen the page —
+     without this a single unbroken string forces sideways scroll on a phone. */
+  overflow-wrap: break-word;
 }
 
 a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.app-loading { display: grid; place-items: center; height: 100vh; color: var(--muted); }
+/* The doubled height/min-height declarations through this file are a fallback
+   pair, not a mistake: mobile browser chrome makes 100vh taller than what you
+   can actually see, so dvh takes over wherever it's understood. */
+.app-loading { display: grid; place-items: center; height: 100vh; height: 100dvh; color: var(--muted); }
 
 /* ------------------------------------------------------------------- login */
 
@@ -41,6 +47,7 @@ a:hover { text-decoration: underline; }
   display: grid;
   place-items: center;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
   background: radial-gradient(1000px 600px at 15% -10%, rgba(249, 115, 22, 0.16), transparent 60%), var(--bg);
 }
@@ -65,7 +72,7 @@ a:hover { text-decoration: underline; }
 
 /* ------------------------------------------------------------------ layout */
 
-.shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; min-height: 100dvh; }
 
 .sidebar {
   background: var(--bg-alt);
@@ -77,6 +84,7 @@ a:hover { text-decoration: underline; }
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; font-weight: 700; font-size: 19px; }
@@ -107,6 +115,10 @@ a:hover { text-decoration: underline; }
 .topbar .spacer { flex: 1; }
 .content { padding: 24px 28px 60px; }
 
+/* Drawer handle. Shown only where the drawer exists — see the responsive
+   section at the foot of this file. */
+.nav-toggle { font-size: 17px; line-height: 1; padding: 8px 12px; flex: none; }
+
 /* ---------------------------------------------------------------- elements */
 
 .btn {
@@ -133,12 +145,15 @@ textarea { resize: vertical; min-height: 72px; }
 label.field { display: block; margin-bottom: 14px; }
 label.field > span { display: block; margin-bottom: 5px; font-size: 13px; color: var(--muted); }
 .field-error { color: var(--red); font-size: 12px; margin-top: 4px; }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 16px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 0 16px; }
 .form-grid .full { grid-column: 1 / -1; }
 
 .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 18px;
+  /* Grid/flex items default to min-width:auto, which lets a wide child (a
+     table, a chart) push the track wider than the screen. */
+  min-width: 0;
 }
 .card > h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
 .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
@@ -146,9 +161,19 @@ label.field > span { display: block; margin-bottom: 5px; font-size: 13px; color:
 .card-head .spacer { flex: 1; }
 
 .grid { display: grid; gap: 16px; }
-.cols-4 { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-.cols-3 { grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
-.cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.grid > * { min-width: 0; }
+/*
+ * auto-fit + minmax collapses these to fewer columns on its own as the viewport
+ * narrows, so there are no per-breakpoint column overrides.
+ *
+ * The min() around each floor is what makes that safe: a bare
+ * minmax(320px, 1fr) holds a 320px track even inside a 290px container, which
+ * pushed every card a few px past the right edge of a 320px phone. min(_, 100%)
+ * lets the track shrink to the container once it can't fit the ideal width.
+ */
+.cols-4 { grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); }
+.cols-3 { grid-template-columns: repeat(auto-fit, minmax(min(270px, 100%), 1fr)); }
+.cols-2 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 .grid.top { align-items: start; }
 
 .stat { display: flex; flex-direction: column; gap: 6px; }
@@ -194,6 +219,8 @@ tbody tr.clickable { cursor: pointer; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
 .toolbar .search { flex: 1; min-width: 220px; max-width: 380px; }
 .toolbar select { width: auto; min-width: 140px; }
+.toolbar-pair { display: flex; align-items: center; gap: 8px; }
+.toolbar-pair > span { font-size: 13px; white-space: nowrap; }
 
 .muted { color: var(--muted); }
 .empty { padding: 36px; text-align: center; color: var(--muted); }
@@ -269,6 +296,7 @@ tbody tr.clickable { cursor: pointer; }
 .checkin-box input { font-size: 20px; padding: 14px 16px; text-align: center; letter-spacing: 0.08em; }
 .checkin-result { margin-top: 18px; padding: 16px; border-radius: 12px; background: var(--bg-alt); border: 1px solid var(--border); }
 .checkin-result.ok { border-left: 3px solid var(--green); }
+.checkin-result.out { border-left: 3px solid var(--blue); }
 .checkin-result.bad { border-left: 3px solid var(--red); }
 
 .timetable { display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); gap: 12px; }
@@ -362,6 +390,10 @@ tbody tr.clickable { cursor: pointer; }
   align-items: center;
   flex-wrap: wrap;
   padding: 4px 0 12px;
+  /* Pairs with the .id-card flex:none below: the card holds its true printed
+     size and this scrolls, instead of the page scrolling. Idle at widths where
+     the card already fits. */
+  overflow-x: auto;
 }
 
 .scan-video-wrap {
@@ -395,6 +427,9 @@ tbody tr.clickable { cursor: pointer; }
 .id-card {
   width: 3.375in;
   height: 2.125in;
+  /* A preview that shrank to fit its container would misrepresent what comes
+     out of the printer, so it keeps its inch geometry and .qr-preview scrolls. */
+  flex: none;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.08in;
@@ -474,16 +509,148 @@ tbody tr.clickable { cursor: pointer; }
   @page { margin: 0.4in; }
 }
 
+/* ---------------------------------------------------------------- responsive */
+
+/*
+ * Three width breakpoints, plus two capability queries that are deliberately
+ * independent of width:
+ *
+ *   900px  tablet down — sidebar becomes an off-canvas drawer
+ *   700px  large phone — topbar and toolbars stack, chart labels grow
+ *   560px  phone — modals go full-bleed, toasts span the width
+ *
+ *   pointer: coarse          — grow every tap target (a 1024px tablet needs
+ *                              this as much as a 360px phone does, so it
+ *                              can't be tied to a width)
+ *   prefers-reduced-motion   — drop the drawer slide and the pulses
+ *
+ * The fluid grids (.cols-*, .form-grid) and the scroll wrappers already in
+ * place (.table-wrap, the timetable) do most of the reflowing on their own;
+ * these blocks handle what auto-fit can't express.
+ */
+
+/* Opens the drawer below 900px; there is no drawer to open above it. */
+.nav-toggle { display: none; }
+.nav-scrim { display: none; }
+
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
+
+  /*
+   * An off-canvas drawer, where this used to lay the sidebar out as a wrapping
+   * row of links. That row cost about four lines of vertical space before any
+   * page content, and the padding it needed was clawed back by hiding
+   * .sidebar-footer — which took "Password" and "Sign out" with it, leaving no
+   * way to sign out on a phone. The drawer keeps the full nav, its section
+   * headings and the footer.
+   */
   .sidebar {
-    position: static; height: auto; flex-direction: row; flex-wrap: wrap;
-    align-items: center; border-right: none; border-bottom: 1px solid var(--border);
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    width: min(284px, 84vw);
+    height: auto;
+    z-index: 70;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: var(--shadow);
   }
-  .brand { padding: 0 12px 0 4px; }
-  .nav-section, .sidebar-footer { display: none; }
+  .sidebar.open { transform: none; }
+
+  .nav-scrim {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(3, 6, 11, 0.62);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+    z-index: 65;
+  }
+  .nav-scrim.open { opacity: 1; pointer-events: auto; }
+
+  /* Freeze the page behind an open drawer so a scroll gesture aimed at the
+     nav doesn't move the page underneath it. */
+  body.nav-open { overflow: hidden; }
+
+  .nav-toggle { display: inline-flex; }
+
   .content, .topbar { padding-left: 16px; padding-right: 16px; }
   .kv { grid-template-columns: 1fr; gap: 2px 0; }
   .kv dd { margin-bottom: 8px; }
+
+  /* iOS Safari zooms the whole page when a focused field is under 16px. */
+  input, select, textarea { font-size: 16px; }
+}
+
+@media (max-width: 700px) {
+  .topbar { flex-wrap: wrap; gap: 10px; padding-top: 12px; padding-bottom: 12px; }
+  .topbar h1 { font-size: 18px; }
+  /* Page actions drop onto their own full-width line under the title rather
+     than squeezing it. :empty keeps views with no actions from paying for a
+     blank row. */
+  .topbar > .row { width: 100%; flex-wrap: wrap; }
+  .topbar > .row:empty { display: none; }
+
+  .content { padding-top: 18px; padding-bottom: 40px; }
+
+  .toolbar .search { flex-basis: 100%; min-width: 0; max-width: none; }
+  .toolbar select { flex: 1 1 140px; min-width: 0; }
+
+  .stat .value { font-size: 23px; }
+
+  /*
+   * Chart text is sized in viewBox user units, so it shrinks with the chart:
+   * 10 units in a 640-unit space rendered at phone width lands near 5px.
+   * Safe to grow because every label the app plots is short — a weekday, a
+   * month, an hour, a day-of-month.
+   */
+  .chart text { font-size: 15px; }
+
+  .pagination { justify-content: center; flex-wrap: wrap; }
+}
+
+@media (max-width: 560px) {
+  /* Full-bleed sheet: a centred card with side gutters spends width the form
+     fields need more. */
+  .modal-backdrop { padding: 10px 8px 24px; justify-items: stretch; }
+  .modal, .modal.wide { width: 100%; }
+  .modal-head { padding: 14px 16px; }
+  .modal-body { padding: 16px; }
+  .modal-foot { padding: 14px 16px; flex-wrap: wrap; }
+  /* Share the row instead of stacking, so neither button lands under a thumb
+     that was aiming for the other. */
+  .modal-foot .btn { flex: 1 1 130px; justify-content: center; }
+  .form-grid { grid-template-columns: 1fr; }
+
+  .toasts { left: 12px; right: 12px; bottom: 12px; }
+  .toast { max-width: none; }
+
+  .content, .topbar { padding-left: 12px; padding-right: 12px; }
+  .card { padding: 14px; }
+  .empty { padding: 28px 16px; }
+
+  .avatar.lg { width: 52px; height: 52px; font-size: 18px; }
+  .checkin-box input { font-size: 18px; padding: 12px 14px; }
+
+  .qr-preview { gap: 10px; }
+
+  .timetable { grid-template-columns: repeat(7, minmax(140px, 1fr)); }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .btn { padding: 11px 16px; }
+  /* Table rows carry two or three of these, so this trades the 44px ideal for
+     something that doesn't double the height of every row. */
+  .btn.sm { padding: 9px 13px; }
+  .icon-btn { font-size: 22px; padding: 8px 10px; }
+  .nav-link { padding: 12px; font-size: 15px; }
+  th, td { padding-top: 13px; padding-bottom: 13px; }
+  .list-item { padding: 13px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .nav-scrim, .btn, .bio-btn { transition: none; }
+  .toast { animation: none; }
+  .bio-pulse { animation: none; }
+  .bio-btn:not(:disabled):hover { transform: none; }
 }
 

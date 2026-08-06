@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
 import { all, get } from '../db.js';
-import { expireOverdueSubscriptions } from '../maintenance.js';
+import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import { config } from '../config.js';
 
 export const dashboardRoutes = Router();
@@ -9,6 +9,7 @@ dashboardRoutes.use(requireAuth);
 
 dashboardRoutes.get('/', (req, res) => {
   expireOverdueSubscriptions();
+  autoCloseFinishedVisits();
 
   const members = get(`
     SELECT

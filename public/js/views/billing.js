@@ -6,6 +6,7 @@ import {
   expiryLabel,
   fullName,
   h,
+  labelledControl,
   money,
   personCell,
   statusBadge,
@@ -237,7 +238,7 @@ export async function renderBilling({ setActions, reload }) {
       h('div', { style: 'flex:1' }),
       ...(state.tab === 'memberships'
         ? [filterSelect]
-        : [h('span', { class: 'muted', style: 'font-size:13px' }, 'From'), dateFrom, h('span', { class: 'muted', style: 'font-size:13px' }, 'to'), dateTo]),
+        : [labelledControl('From', dateFrom), labelledControl('to', dateTo)]),
     );
     clear(body).append(h('div', { class: 'empty' }, 'Loading…'));
     const view = state.tab === 'memberships' ? await renderMemberships() : await renderPayments();

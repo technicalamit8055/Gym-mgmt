@@ -4,7 +4,7 @@ import { performCheckIn } from '../checkin.js';
 import { config } from '../config.js';
 import { get } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
-import { expireOverdueSubscriptions } from '../maintenance.js';
+import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import { ensureQrToken, findMemberByScan, issueQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { parse, toInt } from '../validate.js';
@@ -87,6 +87,7 @@ qrRoutes.post('/lookup', (req, res) => {
   const body = parse(req.body, { code: { type: 'string', required: true, max: 200 } });
 
   expireOverdueSubscriptions();
+  autoCloseFinishedVisits();
   const scanned = findMemberByScan(body.code);
   if (!scanned) throw notFound('That card is not recognised — it may have been reissued');
 
@@ -123,5 +124,5 @@ qrRoutes.post('/check-in', (req, res) => {
   if (!member) throw notFound('That card is not recognised — it may have been reissued');
 
   const result = performCheckIn(member, 'qr');
-  res.status(result.already_in ? 200 : 201).json(result);
+  res.status(result.action === 'checked_in' ? 201 : 200).json(result);
 });

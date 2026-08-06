@@ -273,21 +273,25 @@ describe('WebAuthn biometric check-in', () => {
 
     const res = await call('POST', '/api/biometric/authenticate/verify', { sessionKey, credential }, { tenant: 'ironhouse' });
     assert.equal(res.status, 201);
-    assert.equal(res.body.already_in, false);
+    assert.equal(res.body.action, 'checked_in');
     assert.equal(res.body.visit.source, 'biometric');
 
     const attendance = await call('GET', `/api/attendance?member_id=${memberId}`, null, { token, tenant: 'ironhouse' });
     assert.equal(attendance.body.items.length, 1);
   });
 
-  it('is idempotent for a second biometric punch the same day', async () => {
+  it('toggles the member to checked-out on a second biometric punch the same day', async () => {
     const optionsRes = await call('POST', '/api/biometric/authenticate/options', null, { tenant: 'ironhouse' });
     const { sessionKey, options } = optionsRes.body;
     const credential = authenticator.authenticate({ rpId, origin: base, challenge: options.challenge, counter: 2 });
 
     const res = await call('POST', '/api/biometric/authenticate/verify', { sessionKey, credential }, { tenant: 'ironhouse' });
     assert.equal(res.status, 200);
-    assert.equal(res.body.already_in, true);
+    assert.equal(res.body.action, 'checked_out');
+    assert.ok(res.body.visit.check_out);
+
+    const attendance = await call('GET', `/api/attendance?member_id=${memberId}`, null, { token, tenant: 'ironhouse' });
+    assert.equal(attendance.body.items.length, 1);
   });
 
   it('rejects authentication from a credential that was never registered', async () => {

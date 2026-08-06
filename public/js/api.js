@@ -101,6 +101,11 @@ export const api = {
   checkIn: (payload) => request('POST', '/attendance/check-in', payload),
   checkOut: (payload) => request('POST', '/attendance/check-out', payload),
 
+  sessions: (params) => request('GET', `/sessions${query(params)}`),
+  createSession: (payload) => request('POST', '/sessions', payload),
+  updateSession: (id, payload) => request('PATCH', `/sessions/${id}`, payload),
+  deleteSession: (id) => request('DELETE', `/sessions/${id}`),
+
   biometricRegisterOptions: (payload) => request('POST', '/biometric/register/options', payload),
   biometricRegisterVerify: (payload) => request('POST', '/biometric/register/verify', payload),
   biometricAuthOptions: () => request('POST', '/biometric/authenticate/options'),

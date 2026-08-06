@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS equipment (
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS sessions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time   TEXT NOT NULL,
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS biometric_credentials (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   member_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -171,6 +180,20 @@ const MIGRATIONS = [
   (db) => ensureColumn(db, 'members', 'qr_token', 'TEXT'),
   (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_members_qr_token ON members(qr_token)'),
   (db) => ensureColumn(db, 'members', 'qr_issued_at', 'TEXT'),
+  // Which daily gym shift a member is expected to attend (e.g. a 5am-10am
+  // morning batch vs a 4pm-9pm evening batch) — drives auto-checkout once
+  // that shift's end time has passed. NULL means "no assigned shift", which
+  // opts a member out of auto-checkout entirely (manual checkout only).
+  (db) => ensureColumn(db, 'members', 'session_id', 'INTEGER REFERENCES sessions(id)'),
+  // Seeded once so auto-checkout works out of the box; gyms can rename,
+  // retime or delete these like any other session afterwards.
+  (db) => {
+    const { n } = db.prepare('SELECT COUNT(*) AS n FROM sessions').get();
+    if (n === 0) {
+      db.prepare("INSERT INTO sessions (name, start_time, end_time) VALUES ('Morning', '05:00', '10:00')").run();
+      db.prepare("INSERT INTO sessions (name, start_time, end_time) VALUES ('Evening', '16:00', '21:00')").run();
+    }
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

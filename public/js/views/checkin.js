@@ -204,10 +204,11 @@ export async function renderCheckIn({ setActions }) {
   function showResult(result) {
     const visit = result.visit;
     const membership = result.membership;
+    const checkedOut = result.action === 'checked_out';
     clear(feedback).append(
       h(
         'div',
-        { class: 'checkin-result ok' },
+        { class: `checkin-result ${checkedOut ? 'out' : 'ok'}` },
         h('div', { class: 'row', style: 'gap:12px' }, h('div', { class: 'avatar lg' }, initials(visit.first_name, visit.last_name)),
           h(
             'div',
@@ -216,8 +217,8 @@ export async function renderCheckIn({ setActions }) {
             h(
               'div',
               { class: 'muted', style: 'font-size:13px' },
-              result.already_in
-                ? `Already checked in at ${time(visit.check_in.slice(11))}`
+              checkedOut
+                ? `Checked out at ${time(visit.check_out.slice(11))}`
                 : `Checked in at ${time(visit.check_in.slice(11))}`,
             ),
             membership
@@ -234,7 +235,7 @@ export async function renderCheckIn({ setActions }) {
         ),
       ),
     );
-    toast(result.already_in ? 'Already checked in' : `Welcome, ${visit.first_name}`);
+    toast(checkedOut ? `${visit.first_name} checked out` : `Welcome, ${visit.first_name}`);
     refreshLists();
   }
 
@@ -307,7 +308,8 @@ export async function renderCheckIn({ setActions }) {
       },
       // Named, because the desk box on the same screen also has a "Check in"
       // button — the scanned member's name makes it obvious which is which.
-      info.already_in ? `Check in ${member.first_name} again` : `Check in ${member.first_name}`,
+      // Scanning again while already in checks them out (see performCheckIn).
+      info.already_in ? `Check out ${member.first_name}` : `Check in ${member.first_name}`,
     );
 
     clear(scanPanel).append(

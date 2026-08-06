@@ -3,12 +3,15 @@ import { requireAuth } from '../auth.js';
 import { ATTENDANCE_SELECT, performCheckIn } from '../checkin.js';
 import { all, get, run } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
+import { autoCloseFinishedVisits } from '../maintenance.js';
 import { parse, toInt } from '../validate.js';
 
 export const attendanceRoutes = Router();
 attendanceRoutes.use(requireAuth);
 
 attendanceRoutes.get('/', (req, res) => {
+  autoCloseFinishedVisits();
+
   const where = [];
   const params = [];
   if (req.query.member_id) {
@@ -54,7 +57,7 @@ attendanceRoutes.post('/check-in', (req, res) => {
   if (!member) throw notFound('No member matches that id or code');
 
   const result = performCheckIn(member, body.source);
-  return res.status(result.already_in ? 200 : 201).json(result);
+  return res.status(result.action === 'checked_in' ? 201 : 200).json(result);
 });
 
 attendanceRoutes.post('/check-out', (req, res) => {

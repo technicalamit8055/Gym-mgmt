@@ -275,6 +275,8 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
   const activeSub = shownSub?.status === 'active' ? shownSub : undefined;
   const frozenSub = shownSub?.status === 'frozen' ? shownSub : undefined;
   const queuedSub = live.find((s) => s !== shownSub && s.start_date > now);
+  const latestVisit = member.attendance?.[0];
+  const currentlyIn = Boolean(latestVisit && !latestVisit.check_out && latestVisit.check_in.slice(0, 10) === now);
 
   setActions(
     h(
@@ -284,14 +286,14 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
         onclick: async () => {
           try {
             const result = await api.checkIn({ member_id: member.id });
-            toast(result.already_in ? `${member.first_name} is already checked in` : `${member.first_name} checked in`);
+            toast(result.action === 'checked_out' ? `${member.first_name} checked out` : `${member.first_name} checked in`);
             reload();
           } catch (err) {
             toast(err.message, 'error');
           }
         },
       },
-      '🎫 Check in',
+      currentlyIn ? '🎫 Check out' : '🎫 Check in',
     ),
     session.managesBilling
       ? h(
@@ -339,6 +341,14 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       h('dd', {}, member.health_notes || '—'),
       h('dt', {}, 'Device PIN'),
       h('dd', {}, member.device_pin ?? h('span', { class: 'muted' }, 'Not enrolled')),
+      h('dt', {}, 'Gym session'),
+      h(
+        'dd',
+        {},
+        member.session_name
+          ? `${member.session_name} (${member.session_start}–${member.session_end})`
+          : h('span', { class: 'muted' }, 'No assigned session'),
+      ),
     ),
     h(
       'div',

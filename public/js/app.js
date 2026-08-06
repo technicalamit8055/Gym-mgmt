@@ -9,6 +9,7 @@ import { renderClasses } from './views/classes.js';
 import { renderEquipment } from './views/equipment.js';
 import { renderStaff } from './views/staff.js';
 import { renderDevices } from './views/devices.js';
+import { renderSessions } from './views/sessions.js';
 import { renderReports } from './views/reports.js';
 
 const NAV = [
@@ -24,6 +25,7 @@ const NAV = [
   { path: '/classes', label: 'Classes', icon: '🧘' },
   { path: '/equipment', label: 'Equipment', icon: '🏋️' },
   { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
+  { path: '/sessions', label: 'Gym sessions', icon: '⏰' },
   { path: '/staff', label: 'Staff', icon: '👥' },
 ];
 
@@ -38,6 +40,7 @@ const ROUTES = [
   { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
   { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
   { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
+  { pattern: /^\/sessions$/, title: 'Gym sessions', view: renderSessions },
   { pattern: /^\/staff$/, title: 'Staff', view: renderStaff },
 ];
 
@@ -102,7 +105,7 @@ function renderLogin(message) {
 
 function renderShell() {
   const user = session.user;
-  const nav = h('nav', { class: 'sidebar' });
+  const nav = h('nav', { class: 'sidebar', 'aria-label': 'Main navigation' });
   nav.append(h('div', { class: 'brand' }, h('div', { class: 'logo' }, '🏋️'), 'GymBook'));
 
   for (const item of NAV) {
@@ -113,7 +116,14 @@ function renderShell() {
     nav.append(
       h(
         'a',
-        { class: 'nav-link', href: `#${item.path}`, dataset: { path: item.path } },
+        {
+          class: 'nav-link',
+          href: `#${item.path}`,
+          dataset: { path: item.path },
+          // Tapping the link the drawer is already on fires no hashchange, so
+          // renderRoute's close never runs — close here too.
+          onclick: () => setNavOpen(false),
+        },
         h('span', { class: 'icon' }, item.icon),
         item.label,
       ),
@@ -149,21 +159,51 @@ function renderShell() {
   const content = h('div', { class: 'content' }, h('div', { class: 'empty' }, 'Loading…'));
   const actions = h('div', { class: 'row' });
 
+  const navToggle = h(
+    'button',
+    {
+      class: 'btn ghost nav-toggle',
+      type: 'button',
+      'aria-label': 'Open navigation',
+      'aria-expanded': 'false',
+      onclick: () => setNavOpen(!nav.classList.contains('open')),
+    },
+    '☰',
+  );
+  const scrim = h('div', { class: 'nav-scrim', onclick: () => setNavOpen(false) });
+
   clear(root()).append(
     h(
       'div',
       { class: 'shell' },
       nav,
+      scrim,
       h(
         'div',
         { class: 'main' },
-        h('header', { class: 'topbar' }, title, h('div', { class: 'spacer' }), actions),
+        h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions),
         content,
       ),
     ),
   );
   root().className = '';
-  return { nav, title, content, actions };
+  return { nav, title, content, actions, navToggle, scrim };
+}
+
+/**
+ * Opens or closes the mobile navigation drawer.
+ *
+ * Above 900px the drawer doesn't exist (CSS pins the sidebar open and hides
+ * the toggle), so these classes are inert there and it's safe to call this
+ * from shared paths like renderRoute.
+ */
+function setNavOpen(open) {
+  if (!shell) return;
+  shell.nav.classList.toggle('open', open);
+  shell.scrim.classList.toggle('open', open);
+  shell.navToggle.setAttribute('aria-expanded', String(open));
+  shell.navToggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+  document.body.classList.toggle('nav-open', open);
 }
 
 function openPasswordModal() {
@@ -199,6 +239,7 @@ async function renderRoute() {
     return;
   }
 
+  setNavOpen(false);
   for (const link of shell.nav.querySelectorAll('.nav-link')) {
     link.classList.toggle('active', path.startsWith(link.dataset.path));
   }
@@ -260,6 +301,17 @@ window.addEventListener('hashchange', () => {
 window.addEventListener('gymbook:signed-out', () => {
   shell = undefined;
   renderLogin('Your session expired — please sign in again');
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setNavOpen(false);
+});
+
+/* Rotating a phone to landscape, or dragging a desktop window wider, can cross
+ * 900px while the drawer is open — the drawer styles stop applying but
+ * body.nav-open would keep the page unscrollable. */
+window.matchMedia('(min-width: 901px)').addEventListener('change', (event) => {
+  if (event.matches) setNavOpen(false);
 });
 
 boot();

@@ -208,7 +208,7 @@ describe('QR card check-in', () => {
   it('checks the member in from a scanned card', async () => {
     const res = await call('POST', '/api/qr/check-in', { code: card.payload }, { token, tenant: 'ironhouse' });
     assert.equal(res.status, 201);
-    assert.equal(res.body.already_in, false);
+    assert.equal(res.body.action, 'checked_in');
     assert.equal(res.body.visit.source, 'qr');
     assert.equal(res.body.visit.member_code, 'GM0001');
 
@@ -217,19 +217,27 @@ describe('QR card check-in', () => {
     assert.equal(attendance.body.items[0].source, 'qr');
   });
 
-  it('is idempotent for a second scan the same day', async () => {
-    const res = await call('POST', '/api/qr/check-in', { code: card.payload }, { token, tenant: 'ironhouse' });
-    assert.equal(res.status, 200);
-    assert.equal(res.body.already_in, true);
-
-    const attendance = await call('GET', `/api/attendance?member_id=${memberId}`, null, { token, tenant: 'ironhouse' });
-    assert.equal(attendance.body.items.length, 1);
-  });
-
   it('tells the desk the member is already inside on a re-scan', async () => {
     const res = await call('POST', '/api/qr/lookup', { code: card.payload }, { token, tenant: 'ironhouse' });
     assert.equal(res.body.already_in, true);
     assert.ok(res.body.open_visit);
+  });
+
+  it('toggles the member to checked-out on a second scan the same day', async () => {
+    const res = await call('POST', '/api/qr/check-in', { code: card.payload }, { token, tenant: 'ironhouse' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.action, 'checked_out');
+    assert.ok(res.body.visit.check_out);
+
+    // Same visit closed, not a second row.
+    const attendance = await call('GET', `/api/attendance?member_id=${memberId}`, null, { token, tenant: 'ironhouse' });
+    assert.equal(attendance.body.items.length, 1);
+  });
+
+  it('tells the desk the member has left after that scan', async () => {
+    const res = await call('POST', '/api/qr/lookup', { code: card.payload }, { token, tenant: 'ironhouse' });
+    assert.equal(res.body.already_in, false);
+    assert.equal(res.body.open_visit, null);
   });
 
   it('refuses a scan for a frozen member, with a reason the desk can read out', async () => {

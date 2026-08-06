@@ -1,5 +1,5 @@
 import { badRequest } from './errors.js';
-import { expireOverdueSubscriptions } from './maintenance.js';
+import { autoCloseFinishedVisits, expireOverdueSubscriptions } from './maintenance.js';
 import { get, run, tx } from './db.js';
 
 export const ATTENDANCE_SELECT = `
@@ -8,12 +8,33 @@ export const ATTENDANCE_SELECT = `
 `;
 
 /**
- * Shared by front-desk check-in, WebAuthn check-in, and physical device
- * check-in — the three ways a member can be marked present all funnel
- * through the same rules (status, active membership, session limits,
- * same-day idempotency).
+ * Shared by front-desk check-in, QR scan, WebAuthn check-in, and physical
+ * device check-in — the four ways a member can be marked present all funnel
+ * through the same rules.
+ *
+ * A rescan/re-tap while already checked in toggles them out instead of
+ * creating a duplicate visit or a no-op "already in" response — this is the
+ * only way a QR card or fingerprint punch (which carry no separate "leaving"
+ * signal of their own) can ever mark someone as checked out. Checking out is
+ * never blocked by membership status: a lapsed or frozen member can still
+ * leave cleanly. Fresh check-ins are still gated on status/active
+ * membership/session cap as before.
  */
 export function performCheckIn(member, source) {
+  autoCloseFinishedVisits();
+
+  const openVisit = get(
+    "SELECT * FROM attendance WHERE member_id = ? AND check_out IS NULL AND date(check_in) = date('now')",
+    [member.id],
+  );
+  if (openVisit) {
+    run("UPDATE attendance SET check_out = datetime('now') WHERE id = ?", [openVisit.id]);
+    return {
+      action: 'checked_out',
+      visit: get(`${ATTENDANCE_SELECT} WHERE a.id = ?`, [openVisit.id]),
+    };
+  }
+
   if (member.status === 'frozen') throw badRequest(`${member.first_name}'s membership is frozen`);
   if (member.status === 'inactive') throw badRequest(`${member.first_name}'s membership is inactive`);
 
@@ -27,17 +48,6 @@ export function performCheckIn(member, source) {
     throw badRequest(`${member.first_name} has used all ${sub.sessions_total} sessions on this plan`);
   }
 
-  const openVisit = get(
-    "SELECT * FROM attendance WHERE member_id = ? AND check_out IS NULL AND date(check_in) = date('now')",
-    [member.id],
-  );
-  if (openVisit) {
-    return {
-      already_in: true,
-      visit: get(`${ATTENDANCE_SELECT} WHERE a.id = ?`, [openVisit.id]),
-    };
-  }
-
   const visitId = tx(() => {
     const info = run('INSERT INTO attendance (member_id, source) VALUES (?, ?)', [member.id, source]);
     if (sub.sessions_total !== null) {
@@ -47,7 +57,7 @@ export function performCheckIn(member, source) {
   });
 
   return {
-    already_in: false,
+    action: 'checked_in',
     visit: get(`${ATTENDANCE_SELECT} WHERE a.id = ?`, [visitId]),
     membership: {
       plan_id: sub.plan_id,

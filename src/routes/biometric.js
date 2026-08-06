@@ -198,7 +198,7 @@ biometricRoutes.post('/authenticate/verify', async (req, res) => {
   if (!member) throw badRequest('The member associated with this biometric was not found');
 
   const result = performCheckIn(member, 'biometric');
-  return res.status(result.already_in ? 200 : 201).json(result);
+  return res.status(result.action === 'checked_in' ? 201 : 200).json(result);
 });
 
 /* ── Credential management (staff-only) ───────────────────────────────── */
