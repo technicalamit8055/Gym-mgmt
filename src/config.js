@@ -5,6 +5,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const ROOT = path.resolve(here, '..');
 
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    if (typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile(path.join(ROOT, '.env'));
+    }
+  } catch {
+    // .env file is optional (loads PLATFORM_ADMIN_EMAIL and PLATFORM_ADMIN_PASSWORD)
+  }
+}
+
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   dbFile: process.env.DB_FILE || path.join(ROOT, 'data', 'gym.db'),

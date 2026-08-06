@@ -15,6 +15,7 @@ import { after, before, describe, it } from 'node:test';
  */
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gymbook-noconsole-test-'));
+process.env.NODE_ENV = 'test';
 process.env.DB_FILE = path.join(tmpDir, 'default.db');
 process.env.PLATFORM_DB_FILE = path.join(tmpDir, 'platform.db');
 process.env.TENANTS_DIR = path.join(tmpDir, 'tenants');
