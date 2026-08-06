@@ -156,7 +156,9 @@ export const personCell = (person) =>
   h(
     'div',
     { class: 'person' },
-    h('div', { class: 'avatar' }, initials(person.first_name, person.last_name)),
+    person.photo_url
+      ? h('img', { class: 'avatar', src: person.photo_url, alt: '' })
+      : h('div', { class: 'avatar' }, initials(person.first_name, person.last_name)),
     h(
       'div',
       { class: 'meta' },
@@ -179,17 +181,25 @@ export function toast(message, kind = 'success') {
 
 /* ------------------------------------------------------------------- modal */
 
-let escapeHandler;
+let modalCount = 0;
 
 export function closeModal() {
-  clear(document.getElementById('modal-root'));
-  if (escapeHandler) {
-    document.removeEventListener('keydown', escapeHandler);
-    escapeHandler = undefined;
+  const root = document.getElementById('modal-root');
+  const last = root.lastElementChild;
+  if (last) {
+    if (last.onCloseCallback) last.onCloseCallback();
+    last.remove();
+    modalCount--;
   }
 }
 
-export function openModal({ title, body, footer, wide = false }) {
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && modalCount > 0) {
+    closeModal();
+  }
+});
+
+export function openModal({ title, body, footer, wide = false, onClose }) {
   const root = document.getElementById('modal-root');
   const backdrop = h(
     'div',
@@ -213,13 +223,9 @@ export function openModal({ title, body, footer, wide = false }) {
       footer ? h('div', { class: 'modal-foot' }, footer) : null,
     ),
   );
-  if (escapeHandler) document.removeEventListener('keydown', escapeHandler);
-  clear(root).append(backdrop);
-
-  escapeHandler = (event) => {
-    if (event.key === 'Escape') closeModal();
-  };
-  document.addEventListener('keydown', escapeHandler);
+  backdrop.onCloseCallback = onClose;
+  root.append(backdrop);
+  modalCount++;
 
   const firstInput = backdrop.querySelector('input, select, textarea');
   if (firstInput) firstInput.focus();
@@ -295,15 +301,24 @@ export function buildForm(fields, { onSubmit, submitLabel = 'Save', wide = false
           await onSubmit(values);
         } catch (err) {
           if (err.details && Object.keys(err.details).length) {
+            const unmapped = [];
             for (const [name, message] of Object.entries(err.details)) {
               const input = inputs.get(name);
               if (input) {
                 input.errorNode.textContent = message;
                 input.errorNode.style.display = 'block';
+              } else {
+                unmapped.push(`${name.replace('_', ' ')} ${message}`);
               }
             }
+            if (unmapped.length) {
+              toast(`${err.message || 'Could not save'}: ${unmapped.join(', ')}`, 'error');
+            } else {
+              toast(err.message || 'Could not save', 'error');
+            }
+          } else {
+            toast(err.message || 'Could not save', 'error');
           }
-          toast(err.message || 'Could not save', 'error');
         } finally {
           submit.disabled = false;
         }

@@ -17,9 +17,9 @@ npm run seed     # optional: 68 demo members, a year of history
 npm start        # http://localhost:3000
 ```
 
-The first run creates an admin account and prints the credentials
-(`admin@gymbook.local` / `admin12345` unless you set `ADMIN_EMAIL` and
-`ADMIN_PASSWORD`). Change the password from the sidebar once you are in.
+The first run creates an admin account — `admin@gymbook.local` / `admin12345`
+unless you set `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Change the password from
+the sidebar once you are in.
 
 After seeding, these demo logins also work — all with the password `demo12345`:
 
@@ -37,6 +37,11 @@ Filter by membership state (active, expiring within 7 days, expired, has dues,
 never subscribed) and sort by name, join date, expiry or outstanding balance.
 Each member gets a profile with membership history, payments, visits, class
 bookings, total dues and visit counts.
+
+A member can have a photo — uploaded from a file or captured from a webcam,
+center-cropped and compressed client-side before it's saved. It replaces the
+initials avatar on the roster and profile, and appears on the printed/downloaded
+QR ID card.
 
 **Plans and memberships** — define plans by price, duration and optional session
 limit (e.g. "Personal Training — 12"). Selling a membership derives the end date
@@ -62,7 +67,8 @@ duplicated. Live list of who is in the gym, with check-out.
 one from the member's page, or tick several on the members list and print a sheet
 of them; cards are laid out at CR80 size (3.375in × 2.125in) so they line up with
 standard card stock and laminate pouches. There is also a downloadable PNG for
-sending a member their card over WhatsApp or email.
+sending a member their card over WhatsApp or email — it carries the member's
+photo when one is set.
 
 At the desk, scanning a card shows who it is — photo, plan, expiry, sessions left,
 outstanding dues, and whether they are already inside — and checks them in from
@@ -80,7 +86,11 @@ that panel. Two ways to scan:
 Camera access needs a secure origin, so the desk must be on HTTPS or localhost —
 over plain http on a LAN address the browser refuses regardless of hardware, and
 the desk says exactly that rather than blaming the browser. A handheld scanner
-works either way.
+works either way. The same restriction applies to taking a member's photo with
+a webcam. A quick way to get HTTPS to a phone or another device on your network
+without a domain is a Cloudflare quick tunnel (`cloudflared tunnel --url
+http://localhost:3000`) — its `*.trycloudflare.com` hostname is recognised
+automatically and routed to the default gym even without `ROOT_DOMAIN` set.
 
 The code on a card is a random 128-bit secret, not the member code — member codes
 run GM0001, GM0002…, so deriving cards from them would let anyone print a working
@@ -119,6 +129,7 @@ All optional — sensible defaults apply.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port |
+| `HOST` | `0.0.0.0` | Interface to bind — the default accepts connections from other devices on your network, not just localhost |
 | `DB_FILE` | `data/gym.db` | SQLite database location |
 | `AUTH_SECRET` | dev value | Token signing key — **set this in production** |
 | `TOKEN_TTL` | `43200` | Session length in seconds |
@@ -273,6 +284,7 @@ public/
   css/app.css      dark theme
   js/api.js        typed API client and session storage
   js/ui.js         DOM helpers, formatting, tables, modals, SVG charts
+  js/photo.js      member photo upload/camera capture, crop and compress
   js/app.js        router and layout
   js/views/        one module per screen
 scripts/seed.js    demo data

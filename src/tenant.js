@@ -24,6 +24,17 @@ export function extractSlug(hostHeader) {
     return candidate;
   }
 
+  // Quick tunnels (e.g. *.trycloudflare.com) generate 3-label hostnames like
+  // "front-cultural-flow-hartford.trycloudflare.com". If ROOT_DOMAIN is not explicitly set,
+  // treat the quick tunnel domain as the root host so the app loads the default gym.
+  if (!config.rootDomain && hostname.endsWith('.trycloudflare.com')) {
+    const labels = hostname.split('.');
+    if (labels.length <= 3) return null;
+    const candidate = labels[0];
+    if (!isValidSlug(candidate) || RESERVED_SLUGS.has(candidate)) return null;
+    return candidate;
+  }
+
   // No ROOT_DOMAIN configured (local dev, tests): fall back to inferring
   // from label count, so "<slug>.localhost" dev-testing keeps working.
   const labels = hostname.split('.');

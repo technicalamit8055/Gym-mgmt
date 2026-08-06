@@ -19,6 +19,7 @@ import {
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
 import { downloadCardPng, idCardNode, printCards } from '../qrcard.js';
 import { getGymName, printReceipt } from '../receipt.js';
+import { createPhotoPicker } from '../photo.js';
 
 const FILTERS = [
   { value: '', label: 'All memberships' },
@@ -314,7 +315,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     h(
       'div',
       { class: 'row', style: 'gap:14px;margin-bottom:16px' },
-      h('div', { class: 'avatar lg' }, initials(member.first_name, member.last_name)),
+      member.photo_url
+        ? h('img', { class: 'avatar lg', src: member.photo_url, alt: fullName(member), style: 'object-fit:cover' })
+        : h('div', { class: 'avatar lg' }, initials(member.first_name, member.last_name)),
       h(
         'div',
         {},
@@ -355,6 +358,42 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       'div',
       { class: 'row wrap', style: 'margin-top:16px;gap:8px' },
       h('button', { class: 'btn sm', onclick: () => openMemberForm({ member, onSaved: reload }) }, 'Edit details'),
+      h(
+        'button',
+        {
+          class: 'btn sm',
+          onclick: () => {
+            const photoPicker = createPhotoPicker({ initialUrl: member.photo_url });
+            const saveBtn = h(
+              'button',
+              {
+                class: 'btn primary',
+                onclick: async () => {
+                  saveBtn.disabled = true;
+                  try {
+                    const photo_url = photoPicker.getValue() || '';
+                    await api.updateMember(member.id, { photo_url });
+                    closeModal();
+                    toast('Member photo updated');
+                    await reload();
+                  } catch (err) {
+                    toast(err.message || 'Could not update photo', 'error');
+                    saveBtn.disabled = false;
+                  }
+                },
+              },
+              'Save photo',
+            );
+
+            openModal({
+              title: `Member Photo · ${fullName(member)}`,
+              body: h('div', { style: 'padding:8px 0' }, photoPicker),
+              footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), saveBtn],
+            });
+          },
+        },
+        '📷 Photo',
+      ),
       session.managesBilling
         ? h(
             'button',

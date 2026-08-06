@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, today, toast } from '../ui.js';
 import { getGymName, printReceipt } from '../receipt.js';
+import { createPhotoPicker } from '../photo.js';
 
 /** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma". */
 async function memberOptions() {
@@ -23,81 +24,88 @@ function datalist(id, options) {
 export async function openMemberForm({ member, onSaved }) {
   const editing = Boolean(member);
   const { items: sessions } = await api.sessions({ active: 'true' });
+  const photoPicker = createPhotoPicker({ initialUrl: member?.photo_url });
+
+  const form = buildForm(
+    [
+      { name: 'first_name', label: 'First name', required: true, value: member?.first_name },
+      { name: 'last_name', label: 'Last name', value: member?.last_name },
+      { name: 'phone', label: 'Phone', value: member?.phone, placeholder: '9876543210' },
+      { name: 'email', label: 'Email', type: 'email', value: member?.email },
+      {
+        name: 'device_pin',
+        label: 'Fingerprint device PIN',
+        type: 'number',
+        value: member?.device_pin,
+        hint: 'The numeric ID this member is enrolled under on your fingerprint terminal, if any',
+      },
+      {
+        name: 'session_id',
+        label: 'Gym session',
+        type: 'select',
+        value: member?.session_id || '',
+        options: [
+          { value: '', label: 'No assigned session' },
+          ...sessions.map((s) => ({ value: s.id, label: `${s.name} (${s.start_time}–${s.end_time})` })),
+        ],
+        hint: 'Auto-checks this member out once their session ends, if they never scan or tap out themselves',
+      },
+      {
+        name: 'gender',
+        label: 'Gender',
+        type: 'select',
+        value: member?.gender || '',
+        options: [
+          { value: '', label: '—' },
+          { value: 'male', label: 'Male' },
+          { value: 'female', label: 'Female' },
+          { value: 'other', label: 'Other' },
+        ],
+      },
+      { name: 'date_of_birth', label: 'Date of birth', type: 'date', value: member?.date_of_birth },
+      { name: 'joined_on', label: 'Joined on', type: 'date', value: member?.joined_on || today() },
+      {
+        name: 'status',
+        label: 'Status',
+        type: 'select',
+        value: member?.status || 'active',
+        options: [
+          { value: 'active', label: 'Active' },
+          { value: 'frozen', label: 'Frozen' },
+          { value: 'inactive', label: 'Inactive' },
+        ],
+      },
+      { name: 'emergency_contact', label: 'Emergency contact', value: member?.emergency_contact },
+      { name: 'emergency_phone', label: 'Emergency phone', value: member?.emergency_phone },
+      { name: 'address', label: 'Address', type: 'textarea', full: true, value: member?.address },
+      {
+        name: 'health_notes',
+        label: 'Health notes',
+        type: 'textarea',
+        full: true,
+        value: member?.health_notes,
+        hint: 'Injuries, conditions or anything trainers should know',
+      },
+    ],
+    {
+      submitLabel: editing ? 'Save changes' : 'Add member',
+      onSubmit: async (values) => {
+        values.photo_url = photoPicker.getValue();
+        const saved = editing ? await api.updateMember(member.id, values) : await api.createMember(values);
+        closeModal();
+        toast(editing ? 'Member updated' : `${saved.first_name} added as ${saved.code}`);
+        await onSaved?.(saved);
+      },
+    },
+  );
+
+  const grid = form.querySelector('.form-grid');
+  if (grid) grid.prepend(photoPicker);
 
   openModal({
     title: editing ? `Edit ${member.first_name} ${member.last_name}` : 'Add a new member',
     wide: true,
-    body: buildForm(
-      [
-        { name: 'first_name', label: 'First name', required: true, value: member?.first_name },
-        { name: 'last_name', label: 'Last name', value: member?.last_name },
-        { name: 'phone', label: 'Phone', value: member?.phone, placeholder: '9876543210' },
-        { name: 'email', label: 'Email', type: 'email', value: member?.email },
-        {
-          name: 'device_pin',
-          label: 'Fingerprint device PIN',
-          type: 'number',
-          value: member?.device_pin,
-          hint: 'The numeric ID this member is enrolled under on your fingerprint terminal, if any',
-        },
-        {
-          name: 'session_id',
-          label: 'Gym session',
-          type: 'select',
-          value: member?.session_id || '',
-          options: [
-            { value: '', label: 'No assigned session' },
-            ...sessions.map((s) => ({ value: s.id, label: `${s.name} (${s.start_time}–${s.end_time})` })),
-          ],
-          hint: 'Auto-checks this member out once their session ends, if they never scan or tap out themselves',
-        },
-        {
-          name: 'gender',
-          label: 'Gender',
-          type: 'select',
-          value: member?.gender || '',
-          options: [
-            { value: '', label: '—' },
-            { value: 'male', label: 'Male' },
-            { value: 'female', label: 'Female' },
-            { value: 'other', label: 'Other' },
-          ],
-        },
-        { name: 'date_of_birth', label: 'Date of birth', type: 'date', value: member?.date_of_birth },
-        { name: 'joined_on', label: 'Joined on', type: 'date', value: member?.joined_on || today() },
-        {
-          name: 'status',
-          label: 'Status',
-          type: 'select',
-          value: member?.status || 'active',
-          options: [
-            { value: 'active', label: 'Active' },
-            { value: 'frozen', label: 'Frozen' },
-            { value: 'inactive', label: 'Inactive' },
-          ],
-        },
-        { name: 'emergency_contact', label: 'Emergency contact', value: member?.emergency_contact },
-        { name: 'emergency_phone', label: 'Emergency phone', value: member?.emergency_phone },
-        { name: 'address', label: 'Address', type: 'textarea', full: true, value: member?.address },
-        {
-          name: 'health_notes',
-          label: 'Health notes',
-          type: 'textarea',
-          full: true,
-          value: member?.health_notes,
-          hint: 'Injuries, conditions or anything trainers should know',
-        },
-      ],
-      {
-        submitLabel: editing ? 'Save changes' : 'Add member',
-        onSubmit: async (values) => {
-          const saved = editing ? await api.updateMember(member.id, values) : await api.createMember(values);
-          closeModal();
-          toast(editing ? 'Member updated' : `${saved.first_name} added as ${saved.code}`);
-          await onSaved?.(saved);
-        },
-      },
-    ),
+    body: form,
   });
 }
 

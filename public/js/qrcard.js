@@ -114,6 +114,30 @@ export async function downloadCardPng(card) {
   const left = Math.round(width * 0.05);
   let y = bandHeight + Math.round(height * 0.16);
 
+  if (member.photo_url) {
+    try {
+      const photoImg = await loadImage(member.photo_url);
+      const photoSize = Math.round(height * 0.28);
+      const photoX = left;
+      const photoY = bandHeight + Math.round(height * 0.05);
+
+      ctx.save();
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(photoX, photoY, photoSize, photoSize, Math.round(height * 0.03));
+      } else {
+        ctx.rect(photoX, photoY, photoSize, photoSize);
+      }
+      ctx.clip();
+      ctx.drawImage(photoImg, photoX, photoY, photoSize, photoSize);
+      ctx.restore();
+
+      y = photoY + photoSize + Math.round(height * 0.1);
+    } catch {
+      // Fallback gracefully if image fails to load
+    }
+  }
+
   ctx.fillStyle = '#111827';
   ctx.font = `700 ${Math.round(height * 0.115)}px system-ui, sans-serif`;
   ctx.fillText(fullName(member), left, y, width * 0.55);

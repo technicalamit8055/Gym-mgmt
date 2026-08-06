@@ -23,12 +23,9 @@ const wantsDefaultAdmin = process.env.NODE_ENV !== 'production'
 const created = wantsDefaultAdmin ? ensureAdminAccount() : null;
 const app = createApp();
 
-const server = app.listen(config.port, () => {
+const host = process.env.HOST || '0.0.0.0';
+const server = app.listen(config.port, host, () => {
   console.log(`${config.gymName} is running at http://localhost:${config.port}`);
-  if (created) {
-    console.log(`\nFirst run — admin account created:\n  email:    ${created.email}\n  password: ${created.password}`);
-    if (created.generated) console.log('  Change this password after signing in.\n');
-  }
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

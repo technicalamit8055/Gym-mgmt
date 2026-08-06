@@ -51,7 +51,7 @@ const MEMBER_FIELDS = {
   emergency_contact: { type: 'string', max: 80 },
   emergency_phone: { type: 'string', max: 30 },
   health_notes: { type: 'string', max: 1000 },
-  photo_url: { type: 'string', max: 500 },
+  photo_url: { type: 'string' },
   joined_on: { type: 'date' },
   status: { type: 'enum', values: ['active', 'inactive', 'frozen'] },
   // The numeric ID a fingerprint terminal (e.g. a Realtime/eSSL device)
