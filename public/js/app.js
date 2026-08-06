@@ -1,5 +1,9 @@
-import { ApiError, api, session } from './api.js';
+import { ApiError, api, pathSlug, session } from './api.js';
 import { buildForm, clear, h, openModal, setCurrency, toast } from './ui.js';
+import { renderLanding } from './views/landing.js';
+import { renderSignup } from './views/signup.js';
+import { renderSettings } from './views/settings.js';
+import { renderPlatformConsole } from './views/platform.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderMembers, renderMemberDetail } from './views/members.js';
 import { renderCheckIn } from './views/checkin.js';
@@ -27,6 +31,7 @@ const NAV = [
   { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
   { path: '/sessions', label: 'Gym sessions', icon: '⏰' },
   { path: '/staff', label: 'Staff', icon: '👥' },
+  { path: '/settings', label: 'Gym settings', icon: '⚙️' },
 ];
 
 const ROUTES = [
@@ -42,22 +47,85 @@ const ROUTES = [
   { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
   { pattern: /^\/sessions$/, title: 'Gym sessions', view: renderSessions },
   { pattern: /^\/staff$/, title: 'Staff', view: renderStaff },
+  { pattern: /^\/settings$/, title: 'Gym settings', view: renderSettings },
+];
+
+/**
+ * Pages that exist before anyone signs in, and outside any one gym.
+ *
+ * These render full-page instead of inside the app shell: the shell's sidebar
+ * is a gym's navigation, and on the root domain there is no gym for it to
+ * navigate. Matched ahead of the authenticated routes above.
+ */
+const PUBLIC_ROUTES = [
+  { pattern: /^\/?$/, title: 'GymBook', view: renderLanding },
+  { pattern: /^\/signup$/, title: 'Set up your gym', view: renderSignup },
+  { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole },
 ];
 
 const root = () => document.getElementById('app');
 
 function currentPath() {
-  const hash = window.location.hash.replace(/^#/, '');
-  return hash || '/dashboard';
+  return window.location.hash.replace(/^#/, '');
 }
 
 export function navigate(path) {
   window.location.hash = path;
 }
 
+/* ---------------------------------------------------------------- platform */
+
+/**
+ * Which gym this browser tab is looking at, resolved once at boot from the
+ * host or the /g/<slug> path prefix. `tenant` is null on the root domain and
+ * in single-gym dev mode; `missing` means the address named a gym that does
+ * not exist.
+ */
+let platform = { tenant: null };
+
+const gymName = () => platform.tenant?.gym_name || 'GymBook';
+
+async function loadPlatformContext() {
+  try {
+    return await api.tenantContext();
+  } catch (err) {
+    // resolveTenant serves the SPA shell for an unknown gym so we can say so
+    // in HTML; the API call behind it is what actually reports the 404.
+    if (err instanceof ApiError && err.status === 404) {
+      return { tenant: null, missing: true, slug: pathSlug || window.location.host.split('.')[0] };
+    }
+    if (err instanceof ApiError && err.status === 403) {
+      return { tenant: null, closed: true, slug: pathSlug || window.location.host.split('.')[0] };
+    }
+    throw err;
+  }
+}
+
+function renderNotice(title, body, actions) {
+  clear(root()).append(
+    h(
+      'div',
+      { class: 'onboard' },
+      h(
+        'div',
+        { class: 'onboard-card', style: 'text-align:center' },
+        h('h1', {}, title),
+        h('p', { class: 'sub' }, body),
+        h('div', { class: 'row', style: 'justify-content:center;gap:8px' }, ...actions),
+      ),
+    ),
+  );
+  root().className = '';
+}
+
 /* ------------------------------------------------------------------- login */
 
 function renderLogin(message) {
+  // The login card replaces the shell wholesale. Leaving `shell` set would
+  // leave renderRoute() writing views into nodes that are no longer in the
+  // document — a blank page after the next sign-in.
+  shell = undefined;
+
   const form = buildForm(
     [
       { name: 'email', label: 'Email', type: 'email', required: true, full: true, placeholder: 'you@gym.com' },
@@ -76,6 +144,8 @@ function renderLogin(message) {
   form.querySelector('.modal-foot').remove();
   form.append(h('button', { class: 'btn primary block', type: 'submit' }, 'Sign in'));
 
+  const tenant = platform.tenant;
+
   clear(root()).append(
     h(
       'div',
@@ -83,17 +153,25 @@ function renderLogin(message) {
       h(
         'div',
         { class: 'login-card' },
-        h('h1', {}, '🏋️ GymBook'),
-        h('p', { class: 'sub' }, 'Gym management — members, billing, classes and check-ins.'),
+        h('h1', {}, `🏋️ ${gymName()}`),
+        h(
+          'p',
+          { class: 'sub' },
+          tenant ? 'Sign in to your gym.' : 'Gym management — members, billing, classes and check-ins.',
+        ),
+        tenant?.status === 'suspended'
+          ? h(
+              'p',
+              { class: 'login-notice' },
+              'Access is paused because the trial or last payment lapsed. Sign in as an admin to subscribe — nothing has been deleted.',
+            )
+          : null,
         message ? h('p', { class: 'field-error' }, message) : null,
         form,
         h(
           'div',
-          { class: 'login-hint' },
-          h('strong', {}, 'Demo logins'),
-          h('div', {}, 'admin@gymbook.local / admin12345 — owner'),
-          h('div', {}, 'priyanka@gymbook.local / demo12345 — manager'),
-          h('div', {}, 'desk@gymbook.local / demo12345 — front desk'),
+          { class: 'row', style: 'margin-top:16px;justify-content:center' },
+          h('a', { class: 'btn sm ghost', href: '#/signup' }, 'Set up a new gym'),
         ),
       ),
     ),
@@ -106,7 +184,7 @@ function renderLogin(message) {
 function renderShell() {
   const user = session.user;
   const nav = h('nav', { class: 'sidebar', 'aria-label': 'Main navigation' });
-  nav.append(h('div', { class: 'brand' }, h('div', { class: 'logo' }, '🏋️'), 'GymBook'));
+  nav.append(h('div', { class: 'brand', title: gymName() }, h('div', { class: 'logo' }, '🏋️'), gymName()));
 
   for (const item of NAV) {
     if (item.section) {
@@ -140,17 +218,7 @@ function renderShell() {
         'div',
         { class: 'row', style: 'margin-top:10px;gap:6px' },
         h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, 'Password'),
-        h(
-          'button',
-          {
-            class: 'btn sm ghost',
-            onclick: () => {
-              session.clear();
-              renderLogin();
-            },
-          },
-          'Sign out',
-        ),
+        h('button', { class: 'btn sm ghost', onclick: signOut }, 'Sign out'),
       ),
     ),
   );
@@ -230,8 +298,50 @@ function openPasswordModal() {
 
 let shell;
 
+/**
+ * Renders one of the pre-auth pages, full-page, with no app shell around it.
+ *
+ * `rerender` re-runs the same public route, which is how the signup success
+ * screen and the operator console's sign-in/sign-out swap themselves out
+ * without a page load.
+ */
+async function renderPublicRoute(publicRoute) {
+  shell = undefined;
+  document.title = `${publicRoute.title} — GymBook`;
+
+  const swap = (node) => {
+    clear(root()).append(node);
+    root().className = '';
+  };
+
+  try {
+    const view = await publicRoute.view({
+      context: platform,
+      navigate,
+      rerender: () => renderPublicRoute(publicRoute),
+      swap,
+    });
+    swap(view);
+  } catch (err) {
+    console.error(err);
+    swap(
+      h(
+        'div',
+        { class: 'onboard' },
+        h(
+          'div',
+          { class: 'onboard-card', style: 'text-align:center' },
+          h('h1', {}, 'Could not load this page'),
+          h('p', { class: 'sub' }, err.message || 'Unexpected error'),
+          h('button', { class: 'btn primary', onclick: () => renderPublicRoute(publicRoute) }, 'Try again'),
+        ),
+      ),
+    );
+  }
+}
+
 async function renderRoute() {
-  const path = currentPath();
+  const path = currentPath() || '/dashboard';
   const match = ROUTES.map((route) => ({ route, params: path.match(route.pattern) })).find((r) => r.params);
 
   if (!match) {
@@ -275,32 +385,112 @@ async function renderRoute() {
   }
 }
 
-async function boot() {
+/**
+ * Decides what this URL should show, given who is signed in and which gym (if
+ * any) the address resolves to. Re-run on every hash change, so it is also
+ * what moves between the public pages and the app.
+ */
+async function dispatch() {
+  const path = currentPath();
+
+  if (platform.missing) {
+    renderNotice(
+      'No gym at this address',
+      `Nothing is set up at "${platform.slug}". Check the spelling, or create a gym with that address.`,
+      [
+        h('a', { class: 'btn primary', href: `${window.location.origin}/#/signup` }, 'Set up a gym'),
+        h('a', { class: 'btn ghost', href: window.location.origin }, 'Back to the site'),
+      ],
+    );
+    return;
+  }
+  if (platform.closed) {
+    renderNotice('This account is closed', 'Contact support if you think this is a mistake.', [
+      h('a', { class: 'btn ghost', href: window.location.origin }, 'Back to the site'),
+    ]);
+    return;
+  }
+
+  const publicRoute = PUBLIC_ROUTES.find((r) => r.pattern.test(path));
+
+  // "#/" means the landing page only on the root domain with nobody signed
+  // in. Inside a gym it means the dashboard, and a signed-in dev on the root
+  // domain wants their dashboard too rather than bouncing off their own
+  // marketing page on every reload. Signup and the console are always public.
+  const skipLanding = publicRoute?.view === renderLanding && Boolean(platform.tenant || session.token);
+
+  if (publicRoute && !skipLanding) {
+    await renderPublicRoute(publicRoute);
+    return;
+  }
+
   if (!session.token) {
+    // A real gym has a login screen; the root domain has nothing to sign into,
+    // so send it to the landing page (the hash is non-empty here — an empty
+    // one would have matched the landing route above — so this always fires a
+    // hashchange, and dispatch() runs again).
+    if (!platform.tenant) {
+      navigate('/');
+      return;
+    }
     renderLogin();
     return;
   }
+
   try {
-    const health = await fetch('/api/health').then((r) => r.json());
-    setCurrency(health.currency);
     await api.me();
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       renderLogin('Your session expired — please sign in again');
       return;
     }
+    throw err;
   }
-  shell = renderShell();
+
+  if (!shell) shell = renderShell();
   await renderRoute();
 }
 
+async function boot() {
+  platform = await loadPlatformContext();
+  // The real fix for a currency that used to come from /api/health, which
+  // never returned one — every gym rendered INR regardless of its setting.
+  setCurrency(platform.tenant?.currency);
+  document.title = `${gymName()} — Gym Management`;
+  await dispatch();
+}
+
 window.addEventListener('hashchange', () => {
-  if (session.token && shell) renderRoute();
+  dispatch();
 });
 
-window.addEventListener('gymbook:signed-out', () => {
+/** Drops the session and shows whatever this address offers signed-out
+ * visitors — a gym's login card, or the landing page on the root domain. */
+function signOut(message) {
+  session.clear();
   shell = undefined;
-  renderLogin('Your session expired — please sign in again');
+  if (platform.tenant) {
+    renderLogin(typeof message === 'string' ? message : undefined);
+    return;
+  }
+  if (currentPath() === '/' || currentPath() === '') {
+    renderPublicRoute(PUBLIC_ROUTES[0]);
+  } else {
+    navigate('/'); // fires hashchange -> dispatch()
+  }
+}
+
+window.addEventListener('gymbook:signed-out', () => {
+  signOut('Your session expired — please sign in again');
+});
+
+// Raised by the settings page after a rename. Repainting the two places the
+// gym name already lives beats rebuilding the shell and losing scroll position.
+window.addEventListener('gymbook:gym-updated', (event) => {
+  platform = { ...platform, tenant: event.detail };
+  document.title = `${gymName()} — Gym Management`;
+  const brand = shell?.nav.querySelector('.brand');
+  if (brand) clear(brand).append(h('div', { class: 'logo' }, '🏋️'), gymName());
 });
 
 document.addEventListener('keydown', (event) => {

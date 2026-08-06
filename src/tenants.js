@@ -50,6 +50,10 @@ const MIGRATIONS = [
   (db) => db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_razorpay_subscription ON tenants(razorpay_subscription_id)',
   ),
+  // IANA name ("Asia/Kolkata"), not an offset — offsets change twice a year
+  // under DST and a gym's opening hours don't. NULL means "use the server's
+  // own timezone", which is what every gym created before this column did.
+  (db) => ensureColumn(db, 'tenants', 'timezone', 'TEXT'),
 ];
 
 let registryDb;
@@ -90,15 +94,41 @@ export function listTenants() {
   return getRegistryDb().prepare('SELECT * FROM tenants ORDER BY created_at').all().map(plain);
 }
 
-export function createTenant({ slug, displayName, gymName, currency = 'INR', trialEndsOn } = {}) {
+export function createTenant({ slug, displayName, gymName, currency = 'INR', timezone, trialEndsOn } = {}) {
   if (!isValidSlug(slug)) throw new Error(`Invalid tenant slug "${slug}"`);
   const dbFile = `tenants/${slug}.db`;
   getRegistryDb()
     .prepare(
-      'INSERT INTO tenants (slug, display_name, gym_name, currency, db_file, trial_ends_on) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO tenants (slug, display_name, gym_name, currency, timezone, db_file, trial_ends_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(slug, displayName, gymName ?? displayName, currency, dbFile, trialEndsOn ?? null);
+    .run(slug, displayName, gymName ?? displayName, currency, timezone ?? null, dbFile, trialEndsOn ?? null);
   return findTenantBySlug(slug);
+}
+
+/**
+ * Edits the gym's own identity — the settings its owner controls. Billing
+ * status is deliberately not reachable from here: it is owned by the Razorpay
+ * webhook and the operator console, never by the gym itself.
+ *
+ * COALESCE on every column so a partial update leaves the rest alone.
+ */
+export function updateTenantProfile(slug, { gymName, currency, timezone } = {}) {
+  getRegistryDb()
+    .prepare(
+      `UPDATE tenants
+          SET gym_name     = COALESCE(?, gym_name),
+              display_name = COALESCE(?, display_name),
+              currency     = COALESCE(?, currency),
+              timezone     = COALESCE(?, timezone)
+        WHERE slug = ?`,
+    )
+    .run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, slug);
+  return findTenantBySlug(slug);
+}
+
+export function countTenants() {
+  return getRegistryDb().prepare('SELECT COUNT(*) AS n FROM tenants').get().n;
 }
 
 export function setTenantStatus(slug, status, reason) {
@@ -110,6 +140,13 @@ export function setTenantStatus(slug, status, reason) {
        WHERE slug = ?`,
     )
     .run(status, status, reason ?? null, slug);
+}
+
+/** Moves a trial's end date — the operator console's way of granting an
+ * extension without touching Razorpay. */
+export function setTenantTrialEnd(slug, trialEndsOn) {
+  getRegistryDb().prepare('UPDATE tenants SET trial_ends_on = ? WHERE slug = ?').run(trialEndsOn ?? null, slug);
+  return findTenantBySlug(slug);
 }
 
 export function findTenantBySubscriptionId(subscriptionId) {

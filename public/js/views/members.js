@@ -18,6 +18,7 @@ import {
 } from '../ui.js';
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
 import { downloadCardPng, idCardNode, printCards } from '../qrcard.js';
+import { getGymName, printReceipt } from '../receipt.js';
 
 const FILTERS = [
   { value: '', label: 'All memberships' },
@@ -793,6 +794,27 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           { label: 'Method', render: (row) => h('span', { class: 'badge grey' }, row.method) },
           { label: 'Reference', render: (row) => h('span', { class: 'muted' }, row.reference || '—') },
           { label: 'Amount', align: 'right', render: (row) => money(row.amount) },
+          {
+            label: '',
+            render: (row) =>
+              h(
+                'button',
+                {
+                  class: 'btn sm ghost',
+                  title: 'Print receipt',
+                  onclick: async (event) => {
+                    event.stopPropagation();
+                    try {
+                      const fullPayment = await api.paymentReceipt(row.id);
+                      printReceipt(fullPayment, { gymName: getGymName() });
+                    } catch (err) {
+                      toast(err.message || 'Could not load receipt details', 'error');
+                    }
+                  },
+                },
+                '🖨️ Receipt',
+              ),
+          },
         ],
         member.payments,
         { empty: 'No payments recorded' },

@@ -135,6 +135,43 @@ All optional — sensible defaults apply.
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MS` / `LOGIN_LOCKOUT_MS` | `5` / `900000` / `900000` | Failed-login lockout: attempts, window, lockout duration |
 | `SIGNUP_MAX_ATTEMPTS` / `SIGNUP_WINDOW_MS` / `SIGNUP_LOCKOUT_MS` | `10` / `3600000` / `3600000` | Same, for `/api/platform/signup` (per IP) |
 | `ROOT_DOMAIN` | — | The exact production hostname (e.g. `yourapp.fly.dev`, later a real domain) — needed so a subdomain of it is read as a tenant slug instead of guessed from label count |
+| `TENANT_URL_MODE` | `path` | Which address signup hands a new gym: `path` (`/g/acme`, works anywhere) or `subdomain` (`acme.example.com`, needs wildcard DNS + TLS). Both are always *accepted* — this only picks which one is advertised |
+| `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` | — | Operator console credentials. The console at `/#/platform` does not exist unless **both** are set |
+
+## Onboarding: how a gym joins
+
+The root domain is a public landing page. A gym owner clicks **Start free trial**,
+picks a name and an address, creates their owner account, and lands in a working
+gym — signed in, with three starter plans they can edit and sell straight away.
+Signup provisions a registry row, a dedicated SQLite file, the admin account and
+those plans in one step.
+
+Each gym is then reachable two ways, and both work at the same time:
+
+| | Address | Needs |
+| --- | --- | --- |
+| **Path** (default) | `https://yourapp.fly.dev/g/acme/` | Nothing — works on any hostname, including a throwaway tunnel URL |
+| **Subdomain** | `https://acme.yourgym.com/` | A domain you own, with wildcard DNS and wildcard TLS |
+
+Path addressing exists because Fly's shared `*.fly.dev` cannot issue wildcard
+certificates, so on a fresh deploy there would otherwise be no reachable gym at
+all. `resolveTenant` strips the `/g/<slug>` prefix off the URL before anything
+else sees it, so past that point the two modes are indistinguishable and neither
+needs its own code path. Point a real domain at the app later and the subdomain
+form starts working with no changes — set `TENANT_URL_MODE=subdomain` to make
+signup advertise it.
+
+Inside a gym, **Gym settings** lets an admin change the gym name, currency and
+timezone, and shows trial/subscription state with the button that subscribes.
+
+### Operator console
+
+Set `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`, restart, and
+`/#/platform` on the root domain lists every gym with its status, trial end and
+member/staff/visit counts, and can suspend, reactivate, extend a trial or cancel.
+It signs in with its own credentials and its own token shape — a gym's admin
+token is rejected here, and the console's token is rejected inside every gym.
+With either variable unset the console returns 404 rather than opening up.
 
 ## Deploy (Fly.io)
 
@@ -148,12 +185,21 @@ fly auth login                                    # opens your browser, one-time
 fly apps create <pick-a-unique-name>
 fly volumes create gymbook_data -a <app-name> -r sin -s 1
 fly secrets set AUTH_SECRET=$(openssl rand -hex 32) -a <app-name>
+
+# Optional: enables the operator console at /#/platform. Without both, it 404s.
+fly secrets set PLATFORM_ADMIN_EMAIL=you@example.com \
+                PLATFORM_ADMIN_PASSWORD=$(openssl rand -hex 16) -a <app-name>
+
 fly deploy -a <app-name>
 
 # Only after the first deploy do you know the assigned hostname:
 fly secrets set ROOT_DOMAIN=<app-name>.fly.dev -a <app-name>
 fly deploy -a <app-name>                          # redeploy so it takes effect
 ```
+
+Then open `https://<app-name>.fly.dev` — that is the landing page, and the first
+gym signs itself up from there at `/g/<their-slug>/`. No default admin account is
+created on a production deploy, so the root domain has nothing to sign in to.
 
 Update `app = "CHANGE-ME"` in `fly.toml` to match the name you picked, and
 `primary_region` to whichever [Fly region](https://fly.io/docs/reference/regions/)
@@ -165,9 +211,10 @@ idle, and a real risk that a Razorpay webhook arrives while the machine is aslee
 Once real paying gyms depend on webhooks landing promptly, change this to
 `min_machines_running = 1` (small constant cost, no cold starts, no missed webhooks).
 
-Not yet covered by this deploy: a custom domain and wildcard DNS for real per-gym
-subdomains (Fly's shared `fly.dev` domain can't do this — only a domain you own can),
-and real Razorpay credentials.
+Not yet covered by this deploy: real Razorpay credentials, and a custom domain with
+wildcard DNS for per-gym *subdomains* (Fly's shared `fly.dev` can't do this — only a
+domain you own can). Gyms are reachable at `/g/<slug>/` in the meantime, so nothing
+is blocked on it.
 
 ## Physical fingerprint devices (eSSL/Realtime/ZKTeco-family)
 

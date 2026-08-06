@@ -74,7 +74,10 @@ describe('physical device attendance', () => {
     assert.equal(member.status, 201);
     memberId = member.body.id;
 
-    const plan = await call('POST', '/api/plans', { name: 'Monthly', price: 1000, duration_days: 30 }, { token, tenant: 'ironhouse' });
+    // Not "Monthly": signup seeds starter plans and plans.name is UNIQUE, so
+    // this suite needs a name of its own.
+    const plan = await call('POST', '/api/plans', { name: 'Gold Monthly', price: 1000, duration_days: 30 }, { token, tenant: 'ironhouse' });
+    assert.equal(plan.status, 201);
     const sub = await call('POST', '/api/subscriptions', { member_id: memberId, plan_id: plan.body.id }, { token, tenant: 'ironhouse' });
     assert.equal(sub.status, 201);
   });

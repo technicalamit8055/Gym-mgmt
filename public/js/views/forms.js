@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { addDays, buildForm, closeModal, h, money, openModal, today, toast } from '../ui.js';
+import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, today, toast } from '../ui.js';
+import { getGymName, printReceipt } from '../receipt.js';
 
 /** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma". */
 async function memberOptions() {
@@ -170,7 +171,7 @@ export async function openMembershipForm({ member, onSaved }) {
         return;
       }
       const plan = plans.find((p) => String(p.id) === String(values.plan_id));
-      await api.createSubscription({
+      const sub = await api.createSubscription({
         member_id: memberId,
         plan_id: values.plan_id,
         start_date: values.start_date || undefined,
@@ -182,6 +183,34 @@ export async function openMembershipForm({ member, onSaved }) {
       closeModal();
       toast(`${plan.name} activated`);
       await onSaved?.();
+
+      if (Number(values.payment_amount) > 0) {
+        const paymentAmount = Number(values.payment_amount);
+        confirmDialog({
+          title: 'Membership & Payment Saved',
+          message: `${plan.name} activated and ${money(paymentAmount)} recorded for ${sub.first_name} ${sub.last_name}. Would you like to print a receipt?`,
+          confirmLabel: '🖨️ Print receipt',
+          onConfirm: async () => {
+            printReceipt(
+              {
+                amount: paymentAmount,
+                method: values.payment_method || 'cash',
+                paid_on: today(),
+                member_code: sub.member_code,
+                first_name: sub.first_name,
+                last_name: sub.last_name,
+                plan_name: sub.plan_name,
+                start_date: sub.start_date,
+                end_date: sub.end_date,
+                price: sub.price,
+                discount: sub.discount,
+                note: values.note || undefined,
+              },
+              { gymName: getGymName() },
+            );
+          },
+        });
+      }
     },
   });
 
@@ -256,7 +285,7 @@ export async function openPaymentForm({ member, subscriptions = [], onSaved }) {
           toast('Pick a member from the list', 'error');
           return;
         }
-        await api.createPayment({
+        const payment = await api.createPayment({
           member_id: memberId,
           amount: values.amount,
           method: values.method,
@@ -268,6 +297,15 @@ export async function openPaymentForm({ member, subscriptions = [], onSaved }) {
         closeModal();
         toast(`${money(values.amount)} recorded`);
         await onSaved?.();
+
+        confirmDialog({
+          title: 'Payment Recorded',
+          message: `Payment of ${money(values.amount)} recorded for ${payment.first_name} ${payment.last_name}. Would you like to print a receipt?`,
+          confirmLabel: '🖨️ Print receipt',
+          onConfirm: async () => {
+            printReceipt(payment, { gymName: getGymName() });
+          },
+        });
       },
     },
   );

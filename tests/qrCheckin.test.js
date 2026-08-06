@@ -93,7 +93,10 @@ describe('QR card check-in', () => {
     const other = await call('POST', '/api/members', { first_name: 'Priya' }, { token, tenant: 'ironhouse' });
     otherId = other.body.id;
 
-    const plan = await call('POST', '/api/plans', { name: 'Monthly', price: 1000, duration_days: 30 }, { token, tenant: 'ironhouse' });
+    // Not "Monthly": signup seeds starter plans and plans.name is UNIQUE, so
+    // this suite needs a name of its own.
+    const plan = await call('POST', '/api/plans', { name: 'Gold Monthly', price: 1000, duration_days: 30 }, { token, tenant: 'ironhouse' });
+    assert.equal(plan.status, 201);
     for (const id of [memberId, otherId]) {
       const sub = await call('POST', '/api/subscriptions', { member_id: id, plan_id: plan.body.id }, { token, tenant: 'ironhouse' });
       assert.equal(sub.status, 201);
@@ -169,7 +172,7 @@ describe('QR card check-in', () => {
     assert.equal(res.body.member.first_name, 'Amit');
     assert.equal(res.body.already_in, false);
     assert.ok(res.body.subscription, 'shows the active membership');
-    assert.equal(res.body.subscription.plan_name, 'Monthly');
+    assert.equal(res.body.subscription.plan_name, 'Gold Monthly');
 
     const attendance = await call('GET', `/api/attendance?member_id=${memberId}`, null, { token, tenant: 'ironhouse' });
     assert.equal(attendance.body.items.length, 0, 'lookup is read-only');

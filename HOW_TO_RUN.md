@@ -50,6 +50,29 @@ Open that address in your browser: **http://localhost:3000**
 
 **To stop it:** click into the terminal window and press `Ctrl + C`.
 
+### Trying the gym signup flow locally
+
+`http://localhost:3000` shows the app for the single practice gym as long as
+you are signed in. To see what a *new* gym owner sees, sign out (or open a
+private window) — you land on the public landing page.
+
+From there, **Start free trial** creates a real, separate gym. When it finishes
+it gives you a link like `http://localhost:3000/g/your-gym/` — that gym has its
+own database file under `data\tenants\`, its own staff logins, and its own
+members. Nothing it does can be seen from any other gym. Create two and check.
+
+To try the operator console — the page that lists every gym — start the app
+with a console password set:
+
+```powershell
+$env:PLATFORM_ADMIN_EMAIL = "you@example.com"
+$env:PLATFORM_ADMIN_PASSWORD = "pick-something-long"
+npm start
+```
+
+Then open **http://localhost:3000/#/platform** and sign in with those two
+values. Without them, that page just says the console is not enabled.
+
 That's it for local-only use. Nobody outside this PC can reach it this way —
 skip to section B if you want to open it from your phone or let someone else
 in.

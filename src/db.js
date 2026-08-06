@@ -225,6 +225,13 @@ export function getDb() {
   return openHandle(file);
 }
 
+/** The current gym's IANA timezone, or undefined to mean "the server's own" —
+ * which is the only sensible answer in single-tenant/dev mode, and stays the
+ * behaviour for any gym that hasn't set one. */
+export function getTenantTimezone() {
+  return tenantStorage.getStore()?.timezone;
+}
+
 /** Closes one tenant's handle (by file path), or every open handle when called
  * with no argument — the shape server.js and tests already rely on. */
 export function closeDb(file) {

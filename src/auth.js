@@ -40,6 +40,27 @@ export function issueToken(user, tenantSlug) {
   return `${payload}.${sign(payload)}`;
 }
 
+/**
+ * Operator-console token, for the person who runs the platform rather than
+ * any one gym.
+ *
+ * Deliberately a different shape from a gym token: it carries `scope` and no
+ * `tenant`. requireAuth rejects it everywhere in the gym API (its tenant check
+ * compares against a real slug, and undefined never matches), and
+ * requirePlatformAdmin rejects every gym token in return (they carry no
+ * scope). Neither can be mistaken for the other, in either direction.
+ */
+export function issuePlatformToken(email) {
+  const payload = b64url(
+    JSON.stringify({
+      scope: 'platform',
+      email,
+      exp: Math.floor(Date.now() / 1000) + config.tokenTtlSeconds,
+    }),
+  );
+  return `${payload}.${sign(payload)}`;
+}
+
 export function readToken(token) {
   const [payload, signature] = String(token || '').split('.');
   if (!payload || !signature) return null;

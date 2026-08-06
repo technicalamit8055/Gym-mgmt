@@ -8,8 +8,15 @@ primary_region = "sin"
   PLATFORM_DB_FILE = "/data/platform.db"
   TENANTS_DIR = "/data/tenants"
   TRUST_PROXY = "true"
+  # Gyms are addressed as /g/<slug>/, which works on the shared *.fly.dev
+  # hostname. Flip to "subdomain" only once a domain you own is pointed here
+  # with wildcard DNS and wildcard TLS — fly.dev can issue neither, so
+  # advertising subdomains before then hands new gyms a dead link.
+  TENANT_URL_MODE = "path"
   # ROOT_DOMAIN is set via `fly secrets set` after the first deploy, once the
   # assigned <app-name>.fly.dev hostname is known — see README.
+  # PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD are secrets too, not env:
+  # they gate the operator console, which stays 404 until both are set.
 
 [mounts]
   source = "gymbook_data"

@@ -14,6 +14,7 @@ import {
   toast,
 } from '../ui.js';
 import { openMembershipForm, openPaymentForm } from './forms.js';
+import { getGymName, printReceipt } from '../receipt.js';
 
 export async function renderBilling({ setActions, reload }) {
   const state = { tab: 'memberships', filter: 'active', from: '', to: '' };
@@ -181,29 +182,50 @@ export async function renderBilling({ setActions, reload }) {
             {
               label: '',
               render: (row) =>
-                session.can('admin')
-                  ? h(
-                      'button',
-                      {
-                        class: 'btn sm danger',
-                        onclick: (event) => {
-                          event.stopPropagation();
-                          confirmDialog({
-                            title: 'Delete this payment?',
-                            message: `${money(row.amount)} from ${fullName(row)} on ${date(row.paid_on)} will be removed and the member's balance will go back up.`,
-                            confirmLabel: 'Delete payment',
-                            danger: true,
-                            onConfirm: async () => {
-                              await api.deletePayment(row.id);
-                              toast('Payment deleted');
-                              await render();
-                            },
-                          });
-                        },
+                h(
+                  'div',
+                  { class: 'row', style: 'gap:6px;justify-content:flex-end' },
+                  h(
+                    'button',
+                    {
+                      class: 'btn sm ghost',
+                      title: 'Print receipt',
+                      onclick: async (event) => {
+                        event.stopPropagation();
+                        try {
+                          const fullPayment = await api.paymentReceipt(row.id);
+                          printReceipt(fullPayment, { gymName: getGymName() });
+                        } catch (err) {
+                          toast(err.message || 'Could not load receipt details', 'error');
+                        }
                       },
-                      'Delete',
-                    )
-                  : null,
+                    },
+                    '🖨️ Receipt',
+                  ),
+                  session.can('admin')
+                    ? h(
+                        'button',
+                        {
+                          class: 'btn sm danger',
+                          onclick: (event) => {
+                            event.stopPropagation();
+                            confirmDialog({
+                              title: 'Delete this payment?',
+                              message: `${money(row.amount)} from ${fullName(row)} on ${date(row.paid_on)} will be removed and the member's balance will go back up.`,
+                              confirmLabel: 'Delete payment',
+                              danger: true,
+                              onConfirm: async () => {
+                                await api.deletePayment(row.id);
+                                toast('Payment deleted');
+                                await render();
+                              },
+                            });
+                          },
+                        },
+                        'Delete',
+                      )
+                    : null,
+                ),
             },
           ],
           items,

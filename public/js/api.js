@@ -1,5 +1,23 @@
-const TOKEN_KEY = 'gymbook.token';
-const USER_KEY = 'gymbook.user';
+/**
+ * The "/g/<slug>" prefix this page was loaded under, or '' on a subdomain or
+ * the root domain. Read once from the document URL — hash navigation never
+ * changes the path, so this cannot go stale.
+ */
+export const pathPrefix = (/^\/g\/[a-z][a-z0-9-]{2,39}(?=\/|$)/.exec(window.location.pathname) || [''])[0];
+
+/** The gym slug from the path prefix, or null when addressed by subdomain. */
+export const pathSlug = pathPrefix ? pathPrefix.slice(3) : null;
+
+/** Absolute URL of a gym addressed by path, for links out of the landing page. */
+export const gymPathUrl = (slug) => `${window.location.origin}/g/${slug}/`;
+
+// Two gyms addressed by path share one origin, and therefore one localStorage.
+// Without a per-gym suffix, opening /g/pulse/ would send Acme's token, the
+// server would reject it as a cross-tenant replay, and the owner would appear
+// to have been silently signed out of a gym they never left.
+const SCOPE = pathSlug ? `.${pathSlug}` : '';
+const TOKEN_KEY = `gymbook.token${SCOPE}`;
+const USER_KEY = `gymbook.user${SCOPE}`;
 
 export const session = {
   get token() {
@@ -29,6 +47,44 @@ export const session = {
   },
 };
 
+/**
+ * Writes a session into another gym's storage slot on this same origin.
+ *
+ * Signup happens on the root domain but provisions a gym that lives at
+ * /g/<slug>/, which reads a different, slug-scoped key — so `session.save()`
+ * here would drop the owner's brand-new token into the root's bucket, where
+ * that gym will never look for it. Same-origin path mode only: a subdomain is
+ * a separate origin with a separate localStorage, and the owner signs in there
+ * once instead.
+ */
+export function saveSessionFor(slug, token, user) {
+  localStorage.setItem(`gymbook.token.${slug}`, token);
+  localStorage.setItem(`gymbook.user.${slug}`, JSON.stringify(user));
+}
+
+/**
+ * The operator console's own credentials, kept apart from every gym session.
+ *
+ * A platform token and a gym token are different shapes that the server
+ * refuses to accept for each other's routes, so mixing them into one slot
+ * would only ever produce confusing 401s. Unscoped by path on purpose: the
+ * console belongs to the platform, not to whichever gym you were last looking
+ * at.
+ */
+const PLATFORM_TOKEN_KEY = 'gymbook.platform.token';
+
+export const platformSession = {
+  get token() {
+    return localStorage.getItem(PLATFORM_TOKEN_KEY);
+  },
+  save(token) {
+    localStorage.setItem(PLATFORM_TOKEN_KEY, token);
+  },
+  clear() {
+    localStorage.removeItem(PLATFORM_TOKEN_KEY);
+  },
+};
+
 export class ApiError extends Error {
   constructor(status, message, details) {
     super(message);
@@ -37,18 +93,23 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, { token, anonymous = false } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (session.token) headers.Authorization = `Bearer ${session.token}`;
+  const bearer = token ?? (anonymous ? null : session.token);
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
 
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${pathPrefix}/api${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-  if (res.status === 401 && !path.startsWith('/auth/login')) {
+  // An explicit token means this call is not the gym session's — tearing that
+  // session down over someone else's 401 would sign the user out of a gym
+  // they are still validly signed in to.
+  const ownsGymSession = !token && !anonymous;
+  if (res.status === 401 && ownsGymSession && !path.startsWith('/auth/login')) {
     session.clear();
     window.dispatchEvent(new CustomEvent('gymbook:signed-out'));
     throw new ApiError(401, 'Your session expired — please sign in again');
@@ -74,6 +135,24 @@ export const api = {
   me: () => request('GET', '/auth/me'),
   changePassword: (payload) => request('POST', '/auth/change-password', payload),
 
+  // Platform: onboarding and the gym's own account. `anonymous` on the three
+  // public ones so a stale token from a previous gym can't turn a signed-out
+  // page into a 401 redirect loop.
+  tenantContext: () => request('GET', '/platform/tenant', undefined, { anonymous: true }),
+  slugAvailable: (slug) => request('GET', `/platform/slug-available${query({ slug })}`, undefined, { anonymous: true }),
+  signup: (payload) => request('POST', '/platform/signup', payload, { anonymous: true }),
+  updateGym: (payload) => request('PATCH', '/platform/tenant', payload),
+  billingStatus: () => request('GET', '/platform/billing/status'),
+  subscribe: () => request('POST', '/platform/billing/subscribe'),
+
+  // Operator console — platform token, never the gym session's.
+  platformLogin: (email, password) =>
+    request('POST', '/platform/admin/login', { email, password }, { anonymous: true }),
+  platformTenants: (params) =>
+    request('GET', `/platform/admin/tenants${query(params)}`, undefined, { token: platformSession.token }),
+  platformSetStatus: (slug, payload) =>
+    request('POST', `/platform/admin/tenants/${slug}/status`, payload, { token: platformSession.token }),
+
   dashboard: () => request('GET', '/dashboard'),
 
   members: (params) => request('GET', `/members${query(params)}`),
@@ -95,6 +174,7 @@ export const api = {
 
   payments: (params) => request('GET', `/payments${query(params)}`),
   createPayment: (payload) => request('POST', '/payments', payload),
+  paymentReceipt: (id) => request('GET', `/payments/${id}/receipt`),
   deletePayment: (id) => request('DELETE', `/payments/${id}`),
 
   attendance: (params) => request('GET', `/attendance${query(params)}`),
@@ -145,9 +225,9 @@ export const api = {
   revenueReport: (params) => request('GET', `/reports/revenue${query(params)}`),
   attendanceReport: (params) => request('GET', `/reports/attendance${query(params)}`),
   growthReport: () => request('GET', '/reports/growth'),
-  exportUrl: (entity) => `/api/reports/export/${entity}`,
+  exportUrl: (entity) => `${pathPrefix}/api/reports/export/${entity}`,
   download: async (entity) => {
-    const res = await fetch(`/api/reports/export/${entity}`, {
+    const res = await fetch(`${pathPrefix}/api/reports/export/${entity}`, {
       headers: { Authorization: `Bearer ${session.token}` },
     });
     if (!res.ok) throw new ApiError(res.status, 'Export failed');

@@ -68,7 +68,10 @@ export function createApp() {
   app.use('/api/platform', platformRoutes);
   app.use('/api/auth', authRoutes);
 
-  app.use(requireActiveSubscription);
+  // Scoped to /api, not the whole app: the gate must not reach express.static
+  // and the SPA fallback below, or a gym whose trial lapsed would get a JSON
+  // 402 for "/" and never be able to load the billing page that fixes it.
+  app.use('/api', requireActiveSubscription);
 
   app.use('/api/staff', staffRoutes);
   app.use('/api/devices', deviceRoutes);

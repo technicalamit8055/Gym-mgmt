@@ -45,6 +45,15 @@ export const config = {
   // domain) once deployed. Unset locally/in tests, where subdomain detection
   // falls back to inferring from label count instead (see tenant.js).
   rootDomain: process.env.ROOT_DOMAIN || '',
+  // Which address shape signup hands a new gym: "path" (/g/acme, works on any
+  // hostname) or "subdomain" (acme.example.com, needs wildcard DNS + TLS on a
+  // domain you own). Both are always *accepted* — this only picks which one
+  // gets advertised. Defaults to the one that cannot be misconfigured.
+  tenantUrlMode: process.env.TENANT_URL_MODE === 'subdomain' ? 'subdomain' : 'path',
+  // Operator console credentials. Both must be set for the console to exist
+  // at all — an unset password must never mean "no password required".
+  platformAdminEmail: (process.env.PLATFORM_ADMIN_EMAIL || '').toLowerCase(),
+  platformAdminPassword: process.env.PLATFORM_ADMIN_PASSWORD || '',
 };
 
 /** Pseudo-slug used whenever a request resolves to no real tenant (dev/single-gym mode). */

@@ -8,7 +8,8 @@ export const paymentRoutes = Router();
 paymentRoutes.use(requireAuth);
 
 const PAYMENT_SELECT = `
-  SELECT pay.*, m.code AS member_code, m.first_name, m.last_name, p.name AS plan_name
+  SELECT pay.*, m.code AS member_code, m.first_name, m.last_name, m.phone,
+         p.name AS plan_name, s.start_date, s.end_date, s.price, s.discount
   FROM payments pay
   JOIN members m ON m.id = pay.member_id
   LEFT JOIN subscriptions s ON s.id = pay.subscription_id
