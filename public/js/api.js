@@ -250,4 +250,14 @@ export const api = {
     link.click();
     URL.revokeObjectURL(url);
   },
+
+  whatsappStatus: () => request('GET', '/whatsapp/status'),
+  whatsappConnect: () => request('POST', '/whatsapp/connect'),
+  whatsappLogout: () => request('POST', '/whatsapp/logout'),
+  whatsappSettings: () => request('GET', '/whatsapp/settings'),
+  updateWhatsAppSettings: (payload) => request('PUT', '/whatsapp/settings', payload),
+  sendWhatsAppReceipt: (paymentId) => request('POST', '/whatsapp/send-receipt', { payment_id: paymentId }),
+  sendWhatsAppReminder: (payload) => request('POST', '/whatsapp/send-reminder', payload),
+  sendWhatsAppTest: (payload) => request('POST', '/whatsapp/send-test', payload),
+  whatsappLogs: (params) => request('GET', `/whatsapp/logs${query(params)}`),
 };

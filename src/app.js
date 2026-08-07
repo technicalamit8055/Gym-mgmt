@@ -16,6 +16,7 @@ import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
+import { whatsappRoutes } from './routes/whatsapp.js';
 import { biometricRoutes } from './routes/biometric.js';
 import { handleRazorpayWebhook } from './routes/billing.js';
 import { deviceAttendanceRoutes } from './routes/deviceAttendance.js';
@@ -94,6 +95,7 @@ export function createApp() {
   app.use('/api/equipment', equipmentRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/reports', reportRoutes);
+  app.use('/api/whatsapp', whatsappRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

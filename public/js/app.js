@@ -16,6 +16,7 @@ import { renderStaff } from './views/staff.js';
 import { renderDevices } from './views/devices.js';
 import { renderSessions } from './views/sessions.js';
 import { renderReports } from './views/reports.js';
+import { renderWhatsApp } from './views/whatsapp.js';
 
 const NAV = [
   { section: 'Daily' },
@@ -26,6 +27,9 @@ const NAV = [
   { path: '/billing', label: 'Memberships & billing', icon: '💳' },
   { path: '/plans', label: 'Plans', icon: '🏷️' },
   { path: '/reports', label: 'Reports', icon: '📈' },
+  // Sends under the gym's own WhatsApp number, so the API limits it to the
+  // billing roles — hide it rather than let a trainer click into a 403.
+  { path: '/whatsapp', label: 'WhatsApp', icon: '💬', roles: ['admin', 'manager'] },
   { section: 'Operations' },
   { path: '/classes', label: 'Classes', icon: '🧘' },
   { path: '/equipment', label: 'Equipment', icon: '🏋️' },
@@ -43,6 +47,7 @@ const ROUTES = [
   { pattern: /^\/billing$/, title: 'Memberships & billing', view: renderBilling },
   { pattern: /^\/plans$/, title: 'Membership plans', view: renderPlans },
   { pattern: /^\/reports$/, title: 'Reports', view: renderReports },
+  { pattern: /^\/whatsapp$/, title: 'WhatsApp Automation', view: renderWhatsApp },
   { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
   { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
   { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
@@ -199,6 +204,7 @@ function renderShell() {
       nav.append(h('div', { class: 'nav-section' }, item.section));
       continue;
     }
+    if (item.roles && !item.roles.includes(user?.role)) continue;
     nav.append(
       h(
         'a',

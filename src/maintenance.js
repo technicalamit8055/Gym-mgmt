@@ -1,6 +1,8 @@
 import { localtimeModifiers } from './clock.js';
-import { run } from './db.js';
-import { today } from './validate.js';
+import { config } from './config.js';
+import { run, get, all } from './db.js';
+import { today, addDays } from './validate.js';
+import { getWhatsAppStatus, reminderMessage, sendWhatsAppMessage } from './whatsapp.js';
 
 /**
  * Flips memberships whose end date has passed to "expired". Cheap enough to run
@@ -53,3 +55,65 @@ export function autoCloseFinishedVisits() {
     [toLocal, toUtc, toLocal, toUtc],
   ).changes;
 }
+
+/**
+ * Sends a renewal reminder to every member of *the current gym* whose
+ * membership lapses today or in `reminder_days_before` days.
+ *
+ * Must be called inside a tenantStorage context — every read and every
+ * delivery-log write below lands in whichever database that context names, so
+ * calling it bare would sweep the fallback dev database and nothing else. The
+ * scheduler in server.js is what walks the tenants.
+ *
+ * Reminders already sent today are excluded by joining against whatsapp_logs
+ * rather than by a "reminded_at" column, so the sweep is safe to run hourly:
+ * a member gets at most one reminder a day no matter how often it fires.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.gymName] Name to render into {{gym_name}}.
+ * @returns {number} How many reminders were queued.
+ */
+export function sendAutomatedRenewalReminders({ gymName = config.gymName } = {}) {
+  try {
+    const settings = get('SELECT auto_reminder, reminder_days_before, reminder_template FROM whatsapp_settings WHERE id = 1');
+    if (!settings?.auto_reminder || !getWhatsAppStatus().connected) return 0;
+
+    const now = today();
+    const target = addDays(now, settings.reminder_days_before ?? 3);
+
+    const expiring = all(
+      `SELECT s.id, s.member_id, s.end_date, m.first_name, m.last_name, m.phone, p.name AS plan_name
+       FROM subscriptions s
+       JOIN members m ON m.id = s.member_id
+       JOIN plans p ON p.id = s.plan_id
+       WHERE s.status = 'active'
+         AND s.end_date IN (?, ?)
+         AND m.phone IS NOT NULL AND TRIM(m.phone) != ''
+         AND NOT EXISTS (
+           SELECT 1 FROM whatsapp_logs l
+           WHERE l.member_id = s.member_id
+             AND l.type = 'reminder'
+             AND l.status = 'sent'
+             AND date(l.sent_at) = ?
+         )`,
+      [target, now, now],
+    );
+
+    for (const sub of expiring) {
+      // Queued, not awaited: sendWhatsAppMessage paces sends internally and
+      // logs both outcomes, so there is nothing useful to block on here.
+      sendWhatsAppMessage({
+        phone: sub.phone,
+        message: reminderMessage(sub, { gymName, template: settings.reminder_template }),
+        type: 'reminder',
+        memberId: sub.member_id,
+      }).catch((err) => console.error('[whatsapp] reminder failed:', err.message));
+    }
+
+    return expiring.length;
+  } catch (err) {
+    console.error('[whatsapp] renewal-reminder sweep failed:', err.message);
+    return 0;
+  }
+}
+

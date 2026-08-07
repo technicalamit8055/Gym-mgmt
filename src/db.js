@@ -182,6 +182,30 @@ CREATE TABLE IF NOT EXISTS biometric_credentials (
 );
 CREATE INDEX IF NOT EXISTS idx_biometric_member ON biometric_credentials(member_id);
 CREATE INDEX IF NOT EXISTS idx_biometric_cred ON biometric_credentials(credential_id);
+
+CREATE TABLE IF NOT EXISTS whatsapp_settings (
+  id                      INTEGER PRIMARY KEY CHECK (id = 1),
+  auto_receipt            INTEGER NOT NULL DEFAULT 1,
+  auto_reminder           INTEGER NOT NULL DEFAULT 1,
+  reminder_days_before    INTEGER NOT NULL DEFAULT 3,
+  receipt_template        TEXT NOT NULL DEFAULT 'Hi {{first_name}}, thank you for your payment of {{amount}} for {{plan_name}}. Your membership is valid until {{end_date}}. - {{gym_name}}',
+  reminder_template       TEXT NOT NULL DEFAULT 'Hi {{first_name}}, your membership ({{plan_name}}) expires on {{end_date}}. Please renew to continue your workouts! - {{gym_name}}',
+  welcome_template        TEXT NOT NULL DEFAULT 'Welcome to {{gym_name}}, {{first_name}}! We are thrilled to have you on board.',
+  updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS whatsapp_logs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone       TEXT NOT NULL,
+  member_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  type        TEXT NOT NULL CHECK (type IN ('receipt', 'reminder', 'welcome', 'custom')),
+  message     TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+  error       TEXT,
+  sent_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at);
+CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id);
 `;
 
 /** Append-only: CREATE TABLE IF NOT EXISTS never retrofits columns onto an
@@ -278,6 +302,37 @@ const MIGRATIONS = [
     } catch {
       // Left in place, always NULL, and never selected again.
     }
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS whatsapp_settings (
+        id                      INTEGER PRIMARY KEY CHECK (id = 1),
+        auto_receipt            INTEGER NOT NULL DEFAULT 1,
+        auto_reminder           INTEGER NOT NULL DEFAULT 1,
+        reminder_days_before    INTEGER NOT NULL DEFAULT 3,
+        receipt_template        TEXT NOT NULL DEFAULT 'Hi {{first_name}}, thank you for your payment of {{amount}} for {{plan_name}}. Your membership is valid until {{end_date}}. - {{gym_name}}',
+        reminder_template       TEXT NOT NULL DEFAULT 'Hi {{first_name}}, your membership ({{plan_name}}) expires on {{end_date}}. Please renew to continue your workouts! - {{gym_name}}',
+        welcome_template        TEXT NOT NULL DEFAULT 'Welcome to {{gym_name}}, {{first_name}}! We are thrilled to have you on board.',
+        updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.prepare('INSERT OR IGNORE INTO whatsapp_settings (id) VALUES (1)').run();
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS whatsapp_logs (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone       TEXT NOT NULL,
+        member_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        type        TEXT NOT NULL CHECK (type IN ('receipt', 'reminder', 'welcome', 'custom')),
+        message     TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+        error       TEXT,
+        sent_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id)');
   },
 ];
 

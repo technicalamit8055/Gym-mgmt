@@ -124,20 +124,47 @@ export async function renderBilling({ setActions, reload }) {
             {
               label: '',
               render: (row) =>
-                session.managesBilling && row.due > 0
-                  ? h(
-                      'button',
-                      {
-                        class: 'btn sm',
-                        onclick: async (event) => {
-                          event.stopPropagation();
-                          const member = await api.member(row.member_id);
-                          openPaymentForm({ member, subscriptions: member.subscriptions, onSaved: render });
+                h(
+                  'div',
+                  { class: 'row', style: 'gap:6px;justify-content:flex-end' },
+                  session.managesBilling && row.due > 0
+                    ? h(
+                        'button',
+                        {
+                          class: 'btn sm',
+                          onclick: async (event) => {
+                            event.stopPropagation();
+                            const member = await api.member(row.member_id);
+                            openPaymentForm({ member, subscriptions: member.subscriptions, onSaved: render });
+                          },
                         },
-                      },
-                      'Collect',
-                    )
-                  : null,
+                        'Collect',
+                      )
+                    : null,
+                  session.managesBilling
+                    ? h(
+                        'button',
+                        {
+                          class: 'btn sm ghost',
+                          title: 'Send a renewal reminder on WhatsApp',
+                          onclick: async (event) => {
+                            event.stopPropagation();
+                            const button = event.currentTarget;
+                            button.disabled = true;
+                            try {
+                              await api.sendWhatsAppReminder({ subscription_id: row.id });
+                              toast('Renewal reminder sent on WhatsApp');
+                            } catch (err) {
+                              toast(err.message || 'Could not send the reminder', 'error');
+                            } finally {
+                              button.disabled = false;
+                            }
+                          },
+                        },
+                        '💬 Remind',
+                      )
+                    : null,
+                ),
             },
           ],
           items,
@@ -202,6 +229,29 @@ export async function renderBilling({ setActions, reload }) {
                     },
                     '🖨️ Print',
                   ),
+                  session.managesBilling
+                    ? h(
+                        'button',
+                        {
+                          class: 'btn sm ghost',
+                          title: 'Send this receipt on WhatsApp',
+                          onclick: async (event) => {
+                            event.stopPropagation();
+                            const button = event.currentTarget;
+                            button.disabled = true;
+                            try {
+                              await api.sendWhatsAppReceipt(row.id);
+                              toast('Receipt sent on WhatsApp');
+                            } catch (err) {
+                              toast(err.message || 'Could not send the receipt', 'error');
+                            } finally {
+                              button.disabled = false;
+                            }
+                          },
+                        },
+                        '💬 Receipt',
+                      )
+                    : null,
                   h(
                     'button',
                     {
