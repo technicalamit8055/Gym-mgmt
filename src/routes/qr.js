@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
-import { performCheckIn } from '../checkin.js';
+import { openVisitFor, performCheckIn } from '../checkin.js';
 import { config } from '../config.js';
 import { get } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import { ensureQrToken, findMemberByScan, issueQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
-import { parse, toInt } from '../validate.js';
+import { parse, today, toInt } from '../validate.js';
 
 /**
  * QR member cards: issuing/printing them, and using one at the front desk.
@@ -92,15 +92,14 @@ qrRoutes.post('/lookup', (req, res) => {
   if (!scanned) throw notFound('That card is not recognised — it may have been reissued');
 
   const member = publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [scanned.id]));
-  const openVisit = get(
-    "SELECT * FROM attendance WHERE member_id = ? AND check_out IS NULL AND date(check_in) = date('now')",
-    [member.id],
-  );
+  // Both borrowed from the check-in path rather than re-derived, so the panel
+  // can never disagree with what the check-in button is about to do.
+  const openVisit = openVisitFor(member.id);
   const subscription = get(
     `SELECT s.*, p.name AS plan_name FROM subscriptions s JOIN plans p ON p.id = s.plan_id
-     WHERE s.member_id = ? AND s.status = 'active' AND date('now') BETWEEN s.start_date AND s.end_date
+     WHERE s.member_id = ? AND s.status = 'active' AND ? BETWEEN s.start_date AND s.end_date
      ORDER BY s.end_date DESC LIMIT 1`,
-    [member.id],
+    [member.id, today()],
   );
 
   res.json({

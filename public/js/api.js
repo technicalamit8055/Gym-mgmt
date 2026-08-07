@@ -135,6 +135,13 @@ export const api = {
   me: () => request('GET', '/auth/me'),
   changePassword: (payload) => request('POST', '/auth/change-password', payload),
 
+  // Redeeming a reset link. `anonymous`: the whole point is that whoever is
+  // holding the link cannot sign in, and any stale token must not interfere.
+  checkPasswordReset: (token) =>
+    request('POST', '/auth/password-reset/check', { token }, { anonymous: true }),
+  resetPassword: (token, newPassword) =>
+    request('POST', '/auth/password-reset', { token, new_password: newPassword }, { anonymous: true }),
+
   // Platform: onboarding and the gym's own account. `anonymous` on the three
   // public ones so a stale token from a previous gym can't turn a signed-out
   // page into a 401 redirect loop.
@@ -152,6 +159,10 @@ export const api = {
     request('GET', `/platform/admin/tenants${query(params)}`, undefined, { token: platformSession.token }),
   platformSetStatus: (slug, payload) =>
     request('POST', `/platform/admin/tenants/${slug}/status`, payload, { token: platformSession.token }),
+  platformIssuePasswordReset: (slug, payload) =>
+    request('POST', `/platform/admin/tenants/${slug}/password-reset`, payload, {
+      token: platformSession.token,
+    }),
 
   dashboard: () => request('GET', '/dashboard'),
 

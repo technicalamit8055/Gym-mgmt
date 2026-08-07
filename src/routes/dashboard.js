@@ -1,44 +1,67 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
+import { gymDateOf, gymMonthDay } from '../clock.js';
 import { all, get } from '../db.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
+import { PHOTO_JOIN, PHOTO_PRESENT_COL, withPhotoUrl } from '../photo.js';
 import { config } from '../config.js';
+import { addDays, startOfMonth, today } from '../validate.js';
 
 export const dashboardRoutes = Router();
 dashboardRoutes.use(requireAuth);
 
+/**
+ * Every window on this page is bounded by a *gym-local* calendar date computed
+ * here in JS and passed as a parameter, rather than by SQLite's `date('now',
+ * …)` — which is UTC, and would put a 5am payment on yesterday's takings and
+ * split the morning batch across two days for any gym east of Greenwich.
+ * Stored instants (`check_in`) still need converting at the point of use, which
+ * is what gymDateOf() is for.
+ */
 dashboardRoutes.get('/', (req, res) => {
   expireOverdueSubscriptions();
   autoCloseFinishedVisits();
 
-  const members = get(`
+  const now = today();
+  const monthStart = startOfMonth(now);
+  const day = gymDateOf('check_in');
+
+  const members = get(
+    `
     SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
       SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END) AS frozen,
       SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive,
-      SUM(CASE WHEN joined_on >= date('now', 'start of month') THEN 1 ELSE 0 END) AS joined_this_month
+      SUM(CASE WHEN joined_on >= ? THEN 1 ELSE 0 END) AS joined_this_month
     FROM members
-  `);
+  `,
+    [monthStart],
+  );
 
-  const memberships = get(`
+  const memberships = get(
+    `
     SELECT
       SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
-      SUM(CASE WHEN status = 'active' AND end_date <= date('now', '+7 day') THEN 1 ELSE 0 END) AS expiring_soon,
+      SUM(CASE WHEN status = 'active' AND end_date <= ? THEN 1 ELSE 0 END) AS expiring_soon,
       SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired,
       SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END) AS frozen
     FROM subscriptions
-  `);
+  `,
+    [addDays(now, 7)],
+  );
 
-  const revenue = get(`
+  const revenue = get(
+    `
     SELECT
-      COALESCE(SUM(CASE WHEN paid_on = date('now') THEN amount END), 0) AS today,
-      COALESCE(SUM(CASE WHEN paid_on >= date('now', 'start of month') THEN amount END), 0) AS this_month,
-      COALESCE(SUM(CASE WHEN paid_on >= date('now', 'start of month', '-1 month')
-                         AND paid_on < date('now', 'start of month') THEN amount END), 0) AS last_month,
+      COALESCE(SUM(CASE WHEN paid_on = ? THEN amount END), 0) AS today,
+      COALESCE(SUM(CASE WHEN paid_on >= ? THEN amount END), 0) AS this_month,
+      COALESCE(SUM(CASE WHEN paid_on >= ? AND paid_on < ? THEN amount END), 0) AS last_month,
       COALESCE(SUM(amount), 0) AS all_time
     FROM payments
-  `);
+  `,
+    [now, monthStart, startOfMonth(now, 1), monthStart],
+  );
 
   const billed = get(
     "SELECT COALESCE(SUM(price - discount), 0) AS total FROM subscriptions WHERE status != 'cancelled'",
@@ -46,37 +69,49 @@ dashboardRoutes.get('/', (req, res) => {
   const collected = get('SELECT COALESCE(SUM(amount), 0) AS total FROM payments');
   revenue.outstanding = Math.max(billed.total - collected.total, 0);
 
-  const attendance = get(`
+  const attendance = get(
+    `
     SELECT
-      SUM(CASE WHEN date(check_in) = date('now') THEN 1 ELSE 0 END) AS today,
-      SUM(CASE WHEN date(check_in) >= date('now', '-6 day') THEN 1 ELSE 0 END) AS last_7_days,
-      SUM(CASE WHEN check_out IS NULL AND date(check_in) = date('now') THEN 1 ELSE 0 END) AS currently_in
+      SUM(CASE WHEN ${day} = ? THEN 1 ELSE 0 END) AS today,
+      SUM(CASE WHEN ${day} >= ? THEN 1 ELSE 0 END) AS last_7_days,
+      SUM(CASE WHEN check_out IS NULL AND ${day} = ? THEN 1 ELSE 0 END) AS currently_in
     FROM attendance
-  `);
+  `,
+    [now, addDays(now, -6), now],
+  );
 
-  const revenueTrend = all(`
+  const revenueTrend = all(
+    `
     SELECT strftime('%Y-%m', paid_on) AS month, SUM(amount) AS amount
     FROM payments
-    WHERE paid_on >= date('now', 'start of month', '-5 month')
+    WHERE paid_on >= ?
     GROUP BY month ORDER BY month
-  `);
+  `,
+    [startOfMonth(now, 5)],
+  );
 
-  const attendanceTrend = all(`
-    SELECT date(check_in) AS day, COUNT(*) AS visits
+  const attendanceTrend = all(
+    `
+    SELECT ${day} AS day, COUNT(*) AS visits
     FROM attendance
-    WHERE date(check_in) >= date('now', '-13 day')
+    WHERE ${day} >= ?
     GROUP BY day ORDER BY day
-  `);
+  `,
+    [addDays(now, -13)],
+  );
 
-  const expiringSoon = all(`
+  const expiringSoon = all(
+    `
     SELECT s.id, s.end_date, p.name AS plan_name,
            m.id AS member_id, m.code, m.first_name, m.last_name, m.phone
     FROM subscriptions s
     JOIN members m ON m.id = s.member_id
     JOIN plans p ON p.id = s.plan_id
-    WHERE s.status = 'active' AND s.end_date <= date('now', '+10 day')
+    WHERE s.status = 'active' AND s.end_date <= ?
     ORDER BY s.end_date LIMIT 10
-  `);
+  `,
+    [addDays(now, 10)],
+  );
 
   const recentPayments = all(`
     SELECT pay.id, pay.amount, pay.method, pay.paid_on, m.first_name, m.last_name, m.code
@@ -84,21 +119,41 @@ dashboardRoutes.get('/', (req, res) => {
     ORDER BY pay.paid_on DESC, pay.id DESC LIMIT 8
   `);
 
-  const checkedInNow = all(`
-    SELECT a.id, a.check_in, m.id AS member_id, m.code, m.first_name, m.last_name, m.photo_url
-    FROM attendance a JOIN members m ON m.id = a.member_id
-    WHERE a.check_out IS NULL AND date(a.check_in) = date('now')
+  const checkedInNow = all(
+    `
+    SELECT a.id, a.check_in, m.id AS member_id, m.code, m.first_name, m.last_name,
+           m.photo_version, ${PHOTO_PRESENT_COL}
+    FROM attendance a
+    JOIN members m ON m.id = a.member_id
+    ${PHOTO_JOIN}
+    WHERE a.check_out IS NULL AND ${gymDateOf('a.check_in')} = ?
     ORDER BY a.check_in DESC LIMIT 12
-  `);
+  `,
+    [now],
+  ).map((row) => withPhotoUrl(row, 'member_id'));
 
-  const birthdays = all(`
+  // A 14-day birthday window is compared month-day against month-day so it
+  // ignores the birth year, which means late December wraps past '12-31' into
+  // January: "between 12-25 and 01-08" is empty under a plain BETWEEN, and
+  // ordering by month-day would put January's birthdays first. Both cases are
+  // handled by rotating the comparison around the start of the window.
+  const from = gymMonthDay();
+  const to = addDays(now, 14).slice(5);
+  const wraps = from > to;
+  const birthdays = all(
+    `
     SELECT id, code, first_name, last_name, date_of_birth
     FROM members
     WHERE date_of_birth IS NOT NULL
-      AND strftime('%m-%d', date_of_birth) BETWEEN strftime('%m-%d', 'now')
-      AND strftime('%m-%d', 'now', '+14 day')
-    ORDER BY strftime('%m-%d', date_of_birth) LIMIT 10
-  `);
+      AND ${wraps
+        ? "(strftime('%m-%d', date_of_birth) >= ? OR strftime('%m-%d', date_of_birth) <= ?)"
+        : "strftime('%m-%d', date_of_birth) BETWEEN ? AND ?"}
+    ORDER BY CASE WHEN strftime('%m-%d', date_of_birth) >= ? THEN 0 ELSE 1 END,
+             strftime('%m-%d', date_of_birth)
+    LIMIT 10
+  `,
+    [from, to, from],
+  );
 
   const planMix = all(`
     SELECT p.name, COUNT(s.id) AS members
@@ -106,11 +161,14 @@ dashboardRoutes.get('/', (req, res) => {
     GROUP BY p.id HAVING members > 0 ORDER BY members DESC
   `);
 
-  const equipmentAlerts = all(`
+  const equipmentAlerts = all(
+    `
     SELECT id, name, status, next_service_on FROM equipment
-    WHERE status = 'maintenance' OR (next_service_on IS NOT NULL AND next_service_on <= date('now', '+14 day'))
+    WHERE status = 'maintenance' OR (next_service_on IS NOT NULL AND next_service_on <= ?)
     ORDER BY next_service_on LIMIT 8
-  `);
+  `,
+    [addDays(now, 14)],
+  );
 
   res.json({
     gym: { name: req.tenant?.gym_name ?? config.gymName, currency: req.tenant?.currency ?? config.currency },

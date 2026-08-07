@@ -15,6 +15,7 @@ import {
   RESERVED_SLUGS,
 } from '../tenants.js';
 import { addDays, parse, today } from '../validate.js';
+import { parsePhotoDataUrl } from '../photo.js';
 import { billingRoutes } from './billing.js';
 import { platformAdminRoutes, isPlatformAdminConfigured } from './platformAdmin.js';
 
@@ -30,10 +31,17 @@ const signupLimiter = createLimiter({
   lockoutMs: config.signupLockoutMs,
 });
 
+export function tenantLogoUrl(slug, version = 1) {
+  const store = tenantStorage.getStore();
+  const prefix = store?.pathPrefix ?? '';
+  return `${prefix}/api/platform/tenant-logo/${slug}?v=${version}`;
+}
+
 /** The gym-owned fields of a registry row. Deliberately omits db_file and
  * every razorpay_* column — the front end never needs them and this response
  * is public. */
 function publicTenant(tenant) {
+  const hasLogo = Boolean(tenant.logo_bytes && tenant.logo_mime);
   return {
     slug: tenant.slug,
     gym_name: tenant.gym_name ?? tenant.display_name,
@@ -41,6 +49,7 @@ function publicTenant(tenant) {
     timezone: tenant.timezone ?? null,
     status: tenant.status,
     trial_ends_on: tenant.trial_ends_on ?? null,
+    logo_url: hasLogo ? tenantLogoUrl(tenant.slug, tenant.logo_version || 1) : null,
   };
 }
 
@@ -149,6 +158,21 @@ platformRoutes.post('/signup', (req, res) => {
   });
 });
 
+/** Serve gym logo publicly so browser and login page can display it. */
+platformRoutes.get('/tenant-logo/:slug', (req, res) => {
+  const slug = req.params.slug;
+  if (!slug || !isValidSlug(slug)) {
+    throw notFound('Gym not found');
+  }
+  const tenant = findTenantBySlug(slug);
+  if (!tenant || !tenant.logo_bytes || !tenant.logo_mime) {
+    throw notFound('No logo found for this gym');
+  }
+  res.setHeader('Content-Type', tenant.logo_mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.send(Buffer.from(tenant.logo_bytes));
+});
+
 /** The gym's own settings. Admin-only, and only ever touches the row for the
  * tenant this request already resolved to — a slug is never taken from the body. */
 platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) => {
@@ -161,6 +185,7 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     gym_name: { type: 'string', min: 2, max: 120 },
     currency: { type: 'string', min: 1, max: 8 },
     timezone: { type: 'string', max: 64 },
+    clear_logo: { type: 'boolean' },
   });
 
   if (body.timezone) {
@@ -171,10 +196,25 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     }
   }
 
+  let logoMime;
+  let logoBytes;
+  let clearLogo = Boolean(body.clear_logo);
+
+  if (!clearLogo && typeof req.body.logo_data === 'string' && req.body.logo_data.startsWith('data:image/')) {
+    const parsed = parsePhotoDataUrl(req.body.logo_data);
+    logoMime = parsed.mime;
+    logoBytes = parsed.bytes;
+  } else if (req.body.logo_data === null || req.body.logo_data === '') {
+    clearLogo = true;
+  }
+
   const updated = updateTenantProfile(slug, {
     gymName: body.gym_name,
     currency: body.currency ? body.currency.toUpperCase() : undefined,
     timezone: body.timezone,
+    logoMime,
+    logoBytes,
+    clearLogo,
   });
   res.json({ tenant: publicTenant(updated) });
 });

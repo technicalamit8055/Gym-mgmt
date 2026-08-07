@@ -4,7 +4,9 @@ import { issuePlatformToken, readToken } from '../auth.js';
 import { config } from '../config.js';
 import { get, tenantStorage } from '../db.js';
 import { badRequest, forbidden, notFound, tooManyRequests, unauthorized } from '../errors.js';
+import { issuePasswordReset } from '../passwordReset.js';
 import { createLimiter } from '../rateLimit.js';
+import { tenantUrl } from '../tenant.js';
 import {
   expireOverdueTrials,
   findTenantBySlug,
@@ -135,6 +137,46 @@ platformAdminRoutes.get('/tenants/:slug', (req, res) => {
   const tenant = findTenantBySlug(req.params.slug);
   if (!tenant) throw notFound('No gym with that address');
   res.json({ tenant, stats: tenantStats(tenant.slug) });
+});
+
+/**
+ * Issues a password reset link for a gym whose owner is locked out.
+ *
+ * The operator is the out-of-band authority here — they already control every
+ * gym's status and billing from this console, so being able to hand back a
+ * one-hour single-use link grants nothing they could not already do. The link
+ * is returned to the operator to pass on, never emailed, because this app has
+ * no mail transport.
+ *
+ * Available whatever the tenant's status: a suspended gym is exactly the case
+ * where someone needs to get back in to pay.
+ */
+platformAdminRoutes.post('/tenants/:slug/password-reset', (req, res) => {
+  const tenant = findTenantBySlug(req.params.slug);
+  if (!tenant) throw notFound('No gym with that address');
+
+  const body = parse(req.body, { email: { type: 'email' } });
+
+  const issued = tenantStorage.run(
+    { slug: tenant.slug, dbFile: tenantDbPath(tenant.slug), timezone: tenant.timezone || undefined },
+    () => issuePasswordReset(body.email),
+  );
+
+  console.warn(
+    `[platform] password reset issued for ${issued.email} at gym "${tenant.slug}" by ${req.platformAdmin.email}`,
+  );
+
+  res.json({
+    slug: tenant.slug,
+    email: issued.email,
+    name: issued.name,
+    expires_at: issued.expires_at,
+    expires_in_minutes: issued.expires_in_minutes,
+    // Both forms, because which one reaches this gym depends on whether the
+    // deployment has wildcard DNS — see tenantUrl() in tenant.js.
+    reset_path: `/g/${tenant.slug}/#/reset?token=${issued.token}`,
+    url: `${tenantUrl(req, tenant.slug)}/#/reset?token=${issued.token}`,
+  });
 });
 
 const STATUSES = ['trial', 'active', 'suspended', 'cancelled'];

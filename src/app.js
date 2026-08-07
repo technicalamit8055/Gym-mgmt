@@ -8,6 +8,7 @@ import { bookingRoutes, classRoutes } from './routes/classes.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { equipmentRoutes } from './routes/equipment.js';
 import { memberRoutes } from './routes/members.js';
+import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
@@ -67,6 +68,11 @@ export function createApp() {
   // suspended (lapsed trial/payment) — the gate below only applies past here.
   app.use('/api/platform', platformRoutes);
   app.use('/api/auth', authRoutes);
+
+  // Ahead of the subscription gate, and with no requireAuth of its own: these
+  // URLs are individually signed (src/photo.js), and a lapsed gym serving
+  // broken avatars on the page that takes their payment helps nobody.
+  app.use('/api/member-photos', memberPhotoRoutes);
 
   // Scoped to /api, not the whole app: the gate must not reach express.static
   // and the SPA fallback below, or a gym whose trial lapsed would get a JSON

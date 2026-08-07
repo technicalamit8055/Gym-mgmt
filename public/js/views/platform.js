@@ -1,5 +1,5 @@
 import { api, gymPathUrl, platformSession } from '../api.js';
-import { buildForm, closeModal, date, h, openModal, relativeDays, stat, table, toast } from '../ui.js';
+import { buildForm, clear, closeModal, date, h, openModal, relativeDays, stat, table, toast } from '../ui.js';
 
 /**
  * Operator console — the view for whoever runs the platform, listing every
@@ -83,6 +83,88 @@ function openStatusModal(tenant, onSaved) {
         },
       },
     ),
+  });
+}
+
+/**
+ * Issues a reset link for a gym whose owner is locked out, and shows it for the
+ * operator to copy.
+ *
+ * The link is displayed rather than sent: this app has no mail transport, and
+ * the operator is already talking to the owner over whatever channel brought
+ * them the support request.
+ */
+function openPasswordResetModal(tenant) {
+  const email = h('input', {
+    class: 'input',
+    type: 'email',
+    placeholder: "leave blank for the gym's owner",
+    autocomplete: 'off',
+  });
+  const result = h('div', { style: 'display:none;margin-top:12px' });
+  const issue = h('button', { class: 'btn primary' }, 'Issue reset link');
+
+  issue.onclick = async () => {
+    issue.disabled = true;
+    try {
+      const payload = email.value.trim() ? { email: email.value.trim() } : {};
+      const reset = await api.platformIssuePasswordReset(tenant.slug, payload);
+
+      const link = h('input', { class: 'input', value: reset.url, readonly: true });
+      link.onclick = () => link.select();
+
+      result.style.display = '';
+      clear(result).append(
+        h('p', { class: 'sub' }, `One-time link for ${reset.email} — valid ${reset.expires_in_minutes} minutes.`),
+        link,
+        h(
+          'div',
+          { class: 'row', style: 'gap:6px;margin-top:8px' },
+          h(
+            'button',
+            {
+              class: 'btn sm',
+              onclick: async () => {
+                try {
+                  await navigator.clipboard.writeText(reset.url);
+                  toast('Link copied');
+                } catch {
+                  link.select();
+                  toast('Select and copy the link above', 'info');
+                }
+              },
+            },
+            'Copy link',
+          ),
+        ),
+        h(
+          'p',
+          { class: 'muted', style: 'font-size:12px;margin-top:8px' },
+          'Send it over a channel you already trust. It works once, then stops.',
+        ),
+      );
+      toast('Reset link issued');
+    } catch (err) {
+      toast(err.message || 'Could not issue a reset link', 'error');
+    } finally {
+      issue.disabled = false;
+    }
+  };
+
+  openModal({
+    title: `${tenant.gym_name} — password reset`,
+    body: h(
+      'div',
+      {},
+      h(
+        'p',
+        { class: 'sub' },
+        'For an owner who has lost their password. Nothing is emailed — you get a link to pass on.',
+      ),
+      h('label', { class: 'field full' }, h('span', {}, 'Staff email (optional)'), email),
+      result,
+    ),
+    footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Close'), issue],
   });
 }
 
@@ -172,9 +254,22 @@ export async function renderPlatformConsole({ context, rerender }) {
       align: 'right',
       render: (row) =>
         h(
-          'button',
-          { class: 'btn sm ghost', onclick: () => openStatusModal(row, rerender) },
-          'Status',
+          'div',
+          { class: 'row', style: 'gap:6px;justify-content:flex-end' },
+          h(
+            'button',
+            { class: 'btn sm ghost', onclick: () => openStatusModal(row, rerender) },
+            'Status',
+          ),
+          h(
+            'button',
+            {
+              class: 'btn sm ghost',
+              title: 'Issue a one-time password reset link for this gym',
+              onclick: () => openPasswordResetModal(row),
+            },
+            'Reset password',
+          ),
         ),
     },
   ];

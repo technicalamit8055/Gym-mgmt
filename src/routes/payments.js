@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { MANAGES_BILLING, requireAuth, requireRole } from '../auth.js';
 import { all, get, run } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
-import { parse, toInt } from '../validate.js';
+import { parse, today, toInt } from '../validate.js';
 
 export const paymentRoutes = Router();
 paymentRoutes.use(requireAuth);
@@ -55,7 +55,10 @@ paymentRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
     subscription_id: { type: 'int' },
     amount: { type: 'number', required: true, min: 0.01 },
     method: { type: 'enum', values: ['cash', 'card', 'upi', 'bank', 'online'], default: 'cash' },
-    paid_on: { type: 'date' },
+    // Defaulted here rather than left to the column's own DEFAULT (date('now')),
+    // which is UTC — a 5am cash payment at an IST gym would land on yesterday's
+    // takings and never appear in "collected today".
+    paid_on: { type: 'date', default: today() },
     reference: { type: 'string', max: 80 },
     note: { type: 'string', max: 300 },
   });

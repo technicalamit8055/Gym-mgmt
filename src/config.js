@@ -65,6 +65,28 @@ export const config = {
   // at all — an unset password must never mean "no password required".
   platformAdminEmail: (process.env.PLATFORM_ADMIN_EMAIL || '').toLowerCase(),
   platformAdminPassword: process.env.PLATFORM_ADMIN_PASSWORD || '',
+  backup: {
+    dir: process.env.BACKUP_DIR || path.join(ROOT, 'backups'),
+    // On by default in production, where losing a gym's data is unrecoverable,
+    // and off in development, where an automatic timer would just litter the
+    // working copy. 0 disables it in favour of an external scheduler.
+    intervalHours: Number(
+      process.env.BACKUP_INTERVAL_HOURS ?? (process.env.NODE_ENV === 'production' ? 24 : 0),
+    ),
+    // How many local backup folders to keep. Old ones are pruned so a daily
+    // backup cannot fill the volume and stop the live database writing.
+    keep: Number(process.env.BACKUP_KEEP || 14),
+    // Any S3-compatible store (Cloudflare R2, Backblaze B2, MinIO, S3). Uploads
+    // stay disabled until all four required values are present — see s3.js.
+    s3: {
+      bucket: process.env.BACKUP_S3_BUCKET || '',
+      endpoint: process.env.BACKUP_S3_ENDPOINT || '',
+      region: process.env.BACKUP_S3_REGION || 'auto',
+      accessKeyId: process.env.BACKUP_S3_ACCESS_KEY_ID || '',
+      secretAccessKey: process.env.BACKUP_S3_SECRET_ACCESS_KEY || '',
+      prefix: process.env.BACKUP_S3_PREFIX || '',
+    },
+  },
 };
 
 /** Pseudo-slug used whenever a request resolves to no real tenant (dev/single-gym mode). */

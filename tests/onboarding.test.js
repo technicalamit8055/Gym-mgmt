@@ -473,4 +473,43 @@ describe('operator console', () => {
     });
     assert.equal(signIn.status, 403, 'unlike suspended, cancelled closes the door completely');
   });
+
+  describe('gym logo management', () => {
+    const tinyPng =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    it('uploads a custom logo and returns logo_url in tenant profile', async () => {
+      const token = await login('iron-house', 'amit@ironhouse.test', 'strongpass123');
+      const res = await call(
+        'PATCH',
+        '/g/iron-house/api/platform/tenant',
+        { logo_data: tinyPng },
+        { token },
+      );
+      assert.equal(res.status, 200);
+      assert.ok(res.body.tenant.logo_url);
+      assert.match(res.body.tenant.logo_url, /\/api\/platform\/tenant-logo\/iron-house\?v=1/);
+    });
+
+    it('serves the uploaded gym logo with correct headers', async () => {
+      const res = await call('GET', '/g/iron-house/api/platform/tenant-logo/iron-house');
+      assert.equal(res.status, 200);
+      assert.equal(res.contentType, 'image/png');
+    });
+
+    it('clears an existing logo when clear_logo is true', async () => {
+      const token = await login('iron-house', 'amit@ironhouse.test', 'strongpass123');
+      const res = await call(
+        'PATCH',
+        '/g/iron-house/api/platform/tenant',
+        { clear_logo: true },
+        { token },
+      );
+      assert.equal(res.status, 200);
+      assert.equal(res.body.tenant.logo_url, null);
+
+      const logoFetch = await call('GET', '/g/iron-house/api/platform/tenant-logo/iron-house');
+      assert.equal(logoFetch.status, 404);
+    });
+  });
 });

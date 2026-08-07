@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
-import { ATTENDANCE_SELECT, performCheckIn } from '../checkin.js';
+import { ATTENDANCE_SELECT, performCheckIn, publicVisit } from '../checkin.js';
+import { gymDateOf } from '../clock.js';
 import { all, get, run } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { autoCloseFinishedVisits } from '../maintenance.js';
@@ -14,20 +15,25 @@ attendanceRoutes.get('/', (req, res) => {
 
   const where = [];
   const params = [];
+  // The caller asks in the gym's calendar dates ("show me the 6th"), while
+  // check_in is a stored UTC instant — so the column, not the bound, is what
+  // gets converted.
+  const day = gymDateOf('a.check_in');
+
   if (req.query.member_id) {
     where.push('a.member_id = ?');
     params.push(Number(req.query.member_id));
   }
   if (req.query.date) {
-    where.push('date(a.check_in) = ?');
+    where.push(`${day} = ?`);
     params.push(String(req.query.date));
   }
   if (req.query.from) {
-    where.push('date(a.check_in) >= ?');
+    where.push(`${day} >= ?`);
     params.push(String(req.query.from));
   }
   if (req.query.to) {
-    where.push('date(a.check_in) <= ?');
+    where.push(`${day} <= ?`);
     params.push(String(req.query.to));
   }
   if (req.query.open === 'true') where.push('a.check_out IS NULL');
@@ -35,7 +41,7 @@ attendanceRoutes.get('/', (req, res) => {
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const limit = Math.min(toInt(req.query.limit, 100), 500);
   res.json({
-    items: all(`${ATTENDANCE_SELECT} ${clause} ORDER BY a.check_in DESC LIMIT ?`, [...params, limit]),
+    items: all(`${ATTENDANCE_SELECT} ${clause} ORDER BY a.check_in DESC LIMIT ?`, [...params, limit]).map(publicVisit),
   });
 });
 
@@ -76,5 +82,5 @@ attendanceRoutes.post('/check-out', (req, res) => {
   if (visit.check_out) throw badRequest('That visit is already checked out');
 
   run("UPDATE attendance SET check_out = datetime('now') WHERE id = ?", [visit.id]);
-  res.json(get(`${ATTENDANCE_SELECT} WHERE a.id = ?`, [visit.id]));
+  res.json(publicVisit(get(`${ATTENDANCE_SELECT} WHERE a.id = ?`, [visit.id])));
 });

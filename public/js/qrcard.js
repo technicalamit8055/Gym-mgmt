@@ -84,9 +84,10 @@ const loadImage = (src) =>
 /**
  * Draws the card to a canvas and downloads it as a PNG.
  *
- * Deliberately omits the member photo: photo_url can point at another origin,
- * which taints the canvas and makes toDataURL throw — losing the whole
- * download. The printed card keeps the photo; the shareable image doesn't.
+ * The photo is included: photo_url is always served by this app on this origin
+ * (see src/photo.js), so drawing it leaves the canvas untainted and toDataURL
+ * still works. A photo that fails to load is skipped rather than losing the
+ * whole download.
  */
 export async function downloadCardPng(card) {
   const scale = 300; // dpi

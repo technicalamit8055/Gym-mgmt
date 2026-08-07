@@ -1,4 +1,5 @@
 import { createApp } from './app.js';
+import { startBackupSchedule } from './backup.js';
 import { ensureAdminAccount } from './bootstrap.js';
 import { assertProductionReady, config } from './config.js';
 import { closeDb } from './db.js';
@@ -28,8 +29,11 @@ const server = app.listen(config.port, host, () => {
   console.log(`${config.gymName} is running at http://localhost:${config.port}`);
 });
 
+const stopBackups = startBackupSchedule();
+
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    stopBackups?.();
     server.close(() => {
       closeDb();
       closeRegistryDb();

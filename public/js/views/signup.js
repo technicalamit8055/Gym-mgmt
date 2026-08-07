@@ -113,7 +113,7 @@ function renderDone({ result }) {
       h(
         'p',
         { class: 'muted', style: 'font-size:12px;text-align:center;margin:14px 0 0' },
-        'Save your password somewhere safe. There is no email reset yet.',
+        'Save your password somewhere safe. Nothing is emailed — if you lose it, recovery goes through whoever runs this platform.',
       ),
     ),
   );

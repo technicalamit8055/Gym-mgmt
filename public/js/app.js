@@ -4,6 +4,7 @@ import { renderLanding } from './views/landing.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
 import { renderPlatformConsole } from './views/platform.js';
+import { renderReset } from './views/reset.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderMembers, renderMemberDetail } from './views/members.js';
 import { renderCheckIn } from './views/checkin.js';
@@ -61,6 +62,9 @@ const PUBLIC_ROUTES = [
   { pattern: /^\/?$/, title: 'GymBook', view: renderLanding },
   { pattern: /^\/signup$/, title: 'Set up your gym', view: renderSignup },
   { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole },
+  // Public by necessity — someone redeeming a reset link cannot sign in. The
+  // pattern allows the trailing `?token=…` the link carries in the hash.
+  { pattern: /^\/reset(\?|$)/, title: 'Set a new password', view: renderReset },
 ];
 
 const root = () => document.getElementById('app');
@@ -145,6 +149,9 @@ function renderLogin(message) {
   form.append(h('button', { class: 'btn primary block', type: 'submit' }, 'Sign in'));
 
   const tenant = platform.tenant;
+  const logoNode = tenant?.logo_url
+    ? h('img', { class: 'login-logo-img', src: tenant.logo_url, alt: gymName() })
+    : '🏋️';
 
   clear(root()).append(
     h(
@@ -153,7 +160,7 @@ function renderLogin(message) {
       h(
         'div',
         { class: 'login-card' },
-        h('h1', {}, `🏋️ ${gymName()}`),
+        h('h1', {}, logoNode, gymName()),
         h(
           'p',
           { class: 'sub' },
@@ -179,12 +186,18 @@ function renderLogin(message) {
   root().className = '';
 }
 
-/* ------------------------------------------------------------------- shell */
+function renderBrandLogoNode() {
+  const logoUrl = platform.tenant?.logo_url;
+  if (logoUrl) {
+    return h('div', { class: 'logo' }, h('img', { class: 'logo-img', src: logoUrl, alt: gymName() }));
+  }
+  return h('div', { class: 'logo' }, '🏋️');
+}
 
 function renderShell() {
   const user = session.user;
   const nav = h('nav', { class: 'sidebar', 'aria-label': 'Main navigation' });
-  nav.append(h('div', { class: 'brand', title: gymName() }, h('div', { class: 'logo' }, '🏋️'), gymName()));
+  nav.append(h('div', { class: 'brand', title: gymName() }, renderBrandLogoNode(), gymName()));
 
   for (const item of NAV) {
     if (item.section) {
@@ -484,13 +497,16 @@ window.addEventListener('gymbook:signed-out', () => {
   signOut('Your session expired — please sign in again');
 });
 
-// Raised by the settings page after a rename. Repainting the two places the
-// gym name already lives beats rebuilding the shell and losing scroll position.
+// Raised by the settings page after a rename or logo change. Repainting the brand
+// element beats rebuilding the shell and losing scroll position.
 window.addEventListener('gymbook:gym-updated', (event) => {
   platform = { ...platform, tenant: event.detail };
   document.title = `${gymName()} — Gym Management`;
   const brand = shell?.nav.querySelector('.brand');
-  if (brand) clear(brand).append(h('div', { class: 'logo' }, '🏋️'), gymName());
+  if (brand) {
+    brand.setAttribute('title', gymName());
+    clear(brand).append(renderBrandLogoNode(), gymName());
+  }
 });
 
 document.addEventListener('keydown', (event) => {

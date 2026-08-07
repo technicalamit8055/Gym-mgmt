@@ -93,13 +93,27 @@ export function parse(payload, schema) {
   return out;
 }
 
-export function today() {
-  return new Date().toISOString().slice(0, 10);
-}
+/**
+ * Today's date *where the gym is* — not in UTC.
+ *
+ * Every caller of this wants a calendar date to compare against a stored
+ * `start_date`/`paid_on`/`class_date`, all of which are gym-local dates, so
+ * this has to be gym-local too. Re-exported through clock.js's gymToday() so
+ * there is only one definition of "today" in the codebase.
+ */
+export { gymToday as today } from './clock.js';
 
+/** Pure string arithmetic on a `YYYY-MM-DD`, so no timezone can leak in. */
 export function addDays(isoDate, days) {
   const d = new Date(`${isoDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The first of `isoDate`'s month, optionally `monthsBack` months earlier. */
+export function startOfMonth(isoDate, monthsBack = 0) {
+  const [year, month] = isoDate.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1 - monthsBack, 1));
   return d.toISOString().slice(0, 10);
 }
 

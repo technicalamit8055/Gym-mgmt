@@ -54,6 +54,9 @@ const MIGRATIONS = [
   // under DST and a gym's opening hours don't. NULL means "use the server's
   // own timezone", which is what every gym created before this column did.
   (db) => ensureColumn(db, 'tenants', 'timezone', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'logo_mime', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'logo_bytes', 'BLOB'),
+  (db) => ensureColumn(db, 'tenants', 'logo_version', 'INTEGER DEFAULT 0'),
 ];
 
 let registryDb;
@@ -113,17 +116,42 @@ export function createTenant({ slug, displayName, gymName, currency = 'INR', tim
  *
  * COALESCE on every column so a partial update leaves the rest alone.
  */
-export function updateTenantProfile(slug, { gymName, currency, timezone } = {}) {
-  getRegistryDb()
-    .prepare(
+export function updateTenantProfile(slug, { gymName, currency, timezone, logoMime, logoBytes, clearLogo } = {}) {
+  const db = getRegistryDb();
+  if (clearLogo) {
+    db.prepare(
+      `UPDATE tenants
+          SET gym_name     = COALESCE(?, gym_name),
+              display_name = COALESCE(?, display_name),
+              currency     = COALESCE(?, currency),
+              timezone     = COALESCE(?, timezone),
+              logo_mime    = NULL,
+              logo_bytes   = NULL,
+              logo_version = COALESCE(logo_version, 0) + 1
+        WHERE slug = ?`,
+    ).run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, slug);
+  } else if (logoMime && logoBytes) {
+    db.prepare(
+      `UPDATE tenants
+          SET gym_name     = COALESCE(?, gym_name),
+              display_name = COALESCE(?, display_name),
+              currency     = COALESCE(?, currency),
+              timezone     = COALESCE(?, timezone),
+              logo_mime    = ?,
+              logo_bytes   = ?,
+              logo_version = COALESCE(logo_version, 0) + 1
+        WHERE slug = ?`,
+    ).run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, logoMime, logoBytes, slug);
+  } else {
+    db.prepare(
       `UPDATE tenants
           SET gym_name     = COALESCE(?, gym_name),
               display_name = COALESCE(?, display_name),
               currency     = COALESCE(?, currency),
               timezone     = COALESCE(?, timezone)
         WHERE slug = ?`,
-    )
-    .run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, slug);
+    ).run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, slug);
+  }
   return findTenantBySlug(slug);
 }
 
@@ -168,9 +196,18 @@ export function setTenantBilling(slug, { customerId, subscriptionId, checkoutUrl
   return findTenantBySlug(slug);
 }
 
-/** Lazily flips lapsed trials to 'suspended', mirroring maintenance.js's
+/**
+ * Lazily flips lapsed trials to 'suspended', mirroring maintenance.js's
  * lazy-expiry pattern — no scheduler, just a cheap UPDATE before any read
- * that cares about tenant status. */
+ * that cares about tenant status.
+ *
+ * The one place `date('now')` is deliberately left as UTC. This runs from
+ * resolveTenant *before* a tenant is resolved, so there is no gym timezone to
+ * use, and a trial ending is a platform-side fact rather than a gym-clock one.
+ * The trial end is also written in the same UTC terms at signup, so the two
+ * agree; the worst case is a trial ending a few hours off a gym's local
+ * midnight, which nobody can perceive on a seven-day trial.
+ */
 export function expireOverdueTrials() {
   return getRegistryDb()
     .prepare(

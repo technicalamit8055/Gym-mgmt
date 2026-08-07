@@ -1,39 +1,33 @@
 /**
- * Snapshots the platform registry plus every tenant's database into backups/,
- * using SQLite's VACUUM INTO — safe to run against a live WAL-mode database,
- * no server downtime, no torn copies. Meant to be triggered by an external
- * scheduler (cron / Windows Task Scheduler); the app never runs this itself.
+ * Takes a backup now, from the command line.
  *
- * Restore: stop the server, copy the wanted backup file back over the
- * original path (e.g. data/tenants/acme.db), start the server again.
+ * The server also runs this on a timer (see startBackupSchedule in
+ * src/backup.js). This entry point stays for taking one on demand — before a
+ * migration, before a deploy — and for driving backups from an external
+ * scheduler instead, with BACKUP_INTERVAL_HOURS=0.
+ *
+ *   node scripts/backup.js
+ *
+ * Snapshots the platform registry and every tenant with VACUUM INTO (safe
+ * against a live server), reopens each snapshot to verify it, uploads them if
+ * BACKUP_S3_* is configured, and prunes old local folders.
+ *
+ * Restore: stop the server, copy the wanted file back over the original path
+ * (e.g. data/tenants/acme.db), delete any stale -wal/-shm alongside it, start
+ * the server again.
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { config, ROOT } from '../src/config.js';
-import { closeRegistryDb, listTenants, tenantDbPath } from '../src/tenants.js';
+import { closeBackupHandles, runBackup } from '../src/backup.js';
 
-const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const backupDir = path.join(process.env.BACKUP_DIR || path.join(ROOT, 'backups'), stamp);
-fs.mkdirSync(backupDir, { recursive: true });
+const summary = await runBackup();
+closeBackupHandles();
 
-function snapshot(label, sourceFile) {
-  if (!fs.existsSync(sourceFile)) {
-    console.log(`skip ${label}: no file at ${sourceFile}`);
-    return;
-  }
-  const dest = path.join(backupDir, `${label}.db`);
-  const db = new DatabaseSync(sourceFile);
-  db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
-  db.close();
-  console.log(`backed up ${label} -> ${dest}`);
+if (!summary.offsite) {
+  console.log(
+    '\nThese snapshots are on the same machine as the live databases. Set BACKUP_S3_BUCKET,\n' +
+      'BACKUP_S3_ENDPOINT, BACKUP_S3_ACCESS_KEY_ID and BACKUP_S3_SECRET_ACCESS_KEY to copy them\n' +
+      'off-site — see the README.',
+  );
 }
 
-snapshot('platform', config.platformDbFile);
-snapshot('default', config.dbFile);
-for (const tenant of listTenants()) {
-  snapshot(tenant.slug, tenantDbPath(tenant.slug));
-}
-closeRegistryDb();
-
-console.log(`\nDone: ${backupDir}`);
+// Non-zero on failure so a cron job or CI step actually notices.
+process.exit(summary.errors.length ? 1 : 0);

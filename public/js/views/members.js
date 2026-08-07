@@ -371,8 +371,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                 onclick: async () => {
                   saveBtn.disabled = true;
                   try {
-                    const photo_url = photoPicker.getValue() || '';
-                    await api.updateMember(member.id, { photo_url });
+                    if (photoPicker.changed()) {
+                      await api.updateMember(member.id, { photo: photoPicker.getValue() || '' });
+                    }
                     closeModal();
                     toast('Member photo updated');
                     await reload();

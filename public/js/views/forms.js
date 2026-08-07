@@ -90,7 +90,10 @@ export async function openMemberForm({ member, onSaved }) {
     {
       submitLabel: editing ? 'Save changes' : 'Add member',
       onSubmit: async (values) => {
-        values.photo_url = photoPicker.getValue();
+        // `photo` on the way in (the captured data URL), `photo_url` on the way
+        // back out (a URL the server serves the bytes from) — see src/photo.js.
+        // Only sent when actually touched, so saving other fields leaves it be.
+        if (photoPicker.changed()) values.photo = photoPicker.getValue() || '';
         const saved = editing ? await api.updateMember(member.id, values) : await api.createMember(values);
         closeModal();
         toast(editing ? 'Member updated' : `${saved.first_name} added as ${saved.code}`);
@@ -167,6 +170,7 @@ export async function openMembershipForm({ member, onSaved }) {
       value: 'cash',
       options: ['cash', 'card', 'upi', 'bank', 'online'].map((v) => ({ value: v, label: v.toUpperCase() })),
     },
+    { name: 'reference', label: 'Reference / receipt no.' },
     { name: 'note', label: 'Note', full: true },
   ];
 
@@ -186,6 +190,7 @@ export async function openMembershipForm({ member, onSaved }) {
         discount: values.discount || 0,
         payment_amount: values.payment_amount || undefined,
         payment_method: values.payment_method,
+        reference: values.reference || undefined,
         note: values.note || undefined,
       });
       closeModal();
@@ -212,6 +217,7 @@ export async function openMembershipForm({ member, onSaved }) {
                 end_date: sub.end_date,
                 price: sub.price,
                 discount: sub.discount,
+                reference: values.reference || undefined,
                 note: values.note || undefined,
               },
               { gymName: getGymName() },

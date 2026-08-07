@@ -1,5 +1,6 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
 import { buildForm, date, h, relativeDays, setCurrency, toast } from '../ui.js';
+import { cropAndResizeImage } from '../photo.js';
 
 /**
  * The gym's own account page: identity, regional settings and subscription.
@@ -133,6 +134,92 @@ export async function renderSettings({ reload }) {
 
   const url = pathSlug ? gymPathUrl(tenant.slug) : window.location.origin;
 
+  let pendingLogoData = undefined;
+  let currentLogoUrl = tenant.logo_url;
+
+  const logoPreviewImg = h('img', {
+    src: currentLogoUrl || '',
+    alt: 'Gym logo',
+    style: currentLogoUrl ? '' : 'display:none',
+  });
+  const logoPlaceholder = h('span', {
+    style: currentLogoUrl ? 'display:none' : '',
+  }, '🏋️');
+
+  const logoPreviewContainer = h(
+    'div',
+    { class: 'settings-logo-preview' },
+    logoPreviewImg,
+    logoPlaceholder,
+  );
+
+  const fileInput = h('input', {
+    type: 'file',
+    accept: 'image/jpeg,image/png,image/webp',
+    style: 'display:none',
+  });
+
+  const removeBtn = h(
+    'button',
+    {
+      class: 'btn sm ghost danger',
+      type: 'button',
+      style: currentLogoUrl ? '' : 'display:none',
+    },
+    'Remove logo',
+  );
+
+  const uploadBtn = h(
+    'button',
+    { class: 'btn sm ghost', type: 'button' },
+    'Upload logo',
+  );
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await cropAndResizeImage(file, 250, 0.85);
+      pendingLogoData = dataUrl;
+      logoPreviewImg.src = dataUrl;
+      logoPreviewImg.style.display = '';
+      logoPlaceholder.style.display = 'none';
+      removeBtn.style.display = '';
+      toast('Logo ready — click Save changes below');
+    } catch (err) {
+      toast(err.message || 'Could not read logo image', 'error');
+    }
+    fileInput.value = '';
+  });
+
+  uploadBtn.addEventListener('click', () => {
+    if (isAdmin) fileInput.click();
+  });
+
+  removeBtn.addEventListener('click', () => {
+    pendingLogoData = null;
+    logoPreviewImg.src = '';
+    logoPreviewImg.style.display = 'none';
+    logoPlaceholder.style.display = '';
+    removeBtn.style.display = 'none';
+    toast('Logo removed — click Save changes below');
+  });
+
+  const logoSection = h(
+    'div',
+    { class: 'settings-logo-container' },
+    logoPreviewContainer,
+    h(
+      'div',
+      { style: 'display:flex;flex-direction:column;gap:4px' },
+      h('strong', {}, 'Gym Logo'),
+      h('span', { class: 'muted', style: 'font-size:13px' }, 'Displayed in sidebar brand header. JPEG, PNG, or WebP up to 512 KB.'),
+      isAdmin
+        ? h('div', { class: 'row', style: 'gap:8px;margin-top:6px' }, uploadBtn, removeBtn, fileInput)
+        : null,
+    ),
+  );
+
   const profileForm = buildForm(
     [
       { name: 'gym_name', label: 'Gym name', required: true, value: tenant.gym_name, full: true, hint: 'Shown in the sidebar, on printed ID cards and on your staff sign-in page.' },
@@ -149,7 +236,14 @@ export async function renderSettings({ reload }) {
     {
       submitLabel: 'Save changes',
       onSubmit: async (values) => {
-        const { tenant: updated } = await api.updateGym(values);
+        const payload = { ...values };
+        if (pendingLogoData === null) {
+          payload.clear_logo = true;
+        } else if (typeof pendingLogoData === 'string') {
+          payload.logo_data = pendingLogoData;
+        }
+
+        const { tenant: updated } = await api.updateGym(payload);
         // Take effect now rather than on the next hard reload: money is
         // formatted from the currency, and the sidebar brand and tab title
         // are read from the name. The event is how app.js hears about it
@@ -179,6 +273,7 @@ export async function renderSettings({ reload }) {
       isAdmin
         ? null
         : h('p', { class: 'muted', style: 'margin:0 0 12px;font-size:13px' }, 'Only an admin can change these.'),
+      logoSection,
       profileForm,
     ),
 

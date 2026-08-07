@@ -170,6 +170,16 @@ export async function openCameraModal({ onCapture }) {
  */
 export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
   let currentUrl = initialUrl || null;
+  /**
+   * Whether the person actually touched the photo.
+   *
+   * `initialUrl` for an existing member is a *server URL* that serves the
+   * bytes, not the bytes themselves — so it must never be sent back as an
+   * upload. Callers ask changed() first and leave the photo alone when it is
+   * false, which is also what stops an unrelated edit (fixing a phone number)
+   * from rewriting the photo it never loaded.
+   */
+  let dirty = false;
 
   const avatarImg = h('img', {
     class: 'photo-picker-img',
@@ -192,6 +202,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
 
   const updatePreview = (url) => {
     currentUrl = url || null;
+    dirty = true;
     if (currentUrl) {
       avatarImg.src = currentUrl;
       avatarImg.style.display = '';
@@ -279,6 +290,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
 
   container.getValue = () => currentUrl;
   container.setValue = (url) => updatePreview(url);
+  container.changed = () => dirty;
 
   return container;
 }

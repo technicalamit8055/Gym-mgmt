@@ -57,6 +57,7 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
     note: { type: 'string', max: 300 },
     payment_amount: { type: 'number', min: 0 },
     payment_method: { type: 'enum', values: ['cash', 'card', 'upi', 'bank', 'online'], default: 'cash' },
+    reference: { type: 'string', max: 80 },
   });
 
   const member = get('SELECT * FROM members WHERE id = ?', [body.member_id]);
@@ -102,8 +103,16 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
 
     if (body.payment_amount > 0) {
       run(
-        'INSERT INTO payments (member_id, subscription_id, amount, method, note) VALUES (?, ?, ?, ?, ?)',
-        [member.id, subscriptionId, body.payment_amount, body.payment_method, `Payment for ${plan.name}`],
+        'INSERT INTO payments (member_id, subscription_id, amount, method, paid_on, reference, note) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          member.id,
+          subscriptionId,
+          body.payment_amount,
+          body.payment_method,
+          today(),
+          body.reference ?? null,
+          `Payment for ${plan.name}`,
+        ],
       );
     }
     if (member.status !== 'active') {
@@ -118,7 +127,7 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
 subscriptionRoutes.post('/:id/freeze', requireRole(...MANAGES_BILLING), (req, res) => {
   const sub = loadSubscription(req.params.id);
   if (sub.status !== 'active') throw badRequest('Only an active membership can be frozen');
-  run("UPDATE subscriptions SET status = 'frozen', frozen_on = date('now') WHERE id = ?", [sub.id]);
+  run("UPDATE subscriptions SET status = 'frozen', frozen_on = ? WHERE id = ?", [today(), sub.id]);
   run("UPDATE members SET status = 'frozen', updated_at = datetime('now') WHERE id = ?", [sub.member_id]);
   res.json(get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]));
 });

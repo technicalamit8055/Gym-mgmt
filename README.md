@@ -148,6 +148,11 @@ All optional — sensible defaults apply.
 | `ROOT_DOMAIN` | — | The exact production hostname (e.g. `yourapp.fly.dev`, later a real domain) — needed so a subdomain of it is read as a tenant slug instead of guessed from label count |
 | `TENANT_URL_MODE` | `path` | Which address signup hands a new gym: `path` (`/g/acme`, works anywhere) or `subdomain` (`acme.example.com`, needs wildcard DNS + TLS). Both are always *accepted* — this only picks which one is advertised |
 | `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` | — | Operator console credentials. The console at `/#/platform` does not exist unless **both** are set |
+| `BACKUP_DIR` | `backups/` | Where snapshots are written |
+| `BACKUP_INTERVAL_HOURS` | `24` in production, off otherwise | How often the server backs itself up. `0` disables it in favour of an external scheduler |
+| `BACKUP_KEEP` | `14` | Local backup folders to keep; older ones are pruned so a daily backup can't fill the disk |
+| `BACKUP_S3_BUCKET` / `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` | — | Off-site backup destination. Uploads stay off until **all four** are set |
+| `BACKUP_S3_REGION` / `BACKUP_S3_PREFIX` | `auto` / — | Region (`auto` suits Cloudflare R2) and an optional key prefix |
 
 ## Onboarding: how a gym joins
 
@@ -216,11 +221,11 @@ Update `app = "CHANGE-ME"` in `fly.toml` to match the name you picked, and
 `primary_region` to whichever [Fly region](https://fly.io/docs/reference/regions/)
 is closest to your users.
 
-`fly.toml`'s `auto_stop_machines = "suspend"` is the cheapest setting — it scales to
-near-zero cost when idle, at the cost of a cold-start delay on the first request after
-idle, and a real risk that a Razorpay webhook arrives while the machine is asleep.
-Once real paying gyms depend on webhooks landing promptly, change this to
-`min_machines_running = 1` (small constant cost, no cold starts, no missed webhooks).
+`fly.toml` keeps one machine running (`min_machines_running = 1`). The cheaper
+`auto_stop_machines = "suspend"` scales to near-zero cost when idle, but a suspended
+machine cannot answer a Razorpay webhook — and a missed webhook means a gym that *has*
+paid gets suspended for not paying. It also stops the scheduled backup firing. Only go
+back to suspending for a throwaway demo.
 
 Not yet covered by this deploy: real Razorpay credentials, and a custom domain with
 wildcard DNS for per-gym *subdomains* (Fly's shared `fly.dev` can't do this — only a
@@ -251,19 +256,67 @@ verify/adjust it against your actual unit rather than trusting it blind.
 
 ## Backups
 
-Every tenant is a single SQLite file, so backups are just file copies. Run:
+Every tenant is a single SQLite file, so a backup is a file copy — taken with
+SQLite's `VACUUM INTO`, which is safe against a live server: no downtime, no torn
+copies, WAL or not.
+
+**In production the server backs itself up every 24 hours** (`BACKUP_INTERVAL_HOURS`),
+and takes one on demand with:
 
 ```bash
 node scripts/backup.js
 ```
 
-This snapshots the platform registry and every tenant's database into a timestamped
-folder under `backups/` (override with `BACKUP_DIR`), using SQLite's `VACUUM INTO` —
-safe to run against a live server, no downtime. Schedule it with cron or Windows Task
-Scheduler; the app itself never runs this automatically.
+Either way it snapshots the platform registry and every tenant, then **reopens each
+snapshot and verifies it** — `PRAGMA integrity_check` plus a real row count, because a
+file nobody has ever opened is not a backup. Old local folders are pruned to
+`BACKUP_KEEP` so a daily backup can't fill the volume and stop the live database
+writing. The CLI exits non-zero on failure, so cron notices.
 
-To restore: stop the server, copy the wanted backup file back over the original
-path (e.g. `data/tenants/acme.db`), start the server again.
+### Getting them off the machine
+
+A snapshot on the same Fly volume as the live database protects you against a bad
+`UPDATE` and nothing else — one volume failure takes both. Set these four and every
+backup is also uploaded to any S3-compatible store (Cloudflare R2, Backblaze B2, MinIO,
+S3 itself):
+
+```bash
+fly secrets set \
+  BACKUP_S3_BUCKET=gymbook-backups \
+  BACKUP_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+  BACKUP_S3_ACCESS_KEY_ID=... \
+  BACKUP_S3_SECRET_ACCESS_KEY=... -a <app-name>
+```
+
+Until all four are present, uploads stay off and each run says so rather than
+implying you are covered.
+
+**Restore:** stop the server, copy the wanted file back over the original path (e.g.
+`data/tenants/acme.db`), delete any stale `-wal`/`-shm` sitting next to it, start the
+server again.
+
+This gives a recovery point of at most one backup interval. Continuous replication
+(Litestream streaming the WAL to the same bucket) would cut that to seconds and is the
+natural next step; it needs an extra binary in the image, which is why it isn't here yet.
+
+## Losing a password
+
+There is no email transport in this app, so recovery is issued by someone who already
+has authority over the gym rather than sent to an inbox.
+
+- **Operator console** — **Reset password** next to any gym mints a single-use link,
+  valid one hour, to pass to the owner over whatever channel they contacted you on.
+  Works while a gym is suspended, which is exactly when an owner needs to get back in
+  to pay. Optionally target one staff address instead of the owner.
+- **Shell access** — for a single-gym install with no operator console:
+
+  ```bash
+  node scripts/reset-password.js --gym acme               # print a reset link
+  node scripts/reset-password.js --gym acme --password '...'   # set one directly
+  ```
+
+Reset tokens are stored as SHA-256 digests, spent on first use, and reissuing drops any
+earlier outstanding link.
 
 ## Layout
 
@@ -273,7 +326,12 @@ src/
   app.js           express app and route mounting
   config.js        environment configuration
   db.js            schema and query helpers (node:sqlite)
+  clock.js         UTC instants <-> the gym's local calendar dates
   auth.js          scrypt hashing, signed tokens, role guards
+  passwordReset.js single-use recovery tokens
+  photo.js         member photo bytes and their signed URLs
+  backup.js        snapshot, verify, upload, prune
+  s3.js            minimal SigV4 PUT, for off-site backups
   validate.js      request validation and date helpers
   maintenance.js   expires memberships past their end date
   bootstrap.js     first-run admin account
@@ -287,8 +345,11 @@ public/
   js/photo.js      member photo upload/camera capture, crop and compress
   js/app.js        router and layout
   js/views/        one module per screen
-scripts/seed.js    demo data
-tests/api.test.js  API test suite
+scripts/
+  seed.js          demo data
+  backup.js        take a backup now
+  reset-password.js  recover a lost password from the shell
+tests/             one suite per area
 ```
 
 ## Testing
@@ -297,14 +358,16 @@ tests/api.test.js  API test suite
 npm test
 ```
 
-114 tests over throwaway databases cover authentication and token tampering,
+262 tests over throwaway databases cover authentication and token tampering,
 validation, member codes and duplicate detection, membership end-date maths,
 overlap rejection, renewal start dates, dues, check-in rules and idempotency,
 freeze/resume day credits, class capacity and weekday enforcement, role
 permissions, dashboard aggregates and CSV export, multi-tenant isolation,
 trial/billing lifecycle and webhook signatures, login lockout, fingerprint
 terminal uploads, WebAuthn enrollment and check-in against a software
-authenticator, and QR card issuing, scanning, reissue and forgery rejection.
+authenticator, QR card issuing, scanning, reissue and forgery rejection,
+gym-local date handling across timezones, member photo storage and its signed
+URLs, password-reset issue/redeem/expiry, and backup verification and pruning.
 
 ## Notes on the design
 
@@ -314,6 +377,17 @@ authenticator, and QR card issuing, scanning, reissue and forgery rejection.
 - **Membership expiry is lazy.** Rather than run a scheduler, any read that
   reports on membership state first flips memberships past their end date to
   expired. Cheap, and the numbers can never be stale.
+- **Instants are UTC; calendar dates are the gym's.** `check_in`, `created_at`
+  and friends are UTC, because an instant has no timezone to lose. `paid_on`,
+  `joined_on`, `start_date` and `end_date` are the gym's own local date, because
+  "the day Rahul paid" is a wall-clock fact about the gym. `src/clock.js` is the
+  only place that crosses between the two — SQLite's bare `date('now')` means
+  "today in UTC", which for a gym in IST is still yesterday until 05:30, right
+  when the morning batch arrives.
+- **Member photos are bytes behind a signed URL,** not base64 in a column. An
+  `<img>` cannot send a Bearer token, so the URL authenticates itself: signed
+  with the server secret, scoped to one member of one gym, and expiring. It
+  carries a version, so a changed photo is a new URL and no cache can go stale.
 - **Plans in use are archived, not deleted**, so historical memberships keep
   pointing at a real plan.
 - **`node:sqlite` and Express only.** No ORM, no bundler, no CSS framework, no

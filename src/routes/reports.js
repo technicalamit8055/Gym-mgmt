@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
+import { gymDateOf, gymDatetimeOf } from '../clock.js';
 import { all, get } from '../db.js';
 import { badRequest } from '../errors.js';
-import { addDays, today } from '../validate.js';
+import { addDays, startOfMonth, today } from '../validate.js';
 
 export const reportRoutes = Router();
 reportRoutes.use(requireAuth);
@@ -52,32 +53,38 @@ reportRoutes.get('/revenue', (req, res) => {
 
 reportRoutes.get('/attendance', (req, res) => {
   const { from, to } = range(req, 30);
+  // check_in is a stored UTC instant, so every bucket it feeds — day, hour,
+  // weekday — has to be read in the gym's wall clock. The hour histogram is
+  // the one that made this obvious: under UTC an IST gym's 6am rush showed up
+  // in the 00:00 bar, which is the exact opposite of useful for staffing.
+  const day = gymDateOf('check_in');
+  const localTs = gymDatetimeOf('check_in');
 
   res.json({
     from,
     to,
     per_day: all(
-      `SELECT date(check_in) AS day, COUNT(*) AS visits, COUNT(DISTINCT member_id) AS unique_members
-       FROM attendance WHERE date(check_in) BETWEEN ? AND ?
+      `SELECT ${day} AS day, COUNT(*) AS visits, COUNT(DISTINCT member_id) AS unique_members
+       FROM attendance WHERE ${day} BETWEEN ? AND ?
        GROUP BY day ORDER BY day`,
       [from, to],
     ),
     per_hour: all(
-      `SELECT CAST(strftime('%H', check_in) AS INTEGER) AS hour, COUNT(*) AS visits
-       FROM attendance WHERE date(check_in) BETWEEN ? AND ?
+      `SELECT CAST(strftime('%H', ${localTs}) AS INTEGER) AS hour, COUNT(*) AS visits
+       FROM attendance WHERE ${day} BETWEEN ? AND ?
        GROUP BY hour ORDER BY hour`,
       [from, to],
     ),
     per_weekday: all(
-      `SELECT CAST(strftime('%w', check_in) AS INTEGER) AS weekday, COUNT(*) AS visits
-       FROM attendance WHERE date(check_in) BETWEEN ? AND ?
+      `SELECT CAST(strftime('%w', ${localTs}) AS INTEGER) AS weekday, COUNT(*) AS visits
+       FROM attendance WHERE ${day} BETWEEN ? AND ?
        GROUP BY weekday ORDER BY weekday`,
       [from, to],
     ),
     top_members: all(
       `SELECT m.id, m.code, m.first_name, m.last_name, COUNT(*) AS visits
        FROM attendance a JOIN members m ON m.id = a.member_id
-       WHERE date(a.check_in) BETWEEN ? AND ?
+       WHERE ${gymDateOf('a.check_in')} BETWEEN ? AND ?
        GROUP BY m.id ORDER BY visits DESC LIMIT 10`,
       [from, to],
     ),
@@ -86,41 +93,61 @@ reportRoutes.get('/attendance', (req, res) => {
        FROM members m LEFT JOIN attendance a ON a.member_id = m.id
        WHERE m.status = 'active'
        GROUP BY m.id
-       HAVING last_visit IS NULL OR date(last_visit) < date('now', '-14 day')
+       HAVING last_visit IS NULL OR ${gymDateOf('last_visit')} < ?
        ORDER BY last_visit LIMIT 20`,
+      [addDays(today(), -14)],
     ),
   });
 });
 
 reportRoutes.get('/growth', (_req, res) => {
+  // joined_on/start_date/end_date are already gym-local calendar dates; only
+  // the window they are measured against needed rescuing from UTC.
+  const since = startOfMonth(today(), 11);
+
   res.json({
-    joins: all(`
+    joins: all(
+      `
       SELECT strftime('%Y-%m', joined_on) AS month, COUNT(*) AS members
-      FROM members WHERE joined_on >= date('now', 'start of month', '-11 month')
+      FROM members WHERE joined_on >= ?
       GROUP BY month ORDER BY month
-    `),
-    renewals: all(`
+    `,
+      [since],
+    ),
+    renewals: all(
+      `
       SELECT strftime('%Y-%m', start_date) AS month,
              COUNT(*) AS memberships,
              SUM(price - discount) AS value
       FROM subscriptions
-      WHERE status != 'cancelled' AND start_date >= date('now', 'start of month', '-11 month')
+      WHERE status != 'cancelled' AND start_date >= ?
       GROUP BY month ORDER BY month
-    `),
-    churn: all(`
+    `,
+      [since],
+    ),
+    churn: all(
+      `
       SELECT strftime('%Y-%m', end_date) AS month, COUNT(*) AS expired
       FROM subscriptions
-      WHERE status = 'expired' AND end_date >= date('now', 'start of month', '-11 month')
+      WHERE status = 'expired' AND end_date >= ?
         AND NOT EXISTS (
           SELECT 1 FROM subscriptions later
           WHERE later.member_id = subscriptions.member_id AND later.start_date > subscriptions.end_date
         )
       GROUP BY month ORDER BY month
-    `),
+    `,
+      [since],
+    ),
   });
 });
 
-const EXPORTS = {
+/**
+ * Built per request rather than once at module load: the attendance export has
+ * to render check_in/check_out in the gym's own wall clock, and that offset is
+ * only known once a request has resolved its tenant. A CSV of UTC timestamps
+ * would have a 6am visit reading "00:30" to the gym owner opening it in Excel.
+ */
+const exportSpecs = () => ({
   members: {
     filename: 'members.csv',
     sql: `SELECT m.code, m.first_name, m.last_name, m.email, m.phone, m.gender, m.date_of_birth,
@@ -141,7 +168,9 @@ const EXPORTS = {
   },
   attendance: {
     filename: 'attendance.csv',
-    sql: `SELECT a.check_in, a.check_out, m.code AS member_code, m.first_name, m.last_name, a.source
+    sql: `SELECT ${gymDatetimeOf('a.check_in')} AS check_in,
+                 ${gymDatetimeOf('a.check_out')} AS check_out,
+                 m.code AS member_code, m.first_name, m.last_name, a.source
           FROM attendance a JOIN members m ON m.id = a.member_id
           ORDER BY a.check_in DESC`,
   },
@@ -154,7 +183,7 @@ const EXPORTS = {
           JOIN plans p ON p.id = s.plan_id
           ORDER BY s.start_date DESC`,
   },
-};
+});
 
 const csvCell = (value) => {
   const text = value === null || value === undefined ? '' : String(value);
@@ -162,8 +191,9 @@ const csvCell = (value) => {
 };
 
 reportRoutes.get('/export/:entity', (req, res) => {
-  const spec = EXPORTS[req.params.entity];
-  if (!spec) throw badRequest(`Nothing to export for "${req.params.entity}"`, { entity: `try one of: ${Object.keys(EXPORTS).join(', ')}` });
+  const specs = exportSpecs();
+  const spec = specs[req.params.entity];
+  if (!spec) throw badRequest(`Nothing to export for "${req.params.entity}"`, { entity: `try one of: ${Object.keys(specs).join(', ')}` });
 
   const rows = all(spec.sql);
   const headers = rows.length ? Object.keys(rows[0]) : [];

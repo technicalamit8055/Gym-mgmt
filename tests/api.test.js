@@ -251,8 +251,18 @@ describe('gym sessions', () => {
   });
 
   it('auto-checks a member out once their assigned session has ended', async () => {
-    const past = new Date(Date.now() - 5 * 60_000);
-    const endTime = `${String(past.getHours()).padStart(2, '0')}:${String(past.getMinutes()).padStart(2, '0')}`;
+    // A session that ended earlier *today, in local wall-clock terms*.
+    //
+    // Naively subtracting five minutes from now breaks in the first few minutes
+    // after local midnight: it wraps to yesterday's 23:5x, which as "today's"
+    // session end is 24 hours in the future, and at exactly 00:05 it produces
+    // "00:00" — equal to start_time, which the API rightly rejects. Clamping
+    // inside the current local day fixes both. A session's end_time has only
+    // minute precision, so the one case still not expressible is the first
+    // minute of the day, where no earlier minute exists to have ended.
+    const now = new Date();
+    const endMinutes = Math.max(now.getHours() * 60 + now.getMinutes() - 1, 1);
+    const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
 
     const session = await call('POST', '/api/sessions', { name: 'Already Over', start_time: '00:00', end_time: endTime });
     assert.equal(session.status, 201);
@@ -274,10 +284,12 @@ describe('gym sessions', () => {
     // check_out is stored in UTC; endTime was the session's end in local wall-
     // clock time, so compare instants rather than the raw HH:MM text — with
     // slack for the minute-level (no seconds) precision of a session's end_time.
+    const expectedClose = new Date(now);
+    expectedClose.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
     const closedAt = new Date(`${latest.body.items[0].check_out.replace(' ', 'T')}Z`);
     assert.ok(
-      Math.abs(closedAt.getTime() - past.getTime()) < 65_000,
-      `expected check_out near ${past.toISOString()}, got ${closedAt.toISOString()}`,
+      Math.abs(closedAt.getTime() - expectedClose.getTime()) < 65_000,
+      `expected check_out near ${expectedClose.toISOString()}, got ${closedAt.toISOString()}`,
     );
   });
 });

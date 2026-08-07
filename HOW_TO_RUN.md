@@ -73,6 +73,34 @@ npm start
 Then open **http://localhost:3000/#/platform** and sign in with those two
 values. Without them, that page just says the console is not enabled.
 
+### If you forget a password
+
+Nothing is emailed, so there are two ways back in.
+
+From the operator console above, **Reset password** next to a gym gives you a
+one-time link (good for an hour) to paste into the browser and set a new one.
+
+Or, from a terminal in this folder:
+
+```powershell
+node scripts/reset-password.js                      # the practice gym's owner
+node scripts/reset-password.js --gym your-gym       # a gym you signed up
+node scripts/reset-password.js --gym your-gym --password "new-password-here"
+```
+
+Without `--password` it prints a link instead of choosing a password for you.
+
+### Taking a backup
+
+```powershell
+node scripts/backup.js
+```
+
+Every gym's database is copied into a timestamped folder under `backups\`, and
+each copy is reopened and checked before the command says it worked. Safe to run
+while the app is running. When deployed, the server also does this on its own
+every 24 hours.
+
 That's it for local-only use. Nobody outside this PC can reach it this way —
 skip to section B if you want to open it from your phone or let someone else
 in.

@@ -4,6 +4,21 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
 
+/**
+ * Two kinds of time live in here and they are not interchangeable:
+ *
+ * - **Instants** (`created_at`, `updated_at`, `check_in`, `check_out`,
+ *   `qr_issued_at`) are UTC, which is what `datetime('now')` produces. Correct
+ *   as a column DEFAULT, and anything reading them for display or for an
+ *   hour/day bucket must convert through src/clock.js first.
+ * - **Calendar dates** (`joined_on`, `paid_on`, `start_date`, `end_date`,
+ *   `frozen_on`, `class_date`) are the *gym's* local date, because "the day
+ *   Rahul paid" is a wall-clock fact about the gym. SQLite cannot know the
+ *   tenant's timezone, so the `date('now')` DEFAULTs below are UTC and
+ *   therefore only a last-resort fallback: every route inserts these
+ *   explicitly from validate.js's today(). Adding a date column here means
+ *   adding it to a route's insert too.
+ */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +45,6 @@ CREATE TABLE IF NOT EXISTS members (
   emergency_contact TEXT,
   emergency_phone   TEXT,
   health_notes      TEXT,
-  photo_url         TEXT,
   joined_on         TEXT NOT NULL DEFAULT (date('now')),
   status            TEXT NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'inactive', 'frozen')),
@@ -146,6 +160,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+
 CREATE TABLE IF NOT EXISTS biometric_credentials (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   member_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -192,6 +215,68 @@ const MIGRATIONS = [
     if (n === 0) {
       db.prepare("INSERT INTO sessions (name, start_time, end_time) VALUES ('Morning', '05:00', '10:00')").run();
       db.prepare("INSERT INTO sessions (name, start_time, end_time) VALUES ('Evening', '16:00', '21:00')").run();
+    }
+  },
+  // Member photos move out of members.photo_url (where they sat as base64 data
+  // URLs, riding along in every roster response) into their own table, served
+  // over a cacheable URL instead. See src/photo.js.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_photos (
+        member_id  INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        mime       TEXT NOT NULL,
+        bytes      BLOB NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  // Added to SCHEMA above, so only databases created before it need this.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id)');
+  },
+  // Bumped on every photo change, so a photo URL can be cached indefinitely:
+  // a new photo is a new URL rather than a stale one to invalidate.
+  (db) => ensureColumn(db, 'members', 'photo_version', 'INTEGER NOT NULL DEFAULT 0'),
+  // Carry across whatever is already in photo_url. Guarded on the column still
+  // existing so this is a no-op on a database created after the drop below.
+  (db) => {
+    const cols = db.prepare('PRAGMA table_info(members)').all().map((c) => c.name);
+    if (!cols.includes('photo_url')) return;
+
+    const rows = db
+      .prepare("SELECT id, photo_url FROM members WHERE photo_url IS NOT NULL AND photo_url != ''")
+      .all();
+    const insert = db.prepare(
+      'INSERT OR REPLACE INTO member_photos (member_id, mime, bytes) VALUES (?, ?, ?)',
+    );
+    const bump = db.prepare('UPDATE members SET photo_version = 1 WHERE id = ?');
+
+    for (const row of rows) {
+      // Anything that isn't a base64 data URL (an http link a hand-written API
+      // call could have set) has no bytes to move and is simply dropped.
+      const match = /^data:([a-z]+\/[a-z0-9+.-]+);base64,(.+)$/is.exec(row.photo_url);
+      if (!match) continue;
+      insert.run(row.id, match[1].toLowerCase(), Buffer.from(match[2], 'base64'));
+      bump.run(row.id);
+    }
+
+    // SQLite has had DROP COLUMN since 3.35, but a build without it must not
+    // leave the database unopenable — the column is unread from here on either
+    // way, and blanking it reclaims the space.
+    db.exec("UPDATE members SET photo_url = NULL WHERE photo_url IS NOT NULL");
+    try {
+      db.exec('ALTER TABLE members DROP COLUMN photo_url');
+    } catch {
+      // Left in place, always NULL, and never selected again.
     }
   },
 ];

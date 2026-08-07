@@ -3,13 +3,15 @@ import { MANAGES_BILLING, requireAuth, requireRole } from '../auth.js';
 import { all, get, run, tx } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
-import { parse, toInt } from '../validate.js';
+import { PHOTO_JOIN, PHOTO_PRESENT_COL, parsePhotoDataUrl, setMemberPhoto, withPhotoUrl } from '../photo.js';
+import { addDays, parse, today, toInt } from '../validate.js';
 
 export const memberRoutes = Router();
 memberRoutes.use(requireAuth);
 
 export const MEMBER_SELECT = `
   SELECT m.*,
+    ${PHOTO_PRESENT_COL},
     active_sub.plan_name        AS plan_name,
     active_sub.end_date         AS membership_end,
     active_sub.id               AS subscription_id,
@@ -20,6 +22,7 @@ export const MEMBER_SELECT = `
     gym_session.start_time      AS session_start,
     gym_session.end_time        AS session_end
   FROM members m
+  ${PHOTO_JOIN}
   LEFT JOIN sessions gym_session ON gym_session.id = m.session_id
   LEFT JOIN (
     SELECT s.member_id, s.id, s.end_date, p.name AS plan_name,
@@ -51,7 +54,6 @@ const MEMBER_FIELDS = {
   emergency_contact: { type: 'string', max: 80 },
   emergency_phone: { type: 'string', max: 30 },
   health_notes: { type: 'string', max: 1000 },
-  photo_url: { type: 'string' },
   joined_on: { type: 'date' },
   status: { type: 'enum', values: ['active', 'inactive', 'frozen'] },
   // The numeric ID a fingerprint terminal (e.g. a Realtime/eSSL device)
@@ -63,20 +65,44 @@ const MEMBER_FIELDS = {
   session_id: { type: 'int' },
 };
 
+/**
+ * The same field specs, rewritten for a PATCH.
+ *
+ * Drops `default` as well as `required`: a default is what a *new* member gets
+ * for a field nobody filled in, but on an update it would invent a value the
+ * caller never sent. last_name's `default: ''` meant any PATCH that omitted it
+ * silently blanked the member's surname — which a photo-only edit does.
+ */
 const optional = (fields) =>
   Object.fromEntries(
-    Object.entries(fields).map(([key, spec]) => [key, { ...spec, required: false }]),
+    Object.entries(fields).map(([key, { default: _unused, ...spec }]) => [
+      key,
+      { ...spec, required: false },
+    ]),
   );
 
 /**
  * MEMBER_SELECT is `m.*`, which would otherwise spray the member's QR card
  * secret through every list response. Callers get a flag instead; the token
  * itself is only served by the /api/qr endpoints that need to render a card.
+ *
+ * `photo_version` is likewise swapped for the URL the front end can point an
+ * `<img>` at, so no response ever carries image bytes.
  */
 export function publicMember(row) {
   if (!row) return row;
   const { qr_token, ...rest } = row;
-  return { ...rest, has_qr: Boolean(qr_token) };
+  return { ...withPhotoUrl(rest), has_qr: Boolean(qr_token) };
+}
+
+/**
+ * A photo arrives as the `data:image/jpeg;base64,…` that public/js/photo.js
+ * produces, and is written to its own table rather than a member column — so
+ * it is handled after the main insert/update rather than as one more field.
+ * An empty string means "remove it".
+ */
+function hasPhotoField(body) {
+  return Boolean(body) && typeof body === 'object' && 'photo' in body;
 }
 
 function nextMemberCode() {
@@ -107,7 +133,8 @@ memberRoutes.get('/', (req, res) => {
       where.push('active_sub.id IS NOT NULL');
       break;
     case 'expiring':
-      where.push("active_sub.end_date IS NOT NULL AND active_sub.end_date <= date('now', '+7 day')");
+      where.push('active_sub.end_date IS NOT NULL AND active_sub.end_date <= ?');
+      params.push(addDays(today(), 7));
       break;
     case 'expired':
       where.push('active_sub.id IS NULL AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.member_id = m.id)');
@@ -183,6 +210,11 @@ memberRoutes.get('/:id', (req, res) => {
 
 memberRoutes.post('/', (req, res) => {
   const body = parse(req.body, MEMBER_FIELDS);
+  // MEMBER_FIELDS is built once at module load, so joined_on's default has to
+  // be filled in per request instead: the column's own DEFAULT (date('now'))
+  // is UTC, which would backdate anyone signed up before 05:30 at an IST gym.
+  if (!body.joined_on) body.joined_on = today();
+
   if (body.email && get('SELECT id FROM members WHERE email = ?', [body.email])) {
     throw conflict('A member with that email already exists');
   }
@@ -193,6 +225,11 @@ memberRoutes.post('/', (req, res) => {
     throw notFound('Session not found');
   }
 
+  // Validated before the insert so a rejected photo does not leave a member
+  // behind; written after, because it lands in its own table keyed on the id
+  // the insert is about to hand out.
+  if (hasPhotoField(req.body)) parsePhotoDataUrl(req.body.photo);
+
   const columns = Object.keys(body);
   const info = tx(() => {
     const code = nextMemberCode();
@@ -201,6 +238,7 @@ memberRoutes.post('/', (req, res) => {
       [code, ...columns.map((c) => body[c])],
     );
   });
+  if (hasPhotoField(req.body)) setMemberPhoto(Number(info.lastInsertRowid), req.body.photo);
 
   res.status(201).json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [info.lastInsertRowid])));
 });
@@ -211,7 +249,10 @@ memberRoutes.patch('/:id', (req, res) => {
 
   const body = parse(req.body, optional(MEMBER_FIELDS));
   const columns = Object.keys(body);
-  if (!columns.length) throw badRequest('Nothing to update');
+  const photo = hasPhotoField(req.body);
+  // Replacing just the photo is a legitimate edit on its own — the member's
+  // page offers it as a standalone action — so it counts as something to update.
+  if (!columns.length && !photo) throw badRequest('Nothing to update');
 
   if (body.email && get('SELECT id FROM members WHERE email = ? AND id != ?', [body.email, id])) {
     throw conflict('Another member already uses that email');
@@ -222,11 +263,16 @@ memberRoutes.patch('/:id', (req, res) => {
   if (body.session_id && !get('SELECT id FROM sessions WHERE id = ?', [body.session_id])) {
     throw notFound('Session not found');
   }
+  if (photo) parsePhotoDataUrl(req.body.photo);
 
-  run(
-    `UPDATE members SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`,
-    [...columns.map((c) => body[c]), id],
-  );
+  if (columns.length) {
+    run(
+      `UPDATE members SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`,
+      [...columns.map((c) => body[c]), id],
+    );
+  }
+  if (photo) setMemberPhoto(id, req.body.photo);
+
   res.json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [id])));
 });
 

@@ -3,6 +3,7 @@ import { hashPassword, issueToken, requireAuth, requireRole, verifyPassword } fr
 import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { all, get, run } from '../db.js';
 import { badRequest, conflict, notFound, tooManyRequests, unauthorized } from '../errors.js';
+import { passwordResetIsValid, redeemPasswordReset } from '../passwordReset.js';
 import { createLimiter } from '../rateLimit.js';
 import { parse } from '../validate.js';
 
@@ -60,6 +61,49 @@ authRoutes.post('/change-password', requireAuth, (req, res) => {
   }
   run('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(body.new_password), user.id]);
   res.json({ ok: true });
+});
+
+/* ------------------------------------------------------- password recovery */
+
+/**
+ * Redeeming a reset link. Unauthenticated by necessity — the whole point is
+ * that the person cannot sign in.
+ *
+ * Rate limited per IP even though the token is 256 random bits: the cost of the
+ * limiter is nothing, and it means a flood of guesses shows up as a lockout
+ * rather than as unbounded scrypt work on this process.
+ */
+const resetLimiter = createLimiter({
+  maxAttempts: config.loginMaxAttempts,
+  windowMs: config.loginWindowMs,
+  lockoutMs: config.loginLockoutMs,
+});
+
+/** Lets the reset page tell someone their link has expired before making them
+ * type a new password. Costs a lookup and reveals nothing a redeem would not. */
+authRoutes.post('/password-reset/check', (req, res) => {
+  const body = parse(req.body, { token: { type: 'string', required: true, max: 200 } });
+  res.json({ valid: passwordResetIsValid(body.token) });
+});
+
+authRoutes.post('/password-reset', (req, res) => {
+  const gate = resetLimiter.check(req.ip);
+  if (gate.locked) {
+    res.set('Retry-After', String(gate.retryAfterSeconds));
+    throw tooManyRequests('Too many attempts. Try again later.');
+  }
+  resetLimiter.recordAttempt(req.ip);
+
+  const body = parse(req.body, {
+    token: { type: 'string', required: true, max: 200 },
+    new_password: { type: 'string', required: true, min: 8 },
+  });
+
+  const { email } = redeemPasswordReset(body.token, body.new_password);
+  resetLimiter.recordSuccess(req.ip);
+
+  console.warn(`[auth] password reset redeemed for ${email} at "${req.tenant?.slug ?? DEFAULT_TENANT_SLUG}"`);
+  res.json({ ok: true, email });
 });
 
 /* ---------------------------------------------------------------- staff CRUD */
