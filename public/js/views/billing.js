@@ -14,7 +14,7 @@ import {
   toast,
 } from '../ui.js';
 import { openMembershipForm, openPaymentForm } from './forms.js';
-import { getGymName, printReceipt } from '../receipt.js';
+import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 
 export async function renderBilling({ setActions, reload }) {
   const state = { tab: 'memberships', filter: 'active', from: '', to: '' };
@@ -200,7 +200,24 @@ export async function renderBilling({ setActions, reload }) {
                         }
                       },
                     },
-                    '🖨️ Receipt',
+                    '🖨️ Print',
+                  ),
+                  h(
+                    'button',
+                    {
+                      class: 'btn sm ghost',
+                      title: 'Download receipt',
+                      onclick: async (event) => {
+                        event.stopPropagation();
+                        try {
+                          const fullPayment = await api.paymentReceipt(row.id);
+                          await downloadReceipt(fullPayment, { gymName: getGymName() });
+                        } catch (err) {
+                          toast(err.message || 'Could not load receipt details', 'error');
+                        }
+                      },
+                    },
+                    '⬇️',
                   ),
                   session.can('admin')
                     ? h(

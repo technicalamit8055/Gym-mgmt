@@ -336,7 +336,15 @@ export function buildForm(fields, { onSubmit, submitLabel = 'Save', wide = false
   return form;
 }
 
-export function confirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm }) {
+export function confirmDialog({
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  danger = false,
+  onConfirm,
+  secondaryLabel,
+  onSecondary,
+}) {
   const confirm = h(
     'button',
     {
@@ -354,10 +362,32 @@ export function confirmDialog({ title, message, confirmLabel = 'Confirm', danger
     },
     confirmLabel,
   );
+  const footer = [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel')];
+  if (secondaryLabel && onSecondary) {
+    const secondary = h(
+      'button',
+      {
+        class: 'btn ghost',
+        onclick: async () => {
+          secondary.disabled = true;
+          try {
+            await onSecondary();
+          } catch (err) {
+            toast(err.message || 'Action failed', 'error');
+          } finally {
+            secondary.disabled = false;
+          }
+        },
+      },
+      secondaryLabel,
+    );
+    footer.push(secondary);
+  }
+  footer.push(confirm);
   openModal({
     title,
     body: h('p', { class: 'muted', style: 'margin:0' }, message),
-    footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), confirm],
+    footer,
   });
 }
 

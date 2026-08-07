@@ -465,6 +465,8 @@ tbody tr.clickable { cursor: pointer; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.id-card-gym-brand { display: flex; align-items: center; gap: 0.06in; min-width: 0; }
+.id-card-logo-img { width: 0.22in; height: 0.22in; border-radius: 0.04in; object-fit: cover; flex-shrink: 0; }
 .id-card-photo {
   width: 0.62in; height: 0.62in;
   object-fit: cover;
@@ -473,19 +475,18 @@ tbody tr.clickable { cursor: pointer; }
   margin: 0.07in 0;
 }
 .id-card-name {
-  font-size: 0.17in;
+  font-size: 0.13in;
   font-weight: 700;
-  line-height: 1.15;
-  margin-top: auto;
+  color: #111827;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .id-card-code {
-  font-size: 0.13in;
+  font-size: 0.1in;
+  color: #6b7280;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  color: #4b5563;
-  margin-top: 0.03in;
+  margin-top: 0.02in;
 }
 .id-card-valid { font-size: 0.1in; color: #6b7280; margin-top: 0.03in; }
 .id-card-valid.muted { color: #9ca3af; }
@@ -500,16 +501,18 @@ tbody tr.clickable { cursor: pointer; }
 #print-root { display: none; }
 
 .receipt {
-  width: 320px;
-  background: #ffffff;
-  color: #111827;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  width: 3.4in;
+  margin: 0 auto;
   padding: 20px;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #ffffff;
+  border-radius: 12px;
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 .receipt-header { text-align: center; margin-bottom: 12px; }
+.receipt-gym-brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 4px; }
+.receipt-logo-img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
 .receipt-gym { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #111827; }
 .receipt-title { font-size: 13px; color: #6b7280; font-weight: 500; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
 .receipt-divider { border-bottom: 1px dashed #d1d5db; margin: 12px 0; }

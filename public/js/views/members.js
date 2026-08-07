@@ -18,7 +18,7 @@ import {
 } from '../ui.js';
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
 import { downloadCardPng, idCardNode, printCards } from '../qrcard.js';
-import { getGymName, printReceipt } from '../receipt.js';
+import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
 
 const FILTERS = [
@@ -838,21 +838,42 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
             label: '',
             render: (row) =>
               h(
-                'button',
-                {
-                  class: 'btn sm ghost',
-                  title: 'Print receipt',
-                  onclick: async (event) => {
-                    event.stopPropagation();
-                    try {
-                      const fullPayment = await api.paymentReceipt(row.id);
-                      printReceipt(fullPayment, { gymName: getGymName() });
-                    } catch (err) {
-                      toast(err.message || 'Could not load receipt details', 'error');
-                    }
+                'div',
+                { class: 'row', style: 'gap:6px;justify-content:flex-end' },
+                h(
+                  'button',
+                  {
+                    class: 'btn sm ghost',
+                    title: 'Print receipt',
+                    onclick: async (event) => {
+                      event.stopPropagation();
+                      try {
+                        const fullPayment = await api.paymentReceipt(row.id);
+                        printReceipt(fullPayment, { gymName: getGymName() });
+                      } catch (err) {
+                        toast(err.message || 'Could not load receipt details', 'error');
+                      }
+                    },
                   },
-                },
-                '🖨️ Receipt',
+                  '🖨️ Print',
+                ),
+                h(
+                  'button',
+                  {
+                    class: 'btn sm ghost',
+                    title: 'Download receipt',
+                    onclick: async (event) => {
+                      event.stopPropagation();
+                      try {
+                        const fullPayment = await api.paymentReceipt(row.id);
+                        await downloadReceipt(fullPayment, { gymName: getGymName() });
+                      } catch (err) {
+                        toast(err.message || 'Could not load receipt details', 'error');
+                      }
+                    },
+                  },
+                  '⬇️',
+                ),
               ),
           },
         ],

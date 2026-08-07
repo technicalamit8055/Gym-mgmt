@@ -175,11 +175,6 @@ function renderLogin(message) {
           : null,
         message ? h('p', { class: 'field-error' }, message) : null,
         form,
-        h(
-          'div',
-          { class: 'row', style: 'margin-top:16px;justify-content:center' },
-          h('a', { class: 'btn sm ghost', href: '#/signup' }, 'Set up a new gym'),
-        ),
       ),
     ),
   );

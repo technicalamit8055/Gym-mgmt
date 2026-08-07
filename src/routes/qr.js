@@ -7,6 +7,7 @@ import { badRequest, notFound } from '../errors.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import { ensureQrToken, findMemberByScan, issueQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
+import { tenantLogoUrl } from './platform.js';
 import { parse, today, toInt } from '../validate.js';
 
 /**
@@ -28,9 +29,12 @@ async function buildCard(req, memberId) {
   const token = ensureQrToken(memberId);
   const [svg, png] = await Promise.all([qrSvg(token), qrPngDataUrl(token)]);
 
+  const hasLogo = Boolean(req.tenant?.logo_bytes && req.tenant?.logo_mime);
+
   return {
     member: publicMember(member),
     gym_name: gymNameFor(req),
+    logo_url: hasLogo ? tenantLogoUrl(req.tenant.slug, req.tenant.logo_version || 1) : null,
     token,
     payload: qrPayload(token),
     issued_at: get('SELECT qr_issued_at FROM members WHERE id = ?', [memberId])?.qr_issued_at ?? null,

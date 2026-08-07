@@ -1,4 +1,5 @@
 import { clear, date, fullName, h } from './ui.js';
+import { getGymLogoUrl } from './receipt.js';
 
 /**
  * Member QR ID cards: on-screen preview, printing, and a downloadable image
@@ -15,6 +16,14 @@ const CARD_H_IN = 2.125;
  * sheet — what staff see is what comes out of the printer. */
 export function idCardNode(card) {
   const member = card.member;
+  const logoUrl = card.logo_url || getGymLogoUrl();
+
+  const gymHeader = logoUrl
+    ? h('div', { class: 'id-card-gym-brand' },
+        h('img', { class: 'id-card-logo-img', src: logoUrl, alt: '' }),
+        h('div', { class: 'id-card-gym' }, card.gym_name),
+      )
+    : h('div', { class: 'id-card-gym' }, card.gym_name);
 
   return h(
     'div',
@@ -22,7 +31,7 @@ export function idCardNode(card) {
     h(
       'div',
       { class: 'id-card-main' },
-      h('div', { class: 'id-card-gym' }, card.gym_name),
+      gymHeader,
       member.photo_url
         ? h('img', { class: 'id-card-photo', src: member.photo_url, alt: '' })
         : null,
@@ -106,10 +115,38 @@ export async function downloadCardPng(card) {
   const bandHeight = Math.round(height * 0.19);
   ctx.fillStyle = '#111827';
   ctx.fillRect(0, 0, width, bandHeight);
+
+  const logoUrl = card.logo_url || getGymLogoUrl();
+  let textX = Math.round(width * 0.05);
+
+  if (logoUrl) {
+    try {
+      const logoImg = await loadImage(logoUrl);
+      const logoSize = Math.round(bandHeight * 0.65);
+      const logoX = Math.round(width * 0.04);
+      const logoY = Math.round((bandHeight - logoSize) / 2);
+
+      ctx.save();
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(logoX, logoY, logoSize, logoSize, Math.round(logoSize * 0.18));
+      } else {
+        ctx.rect(logoX, logoY, logoSize, logoSize);
+      }
+      ctx.clip();
+      ctx.drawImage(logoImg, logoX, logoY, logoSize, logoSize);
+      ctx.restore();
+
+      textX = logoX + logoSize + Math.round(width * 0.03);
+    } catch {
+      // Skips cleanly if logo image fails to load
+    }
+  }
+
   ctx.fillStyle = '#ffffff';
   ctx.font = `600 ${Math.round(bandHeight * 0.42)}px system-ui, sans-serif`;
   ctx.textBaseline = 'middle';
-  ctx.fillText(card.gym_name, Math.round(width * 0.05), bandHeight / 2, width * 0.9);
+  ctx.fillText(card.gym_name, textX, bandHeight / 2, width * 0.95 - textX);
 
   const member = card.member;
   const left = Math.round(width * 0.05);

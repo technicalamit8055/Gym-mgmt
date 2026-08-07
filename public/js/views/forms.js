@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, today, toast } from '../ui.js';
-import { getGymName, printReceipt } from '../receipt.js';
+import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
 
 /** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma". */
@@ -199,29 +199,29 @@ export async function openMembershipForm({ member, onSaved }) {
 
       if (Number(values.payment_amount) > 0) {
         const paymentAmount = Number(values.payment_amount);
+        const receiptData = {
+          amount: paymentAmount,
+          method: values.payment_method || 'cash',
+          paid_on: today(),
+          member_code: sub.member_code,
+          first_name: sub.first_name,
+          last_name: sub.last_name,
+          plan_name: sub.plan_name,
+          start_date: sub.start_date,
+          end_date: sub.end_date,
+          price: sub.price,
+          discount: sub.discount,
+          reference: values.reference || undefined,
+          note: values.note || undefined,
+        };
         confirmDialog({
           title: 'Membership & Payment Saved',
-          message: `${plan.name} activated and ${money(paymentAmount)} recorded for ${sub.first_name} ${sub.last_name}. Would you like to print a receipt?`,
+          message: `${plan.name} activated and ${money(paymentAmount)} recorded for ${sub.first_name} ${sub.last_name}. Would you like to print or download a receipt?`,
           confirmLabel: '🖨️ Print receipt',
+          secondaryLabel: '⬇️ Download receipt',
+          onSecondary: () => downloadReceipt(receiptData, { gymName: getGymName() }),
           onConfirm: async () => {
-            printReceipt(
-              {
-                amount: paymentAmount,
-                method: values.payment_method || 'cash',
-                paid_on: today(),
-                member_code: sub.member_code,
-                first_name: sub.first_name,
-                last_name: sub.last_name,
-                plan_name: sub.plan_name,
-                start_date: sub.start_date,
-                end_date: sub.end_date,
-                price: sub.price,
-                discount: sub.discount,
-                reference: values.reference || undefined,
-                note: values.note || undefined,
-              },
-              { gymName: getGymName() },
-            );
+            printReceipt(receiptData, { gymName: getGymName() });
           },
         });
       }
@@ -314,8 +314,10 @@ export async function openPaymentForm({ member, subscriptions = [], onSaved }) {
 
         confirmDialog({
           title: 'Payment Recorded',
-          message: `Payment of ${money(values.amount)} recorded for ${payment.first_name} ${payment.last_name}. Would you like to print a receipt?`,
+          message: `Payment of ${money(values.amount)} recorded for ${payment.first_name} ${payment.last_name}. Would you like to print or download a receipt?`,
           confirmLabel: '🖨️ Print receipt',
+          secondaryLabel: '⬇️ Download receipt',
+          onSecondary: () => downloadReceipt(payment, { gymName: getGymName() }),
           onConfirm: async () => {
             printReceipt(payment, { gymName: getGymName() });
           },
