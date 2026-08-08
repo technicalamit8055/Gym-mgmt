@@ -1,5 +1,5 @@
 import { ApiError, api, pathSlug, session } from './api.js';
-import { buildForm, clear, h, openModal, setCurrency, toast } from './ui.js';
+import { buildForm, clear, h, isFullscreen, openModal, setCurrency, toast, toggleFullscreen, onFullscreenChange } from './ui.js';
 import { renderLanding } from './views/landing.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
@@ -230,7 +230,12 @@ function renderShell() {
       h('div', { style: 'text-transform:capitalize;font-size:12px' }, user?.role || ''),
       h(
         'div',
-        { class: 'row', style: 'margin-top:10px;gap:6px' },
+        { class: 'row', style: 'margin-top:10px;gap:6px;flex-wrap:wrap' },
+        h(
+          'button',
+          { id: 'btn-fullscreen-sidebar', class: 'btn sm ghost', onclick: () => toggleFullscreen() },
+          isFullscreen() ? '🗗 Fullscreen' : '⛶ Fullscreen',
+        ),
         h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, 'Password'),
         h('button', { class: 'btn sm ghost', onclick: signOut }, 'Sign out'),
       ),
@@ -240,6 +245,19 @@ function renderShell() {
   const title = h('h1', {}, 'Dashboard');
   const content = h('div', { class: 'content' }, h('div', { class: 'empty' }, 'Loading…'));
   const actions = h('div', { class: 'row' });
+
+  const fullscreenTopbarBtn = h(
+    'button',
+    {
+      id: 'btn-fullscreen-topbar',
+      class: 'btn ghost icon-only',
+      type: 'button',
+      title: isFullscreen() ? 'Exit Fullscreen' : 'Enter Fullscreen Mode',
+      'aria-label': isFullscreen() ? 'Exit Fullscreen' : 'Enter Fullscreen Mode',
+      onclick: () => toggleFullscreen(),
+    },
+    isFullscreen() ? '🗗' : '⛶',
+  );
 
   const navToggle = h(
     'button',
@@ -263,7 +281,7 @@ function renderShell() {
       h(
         'div',
         { class: 'main' },
-        h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions),
+        h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions, fullscreenTopbarBtn),
         content,
       ),
     ),
@@ -519,6 +537,30 @@ document.addEventListener('keydown', (event) => {
  * body.nav-open would keep the page unscrollable. */
 window.matchMedia('(min-width: 901px)').addEventListener('change', (event) => {
   if (event.matches) setNavOpen(false);
+});
+
+function updateFullscreenButtons(active = isFullscreen()) {
+  document.body.classList.toggle('is-fullscreen', active);
+  const topbarBtn = document.getElementById('btn-fullscreen-topbar');
+  if (topbarBtn) {
+    topbarBtn.title = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
+    topbarBtn.setAttribute('aria-label', active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode');
+    topbarBtn.innerHTML = active ? '🗗' : '⛶';
+  }
+  const sidebarBtn = document.getElementById('btn-fullscreen-sidebar');
+  if (sidebarBtn) {
+    sidebarBtn.title = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
+    sidebarBtn.innerHTML = active ? '🗗 Fullscreen' : '⛶ Fullscreen';
+  }
+  const checkinBtn = document.getElementById('btn-fullscreen-checkin');
+  if (checkinBtn) {
+    checkinBtn.title = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
+    checkinBtn.innerHTML = active ? '🗗 Exit Fullscreen' : '⛶ Kiosk Fullscreen';
+  }
+}
+
+onFullscreenChange((active) => {
+  updateFullscreenButtons(active);
 });
 
 boot();

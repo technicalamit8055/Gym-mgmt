@@ -146,7 +146,14 @@ a:hover { text-decoration: underline; }
 .btn.ghost { background: transparent; }
 .btn.danger { color: var(--red); border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); }
 .btn.sm { padding: 5px 10px; font-size: 13px; }
+.btn.icon-only { padding: 6px 10px; font-size: 16px; line-height: 1; }
 .btn.block { width: 100%; justify-content: center; }
+
+/* Fullscreen mode enhancements */
+body.is-fullscreen .topbar {
+  border-bottom-color: var(--brand-soft);
+}
+
 
 input, select, textarea {
   width: 100%; padding: 9px 12px; border-radius: 9px;

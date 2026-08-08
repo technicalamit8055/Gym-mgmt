@@ -520,3 +520,42 @@ export function lineChart(data, { height = 170, format = (v) => v } = {}) {
     ),
   );
 }
+
+/* ------------------------------------------------------------- fullscreen */
+
+export function isFullscreen() {
+  return Boolean(
+    document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.mozFullScreenElement ||
+      document.msFullscreenElement,
+  );
+}
+
+export async function toggleFullscreen() {
+  try {
+    if (isFullscreen()) {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+      else if (document.mozCancelFullScreen) await document.mozCancelFullScreen();
+      else if (document.msExitFullscreen) await document.msExitFullscreen();
+    } else {
+      const docEl = document.documentElement;
+      if (docEl.requestFullscreen) await docEl.requestFullscreen();
+      else if (docEl.webkitRequestFullscreen) await docEl.webkitRequestFullscreen();
+      else if (docEl.mozRequestFullScreen) await docEl.mozRequestFullScreen();
+      else if (docEl.msRequestFullscreen) await docEl.msRequestFullscreen();
+    }
+  } catch (err) {
+    console.warn('Fullscreen toggle failed:', err);
+    toast('Fullscreen mode is not permitted by your browser settings', 'error');
+  }
+}
+
+export function onFullscreenChange(callback) {
+  const events = ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'];
+  const handler = () => callback(isFullscreen());
+  events.forEach((evt) => document.addEventListener(evt, handler));
+  return () => events.forEach((evt) => document.removeEventListener(evt, handler));
+}
+

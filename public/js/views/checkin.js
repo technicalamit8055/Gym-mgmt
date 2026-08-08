@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { clear, date, fullName, h, initials, money, sourceBadge, statusBadge, table, time, toast, today } from '../ui.js';
+import { clear, date, fullName, h, initials, isFullscreen, money, sourceBadge, statusBadge, table, time, toast, today, toggleFullscreen } from '../ui.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -523,7 +523,16 @@ export async function renderCheckIn({ setActions }) {
     if (event.key === 'Enter') submit();
   });
 
-  setActions(h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
+  const kioskFullscreenBtn = h(
+    'button',
+    {
+      id: 'btn-fullscreen-checkin',
+      class: 'btn ghost',
+      onclick: () => toggleFullscreen(),
+    },
+    isFullscreen() ? '🗗 Exit Fullscreen' : '⛶ Kiosk Fullscreen',
+  );
+  setActions(kioskFullscreenBtn, h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
   await refreshLists();
   setTimeout(() => input.focus(), 50);
 

@@ -1,5 +1,5 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
-import { buildForm, date, h, relativeDays, setCurrency, toast } from '../ui.js';
+import { buildForm, date, h, isFullscreen, relativeDays, setCurrency, toast, toggleFullscreen } from '../ui.js';
 import { cropAndResizeImage } from '../photo.js';
 
 /**
@@ -313,6 +313,20 @@ export async function renderSettings({ reload }) {
           h('div', {}, tenant.slug),
           h('div', {}, 'Data'),
           h('div', {}, 'Its own database file'),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', {}, 'Display & Kiosk Mode')),
+        h('p', { class: 'muted', style: 'margin:0 0 14px' }, 'Toggle full screen mode to run GymBook in clean kiosk mode on your check-in desk or tablet.'),
+        h(
+          'button',
+          {
+            class: 'btn primary',
+            onclick: () => toggleFullscreen(),
+          },
+          isFullscreen() ? '🗗 Exit Fullscreen' : '⛶ Enter Fullscreen Mode',
         ),
       ),
     ),
