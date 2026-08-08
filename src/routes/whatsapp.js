@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { all, get, run } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { parse, toInt } from '../validate.js';
+import { generateReceiptPdf } from '../receiptPdf.js';
 import {
   connectWhatsApp,
   getWhatsAppStatus,
@@ -30,6 +31,7 @@ function settingsFor() {
     get('SELECT * FROM whatsapp_settings WHERE id = 1') ?? {
       id: 1,
       auto_receipt: 1,
+      send_pdf_receipt: 1,
       auto_reminder: 1,
       reminder_days_before: 3,
       receipt_template:
@@ -77,6 +79,7 @@ whatsappRoutes.get('/settings', (_req, res) => {
 whatsappRoutes.put('/settings', (req, res) => {
   const body = parse(req.body, {
     auto_receipt: { type: 'boolean', default: 0 },
+    send_pdf_receipt: { type: 'boolean', default: 1 },
     auto_reminder: { type: 'boolean', default: 0 },
     reminder_days_before: { type: 'int', default: 3, min: 0, max: 60 },
     receipt_template: { type: 'string', max: 1000, required: true },
@@ -86,11 +89,12 @@ whatsappRoutes.put('/settings', (req, res) => {
 
   run(
     `INSERT INTO whatsapp_settings
-       (id, auto_receipt, auto_reminder, reminder_days_before,
+       (id, auto_receipt, send_pdf_receipt, auto_reminder, reminder_days_before,
         receipt_template, reminder_template, welcome_template, updated_at)
-     VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET
        auto_receipt         = excluded.auto_receipt,
+       send_pdf_receipt     = excluded.send_pdf_receipt,
        auto_reminder        = excluded.auto_reminder,
        reminder_days_before = excluded.reminder_days_before,
        receipt_template     = excluded.receipt_template,
@@ -99,6 +103,7 @@ whatsappRoutes.put('/settings', (req, res) => {
        updated_at           = excluded.updated_at`,
     [
       body.auto_receipt,
+      body.send_pdf_receipt,
       body.auto_reminder,
       body.reminder_days_before,
       body.receipt_template,
@@ -117,8 +122,8 @@ whatsappRoutes.post('/send-receipt', async (req, res, next) => {
     if (!paymentId) throw badRequest('payment_id is required');
 
     const payment = get(
-      `SELECT pay.*, m.first_name, m.last_name, m.phone,
-              p.name AS plan_name, s.end_date
+      `SELECT pay.*, m.first_name, m.last_name, m.phone, m.code AS member_code,
+              p.name AS plan_name, s.start_date, s.end_date
        FROM payments pay
        JOIN members m ON m.id = pay.member_id
        LEFT JOIN subscriptions s ON s.id = pay.subscription_id
@@ -129,14 +134,69 @@ whatsappRoutes.post('/send-receipt', async (req, res, next) => {
     if (!payment) throw notFound('Payment not found');
     if (!payment.phone) throw badRequest('That member has no phone number on file');
 
+    const shouldAttachPdf = req.body?.send_pdf !== undefined
+      ? Boolean(req.body.send_pdf)
+      : Boolean(settingsFor().send_pdf_receipt);
+
+    let doc = null;
+    if (shouldAttachPdf) {
+      const pdfBuffer = req.body?.pdf_base64
+        ? Buffer.from(req.body.pdf_base64, 'base64')
+        : await generateReceiptPdf(payment, { gymName: gymNameFor(req) });
+      const receiptNo = payment.id ? `PAY-${String(payment.id).padStart(5, '0')}` : '00000';
+      doc = {
+        buffer: pdfBuffer,
+        fileName: `Receipt_${receiptNo}.pdf`,
+        mimetype: 'application/pdf',
+      };
+    }
+
     await sendWhatsAppMessage({
       phone: payment.phone,
       message: receiptMessage(payment, {
         gymName: gymNameFor(req),
         template: settingsFor().receipt_template,
       }),
+      document: doc,
       type: 'receipt',
       memberId: payment.member_id,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/whatsapp/send-id-card */
+whatsappRoutes.post('/send-id-card', async (req, res, next) => {
+  try {
+    const memberId = toInt(req.body?.member_id);
+    if (!memberId) throw badRequest('member_id is required');
+
+    const member = get(
+      'SELECT id, first_name, last_name, phone, code FROM members WHERE id = ?',
+      [memberId],
+    );
+    if (!member) throw notFound('Member not found');
+    if (!member.phone) throw badRequest('That member has no phone number on file');
+
+    const imageBase64 = req.body?.image_base64;
+    if (!imageBase64) throw badRequest('image_base64 is required');
+
+    const imageBuffer = Buffer.from(imageBase64, 'base64');
+    const gymName = gymNameFor(req);
+
+    await sendWhatsAppMessage({
+      phone: member.phone,
+      message: `Hi ${member.first_name}, here is your QR ID card for ${gymName}. Show this at reception for quick check-in! 🎟️`,
+      image: {
+        buffer: imageBuffer,
+        mimetype: 'image/png',
+        caption: `${member.first_name}'s QR ID Card — ${gymName}`,
+      },
+      type: 'id_card',
+      memberId: member.id,
     });
 
     res.json({ ok: true });

@@ -352,3 +352,30 @@ describe('the renewal sweep', () => {
     assert.equal(message, `Hi Ravi, Monthly ends ${addDays(today(), 3)} — Sunrise Gym`);
   });
 });
+
+const { generateReceiptPdf } = await import('../src/receiptPdf.js');
+
+describe('PDF receipt generation', () => {
+  it('generates a valid PDF buffer for a payment', async () => {
+    const pdfBuffer = await generateReceiptPdf(
+      {
+        id: 101,
+        amount: 2500,
+        method: 'upi',
+        paid_on: '2026-08-07',
+        first_name: 'Rahul',
+        last_name: 'Sharma',
+        member_code: 'M001',
+        phone: '9876543210',
+        plan_name: 'Quarterly Membership',
+        start_date: '2026-08-07',
+        end_date: '2026-11-07',
+      },
+      { gymName: 'Iron House Gym' },
+    );
+
+    assert.ok(Buffer.isBuffer(pdfBuffer));
+    assert.ok(pdfBuffer.length > 500);
+    assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
+  });
+});

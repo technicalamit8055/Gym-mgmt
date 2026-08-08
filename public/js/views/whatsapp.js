@@ -172,6 +172,16 @@ export async function renderWhatsApp({ setActions, reload }) {
           ],
         },
         {
+          name: 'send_pdf_receipt',
+          label: 'Attach PDF document to payment receipts',
+          type: 'select',
+          value: String(settings.send_pdf_receipt ?? 1),
+          options: [
+            { value: '1', label: 'On (Attach PDF Receipt)' },
+            { value: '0', label: 'Off (Text message only)' },
+          ],
+        },
+        {
           name: 'auto_reminder',
           label: 'Send renewal reminders automatically',
           type: 'select',
@@ -218,7 +228,13 @@ export async function renderWhatsApp({ setActions, reload }) {
       {
         submitLabel: 'Save',
         onSubmit: async (values) => {
-          await api.updateWhatsAppSettings(values);
+          await api.updateWhatsAppSettings({
+            ...values,
+            auto_receipt: values.auto_receipt === '1',
+            send_pdf_receipt: values.send_pdf_receipt === '1',
+            auto_reminder: values.auto_reminder === '1',
+            reminder_days_before: Number(values.reminder_days_before),
+          });
           toast('WhatsApp settings saved');
           reload();
         },

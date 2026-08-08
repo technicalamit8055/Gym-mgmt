@@ -307,6 +307,28 @@ function paintReceipt(ctx, ops) {
   }
 }
 
+export async function renderReceiptPdfBytes(data, { gymName = 'GymBook', logoUrl } = {}) {
+  const finalLogoUrl = logoUrl ?? getGymLogoUrl();
+  const logoImg = finalLogoUrl ? await loadImage(finalLogoUrl).catch(() => null) : null;
+
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  const layout = layoutReceipt(measureCtx, data, { gymName, logoImg });
+
+  const SCALE = 3;
+  const canvas = document.createElement('canvas');
+  canvas.width = layout.width * SCALE;
+  canvas.height = layout.height * SCALE;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(SCALE, SCALE);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, layout.width, layout.height);
+  paintReceipt(ctx, layout.ops);
+
+  const jpegBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+  return imageBytesToPdf(jpegBytes, canvas.width, canvas.height, { dpi: 72 * SCALE });
+}
+
 /**
  * Downloads a payment receipt as a PDF — rendered to a canvas first (so any
  * currency symbol or script the browser can display comes through correctly,
@@ -319,25 +341,7 @@ function paintReceipt(ctx, ops) {
  * @param {string} opts.gymName - The gym's display name
  */
 export async function downloadReceipt(data, { gymName = 'GymBook', logoUrl } = {}) {
-  const finalLogoUrl = logoUrl ?? getGymLogoUrl();
-  const logoImg = finalLogoUrl ? await loadImage(finalLogoUrl).catch(() => null) : null;
-
-  const measureCtx = document.createElement('canvas').getContext('2d');
-  const layout = layoutReceipt(measureCtx, data, { gymName, logoImg });
-
-  const SCALE = 3; // renders crisp text into the rasterized PDF page
-  const canvas = document.createElement('canvas');
-  canvas.width = layout.width * SCALE;
-  canvas.height = layout.height * SCALE;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(SCALE, SCALE);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, layout.width, layout.height);
-  paintReceipt(ctx, layout.ops);
-
-  const jpegBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-  const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
-  const pdfBytes = imageBytesToPdf(jpegBytes, canvas.width, canvas.height, { dpi: 72 * SCALE });
+  const pdfBytes = await renderReceiptPdfBytes(data, { gymName, logoUrl });
 
   const receiptNo = data.id ? `PAY-${String(data.id).padStart(5, '0')}` : 'receipt';
   const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));

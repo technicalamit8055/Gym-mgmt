@@ -186,6 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_biometric_cred ON biometric_credentials(credentia
 CREATE TABLE IF NOT EXISTS whatsapp_settings (
   id                      INTEGER PRIMARY KEY CHECK (id = 1),
   auto_receipt            INTEGER NOT NULL DEFAULT 1,
+  send_pdf_receipt        INTEGER NOT NULL DEFAULT 1,
   auto_reminder           INTEGER NOT NULL DEFAULT 1,
   reminder_days_before    INTEGER NOT NULL DEFAULT 3,
   receipt_template        TEXT NOT NULL DEFAULT 'Hi {{first_name}}, thank you for your payment of {{amount}} for {{plan_name}}. Your membership is valid until {{end_date}}. - {{gym_name}}',
@@ -308,6 +309,7 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS whatsapp_settings (
         id                      INTEGER PRIMARY KEY CHECK (id = 1),
         auto_receipt            INTEGER NOT NULL DEFAULT 1,
+        send_pdf_receipt        INTEGER NOT NULL DEFAULT 1,
         auto_reminder           INTEGER NOT NULL DEFAULT 1,
         reminder_days_before    INTEGER NOT NULL DEFAULT 3,
         receipt_template        TEXT NOT NULL DEFAULT 'Hi {{first_name}}, thank you for your payment of {{amount}} for {{plan_name}}. Your membership is valid until {{end_date}}. - {{gym_name}}',
@@ -316,6 +318,7 @@ const MIGRATIONS = [
         updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
+    ensureColumn(db, 'whatsapp_settings', 'send_pdf_receipt', 'INTEGER NOT NULL DEFAULT 1');
     db.prepare('INSERT OR IGNORE INTO whatsapp_settings (id) VALUES (1)').run();
   },
   (db) => {

@@ -17,7 +17,7 @@ import {
   today,
 } from '../ui.js';
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
-import { downloadCardPng, idCardNode, printCards } from '../qrcard.js';
+import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../qrcard.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
 
@@ -750,6 +750,34 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
             },
             '⬇️ Download image',
           ),
+          session.managesBilling
+            ? h(
+                'button',
+                {
+                  class: 'btn sm',
+                  title: 'Send ID card to member on WhatsApp',
+                  onclick: async (event) => {
+                    const button = event.target;
+                    button.disabled = true;
+                    try {
+                      const pngBytes = await renderCardPngBytes(card);
+                      let binary = '';
+                      for (let i = 0; i < pngBytes.byteLength; i++) {
+                        binary += String.fromCharCode(pngBytes[i]);
+                      }
+                      const imageBase64 = btoa(binary);
+                      await api.sendWhatsAppIdCard(member.id, imageBase64);
+                      toast('ID card sent on WhatsApp');
+                    } catch (err) {
+                      toast(err.message || 'Could not send the ID card', 'error');
+                    } finally {
+                      button.disabled = false;
+                    }
+                  },
+                },
+                '💬 Send to WhatsApp',
+              )
+            : null,
           h(
             'button',
             {

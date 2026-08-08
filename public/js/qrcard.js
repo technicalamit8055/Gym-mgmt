@@ -98,21 +98,27 @@ const loadImage = (src) =>
  * still works. A photo that fails to load is skipped rather than losing the
  * whole download.
  */
-export async function downloadCardPng(card) {
+export async function renderCardPngBytes(card) {
   const scale = 300; // dpi
-  const width = Math.round(CARD_W_IN * scale);
-  const height = Math.round(CARD_H_IN * scale);
+  const width = Math.round(CARD_W_IN * scale); // ~1013px
+  const height = Math.round(CARD_H_IN * scale); // ~638px
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
 
+  // Card background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
-  // Header band
-  const bandHeight = Math.round(height * 0.19);
+  // Card outer border line
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = Math.round(scale * 0.01);
+  ctx.strokeRect(0, 0, width, height);
+
+  // Header band (#111827)
+  const bandHeight = Math.round(height * 0.18);
   ctx.fillStyle = '#111827';
   ctx.fillRect(0, 0, width, bandHeight);
 
@@ -122,7 +128,7 @@ export async function downloadCardPng(card) {
   if (logoUrl) {
     try {
       const logoImg = await loadImage(logoUrl);
-      const logoSize = Math.round(bandHeight * 0.65);
+      const logoSize = Math.round(bandHeight * 0.62);
       const logoX = Math.round(width * 0.04);
       const logoY = Math.round((bandHeight - logoSize) / 2);
 
@@ -143,26 +149,31 @@ export async function downloadCardPng(card) {
     }
   }
 
+  // Gym Name in header band
   ctx.fillStyle = '#ffffff';
-  ctx.font = `600 ${Math.round(bandHeight * 0.42)}px system-ui, sans-serif`;
+  ctx.font = `600 ${Math.round(bandHeight * 0.44)}px system-ui, sans-serif`;
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(card.gym_name, textX, bandHeight / 2, width * 0.95 - textX);
 
   const member = card.member;
   const left = Math.round(width * 0.05);
-  let y = bandHeight + Math.round(height * 0.16);
+  const maxTextWidth = Math.round(width * 0.48);
 
+  let currentY = bandHeight + Math.round(height * 0.05);
+
+  // Member photo (if present)
   if (member.photo_url) {
     try {
       const photoImg = await loadImage(member.photo_url);
-      const photoSize = Math.round(height * 0.28);
+      const photoSize = Math.round(height * 0.32);
       const photoX = left;
-      const photoY = bandHeight + Math.round(height * 0.05);
+      const photoY = currentY;
 
       ctx.save();
       ctx.beginPath();
       if (ctx.roundRect) {
-        ctx.roundRect(photoX, photoY, photoSize, photoSize, Math.round(height * 0.03));
+        ctx.roundRect(photoX, photoY, photoSize, photoSize, Math.round(photoSize * 0.12));
       } else {
         ctx.rect(photoX, photoY, photoSize, photoSize);
       }
@@ -170,40 +181,58 @@ export async function downloadCardPng(card) {
       ctx.drawImage(photoImg, photoX, photoY, photoSize, photoSize);
       ctx.restore();
 
-      y = photoY + photoSize + Math.round(height * 0.1);
+      currentY = photoY + photoSize + Math.round(height * 0.04);
     } catch {
       // Fallback gracefully if image fails to load
     }
+  } else {
+    currentY += Math.round(height * 0.04);
   }
 
+  ctx.textBaseline = 'top';
+
+  // Member Name
   ctx.fillStyle = '#111827';
-  ctx.font = `700 ${Math.round(height * 0.115)}px system-ui, sans-serif`;
-  ctx.fillText(fullName(member), left, y, width * 0.55);
+  ctx.font = `700 ${Math.round(height * 0.085)}px system-ui, sans-serif`;
+  ctx.fillText(fullName(member), left, currentY, maxTextWidth);
+  currentY += Math.round(height * 0.095);
 
-  y += Math.round(height * 0.15);
-  ctx.fillStyle = '#6b7280';
-  ctx.font = `500 ${Math.round(height * 0.082)}px ui-monospace, monospace`;
-  ctx.fillText(member.code, left, y, width * 0.55);
+  // Member Code
+  ctx.fillStyle = '#4b5563';
+  ctx.font = `500 ${Math.round(height * 0.065)}px ui-monospace, monospace`;
+  ctx.fillText(member.code, left, currentY, maxTextWidth);
+  currentY += Math.round(height * 0.08);
 
-  if (member.membership_end) {
-    y += Math.round(height * 0.125);
-    ctx.font = `400 ${Math.round(height * 0.066)}px system-ui, sans-serif`;
-    ctx.fillText(`Valid until ${date(member.membership_end)}`, left, y, width * 0.55);
-  }
-
-  ctx.fillStyle = '#9ca3af';
+  // Validity Date / Membership Status
+  ctx.fillStyle = member.membership_end ? '#4b5563' : '#9ca3af';
   ctx.font = `400 ${Math.round(height * 0.055)}px system-ui, sans-serif`;
-  ctx.fillText('Scan at reception', left, height - Math.round(height * 0.08), width * 0.55);
+  const validText = member.membership_end ? `Valid until ${date(member.membership_end)}` : 'No active membership';
+  ctx.fillText(validText, left, currentY, maxTextWidth);
 
-  // QR block, right-aligned. Data URL, so the canvas stays untainted.
+  // QR block on the right side
   const qr = await loadImage(card.png);
-  const qrSize = Math.round(height * 0.62);
+  const qrSize = Math.round(height * 0.54);
   const qrX = width - qrSize - Math.round(width * 0.05);
-  const qrY = bandHeight + Math.round((height - bandHeight - qrSize) / 2);
+  const qrY = bandHeight + Math.round(height * 0.06);
   ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
+  // "Scan at reception" centered directly under the QR code
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = `400 ${Math.round(height * 0.048)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('Scan at reception', qrX + qrSize / 2, qrY + qrSize + Math.round(height * 0.03));
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+export async function downloadCardPng(card) {
+  const pngBytes = await renderCardPngBytes(card);
+  const member = card.member;
   const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/png');
+  link.href = URL.createObjectURL(new Blob([pngBytes], { type: 'image/png' }));
   link.download = `${member.code}-gym-card.png`;
   link.click();
+  URL.revokeObjectURL(link.href);
 }

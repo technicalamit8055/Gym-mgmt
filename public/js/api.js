@@ -256,7 +256,10 @@ export const api = {
   whatsappLogout: () => request('POST', '/whatsapp/logout'),
   whatsappSettings: () => request('GET', '/whatsapp/settings'),
   updateWhatsAppSettings: (payload) => request('PUT', '/whatsapp/settings', payload),
-  sendWhatsAppReceipt: (paymentId) => request('POST', '/whatsapp/send-receipt', { payment_id: paymentId }),
+  sendWhatsAppReceipt: (paymentId, pdfBase64) =>
+    request('POST', '/whatsapp/send-receipt', { payment_id: paymentId, pdf_base64: pdfBase64 }),
+  sendWhatsAppIdCard: (memberId, imageBase64) =>
+    request('POST', '/whatsapp/send-id-card', { member_id: memberId, image_base64: imageBase64 }),
   sendWhatsAppReminder: (payload) => request('POST', '/whatsapp/send-reminder', payload),
   sendWhatsAppTest: (payload) => request('POST', '/whatsapp/send-test', payload),
   whatsappLogs: (params) => request('GET', `/whatsapp/logs${query(params)}`),

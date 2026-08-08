@@ -303,7 +303,7 @@ function logDelivery(store, row) {
  * that settles when their own message has actually gone out, so a failure is
  * still reportable even though the send may have waited behind others.
  */
-export async function sendWhatsAppMessage({ phone, message, type = 'custom', memberId = null, slug = currentSlug() }) {
+export async function sendWhatsAppMessage({ phone, message, document = null, image = null, type = 'custom', memberId = null, slug = currentSlug() }) {
   const session = sessionFor(slug);
   // Captured now, while we are still inside the caller's request context.
   const store = tenantStorage.getStore();
@@ -319,7 +319,7 @@ export async function sendWhatsAppMessage({ phone, message, type = 'custom', mem
 
   if (!phone) fail('No phone number on file for this member');
   if (!jid) fail(`"${phone}" is not a valid phone number`);
-  if (!message) fail('Message is empty');
+  if (!message && !document && !image) fail('Message is empty');
   if (session.state !== 'CONNECTED' || !session.sock) {
     fail('WhatsApp is not connected. Scan the QR code on the WhatsApp page first.');
   }
@@ -341,7 +341,22 @@ export async function sendWhatsAppMessage({ phone, message, type = 'custom', mem
     }
 
     try {
-      await sock.sendMessage(jid, { text: message });
+      if (image && image.buffer) {
+        await sock.sendMessage(jid, {
+          image: image.buffer,
+          mimetype: image.mimetype || 'image/png',
+          caption: image.caption || message || '',
+        });
+      } else if (document && document.buffer) {
+        await sock.sendMessage(jid, {
+          document: document.buffer,
+          fileName: document.fileName || 'Receipt.pdf',
+          mimetype: document.mimetype || 'application/pdf',
+          caption: message || '',
+        });
+      } else {
+        await sock.sendMessage(jid, { text: message });
+      }
     } catch (err) {
       fail(err.message || 'WhatsApp rejected the message');
     }
