@@ -5,6 +5,8 @@ import { badRequest, conflict, notFound } from '../errors.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
 import { addDays, parse, today, toInt } from '../validate.js';
 
+import { sendAutoReceiptIfEnabled } from './payments.js';
+
 export const subscriptionRoutes = Router();
 subscriptionRoutes.use(requireAuth);
 
@@ -82,6 +84,7 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
 
   const endDate = addDays(startDate, plan.duration_days - 1);
 
+  let paymentId = null;
   const result = tx(() => {
     const info = run(
       `INSERT INTO subscriptions
@@ -102,7 +105,7 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
     const subscriptionId = Number(info.lastInsertRowid);
 
     if (body.payment_amount > 0) {
-      run(
+      const payInfo = run(
         'INSERT INTO payments (member_id, subscription_id, amount, method, paid_on, reference, note) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [
           member.id,
@@ -114,12 +117,19 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
           `Payment for ${plan.name}`,
         ],
       );
+      paymentId = Number(payInfo.lastInsertRowid);
     }
     if (member.status !== 'active') {
       run("UPDATE members SET status = 'active', updated_at = datetime('now') WHERE id = ?", [member.id]);
     }
     return subscriptionId;
   });
+
+  if (paymentId) {
+    sendAutoReceiptIfEnabled(paymentId, req).catch((err) =>
+      console.error('[whatsapp] auto-receipt for membership failed:', err.message),
+    );
+  }
 
   res.status(201).json(get(`${SUB_SELECT} WHERE s.id = ?`, [result]));
 });

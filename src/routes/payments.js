@@ -83,46 +83,51 @@ paymentRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
 
   const paymentRecord = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [info.lastInsertRowid]);
 
-  // Fire-and-forget: a WhatsApp hiccup must never fail the payment that was
-  // already written, and the receipt is queued behind any other sends anyway.
-  // sendWhatsAppMessage records its own success/failure in whatsapp_logs.
-  try {
-    const settings = get('SELECT auto_receipt, send_pdf_receipt, receipt_template FROM whatsapp_settings WHERE id = 1');
-    if (settings?.auto_receipt && paymentRecord?.phone && getWhatsAppStatus().connected) {
-      const gymName = req.tenant?.gym_name || config.gymName || 'GymBook';
-      (async () => {
-        let doc = null;
-        if (settings.send_pdf_receipt !== 0) {
-          try {
-            const pdfBuffer = await generateReceiptPdf(paymentRecord, { gymName });
-            const receiptNo = paymentRecord.id ? `PAY-${String(paymentRecord.id).padStart(5, '0')}` : '00000';
-            doc = {
-              buffer: pdfBuffer,
-              fileName: `Receipt_${receiptNo}.pdf`,
-              mimetype: 'application/pdf',
-            };
-          } catch (pdfErr) {
-            console.error('[whatsapp] failed to generate PDF receipt:', pdfErr.message);
-          }
-        }
-        await sendWhatsAppMessage({
-          phone: paymentRecord.phone,
-          message: receiptMessage(paymentRecord, {
-            gymName,
-            template: settings.receipt_template,
-          }),
-          document: doc,
-          type: 'receipt',
-          memberId: paymentRecord.member_id,
-        });
-      })().catch((err) => console.error('[whatsapp] auto-receipt failed:', err.message));
-    }
-  } catch (err) {
-    console.error('[whatsapp] could not queue the auto-receipt:', err.message);
-  }
+  sendAutoReceiptIfEnabled(info.lastInsertRowid, req).catch((err) =>
+    console.error('[whatsapp] auto-receipt failed:', err.message),
+  );
 
   res.status(201).json(paymentRecord);
 });
+
+export async function sendAutoReceiptIfEnabled(paymentId, req) {
+  if (!paymentId) return;
+  try {
+    const paymentRecord = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [paymentId]);
+    if (!paymentRecord || !paymentRecord.phone) return;
+
+    const settings = get('SELECT auto_receipt, send_pdf_receipt, receipt_template FROM whatsapp_settings WHERE id = 1');
+    if (settings?.auto_receipt && getWhatsAppStatus().connected) {
+      const gymName = req?.tenant?.gym_name || config.gymName || 'GymBook';
+      let doc = null;
+      if (settings.send_pdf_receipt !== 0) {
+        try {
+          const pdfBuffer = await generateReceiptPdf(paymentRecord, { gymName });
+          const receiptNo = paymentRecord.id ? `PAY-${String(paymentRecord.id).padStart(5, '0')}` : '00000';
+          doc = {
+            buffer: pdfBuffer,
+            fileName: `Receipt_${receiptNo}.pdf`,
+            mimetype: 'application/pdf',
+          };
+        } catch (pdfErr) {
+          console.error('[whatsapp] failed to generate PDF receipt:', pdfErr.message);
+        }
+      }
+      await sendWhatsAppMessage({
+        phone: paymentRecord.phone,
+        message: receiptMessage(paymentRecord, {
+          gymName,
+          template: settings.receipt_template,
+        }),
+        document: doc,
+        type: 'receipt',
+        memberId: paymentRecord.member_id,
+      });
+    }
+  } catch (err) {
+    console.error('[whatsapp] could not send auto-receipt:', err.message);
+  }
+}
 
 paymentRoutes.get('/:id/receipt', (req, res) => {
   const payment = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [Number(req.params.id)]);
