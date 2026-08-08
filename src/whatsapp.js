@@ -408,6 +408,18 @@ export function reminderMessage(sub, { gymName, template }) {
   });
 }
 
+/** Builds the freeze-notice message, sent when a membership is frozen. */
+export function freezeMessage(sub, { gymName, template }) {
+  return renderTemplate(template, {
+    first_name: sub.first_name,
+    last_name: sub.last_name,
+    plan_name: sub.plan_name,
+    end_date: sub.end_date,
+    frozen_on: sub.frozen_on,
+    gym_name: gymName,
+  });
+}
+
 /** Closes every socket — for graceful shutdown. */
 export function closeAllWhatsAppSessions() {
   for (const session of sessions.values()) teardown(session);

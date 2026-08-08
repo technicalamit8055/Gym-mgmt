@@ -15,7 +15,7 @@ const { createApp } = await import('../src/app.js');
 const { closeDb, tenantStorage } = await import('../src/db.js');
 const { closeRegistryDb, tenantDbPath } = await import('../src/tenants.js');
 const { addDays, today } = await import('../src/validate.js');
-const { formatPhoneNumber, getWhatsAppStatus, hasStoredCredentials, renderTemplate, reminderMessage } =
+const { formatPhoneNumber, freezeMessage, getWhatsAppStatus, hasStoredCredentials, renderTemplate, reminderMessage } =
   await import('../src/whatsapp.js');
 const { sendAutomatedRenewalReminders } = await import('../src/maintenance.js');
 
@@ -194,7 +194,9 @@ describe('settings are per gym', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.auto_receipt, 1);
     assert.equal(res.body.reminder_days_before, 3);
+    assert.equal(res.body.auto_freeze, 1);
     assert.match(res.body.receipt_template, /\{\{first_name\}\}/);
+    assert.match(res.body.freeze_template, /\{\{plan_name\}\}/);
   });
 
   it('round-trips a saved change', async () => {
@@ -205,9 +207,11 @@ describe('settings are per gym', () => {
         auto_receipt: '0',
         auto_reminder: '1',
         reminder_days_before: '7',
+        auto_freeze: '0',
         receipt_template: 'Paid {{amount}} — {{gym_name}}',
         reminder_template: 'Expiring {{end_date}} — {{gym_name}}',
         welcome_template: 'Welcome {{first_name}}',
+        freeze_template: 'Frozen {{plan_name}} — {{gym_name}}',
       },
       { token: acmeToken, tenant: 'acmewa' },
     );
@@ -215,9 +219,11 @@ describe('settings are per gym', () => {
     assert.equal(saved.body.auto_receipt, 0);
     assert.equal(saved.body.auto_reminder, 1);
     assert.equal(saved.body.reminder_days_before, 7);
+    assert.equal(saved.body.auto_freeze, 0);
 
     const reread = await call('GET', '/api/whatsapp/settings', null, { token: acmeToken, tenant: 'acmewa' });
     assert.equal(reread.body.receipt_template, 'Paid {{amount}} — {{gym_name}}');
+    assert.equal(reread.body.freeze_template, 'Frozen {{plan_name}} — {{gym_name}}');
   });
 
   it('does not leak one gym’s templates into another', async () => {
@@ -350,6 +356,38 @@ describe('the renewal sweep', () => {
       { gymName: 'Sunrise Gym', template: 'Hi {{first_name}}, {{plan_name}} ends {{end_date}} — {{gym_name}}' },
     );
     assert.equal(message, `Hi Ravi, Monthly ends ${addDays(today(), 3)} — Sunrise Gym`);
+  });
+});
+
+describe('freezing a membership', () => {
+  it('builds the freeze notice from the gym name and plan', () => {
+    const message = freezeMessage(
+      { first_name: 'Asha', last_name: 'Menon', plan_name: 'Monthly', end_date: '2026-09-01' },
+      { gymName: 'Sunrise Gym', template: 'Hi {{first_name}}, {{plan_name}} is frozen — {{gym_name}}' },
+    );
+    assert.equal(message, 'Hi Asha, Monthly is frozen — Sunrise Gym');
+  });
+
+  it('freezes successfully and sends no notice while WhatsApp is unlinked', async () => {
+    const token = (await login('sendwa')).body.token;
+    const ctx = { token, tenant: 'sendwa' };
+
+    const subs = await call('GET', '/api/subscriptions', null, ctx);
+    const activeSub = subs.body.items.find((s) => s.first_name === 'Asha' && s.status === 'active');
+    assert.ok(activeSub, 'expected Asha to still have an active subscription to freeze');
+
+    const before = await call('GET', '/api/whatsapp/logs', null, ctx);
+
+    const freeze = await call('POST', `/api/subscriptions/${activeSub.id}/freeze`, {}, ctx);
+    assert.equal(freeze.status, 200);
+    assert.equal(freeze.body.status, 'frozen');
+
+    // Mirrors the auto-receipt gate: an automated send checks the connection
+    // before ever calling sendWhatsAppMessage, so nothing gets queued or
+    // logged while the gym is unlinked — unlike the manual send-receipt
+    // endpoint, which always attempts the send and logs the failure.
+    const after = await call('GET', '/api/whatsapp/logs', null, ctx);
+    assert.equal(after.body.items.length, before.body.items.length);
   });
 });
 

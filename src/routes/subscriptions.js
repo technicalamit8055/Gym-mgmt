@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { MANAGES_BILLING, requireAuth, requireRole } from '../auth.js';
+import { config } from '../config.js';
 import { all, get, run, tx } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
 import { addDays, parse, today, toInt } from '../validate.js';
+import { freezeMessage, getWhatsAppStatus, sendWhatsAppMessage } from '../whatsapp.js';
 
 import { sendAutoReceiptIfEnabled } from './payments.js';
 
@@ -139,8 +141,36 @@ subscriptionRoutes.post('/:id/freeze', requireRole(...MANAGES_BILLING), (req, re
   if (sub.status !== 'active') throw badRequest('Only an active membership can be frozen');
   run("UPDATE subscriptions SET status = 'frozen', frozen_on = ? WHERE id = ?", [today(), sub.id]);
   run("UPDATE members SET status = 'frozen', updated_at = datetime('now') WHERE id = ?", [sub.member_id]);
-  res.json(get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]));
+
+  const updated = get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]);
+  sendAutoFreezeNoticeIfEnabled(updated, req).catch((err) =>
+    console.error('[whatsapp] auto-freeze notice failed:', err.message),
+  );
+  res.json(updated);
 });
+
+/** Fire-and-forget WhatsApp notice for a freshly frozen membership — mirrors
+ * sendAutoReceiptIfEnabled so the member hears it from the gym, not just
+ * finds out at the door next time their card doesn't work. */
+async function sendAutoFreezeNoticeIfEnabled(sub, req) {
+  try {
+    const member = get('SELECT phone FROM members WHERE id = ?', [sub.member_id]);
+    if (!member?.phone) return;
+
+    const settings = get('SELECT auto_freeze, freeze_template FROM whatsapp_settings WHERE id = 1');
+    if (settings?.auto_freeze && getWhatsAppStatus().connected) {
+      const gymName = req?.tenant?.gym_name || config.gymName || 'GymBook';
+      await sendWhatsAppMessage({
+        phone: member.phone,
+        message: freezeMessage(sub, { gymName, template: settings.freeze_template }),
+        type: 'freeze',
+        memberId: sub.member_id,
+      });
+    }
+  } catch (err) {
+    console.error('[whatsapp] could not send freeze notice:', err.message);
+  }
+}
 
 subscriptionRoutes.post('/:id/resume', requireRole(...MANAGES_BILLING), (req, res) => {
   const sub = loadSubscription(req.params.id);

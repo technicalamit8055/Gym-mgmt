@@ -201,6 +201,16 @@ export async function renderWhatsApp({ setActions, reload }) {
           hint: 'Members are also reminded on the day their membership ends.',
         },
         {
+          name: 'auto_freeze',
+          label: 'Notify a member automatically when their membership is frozen',
+          type: 'select',
+          value: String(settings.auto_freeze ?? 1),
+          options: [
+            { value: '1', label: 'On' },
+            { value: '0', label: 'Off' },
+          ],
+        },
+        {
           name: 'receipt_template',
           label: 'Receipt message',
           type: 'textarea',
@@ -224,6 +234,14 @@ export async function renderWhatsApp({ setActions, reload }) {
           value: settings.welcome_template || '',
           hint: 'Tags: {{first_name}} {{last_name}} {{gym_name}}',
         },
+        {
+          name: 'freeze_template',
+          label: 'Freeze notice message',
+          type: 'textarea',
+          full: true,
+          value: settings.freeze_template || '',
+          hint: 'Tags: {{first_name}} {{last_name}} {{plan_name}} {{end_date}} {{gym_name}}',
+        },
       ],
       {
         submitLabel: 'Save',
@@ -234,6 +252,7 @@ export async function renderWhatsApp({ setActions, reload }) {
             send_pdf_receipt: values.send_pdf_receipt === '1',
             auto_reminder: values.auto_reminder === '1',
             reminder_days_before: Number(values.reminder_days_before),
+            auto_freeze: values.auto_freeze === '1',
           });
           toast('WhatsApp settings saved');
           reload();
@@ -318,7 +337,17 @@ export async function renderWhatsApp({ setActions, reload }) {
             render: (row) =>
               h(
                 'span',
-                { class: `badge ${row.type === 'receipt' ? 'blue' : row.type === 'reminder' ? 'amber' : 'grey'}` },
+                {
+                  class: `badge ${
+                    row.type === 'receipt'
+                      ? 'blue'
+                      : row.type === 'reminder'
+                        ? 'amber'
+                        : row.type === 'freeze'
+                          ? 'violet'
+                          : 'grey'
+                  }`,
+                },
                 row.type,
               ),
           },

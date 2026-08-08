@@ -102,7 +102,10 @@ export async function sendAutoReceiptIfEnabled(paymentId, req) {
       let doc = null;
       if (settings.send_pdf_receipt !== 0) {
         try {
-          const pdfBuffer = await generateReceiptPdf(paymentRecord, { gymName });
+          const pdfBuffer = await generateReceiptPdf(paymentRecord, {
+            gymName,
+            logoBuffer: req?.tenant?.logo_bytes ? Buffer.from(req.tenant.logo_bytes) : null,
+          });
           const receiptNo = paymentRecord.id ? `PAY-${String(paymentRecord.id).padStart(5, '0')}` : '00000';
           doc = {
             buffer: pdfBuffer,

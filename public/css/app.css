@@ -242,7 +242,10 @@ tbody tr.clickable { cursor: pointer; }
 .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; font-size: 14px; }
 .kv dt { color: var(--muted); }
-.kv dd { margin: 0; }
+/* min-width: 0 lets the grid cell shrink below its content's natural width;
+   overflow-wrap breaks a long unbreakable value (email, long note) onto the
+   next line instead of spilling out of the card and getting clipped. */
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .pagination { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 14px; font-size: 14px; }
 
 .list { display: flex; flex-direction: column; }

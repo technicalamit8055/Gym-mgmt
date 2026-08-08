@@ -14,7 +14,7 @@ import {
   toast,
 } from '../ui.js';
 import { openMembershipForm, openPaymentForm } from './forms.js';
-import { downloadReceipt, getGymName, printReceipt, renderReceiptPdfBytes } from '../receipt.js';
+import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 
 export async function renderBilling({ setActions, reload }) {
   const state = { tab: 'memberships', filter: 'active', from: '', to: '' };
@@ -240,20 +240,11 @@ export async function renderBilling({ setActions, reload }) {
                             const button = event.currentTarget;
                             button.disabled = true;
                             try {
-                              const fullPayment = await api.paymentReceipt(row.id);
-                              let pdfBase64;
-                              try {
-                                const pdfBytes = await renderReceiptPdfBytes(fullPayment, { gymName: getGymName() });
-                                let binary = '';
-                                const bytes = new Uint8Array(pdfBytes);
-                                for (let i = 0; i < bytes.byteLength; i++) {
-                                  binary += String.fromCharCode(bytes[i]);
-                                }
-                                pdfBase64 = btoa(binary);
-                              } catch (e) {
-                                console.warn('Could not render client canvas PDF, falling back to server generator', e);
-                              }
-                              await api.sendWhatsAppReceipt(row.id, pdfBase64);
+                              // Let the server attach its own built-in PDF receipt
+                              // (src/receiptPdf.js) rather than rendering a fresh one
+                              // here — keeps the WhatsApp copy identical to the
+                              // auto-sent one instead of a second, divergent render.
+                              await api.sendWhatsAppReceipt(row.id);
                               toast('Receipt sent on WhatsApp');
                             } catch (err) {
                               toast(err.message || 'Could not send the receipt', 'error');

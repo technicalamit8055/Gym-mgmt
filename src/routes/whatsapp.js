@@ -34,11 +34,14 @@ function settingsFor() {
       send_pdf_receipt: 1,
       auto_reminder: 1,
       reminder_days_before: 3,
+      auto_freeze: 1,
       receipt_template:
         'Hi {{first_name}}, thank you for your payment of {{amount}} for {{plan_name}}. Your membership is valid until {{end_date}}. - {{gym_name}}',
       reminder_template:
         'Hi {{first_name}}, your membership ({{plan_name}}) expires on {{end_date}}. Please renew to continue your workouts! - {{gym_name}}',
       welcome_template: 'Welcome to {{gym_name}}, {{first_name}}! We are thrilled to have you on board.',
+      freeze_template:
+        'Hi {{first_name}}, your membership ({{plan_name}}) has been frozen. It will resume once you or the gym reactivates it. - {{gym_name}}',
     }
   );
 }
@@ -82,33 +85,39 @@ whatsappRoutes.put('/settings', (req, res) => {
     send_pdf_receipt: { type: 'boolean', default: 1 },
     auto_reminder: { type: 'boolean', default: 0 },
     reminder_days_before: { type: 'int', default: 3, min: 0, max: 60 },
+    auto_freeze: { type: 'boolean', default: 0 },
     receipt_template: { type: 'string', max: 1000, required: true },
     reminder_template: { type: 'string', max: 1000, required: true },
     welcome_template: { type: 'string', max: 1000, required: true },
+    freeze_template: { type: 'string', max: 1000, required: true },
   });
 
   run(
     `INSERT INTO whatsapp_settings
-       (id, auto_receipt, send_pdf_receipt, auto_reminder, reminder_days_before,
-        receipt_template, reminder_template, welcome_template, updated_at)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       (id, auto_receipt, send_pdf_receipt, auto_reminder, reminder_days_before, auto_freeze,
+        receipt_template, reminder_template, welcome_template, freeze_template, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET
        auto_receipt         = excluded.auto_receipt,
        send_pdf_receipt     = excluded.send_pdf_receipt,
        auto_reminder        = excluded.auto_reminder,
        reminder_days_before = excluded.reminder_days_before,
+       auto_freeze          = excluded.auto_freeze,
        receipt_template     = excluded.receipt_template,
        reminder_template    = excluded.reminder_template,
        welcome_template     = excluded.welcome_template,
+       freeze_template      = excluded.freeze_template,
        updated_at           = excluded.updated_at`,
     [
       body.auto_receipt,
       body.send_pdf_receipt,
       body.auto_reminder,
       body.reminder_days_before,
+      body.auto_freeze,
       body.receipt_template,
       body.reminder_template,
       body.welcome_template,
+      body.freeze_template,
     ],
   );
 
@@ -142,7 +151,10 @@ whatsappRoutes.post('/send-receipt', async (req, res, next) => {
     if (shouldAttachPdf) {
       const pdfBuffer = req.body?.pdf_base64
         ? Buffer.from(req.body.pdf_base64, 'base64')
-        : await generateReceiptPdf(payment, { gymName: gymNameFor(req) });
+        : await generateReceiptPdf(payment, {
+            gymName: gymNameFor(req),
+            logoBuffer: req?.tenant?.logo_bytes ? Buffer.from(req.tenant.logo_bytes) : null,
+          });
       const receiptNo = payment.id ? `PAY-${String(payment.id).padStart(5, '0')}` : '00000';
       doc = {
         buffer: pdfBuffer,
