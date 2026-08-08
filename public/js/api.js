@@ -157,12 +157,24 @@ export const api = {
     request('POST', '/platform/admin/login', { email, password }, { anonymous: true }),
   platformTenants: (params) =>
     request('GET', `/platform/admin/tenants${query(params)}`, undefined, { token: platformSession.token }),
+  platformTenant: (slug) =>
+    request('GET', `/platform/admin/tenants/${slug}`, undefined, { token: platformSession.token }),
   platformSetStatus: (slug, payload) =>
     request('POST', `/platform/admin/tenants/${slug}/status`, payload, { token: platformSession.token }),
+  platformUpdateTenant: (slug, payload) =>
+    request('PATCH', `/platform/admin/tenants/${slug}`, payload, { token: platformSession.token }),
+  platformDeleteTenant: (slug, payload) =>
+    request('DELETE', `/platform/admin/tenants/${slug}`, payload, { token: platformSession.token }),
   platformIssuePasswordReset: (slug, payload) =>
     request('POST', `/platform/admin/tenants/${slug}/password-reset`, payload, {
       token: platformSession.token,
     }),
+  platformAnalytics: () =>
+    request('GET', '/platform/admin/analytics', undefined, { token: platformSession.token }),
+  platformBackups: () =>
+    request('GET', '/platform/admin/backups', undefined, { token: platformSession.token }),
+  platformRunBackup: () =>
+    request('POST', '/platform/admin/backups/run', {}, { token: platformSession.token }),
 
   dashboard: () => request('GET', '/dashboard'),
 

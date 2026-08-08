@@ -93,6 +93,19 @@ export function findTenantBySlug(slug) {
   return plain(getRegistryDb().prepare('SELECT * FROM tenants WHERE slug = ?').get(slug));
 }
 
+/**
+ * A registry row with its logo BLOB dropped, safe to serialise into JSON.
+ *
+ * `SELECT *` carries logo_bytes, which is binary, potentially large, and
+ * useless to any API client — the logo is served from its own endpoint. A
+ * boolean stands in so callers can still tell whether one is set.
+ */
+export function withoutLogoBytes(tenant) {
+  if (!tenant) return tenant;
+  const { logo_bytes: logoBytes, ...rest } = tenant;
+  return { ...rest, has_logo: Boolean(logoBytes && tenant.logo_mime) };
+}
+
 export function listTenants() {
   return getRegistryDb().prepare('SELECT * FROM tenants ORDER BY created_at').all().map(plain);
 }
@@ -157,6 +170,21 @@ export function updateTenantProfile(slug, { gymName, currency, timezone, logoMim
 
 export function countTenants() {
   return getRegistryDb().prepare('SELECT COUNT(*) AS n FROM tenants').get().n;
+}
+
+/**
+ * Removes a gym from the registry, along with any biometric devices pointed at
+ * it — an orphaned device row would otherwise keep routing scans to a gym that
+ * no longer exists.
+ *
+ * Deliberately does *not* touch the gym's SQLite file: closing the open handle
+ * first is the caller's job, and on Windows an unlink against an open file
+ * fails outright. See the operator console's delete route.
+ */
+export function deleteTenant(slug) {
+  const db = getRegistryDb();
+  db.prepare('DELETE FROM biometric_devices WHERE tenant_slug = ?').run(slug);
+  return db.prepare('DELETE FROM tenants WHERE slug = ?').run(slug).changes;
 }
 
 export function setTenantStatus(slug, status, reason) {

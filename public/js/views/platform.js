@@ -1,5 +1,17 @@
 import { api, gymPathUrl, platformSession } from '../api.js';
-import { buildForm, clear, closeModal, date, h, openModal, relativeDays, stat, table, toast } from '../ui.js';
+import {
+  barChart,
+  buildForm,
+  clear,
+  closeModal,
+  date,
+  h,
+  openModal,
+  relativeDays,
+  stat,
+  table,
+  toast,
+} from '../ui.js';
 
 /**
  * Operator console — the view for whoever runs the platform, listing every
@@ -17,6 +29,30 @@ const STATUSES = [
   { value: 'suspended', label: 'Suspended — can sign in and pay, nothing else' },
   { value: 'cancelled', label: 'Cancelled — hard block on everything' },
 ];
+
+/** Money formatted in a *gym's* own currency, not the operator's. ui.js's
+ * money() is bound to the signed-in gym's currency, which the console has no
+ * concept of — every row here can be denominated differently. */
+function amount(value, currency = 'INR') {
+  const n = Number(value || 0);
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: n % 1 === 0 ? 0 : 2,
+      notation: Math.abs(n) >= 100_000 ? 'compact' : 'standard',
+    }).format(n);
+  } catch {
+    return `${currency} ${n.toFixed(0)}`;
+  }
+}
+
+const bytes = (n) => {
+  const value = Number(n || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 function loginCard(rerender) {
   const form = buildForm(
@@ -84,6 +120,236 @@ function openStatusModal(tenant, onSaved) {
       },
     ),
   });
+}
+
+/** Edits a gym's identity on its owner's behalf — the support case where a
+ * name was typed wrong at signup or a timezone was never set. */
+function openEditModal(tenant, onSaved) {
+  openModal({
+    title: `${tenant.gym_name} — edit details`,
+    body: buildForm(
+      [
+        { name: 'gym_name', label: 'Gym name', value: tenant.gym_name || '', required: true, full: true },
+        { name: 'currency', label: 'Currency', value: tenant.currency || 'INR', hint: 'ISO code, e.g. INR, USD, GBP.' },
+        {
+          name: 'timezone',
+          label: 'Timezone',
+          value: tenant.timezone || '',
+          hint: 'IANA name, e.g. Asia/Kolkata. Blank uses the server’s own.',
+        },
+      ],
+      {
+        submitLabel: 'Save changes',
+        onSubmit: async (values) => {
+          const payload = { gym_name: values.gym_name, currency: values.currency };
+          // Sent only when non-blank: the server treats an empty string as
+          // "not supplied" and COALESCEs it away, so clearing is a no-op
+          // rather than an error.
+          if (values.timezone.trim()) payload.timezone = values.timezone.trim();
+          await api.platformUpdateTenant(tenant.slug, payload);
+          closeModal();
+          toast('Gym details updated');
+          await onSaved();
+        },
+      },
+    ),
+  });
+}
+
+/**
+ * Permanent deletion, behind a typed confirmation.
+ *
+ * The server independently refuses anything that is not already cancelled and
+ * re-checks the typed slug, so this dialog is a speed bump rather than the
+ * actual guard — but it is the speed bump that stops the misclick.
+ */
+function openDeleteModal(tenant, onDeleted) {
+  const confirmInput = h('input', { class: 'input', placeholder: tenant.slug, autocomplete: 'off' });
+  const remove = h('button', { class: 'btn danger', disabled: true }, 'Delete permanently');
+
+  confirmInput.addEventListener('input', () => {
+    remove.disabled = confirmInput.value.trim() !== tenant.slug;
+  });
+
+  remove.onclick = async () => {
+    remove.disabled = true;
+    try {
+      const result = await api.platformDeleteTenant(tenant.slug, { confirm_slug: confirmInput.value.trim() });
+      closeModal();
+      toast(result.archived_to ? 'Gym deleted — a final snapshot was archived first' : 'Gym deleted');
+      await onDeleted();
+    } catch (err) {
+      toast(err.message || 'Could not delete this gym', 'error');
+      remove.disabled = false;
+    }
+  };
+
+  openModal({
+    title: `Delete ${tenant.gym_name}?`,
+    body: h(
+      'div',
+      {},
+      h(
+        'p',
+        { class: 'sub' },
+        'This removes the gym from the registry and deletes its database — every member, payment and visit it holds.',
+      ),
+      tenant.status !== 'cancelled'
+        ? h(
+            'p',
+            { class: 'badge red', style: 'display:block;padding:10px;line-height:1.5' },
+            `This gym is ${tenant.status}. Only a cancelled gym can be deleted — change its status first.`,
+          )
+        : h(
+            'p',
+            { class: 'muted', style: 'font-size:13px' },
+            'A final verified snapshot is written to the backups folder first, and the delete is abandoned if that snapshot cannot be taken.',
+          ),
+      h(
+        'label',
+        { class: 'field full' },
+        h('span', {}, `Type ${tenant.slug} to confirm`),
+        confirmInput,
+      ),
+    ),
+    footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), remove],
+  });
+}
+
+/** A labelled row inside the detail modal's definition lists. */
+const kv = (label, value) => [h('dt', {}, label), h('dd', {}, value ?? '—')];
+
+/** Opens the per-gym drill-down: who runs it, what it sells, what it earned,
+ * and whether its integrations are live. */
+async function openDetailModal(row, onChanged) {
+  const bodyNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
+  openModal({ title: row.gym_name, body: bodyNode, wide: true });
+
+  let data;
+  try {
+    data = await api.platformTenant(row.slug);
+  } catch (err) {
+    clear(bodyNode).append(h('div', { class: 'empty' }, err.message || 'Could not load this gym'));
+    return;
+  }
+
+  const { tenant, stats, detail, devices, whatsapp, url } = data;
+  const currency = tenant.currency || 'INR';
+
+  const waTone = whatsapp.connected ? 'green' : whatsapp.has_credentials ? 'amber' : 'grey';
+  const waLabel = whatsapp.connected
+    ? 'Connected'
+    : whatsapp.has_credentials
+      ? `Paired but ${whatsapp.state.toLowerCase()}`
+      : 'Never linked';
+
+  clear(bodyNode).append(
+    h(
+      'div',
+      { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
+      stat('Active members', stats?.members ?? '—', `${stats?.members_total ?? 0} on the roster`),
+      stat('This month', amount(stats?.revenue_month, currency), 'Collected', { accent: true }),
+      stat('All time', amount(stats?.revenue_total, currency), 'Collected'),
+      stat('Visits 30d', stats?.visits_30d ?? '—'),
+    ),
+
+    h(
+      'div',
+      { class: 'grid cols-2', style: 'gap:16px' },
+
+      h(
+        'div',
+        { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', {}, 'Account')),
+        h(
+          'dl',
+          { class: 'kv' },
+          ...kv('Address', h('a', { href: url, target: '_blank' }, `/g/${tenant.slug}`)),
+          ...kv('Status', h('span', { class: `badge ${STATUS_TONE[tenant.status] || 'grey'}` }, tenant.status)),
+          ...kv('Signed up', date(tenant.created_at)),
+          ...kv('Currency', currency),
+          ...kv('Timezone', tenant.timezone || h('span', { class: 'muted' }, 'server default')),
+          ...kv('Trial ends', tenant.trial_ends_on ? date(tenant.trial_ends_on) : '—'),
+          ...kv(
+            'Suspended',
+            tenant.suspended_at
+              ? `${date(tenant.suspended_at)}${tenant.suspended_reason ? ` — ${tenant.suspended_reason}` : ''}`
+              : '—',
+          ),
+          ...kv('Subscription', tenant.razorpay_subscription_id || h('span', { class: 'muted' }, 'none')),
+          ...kv('WhatsApp', h('span', { class: `badge ${waTone}` }, waLabel)),
+          ...kv('Devices', devices.length ? devices.map((d) => d.serial_number).join(', ') : '—'),
+          ...kv('New members', `${stats?.new_members_month ?? 0} this month`),
+          ...kv('Last visit', stats?.last_visit_at ? date(stats.last_visit_at, { withTime: true }) : 'Never'),
+        ),
+      ),
+
+      h(
+        'div',
+        { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', {}, `Staff (${detail?.staff?.length ?? 0})`)),
+        table(
+          [
+            { label: 'Name', render: (s) => h('div', {}, s.name, h('div', { class: 'muted', style: 'font-size:12px' }, s.email)) },
+            { label: 'Role', render: (s) => h('span', { class: 'badge grey' }, s.role) },
+            {
+              label: '',
+              align: 'right',
+              render: (s) => (s.active ? '' : h('span', { class: 'badge red' }, 'disabled')),
+            },
+          ],
+          detail?.staff ?? [],
+          { empty: 'No staff accounts' },
+        ),
+      ),
+
+      h(
+        'div',
+        { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', {}, 'Recent payments')),
+        table(
+          [
+            { label: 'Member', render: (p) => `${p.first_name} ${p.last_name || ''}`.trim() },
+            { label: 'Method', render: (p) => h('span', { class: 'badge grey' }, p.method) },
+            { label: 'Date', render: (p) => h('span', { class: 'muted' }, date(p.paid_on)) },
+            { label: 'Amount', align: 'right', render: (p) => amount(p.amount, currency) },
+          ],
+          detail?.recent_payments ?? [],
+          { empty: 'No payments recorded' },
+        ),
+      ),
+
+      h(
+        'div',
+        { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', {}, 'Plans')),
+        table(
+          [
+            { label: 'Plan', render: (p) => p.name },
+            { label: 'Days', align: 'right', render: (p) => p.duration_days },
+            {
+              label: 'Price',
+              align: 'right',
+              render: (p) =>
+                h('span', {}, amount(p.price, currency), p.active ? null : h('span', { class: 'badge grey' }, ' archived')),
+            },
+          ],
+          detail?.plans ?? [],
+          { empty: 'No plans set up' },
+        ),
+      ),
+    ),
+
+    h(
+      'div',
+      { class: 'row', style: 'gap:8px;margin-top:16px;flex-wrap:wrap' },
+      h('button', { class: 'btn sm', onclick: () => { closeModal(); openEditModal(tenant, onChanged); } }, 'Edit details'),
+      h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openStatusModal(tenant, onChanged); } }, 'Change status'),
+      h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openPasswordResetModal(tenant); } }, 'Reset password'),
+      h('div', { class: 'spacer', style: 'flex:1' }),
+      h('button', { class: 'btn sm danger', onclick: () => { closeModal(); openDeleteModal(tenant, onChanged); } }, 'Delete gym'),
+    ),
+  );
 }
 
 /**
@@ -177,6 +443,72 @@ function trialCell(tenant) {
   return h('span', { class: `badge ${days <= 2 ? 'amber' : 'blue'}` }, `${days}d left`);
 }
 
+/**
+ * Backups, run and reviewed from here.
+ *
+ * Rendered into a node it owns so a run can refresh the list in place — a full
+ * console re-render would re-open every gym's database just to show that a
+ * backup finished.
+ */
+function backupCard() {
+  const listNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
+  const meta = h('div', { class: 'muted', style: 'font-size:12px' });
+  const run = h('button', { class: 'btn sm primary' }, '↻ Back up now');
+
+  const load = async () => {
+    try {
+      const data = await api.platformBackups();
+      meta.textContent = `Every ${data.interval_hours || 0}h · keeping ${data.keep} · ${
+        data.offsite ? 'off-site copy configured' : 'this machine only'
+      }`;
+      clear(listNode).append(
+        table(
+          [
+            { label: 'Taken', render: (b) => date(b.taken_at, { withTime: true }) },
+            { label: 'Databases', align: 'right', render: (b) => b.databases },
+            { label: 'Size', align: 'right', render: (b) => bytes(b.bytes) },
+          ],
+          data.items,
+          { empty: 'No backups taken yet' },
+        ),
+      );
+    } catch (err) {
+      clear(listNode).append(h('div', { class: 'empty' }, err.message || 'Could not load backups'));
+    }
+  };
+
+  run.onclick = async () => {
+    run.disabled = true;
+    run.textContent = 'Backing up…';
+    try {
+      const summary = await api.platformRunBackup();
+      if (summary.errors?.length) {
+        toast(`Backup finished with ${summary.errors.length} problem(s): ${summary.errors[0]}`, 'error');
+      } else {
+        toast(
+          `Backed up ${summary.databases} database(s)${summary.uploaded ? `, ${summary.uploaded} uploaded off-site` : ''}`,
+        );
+      }
+      await load();
+    } catch (err) {
+      toast(err.message || 'Backup failed', 'error');
+    } finally {
+      run.disabled = false;
+      run.textContent = '↻ Back up now';
+    }
+  };
+
+  load();
+
+  return h(
+    'div',
+    { class: 'card' },
+    h('div', { class: 'card-head' }, h('h3', {}, 'Backups'), h('div', { class: 'spacer' }), run),
+    meta,
+    h('div', { style: 'margin-top:10px' }, listNode),
+  );
+}
+
 export async function renderPlatformConsole({ context, rerender }) {
   if (!context.platform_admin) {
     return h(
@@ -199,8 +531,13 @@ export async function renderPlatformConsole({ context, rerender }) {
   if (!platformSession.token) return loginCard(rerender);
 
   let data;
+  let analytics;
   try {
-    data = await api.platformTenants({ stats: 1 });
+    [data, analytics] = await Promise.all([
+      api.platformTenants({ stats: 1 }),
+      // Registry-only, so this costs nothing beyond the call itself.
+      api.platformAnalytics().catch(() => null),
+    ]);
   } catch (err) {
     // 401 here means the operator's own token lapsed — no gym session to
     // clear, so just drop back to the console's login card.
@@ -216,6 +553,35 @@ export async function renderPlatformConsole({ context, rerender }) {
     return acc;
   }, {});
 
+  // Rolled up from the rows already fetched rather than a second server pass.
+  // Bucketed by currency because summing gyms billed in different ones would
+  // produce a number that means nothing.
+  const revenueByCurrency = {};
+  let totalMembers = 0;
+  for (const row of data.items) {
+    if (!row.stats) continue;
+    const code = row.currency || 'INR';
+    revenueByCurrency[code] = (revenueByCurrency[code] || 0) + row.stats.revenue_month;
+    totalMembers += row.stats.members;
+  }
+  const revenueLabel = Object.keys(revenueByCurrency).length
+    ? Object.entries(revenueByCurrency)
+        .map(([code, value]) => amount(value, code))
+        .join(' + ')
+    : amount(0);
+
+  const state = { q: '', status: '', sort: 'created:desc' };
+  const tableNode = h('div', {});
+
+  const SORTS = {
+    'created:desc': (a, b) => String(b.created_at).localeCompare(String(a.created_at)),
+    'created:asc': (a, b) => String(a.created_at).localeCompare(String(b.created_at)),
+    'name:asc': (a, b) => a.gym_name.localeCompare(b.gym_name),
+    'members:desc': (a, b) => (b.stats?.members ?? -1) - (a.stats?.members ?? -1),
+    'revenue:desc': (a, b) => (b.stats?.revenue_month ?? -1) - (a.stats?.revenue_month ?? -1),
+    'visits:desc': (a, b) => (b.stats?.visits_30d ?? -1) - (a.stats?.visits_30d ?? -1),
+  };
+
   const columns = [
     {
       label: 'Gym',
@@ -226,7 +592,12 @@ export async function renderPlatformConsole({ context, rerender }) {
           h('div', { style: 'font-weight:600' }, row.gym_name),
           h(
             'a',
-            { class: 'muted', style: 'font-size:12px', href: gymPathUrl(row.slug) },
+            {
+              class: 'muted',
+              style: 'font-size:12px',
+              href: gymPathUrl(row.slug),
+              onclick: (e) => e.stopPropagation(),
+            },
             `/g/${row.slug}`,
           ),
         ),
@@ -244,10 +615,17 @@ export async function renderPlatformConsole({ context, rerender }) {
         ),
     },
     { label: 'Trial', render: trialCell },
-    { label: 'Members', align: 'right', render: (row) => (row.stats ? row.stats.members : h('span', { class: 'badge red' }, 'db error')) },
-    { label: 'Staff', align: 'right', render: (row) => row.stats?.staff ?? '—' },
+    {
+      label: 'Members',
+      align: 'right',
+      render: (row) => (row.stats ? row.stats.members : h('span', { class: 'badge red' }, 'db error')),
+    },
+    {
+      label: 'This month',
+      align: 'right',
+      render: (row) => (row.stats ? amount(row.stats.revenue_month, row.currency) : '—'),
+    },
     { label: 'Visits 30d', align: 'right', render: (row) => row.stats?.visits_30d ?? '—' },
-    { label: 'Currency', render: (row) => row.currency },
     { label: 'Created', render: (row) => h('span', { class: 'muted' }, date(row.created_at)) },
     {
       label: '',
@@ -258,7 +636,13 @@ export async function renderPlatformConsole({ context, rerender }) {
           { class: 'row', style: 'gap:6px;justify-content:flex-end' },
           h(
             'button',
-            { class: 'btn sm ghost', onclick: () => openStatusModal(row, rerender) },
+            {
+              class: 'btn sm ghost',
+              onclick: (e) => {
+                e.stopPropagation();
+                openStatusModal(row, rerender);
+              },
+            },
             'Status',
           ),
           h(
@@ -266,13 +650,95 @@ export async function renderPlatformConsole({ context, rerender }) {
             {
               class: 'btn sm ghost',
               title: 'Issue a one-time password reset link for this gym',
-              onclick: () => openPasswordResetModal(row),
+              onclick: (e) => {
+                e.stopPropagation();
+                openPasswordResetModal(row);
+              },
             },
             'Reset password',
           ),
         ),
     },
   ];
+
+  const draw = () => {
+    const needle = state.q.toLowerCase();
+    const rows = data.items
+      .filter((row) => !state.status || row.status === state.status)
+      .filter(
+        (row) =>
+          !needle ||
+          row.gym_name.toLowerCase().includes(needle) ||
+          row.slug.toLowerCase().includes(needle),
+      )
+      .sort(SORTS[state.sort]);
+
+    clear(tableNode).append(
+      table(columns, rows, {
+        onRowClick: (row) => openDetailModal(row, rerender),
+        empty: state.q || state.status ? 'No gym matches that' : 'No gyms have signed up yet',
+      }),
+    );
+    // Appended separately rather than as a `cond ? node : null` argument above:
+    // clear() hands back the element, so that .append() is the DOM's own, which
+    // renders a null as the literal text "null".
+    if (rows.length && rows.length !== data.items.length) {
+      tableNode.append(
+        h(
+          'div',
+          { class: 'muted', style: 'font-size:12px;padding:10px 12px 0' },
+          `${rows.length} of ${data.items.length} gyms`,
+        ),
+      );
+    }
+  };
+
+  const search = h('input', {
+    class: 'search',
+    type: 'search',
+    placeholder: 'Search by gym name or address…',
+  });
+  search.addEventListener('input', () => {
+    state.q = search.value.trim();
+    draw();
+  });
+
+  const statusFilter = h(
+    'select',
+    {
+      onchange: (e) => {
+        state.status = e.target.value;
+        draw();
+      },
+    },
+    h('option', { value: '' }, 'Any status'),
+    ...['active', 'trial', 'suspended', 'cancelled'].map((s) =>
+      h('option', { value: s }, `${s[0].toUpperCase()}${s.slice(1)} (${counts[s] || 0})`),
+    ),
+  );
+
+  const sortSelect = h(
+    'select',
+    {
+      onchange: (e) => {
+        state.sort = e.target.value;
+        draw();
+      },
+    },
+    h('option', { value: 'created:desc' }, 'Newest first'),
+    h('option', { value: 'created:asc' }, 'Oldest first'),
+    h('option', { value: 'name:asc' }, 'Name A–Z'),
+    h('option', { value: 'members:desc' }, 'Most members'),
+    h('option', { value: 'revenue:desc' }, 'Highest revenue'),
+    h('option', { value: 'visits:desc' }, 'Most visits'),
+  );
+
+  draw();
+
+  const signups = (analytics?.signups_by_month ?? []).map((point) => ({
+    label: point.month.slice(5),
+    value: point.count,
+  }));
 
   return h(
     'div',
@@ -302,16 +768,35 @@ export async function renderPlatformConsole({ context, rerender }) {
       h(
         'div',
         { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
-        stat('Gyms', data.total),
+        stat('Gyms', data.total, `${counts.trial || 0} on trial`),
         stat('Active', counts.active || 0, 'Paying', { accent: true }),
-        stat('On trial', counts.trial || 0),
-        stat('Suspended', counts.suspended || 0, 'Lapsed trial or payment'),
+        stat('Members', totalMembers, 'Active, platform-wide'),
+        stat('Collected', revenueLabel, 'This month, across all gyms'),
       ),
+
       h(
         'div',
-        { class: 'card', style: 'padding:6px 6px 14px' },
-        table(columns, data.items, { empty: 'No gyms have signed up yet' }),
+        { class: 'grid cols-2', style: 'gap:16px;margin-bottom:16px' },
+        h(
+          'div',
+          { class: 'card' },
+          h('div', { class: 'card-head' }, h('h3', {}, 'Signups')),
+          signups.length
+            ? barChart(signups, { height: 150 })
+            : h('div', { class: 'empty' }, 'No signup history yet'),
+        ),
+        backupCard(),
       ),
+
+      h(
+        'div',
+        { class: 'toolbar' },
+        search,
+        statusFilter,
+        sortSelect,
+      ),
+
+      h('div', { class: 'card', style: 'padding:6px 6px 14px' }, tableNode),
     ),
   );
 }

@@ -190,6 +190,62 @@ export async function runBackup({ quiet = false } = {}) {
   return summary;
 }
 
+/** Folder under the backup root holding final snapshots of deleted gyms. Kept
+ * out of the rotation so prune() can never sweep away the one copy of a gym
+ * that no longer exists anywhere else. */
+const DELETED_DIR = 'deleted';
+
+/**
+ * Takes a final, verified snapshot of one gym's database before it is deleted.
+ *
+ * Deleting a gym is the only irreversible action the console has. Writing a
+ * snapshot that has been reopened and integrity-checked *first* turns it into
+ * something recoverable — and a failure here is a reason to abort the delete,
+ * not to carry on.
+ */
+export function archiveTenantDatabase(slug, sourceFile) {
+  const destDir = path.join(config.backup.dir, DELETED_DIR);
+  fs.mkdirSync(destDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return snapshot(`${slug}-${stamp}`, sourceFile, destDir);
+}
+
+/**
+ * Recent backup folders, newest first — what the operator console lists.
+ *
+ * The folder's own mtime is the timestamp rather than parsing it back out of
+ * the name: the name is an ISO string with its punctuation flattened, which no
+ * date parser accepts.
+ */
+export function listBackups({ limit = 20 } = {}) {
+  const rootDir = config.backup.dir;
+  if (!fs.existsSync(rootDir)) return [];
+
+  return fs
+    .readdirSync(rootDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== DELETED_DIR)
+    .map((entry) => entry.name)
+    .sort()
+    .reverse()
+    .slice(0, limit)
+    .map((name) => {
+      const dir = path.join(rootDir, name);
+      let databases = 0;
+      let bytes = 0;
+      try {
+        for (const file of fs.readdirSync(dir)) {
+          if (!file.endsWith('.db')) continue;
+          databases += 1;
+          bytes += fs.statSync(path.join(dir, file)).size;
+        }
+      } catch {
+        // A folder that vanished or is unreadable mid-listing still belongs in
+        // the list, as a row with nothing in it, rather than a 500.
+      }
+      return { stamp: name, databases, bytes, taken_at: fs.statSync(dir).mtime.toISOString() };
+    });
+}
+
 /**
  * Starts the in-process backup timer, or returns null when disabled.
  *
