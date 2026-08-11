@@ -1,37 +1,11 @@
 import { clear, closeModal, h, openModal, toast } from './ui.js';
 
-/**
- * Loads an image from a File, Blob, or URL string and renders it onto a square
- * canvas (center cropped) at 300x300, returning a compressed JPEG base64 Data URL.
- */
-export function cropAndResizeImage(source, size = 250, quality = 0.75) {
+/** Decodes a File, Blob or URL string into an <img> the canvas can draw. */
+function loadImage(source) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-
-    const process = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-
-        // Center crop math
-        const minDim = Math.min(img.width, img.height);
-        const sx = (img.width - minDim) / 2;
-        const sy = (img.height - minDim) / 2;
-
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, size, size);
-        ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
-
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      } catch (err) {
-        reject(err);
-      }
-    };
-
-    img.onload = process;
+    img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Could not read image file'));
 
     if (source instanceof File || source instanceof Blob) {
@@ -47,6 +21,71 @@ export function cropAndResizeImage(source, size = 250, quality = 0.75) {
       reject(new Error('Invalid image source'));
     }
   });
+}
+
+/**
+ * Loads an image from a File, Blob, or URL string and renders it onto a square
+ * canvas (center cropped) at 300x300, returning a compressed JPEG base64 Data URL.
+ */
+export async function cropAndResizeImage(source, size = 250, quality = 0.75) {
+  const img = await loadImage(source);
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  // Center crop math
+  const minDim = Math.min(img.width, img.height);
+  const sx = (img.width - minDim) / 2;
+  const sy = (img.height - minDim) / 2;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+/**
+ * Beyond this the base64 string risks the server's 512 KB image cap. PNG keeps
+ * a flat logo crisp; a photographic one blows past this, and JPEG takes over.
+ */
+const MAX_ICON_DATA_URL = 380_000;
+
+/**
+ * Draws the square icon a phone installs to its home screen from the gym's own
+ * logo. See src/routes/pwa.js, which puts it in the web app manifest.
+ *
+ * Two things make this different from the logo itself:
+ *
+ * - It *contains* the image rather than center-cropping it. A gym logo is
+ *   usually a wordmark, and cropping one cuts the name in half.
+ * - It leaves a wide margin. Android crops every icon to its launcher's shape —
+ *   circle, squircle, teardrop — and only the middle 80% survives; the inset
+ *   below keeps the whole logo inside that, corners included.
+ *
+ * Drawn on white for the same reason the logo is: whatever is transparent in
+ * the uploaded file already renders against white everywhere else in the app,
+ * and a dark background here would make a dark wordmark disappear.
+ */
+export async function makeAppIcon(source, { size = 512, inset = 0.22, background = '#ffffff' } = {}) {
+  const img = await loadImage(source);
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, size, size);
+
+  const box = size * (1 - inset * 2);
+  const scale = Math.min(box / img.width, box / img.height);
+  const width = img.width * scale;
+  const height = img.height * scale;
+  ctx.drawImage(img, (size - width) / 2, (size - height) / 2, width, height);
+
+  const png = canvas.toDataURL('image/png');
+  return png.length <= MAX_ICON_DATA_URL ? png : canvas.toDataURL('image/jpeg', 0.9);
 }
 
 /**

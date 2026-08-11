@@ -141,12 +141,26 @@ Installed, it runs full-screen with no browser bars, keeps clear of the iPhone
 notch and home indicator, and shows its own offline state instead of the
 browser's error page.
 
-**Each gym installs as its own app.** The manifest is generated per request
-(`src/routes/pwa.js`), so `/g/acme/` installs as "Acme Gym" and launches into
-Acme's dashboard, while `/g/pulse/` on the same origin installs separately.
-Icons live in `public/icons/` and are drawn by `npm run icons:gen` — a
-dependency-free generator, so there is no image toolchain to install; the PNGs
-are committed and only need regenerating if the mark changes.
+**Each gym installs as its own app, under its own logo.** The manifest is
+generated per request (`src/routes/pwa.js`), so `/g/acme/` installs as "Acme
+Gym" and launches into Acme's dashboard, while `/g/pulse/` on the same origin
+installs separately.
+
+Upload a logo in **Gym settings** and it becomes the home-screen icon, the iOS
+`apple-touch-icon` and the browser-tab favicon. The browser draws the icon at
+upload time (`makeAppIcon` in `public/js/photo.js`): 512px square, the logo
+*contained* rather than cropped — a wordmark would otherwise lose half the gym's
+name — on white, with the margin an Android launcher needs to crop the icon to a
+circle or squircle without cutting into it. The server has no image decoder, so
+this cannot happen there; it stores what the browser produced, alongside the
+logo, and clears both together. A gym with no logo installs under GymBook's own
+mark, and one whose logo predates this feature uses the logo as-is until it is
+saved again.
+
+GymBook's own icons live in `public/icons/` and are drawn by
+`npm run icons:gen` — a dependency-free generator, so there is no image
+toolchain to install; the PNGs are committed and only need regenerating if the
+mark changes.
 
 **What works offline.** The service worker (`public/sw.js`) caches the app
 shell, so an installed icon opens instantly and still opens with no signal —
@@ -402,7 +416,7 @@ tests/             one suite per area
 npm test
 ```
 
-325 tests over throwaway databases cover authentication and token tampering,
+330 tests over throwaway databases cover authentication and token tampering,
 validation, member codes and duplicate detection, membership end-date maths,
 overlap rejection, renewal start dates, dues, check-in rules and idempotency,
 freeze/resume day credits, class capacity and weekday enforcement, role
@@ -412,8 +426,8 @@ terminal uploads, WebAuthn enrollment and check-in against a software
 authenticator, QR card issuing, scanning, reissue and forgery rejection,
 gym-local date handling across timezones, member photo storage and its signed
 URLs, password-reset issue/redeem/expiry, backup verification and pruning, and
-the installable-app surface — per-gym manifest, icon sizes, service worker
-headers and precache list.
+the installable-app surface — per-gym manifest, the gym logo as the installed
+app icon, icon sizes, service worker headers and precache list.
 
 ## Notes on the design
 

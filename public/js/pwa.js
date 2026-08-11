@@ -29,6 +29,41 @@ function applyManifestLink() {
   if (link && pathPrefix) link.href = `${pathPrefix}/manifest.webmanifest`;
 }
 
+/* ------------------------------------------------------------- gym branding */
+
+/** GymBook's own icon links, as index.html declares them. Held so that
+ * removing a gym's logo puts them back without a reload. */
+const DEFAULT_APPLE_ICON = document.querySelector('link[rel="apple-touch-icon"]')?.href;
+const DEFAULT_FAVICONS = [...document.querySelectorAll('link[rel="icon"]')];
+
+/**
+ * Swaps in the gym's own logo as the home-screen and tab icon.
+ *
+ * iOS ignores the manifest entirely for "Add to Home Screen" and reads
+ * <link rel="apple-touch-icon"> off the live document at the moment you tap it
+ * — so pointing it at this gym once the tenant is known is all iPhones need,
+ * even though that happens after first paint. Browsers re-read the favicon
+ * link the same way.
+ *
+ * @param {string|null|undefined} iconUrl `app_icon_url` from
+ *   /api/platform/tenant. Null (no logo, or one just removed) restores
+ *   GymBook's own icons.
+ */
+export function applyGymIcons(iconUrl) {
+  for (const link of document.querySelectorAll('link[rel="apple-touch-icon"]')) {
+    if (iconUrl || DEFAULT_APPLE_ICON) link.href = iconUrl || DEFAULT_APPLE_ICON;
+  }
+
+  // Replaced rather than repointed: the markup declares two favicon sizes, and
+  // a gym's icon is not either of the sizes they claim.
+  for (const link of document.querySelectorAll('link[rel="icon"]')) link.remove();
+  if (iconUrl) {
+    document.head.append(h('link', { rel: 'icon', href: iconUrl }));
+  } else {
+    document.head.append(...DEFAULT_FAVICONS);
+  }
+}
+
 /* -------------------------------------------------------------- detection */
 
 export const isStandalone = () =>

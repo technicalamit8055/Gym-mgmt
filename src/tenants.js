@@ -57,6 +57,13 @@ const MIGRATIONS = [
   (db) => ensureColumn(db, 'tenants', 'logo_mime', 'TEXT'),
   (db) => ensureColumn(db, 'tenants', 'logo_bytes', 'BLOB'),
   (db) => ensureColumn(db, 'tenants', 'logo_version', 'INTEGER DEFAULT 0'),
+  // The same logo, redrawn at 512px on its own background with the padding an
+  // Android launcher crops into. Stored rather than derived on request: the
+  // server has no image decoder, so this is made in the browser at upload time
+  // (see makeAppIcon in public/js/photo.js). Shares logo_version — the two
+  // always change together.
+  (db) => ensureColumn(db, 'tenants', 'icon_mime', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'icon_bytes', 'BLOB'),
 ];
 
 let registryDb;
@@ -94,16 +101,20 @@ export function findTenantBySlug(slug) {
 }
 
 /**
- * A registry row with its logo BLOB dropped, safe to serialise into JSON.
+ * A registry row with its image BLOBs dropped, safe to serialise into JSON.
  *
- * `SELECT *` carries logo_bytes, which is binary, potentially large, and
- * useless to any API client — the logo is served from its own endpoint. A
- * boolean stands in so callers can still tell whether one is set.
+ * `SELECT *` carries logo_bytes and icon_bytes, which are binary, potentially
+ * large, and useless to any API client — each is served from its own endpoint.
+ * Booleans stand in so callers can still tell whether one is set.
  */
 export function withoutLogoBytes(tenant) {
   if (!tenant) return tenant;
-  const { logo_bytes: logoBytes, ...rest } = tenant;
-  return { ...rest, has_logo: Boolean(logoBytes && tenant.logo_mime) };
+  const { logo_bytes: logoBytes, icon_bytes: iconBytes, ...rest } = tenant;
+  return {
+    ...rest,
+    has_logo: Boolean(logoBytes && tenant.logo_mime),
+    has_app_icon: Boolean(iconBytes && tenant.icon_mime),
+  };
 }
 
 export function listTenants() {
@@ -129,42 +140,45 @@ export function createTenant({ slug, displayName, gymName, currency = 'INR', tim
  *
  * COALESCE on every column so a partial update leaves the rest alone.
  */
-export function updateTenantProfile(slug, { gymName, currency, timezone, logoMime, logoBytes, clearLogo } = {}) {
-  const db = getRegistryDb();
+export function updateTenantProfile(
+  slug,
+  { gymName, currency, timezone, logoMime, logoBytes, iconMime, iconBytes, clearLogo } = {},
+) {
+  const sets = [
+    'gym_name     = COALESCE(?, gym_name)',
+    'display_name = COALESCE(?, display_name)',
+    'currency     = COALESCE(?, currency)',
+    'timezone     = COALESCE(?, timezone)',
+  ];
+  const params = [gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null];
+
+  // The logo and the app icon drawn from it are one fact, written and cleared
+  // together: leaving a stale icon behind would keep installing the old brand.
   if (clearLogo) {
-    db.prepare(
-      `UPDATE tenants
-          SET gym_name     = COALESCE(?, gym_name),
-              display_name = COALESCE(?, display_name),
-              currency     = COALESCE(?, currency),
-              timezone     = COALESCE(?, timezone),
-              logo_mime    = NULL,
-              logo_bytes   = NULL,
-              logo_version = COALESCE(logo_version, 0) + 1
-        WHERE slug = ?`,
-    ).run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, slug);
+    sets.push(
+      'logo_mime = NULL',
+      'logo_bytes = NULL',
+      'icon_mime = NULL',
+      'icon_bytes = NULL',
+      'logo_version = COALESCE(logo_version, 0) + 1',
+    );
   } else if (logoMime && logoBytes) {
-    db.prepare(
-      `UPDATE tenants
-          SET gym_name     = COALESCE(?, gym_name),
-              display_name = COALESCE(?, display_name),
-              currency     = COALESCE(?, currency),
-              timezone     = COALESCE(?, timezone),
-              logo_mime    = ?,
-              logo_bytes   = ?,
-              logo_version = COALESCE(logo_version, 0) + 1
-        WHERE slug = ?`,
-    ).run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, logoMime, logoBytes, slug);
-  } else {
-    db.prepare(
-      `UPDATE tenants
-          SET gym_name     = COALESCE(?, gym_name),
-              display_name = COALESCE(?, display_name),
-              currency     = COALESCE(?, currency),
-              timezone     = COALESCE(?, timezone)
-        WHERE slug = ?`,
-    ).run(gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, slug);
+    sets.push(
+      'logo_mime = ?',
+      'logo_bytes = ?',
+      // Null when an older client uploads a logo without an icon — better no
+      // icon (the app falls back to its own) than the previous gym logo's one.
+      'icon_mime = ?',
+      'icon_bytes = ?',
+      'logo_version = COALESCE(logo_version, 0) + 1',
+    );
+    params.push(logoMime, logoBytes, iconMime ?? null, iconBytes ?? null);
   }
+
+  params.push(slug);
+  getRegistryDb()
+    .prepare(`UPDATE tenants SET ${sets.join(', ')} WHERE slug = ?`)
+    .run(...params);
   return findTenantBySlug(slug);
 }
 

@@ -37,11 +37,22 @@ export function tenantLogoUrl(slug, version = 1) {
   return `${prefix}/api/platform/tenant-logo/${slug}?v=${version}`;
 }
 
+/** The logo redrawn as a square home-screen icon. Shares logo_version, so a
+ * new logo is a new URL for both and no cache needs invalidating. */
+export function tenantIconUrl(slug, version = 1) {
+  const store = tenantStorage.getStore();
+  const prefix = store?.pathPrefix ?? '';
+  return `${prefix}/api/platform/tenant-icon/${slug}?v=${version}`;
+}
+
+export const hasTenantLogo = (tenant) => Boolean(tenant?.logo_bytes && tenant?.logo_mime);
+export const hasTenantIcon = (tenant) => Boolean(tenant?.icon_bytes && tenant?.icon_mime);
+
 /** The gym-owned fields of a registry row. Deliberately omits db_file and
  * every razorpay_* column — the front end never needs them and this response
  * is public. */
 function publicTenant(tenant) {
-  const hasLogo = Boolean(tenant.logo_bytes && tenant.logo_mime);
+  const version = tenant.logo_version || 1;
   return {
     slug: tenant.slug,
     gym_name: tenant.gym_name ?? tenant.display_name,
@@ -49,7 +60,16 @@ function publicTenant(tenant) {
     timezone: tenant.timezone ?? null,
     status: tenant.status,
     trial_ends_on: tenant.trial_ends_on ?? null,
-    logo_url: hasLogo ? tenantLogoUrl(tenant.slug, tenant.logo_version || 1) : null,
+    logo_url: hasTenantLogo(tenant) ? tenantLogoUrl(tenant.slug, version) : null,
+    // What the browser tab and an iOS home screen should show. The purpose-
+    // built icon when there is one; otherwise the logo itself, which still
+    // beats falling back to the generic GymBook barbell. Null means this gym
+    // has uploaded nothing and the app's own icons stand.
+    app_icon_url: hasTenantIcon(tenant)
+      ? tenantIconUrl(tenant.slug, version)
+      : hasTenantLogo(tenant)
+        ? tenantLogoUrl(tenant.slug, version)
+        : null,
   };
 }
 
@@ -173,6 +193,27 @@ platformRoutes.get('/tenant-logo/:slug', (req, res) => {
   res.send(Buffer.from(tenant.logo_bytes));
 });
 
+/**
+ * The gym's home-screen icon, referenced by the web app manifest.
+ *
+ * Public and unauthenticated like the logo above: a browser fetches manifest
+ * icons with no credentials, and an install would simply fail if this needed a
+ * session. Nothing here is more secret than the logo on the login page.
+ */
+platformRoutes.get('/tenant-icon/:slug', (req, res) => {
+  const slug = req.params.slug;
+  if (!slug || !isValidSlug(slug)) {
+    throw notFound('Gym not found');
+  }
+  const tenant = findTenantBySlug(slug);
+  if (!hasTenantIcon(tenant)) {
+    throw notFound('No app icon found for this gym');
+  }
+  res.setHeader('Content-Type', tenant.icon_mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.send(Buffer.from(tenant.icon_bytes));
+});
+
 /** The gym's own settings. Admin-only, and only ever touches the row for the
  * tenant this request already resolved to — a slug is never taken from the body. */
 platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) => {
@@ -198,12 +239,22 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
 
   let logoMime;
   let logoBytes;
+  let iconMime;
+  let iconBytes;
   let clearLogo = Boolean(body.clear_logo);
 
   if (!clearLogo && typeof req.body.logo_data === 'string' && req.body.logo_data.startsWith('data:image/')) {
     const parsed = parsePhotoDataUrl(req.body.logo_data);
     logoMime = parsed.mime;
     logoBytes = parsed.bytes;
+
+    // Drawn from the same file by the browser, and only meaningful alongside a
+    // logo — an icon on its own is ignored rather than stored orphaned.
+    if (typeof req.body.icon_data === 'string' && req.body.icon_data.startsWith('data:image/')) {
+      const icon = parsePhotoDataUrl(req.body.icon_data);
+      iconMime = icon.mime;
+      iconBytes = icon.bytes;
+    }
   } else if (req.body.logo_data === null || req.body.logo_data === '') {
     clearLogo = true;
   }
@@ -214,6 +265,8 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     timezone: body.timezone,
     logoMime,
     logoBytes,
+    iconMime,
+    iconBytes,
     clearLogo,
   });
   res.json({ tenant: publicTenant(updated) });

@@ -55,6 +55,36 @@ before(async () => {
   await signup('powerhouse', 'Powerhouse Fitness Studio');
 });
 
+/** A 1×1 PNG — parsePhotoDataUrl checks the format and size, not the pixels. */
+const PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const JPEG_DATA_URL =
+  'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+
+const login = async (slug) => {
+  const res = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Tenant-Slug': slug },
+    body: JSON.stringify({ email: `owner@${slug}.test`, password: 'ownerpass123' }),
+  });
+  const { token } = await res.json();
+  return token;
+};
+
+/** Saves a logo (and optionally the icon drawn from it) the way the settings
+ * page does — the only path that ever writes these. */
+const saveBranding = async (slug, payload) => {
+  const token = await login(slug);
+  const res = await fetch(`${base}/g/${slug}/api/platform/tenant`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(body));
+  return body.tenant;
+};
+
 after(() => {
   server.close();
   closeDb();
@@ -136,6 +166,64 @@ describe('web app manifest', () => {
     assert.ok(body.icons.some((i) => i.sizes === '192x192'));
     assert.ok(body.icons.some((i) => i.sizes === '512x512'));
     assert.ok(body.icons.some((i) => i.purpose === 'maskable'));
+  });
+});
+
+describe("a gym's own logo as the app icon", () => {
+  it('installs under the gym logo once one is uploaded', async () => {
+    const tenant = await saveBranding('powerhouse', {
+      logo_data: JPEG_DATA_URL,
+      icon_data: PNG_DATA_URL,
+    });
+    assert.match(tenant.app_icon_url, /\/api\/platform\/tenant-icon\/powerhouse/);
+
+    const { body } = await manifest('/g/powerhouse/manifest.webmanifest');
+    for (const entry of body.icons) {
+      assert.match(entry.src, /^\/g\/powerhouse\/api\/platform\/tenant-icon\/powerhouse\?v=/, entry.src);
+      // Uploaded images: a declared pixel size the bitmap does not match would
+      // make a browser discard the icon.
+      assert.equal(entry.sizes, 'any');
+      assert.equal(entry.type, 'image/png');
+    }
+    // The padded icon is safe to hand an Android launcher to crop.
+    assert.ok(body.icons.some((i) => i.purpose === 'maskable'));
+    assert.ok(body.shortcuts.every((s) => s.icons.every((i) => i.src.includes('tenant-icon'))));
+  });
+
+  it('serves the icon bytes publicly and immutably', async () => {
+    const { status, headers, text } = await get('/api/platform/tenant-icon/powerhouse');
+    assert.equal(status, 200);
+    assert.equal(headers.get('content-type'), 'image/png');
+    assert.match(headers.get('cache-control'), /immutable/);
+    assert.ok(text.length > 0);
+  });
+
+  it('falls back to the logo for a gym that uploaded one before app icons existed', async () => {
+    await saveBranding('iron-yard', { logo_data: JPEG_DATA_URL });
+
+    const { body } = await manifest('/g/iron-yard/manifest.webmanifest');
+    assert.equal(body.icons.length, 1);
+    assert.match(body.icons[0].src, /\/api\/platform\/tenant-logo\/iron-yard/);
+    assert.equal(body.icons[0].type, 'image/jpeg');
+    // A center-cropped logo has no safe-zone padding, so offering it as
+    // maskable would let a launcher crop into the gym's name.
+    assert.equal(body.icons[0].purpose, undefined);
+  });
+
+  it('goes back to the GymBook icons when the logo is removed', async () => {
+    const tenant = await saveBranding('powerhouse', { clear_logo: true });
+    assert.equal(tenant.app_icon_url, null);
+    assert.equal(tenant.logo_url, null);
+
+    const { body } = await manifest('/g/powerhouse/manifest.webmanifest');
+    assert.ok(body.icons.every((i) => i.src.startsWith('/icons/')));
+    // The stale icon must be gone, not merely unreferenced.
+    assert.equal((await get('/api/platform/tenant-icon/powerhouse')).status, 404);
+  });
+
+  it('leaves the root domain on the GymBook icons', async () => {
+    const { body } = await manifest('/manifest.webmanifest');
+    assert.ok(body.icons.every((i) => i.src.startsWith('/icons/')));
   });
 });
 

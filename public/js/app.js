@@ -1,6 +1,6 @@
 import { ApiError, api, pathSlug, session } from './api.js';
 import { buildForm, clear, h, isFullscreen, openModal, setCurrency, toast, toggleFullscreen, onFullscreenChange } from './ui.js';
-import { onInstallChange, promptInstall } from './pwa.js';
+import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
 import { renderLanding } from './views/landing.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
@@ -544,6 +544,9 @@ async function boot() {
     // never returned one — every gym rendered INR regardless of its setting.
     setCurrency(platform.tenant?.currency);
     document.title = `${gymName()} — Gym Management`;
+    // A gym that uploaded a logo installs and appears in the tab strip under
+    // its own brand, not GymBook's barbell.
+    applyGymIcons(platform.tenant?.app_icon_url);
     await dispatch();
     awaitingReconnect = false;
   } catch (err) {
@@ -584,6 +587,7 @@ window.addEventListener('gymbook:signed-out', () => {
 window.addEventListener('gymbook:gym-updated', (event) => {
   platform = { ...platform, tenant: event.detail };
   document.title = `${gymName()} — Gym Management`;
+  applyGymIcons(platform.tenant?.app_icon_url);
   const brand = shell?.nav.querySelector('.brand');
   if (brand) {
     brand.setAttribute('title', gymName());

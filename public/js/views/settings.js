@@ -1,6 +1,6 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
 import { buildForm, date, h, isFullscreen, relativeDays, setCurrency, toast, toggleFullscreen } from '../ui.js';
-import { cropAndResizeImage } from '../photo.js';
+import { cropAndResizeImage, makeAppIcon } from '../photo.js';
 
 /**
  * The gym's own account page: identity, regional settings and subscription.
@@ -135,6 +135,9 @@ export async function renderSettings({ reload }) {
   const url = pathSlug ? gymPathUrl(tenant.slug) : window.location.origin;
 
   let pendingLogoData = undefined;
+  // The square home-screen icon drawn from the same file. Kept beside the logo
+  // rather than derived on the server, which has no image decoder.
+  let pendingIconData = undefined;
   let currentLogoUrl = tenant.logo_url;
 
   const logoPreviewImg = h('img', {
@@ -179,8 +182,15 @@ export async function renderSettings({ reload }) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrl = await cropAndResizeImage(file, 250, 0.85);
+      // Both are drawn from the original file rather than one from the other:
+      // the icon is four times the logo's width, and upscaling the 250px crop
+      // would install a blurry home-screen icon.
+      const [dataUrl, iconData] = await Promise.all([
+        cropAndResizeImage(file, 250, 0.85),
+        makeAppIcon(file),
+      ]);
       pendingLogoData = dataUrl;
+      pendingIconData = iconData;
       logoPreviewImg.src = dataUrl;
       logoPreviewImg.style.display = '';
       logoPlaceholder.style.display = 'none';
@@ -198,6 +208,7 @@ export async function renderSettings({ reload }) {
 
   removeBtn.addEventListener('click', () => {
     pendingLogoData = null;
+    pendingIconData = null;
     logoPreviewImg.src = '';
     logoPreviewImg.style.display = 'none';
     logoPlaceholder.style.display = '';
@@ -213,7 +224,11 @@ export async function renderSettings({ reload }) {
       'div',
       { style: 'display:flex;flex-direction:column;gap:4px' },
       h('strong', {}, 'Gym Logo'),
-      h('span', { class: 'muted', style: 'font-size:13px' }, 'Displayed in sidebar brand header. JPEG, PNG, or WebP up to 512 KB.'),
+      h(
+        'span',
+        { class: 'muted', style: 'font-size:13px' },
+        'Displayed in the sidebar and on your sign-in page, and used as the app icon when someone installs GymBook to their home screen. JPEG, PNG or WebP up to 512 KB.',
+      ),
       isAdmin
         ? h('div', { class: 'row', style: 'gap:8px;margin-top:6px' }, uploadBtn, removeBtn, fileInput)
         : null,
@@ -241,6 +256,7 @@ export async function renderSettings({ reload }) {
           payload.clear_logo = true;
         } else if (typeof pendingLogoData === 'string') {
           payload.logo_data = pendingLogoData;
+          payload.icon_data = pendingIconData;
         }
 
         const { tenant: updated } = await api.updateGym(payload);
