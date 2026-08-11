@@ -2,9 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover lets the app paint under the iPhone notch and home
+         indicator; app.css pays that back with env(safe-area-inset-*) padding. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>GymBook — Gym Management</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏋️</text></svg>" />
+    <meta name="description" content="Gym management: members, memberships, billing, check-ins, classes, trainers and equipment." />
+
+    <!-- Installed app. js/pwa.js repoints this at /g/<slug>/manifest.webmanifest
+         when a gym is addressed by path, so each gym installs as its own app. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0d1117" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- iOS ignores the manifest for home-screen installs and reads these. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GymBook" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png" />
     <link rel="stylesheet" href="/css/app.css" />
   </head>
   <body>
@@ -13,6 +31,9 @@
     <div id="modal-root"></div>
     <!-- Filled in only while printing ID cards; see printCards() in js/qrcard.js -->
     <div id="print-root"></div>
+    <!-- Before app.js: the manifest link has to be corrected for this gym
+         before the browser acts on the one in the markup above. -->
+    <script type="module" src="/js/pwa.js"></script>
     <script type="module" src="/js/app.js"></script>
   </body>
 </html>

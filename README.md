@@ -122,6 +122,43 @@ lapsed. Everything exports to CSV: members, payments, attendance, memberships.
 gym right now, renewals due, unpaid dues, plan mix, upcoming birthdays and
 equipment needing attention.
 
+## Install it on a phone or tablet (PWA)
+
+GymBook installs to the home screen on Android and iOS, and to the desktop on
+Chrome and Edge. There is nothing to submit to an app store and nothing extra to
+deploy — the running server is the app.
+
+- **Android** (Chrome, Edge, Samsung Internet) — an "Install app" button appears
+  in the sidebar, plus a one-time banner. Both call the browser's own install
+  prompt. Long-pressing the installed icon gives shortcuts straight to the
+  check-in desk, members and billing.
+- **iPhone / iPad** — Safari has no install API, so the same button opens the
+  exact steps instead: **Share → Add to Home Screen**. It must be Safari; Chrome
+  on iOS cannot install web apps.
+- **Desktop** — Chrome and Edge show an install icon in the address bar.
+
+Installed, it runs full-screen with no browser bars, keeps clear of the iPhone
+notch and home indicator, and shows its own offline state instead of the
+browser's error page.
+
+**Each gym installs as its own app.** The manifest is generated per request
+(`src/routes/pwa.js`), so `/g/acme/` installs as "Acme Gym" and launches into
+Acme's dashboard, while `/g/pulse/` on the same origin installs separately.
+Icons live in `public/icons/` and are drawn by `npm run icons:gen` — a
+dependency-free generator, so there is no image toolchain to install; the PNGs
+are committed and only need regenerating if the mark changes.
+
+**What works offline.** The service worker (`public/sw.js`) caches the app
+shell, so an installed icon opens instantly and still opens with no signal —
+showing "Can't reach GymBook" rather than a blank screen. It deliberately caches
+**nothing** from `/api`: every response there is specific to one gym and one
+signed-in person, and a cached member list on a shared front-desk tablet would
+be both stale and readable by whoever picks it up next. So the app opens
+offline; it does not operate offline. Check-ins and edits need the server.
+
+Requires HTTPS (or `localhost`) — service workers refuse to register on a plain
+`http://` LAN address, and the app degrades to a normal website there.
+
 ## Configuration
 
 All optional — sensible defaults apply.
@@ -336,18 +373,25 @@ src/
   maintenance.js   expires memberships past their end date
   bootstrap.js     first-run admin account
   routes/          auth, members, plans, subscriptions, payments,
-                   attendance, classes, equipment, dashboard, reports
+                   attendance, classes, equipment, dashboard, reports,
+                   pwa (the per-gym web app manifest)
 public/
   index.html       single page app shell
+  offline.html     shown when even the shell cannot be reached
+  sw.js            service worker: caches the shell, never the API
+  manifest         generated per gym — see src/routes/pwa.js
   css/app.css      dark theme
+  icons/           installed-app icons (npm run icons:gen)
   js/api.js        typed API client and session storage
   js/ui.js         DOM helpers, formatting, tables, modals, SVG charts
   js/photo.js      member photo upload/camera capture, crop and compress
+  js/pwa.js        install prompt, worker registration, update and offline UI
   js/app.js        router and layout
   js/views/        one module per screen
 scripts/
   seed.js          demo data
   backup.js        take a backup now
+  gen-icons.js     draws public/icons/*.png with no dependencies
   reset-password.js  recover a lost password from the shell
 tests/             one suite per area
 ```
@@ -358,7 +402,7 @@ tests/             one suite per area
 npm test
 ```
 
-262 tests over throwaway databases cover authentication and token tampering,
+325 tests over throwaway databases cover authentication and token tampering,
 validation, member codes and duplicate detection, membership end-date maths,
 overlap rejection, renewal start dates, dues, check-in rules and idempotency,
 freeze/resume day credits, class capacity and weekday enforcement, role
@@ -367,7 +411,9 @@ trial/billing lifecycle and webhook signatures, login lockout, fingerprint
 terminal uploads, WebAuthn enrollment and check-in against a software
 authenticator, QR card issuing, scanning, reissue and forgery rejection,
 gym-local date handling across timezones, member photo storage and its signed
-URLs, password-reset issue/redeem/expiry, and backup verification and pruning.
+URLs, password-reset issue/redeem/expiry, backup verification and pruning, and
+the installable-app surface — per-gym manifest, icon sizes, service worker
+headers and precache list.
 
 ## Notes on the design
 

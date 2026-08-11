@@ -12,7 +12,8 @@
     "dev": "node --no-warnings=ExperimentalWarning --watch src/server.js",
     "seed": "node --no-warnings=ExperimentalWarning scripts/seed.js",
     "test": "node --no-warnings=ExperimentalWarning --test \"tests/**/*.test.js\"",
-    "vendor:jsqr": "node scripts/vendor-jsqr.js"
+    "vendor:jsqr": "node scripts/vendor-jsqr.js",
+    "icons:gen": "node scripts/gen-icons.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",

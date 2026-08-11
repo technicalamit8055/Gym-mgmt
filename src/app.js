@@ -12,6 +12,7 @@ import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
+import { pwaRoutes } from './routes/pwa.js';
 import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
 import { sessionRoutes } from './routes/sessions.js';
@@ -65,6 +66,11 @@ export function createApp() {
 
   app.use(resolveTenant);
 
+  // The installed-app manifest, named after whichever gym the address resolved
+  // to. Outside /api so the subscription gate below never applies: a lapsed
+  // gym's home-screen icon must still open the page that takes payment.
+  app.use(pwaRoutes);
+
   // Signup, login, and billing must stay reachable even while a tenant is
   // suspended (lapsed trial/payment) — the gate below only applies past here.
   app.use('/api/platform', platformRoutes);
@@ -101,7 +107,21 @@ export function createApp() {
     res.status(404).json({ error: 'No such endpoint' });
   });
 
-  app.use(express.static(path.join(ROOT, 'public')));
+  app.use(
+    express.static(path.join(ROOT, 'public'), {
+      setHeaders(res, filePath) {
+        // A cached service worker script is a stuck deployment: the browser
+        // would keep re-registering the old one, and the new shell would never
+        // install. Icons are the opposite — content-stable, so let them sit.
+        if (path.basename(filePath) === 'sw.js') {
+          res.set('Cache-Control', 'no-cache');
+          res.set('Service-Worker-Allowed', '/');
+        } else if (filePath.includes(`${path.sep}icons${path.sep}`)) {
+          res.set('Cache-Control', 'public, max-age=604800');
+        }
+      },
+    }),
+  );
   app.get('*splat', (_req, res) => {
     res.sendFile(path.join(ROOT, 'public', 'index.html'));
   });

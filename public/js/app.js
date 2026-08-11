@@ -1,5 +1,6 @@
 import { ApiError, api, pathSlug, session } from './api.js';
 import { buildForm, clear, h, isFullscreen, openModal, setCurrency, toast, toggleFullscreen, onFullscreenChange } from './ui.js';
+import { onInstallChange, promptInstall } from './pwa.js';
 import { renderLanding } from './views/landing.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
@@ -186,6 +187,9 @@ function renderLogin(message) {
   root().className = '';
 }
 
+/** Cancels the previous shell's install-availability subscription. */
+let unsubscribeInstall;
+
 function renderBrandLogoNode() {
   const logoUrl = platform.tenant?.logo_url;
   if (logoUrl) {
@@ -222,6 +226,20 @@ function renderShell() {
     );
   }
 
+  // Hidden until a browser reports an install is possible — the subscription
+  // is also what un-hides it if Chrome fires its prompt after the shell is
+  // already on screen. Dropped first, so signing out and back in doesn't leave
+  // the previous shell's button subscribed.
+  const installBtn = h(
+    'button',
+    { class: 'btn sm ghost install-hidden', onclick: () => promptInstall() },
+    '📲 Install app',
+  );
+  unsubscribeInstall?.();
+  unsubscribeInstall = onInstallChange((available) =>
+    installBtn.classList.toggle('install-hidden', !available),
+  );
+
   nav.append(
     h(
       'div',
@@ -231,6 +249,7 @@ function renderShell() {
       h(
         'div',
         { class: 'row', style: 'margin-top:10px;gap:6px;flex-wrap:wrap' },
+        installBtn,
         h(
           'button',
           { id: 'btn-fullscreen-sidebar', class: 'btn sm ghost', onclick: () => toggleFullscreen() },
@@ -483,17 +502,61 @@ async function dispatch() {
   await renderRoute();
 }
 
+/**
+ * Whether an error means "the server could not be reached".
+ *
+ * Offline, this arrives one of two ways: a rejected fetch (TypeError) with no
+ * service worker in play, or the worker's own JSON 503 stand-in, which it
+ * substitutes precisely so failures land here as an ApiError instead of a bare
+ * network exception. See public/sw.js.
+ */
+function isOfflineError(err) {
+  if (err instanceof ApiError) return err.status === 503;
+  return err instanceof TypeError || !navigator.onLine;
+}
+
+/** Set while the "can't reach the server" notice is on screen, so that
+ * reconnecting can clear it without anyone tapping anything. */
+let awaitingReconnect = false;
+
+/** The installed app has no browser error page behind it: a failed boot would
+ * otherwise leave a home-screen icon that opens to "Loading…" forever. */
+function renderBootFailure(err) {
+  console.error(err);
+  if (isOfflineError(err)) {
+    awaitingReconnect = true;
+    renderNotice(
+      "Can't reach GymBook",
+      'You appear to be offline. Nothing has been lost — reconnect and this page will pick up where it left off.',
+      [h('button', { class: 'btn primary', onclick: () => boot() }, 'Try again')],
+    );
+    return;
+  }
+  renderNotice('Could not start GymBook', err?.message || 'Unexpected error', [
+    h('button', { class: 'btn primary', onclick: () => boot() }, 'Try again'),
+  ]);
+}
+
 async function boot() {
-  platform = await loadPlatformContext();
-  // The real fix for a currency that used to come from /api/health, which
-  // never returned one — every gym rendered INR regardless of its setting.
-  setCurrency(platform.tenant?.currency);
-  document.title = `${gymName()} — Gym Management`;
-  await dispatch();
+  try {
+    platform = await loadPlatformContext();
+    // The real fix for a currency that used to come from /api/health, which
+    // never returned one — every gym rendered INR regardless of its setting.
+    setCurrency(platform.tenant?.currency);
+    document.title = `${gymName()} — Gym Management`;
+    await dispatch();
+    awaitingReconnect = false;
+  } catch (err) {
+    renderBootFailure(err);
+  }
 }
 
 window.addEventListener('hashchange', () => {
-  dispatch();
+  dispatch().catch(renderBootFailure);
+});
+
+window.addEventListener('online', () => {
+  if (awaitingReconnect) boot();
 });
 
 /** Drops the session and shows whatever this address offers signed-out
