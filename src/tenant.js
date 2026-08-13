@@ -112,7 +112,12 @@ export function resolveTenant(req, res, next) {
   if (!slug) {
     req.tenant = { slug: DEFAULT_TENANT_SLUG };
     return tenantStorage.run(
-      { slug: DEFAULT_TENANT_SLUG, dbFile: undefined, pathPrefix: req.tenantPathPrefix },
+      {
+        slug: DEFAULT_TENANT_SLUG,
+        dbFile: undefined,
+        businessType: 'gym',
+        pathPrefix: req.tenantPathPrefix,
+      },
       next,
     );
   }
@@ -148,6 +153,7 @@ export function resolveTenant(req, res, next) {
       slug: tenant.slug,
       dbFile: tenantDbPath(tenant.slug),
       timezone: tenant.timezone || undefined,
+      businessType: tenant.business_type || 'gym',
       // Carried so anything building a URL back into this gym (member photo
       // URLs) keeps the /g/<slug> prefix the request arrived with.
       pathPrefix: req.tenantPathPrefix,

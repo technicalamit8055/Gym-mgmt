@@ -3,19 +3,21 @@ import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, tod
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
 
-/** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma". */
-async function memberOptions() {
+/** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma".
+ * Exported for seats.js and lockers.js, which need the same search-by-code-
+ * or-name picker for assigning a seat or a locker. */
+export async function memberOptions() {
   const { items } = await api.members({ limit: 200, sort: 'name' });
   return items.map((m) => ({ value: `${m.code} — ${m.first_name} ${m.last_name}`.trim(), id: m.id }));
 }
 
-function resolveMember(options, raw) {
+export function resolveMember(options, raw) {
   const text = String(raw || '').trim().toLowerCase();
   const match = options.find((o) => o.value.toLowerCase() === text) || options.find((o) => o.value.toLowerCase().startsWith(text));
   return match?.id;
 }
 
-function datalist(id, options) {
+export function datalist(id, options) {
   return h('datalist', { id }, ...options.map((option) => h('option', { value: option.value })));
 }
 

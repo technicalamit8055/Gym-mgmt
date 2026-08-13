@@ -230,9 +230,14 @@ describe('gym sessions', () => {
     assert.equal((await call('DELETE', `/api/sessions/${created.body.id}`)).status, 200);
   });
 
-  it('rejects a session whose end time is not after its start time', async () => {
-    const res = await call('POST', '/api/sessions', { name: 'Bad', start_time: '10:00', end_time: '09:00' });
-    assert.equal(res.status, 400);
+  it('treats a session whose end time is not after its start time as overnight', async () => {
+    // 22:00-06:00 is a real shift (a library's night batch), indistinguishable
+    // from a plain input typo by the clock alone — so this is accepted and
+    // flagged, not rejected. See the auto-checkout fix this flag exists for
+    // in maintenance.js.
+    const res = await call('POST', '/api/sessions', { name: 'Night', start_time: '22:00', end_time: '06:00' });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.overnight, 1);
   });
 
   it('rejects assigning a member to a session that does not exist', async () => {

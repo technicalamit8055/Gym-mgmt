@@ -8,6 +8,18 @@ export const pathPrefix = (/^\/g\/[a-z][a-z0-9-]{2,39}(?=\/|$)/.exec(window.loca
 /** The gym slug from the path prefix, or null when addressed by subdomain. */
 export const pathSlug = pathPrefix ? pathPrefix.slice(3) : null;
 
+/**
+ * Which marketing site an unauthenticated root-domain visitor sees: SeatBook
+ * at /library (and, once a domain exists, seatbook.*), GymBook everywhere
+ * else. Read once from the real URL, not the hash — hash navigation never
+ * changes it, so it cannot go stale mid-session; and it must be the real path
+ * because the hash router only ever sees `''` on first load here.
+ */
+export const landingBrand =
+  /^\/library(\/|$)/.test(window.location.pathname) || /^(www\.)?seatbook\./.test(window.location.host)
+    ? 'library'
+    : 'gym';
+
 /** Absolute URL of a gym addressed by path, for links out of the landing page. */
 export const gymPathUrl = (slug) => `${window.location.origin}/g/${slug}/`;
 
@@ -262,6 +274,28 @@ export const api = {
     link.click();
     URL.revokeObjectURL(url);
   },
+
+  seats: (params) => request('GET', `/seats${query(params)}`),
+  seatMap: (params) => request('GET', `/seats/map${query(params)}`),
+  seatVacancy: (params) => request('GET', `/seats/vacancy${query(params)}`),
+  createSeat: (payload) => request('POST', '/seats', payload),
+  bulkCreateSeats: (payload) => request('POST', '/seats/bulk', payload),
+  updateSeat: (id, payload) => request('PATCH', `/seats/${id}`, payload),
+  deleteSeat: (id) => request('DELETE', `/seats/${id}`),
+  allocateSeat: (id, payload) => request('POST', `/seats/${id}/allocate`, payload),
+  releaseSeat: (id, payload) => request('POST', `/seats/${id}/release`, payload),
+  transferSeat: (id, payload) => request('POST', `/seats/${id}/transfer`, payload),
+
+  seatZones: () => request('GET', '/seats/zones'),
+  createSeatZone: (payload) => request('POST', '/seats/zones', payload),
+  updateSeatZone: (id, payload) => request('PATCH', `/seats/zones/${id}`, payload),
+  deleteSeatZone: (id) => request('DELETE', `/seats/zones/${id}`),
+
+  seatWaitlist: (params) => request('GET', `/seats/waitlist${query(params)}`),
+  createWaitlistEntry: (payload) => request('POST', '/seats/waitlist', payload),
+  updateWaitlistEntry: (id, payload) => request('PATCH', `/seats/waitlist/${id}`, payload),
+  deleteWaitlistEntry: (id) => request('DELETE', `/seats/waitlist/${id}`),
+  convertWaitlistEntry: (id, payload) => request('POST', `/seats/waitlist/${id}/convert`, payload),
 
   whatsappStatus: () => request('GET', '/whatsapp/status'),
   whatsappConnect: () => request('POST', '/whatsapp/connect'),

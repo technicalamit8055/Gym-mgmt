@@ -5,6 +5,7 @@ import { badRequest, conflict, notFound } from '../errors.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
 import { PHOTO_JOIN, PHOTO_PRESENT_COL, parsePhotoDataUrl, setMemberPhoto, withPhotoUrl } from '../photo.js';
 import { addDays, parse, today, toInt } from '../validate.js';
+import { currentVertical } from '../verticals.js';
 
 export const memberRoutes = Router();
 memberRoutes.use(requireAuth);
@@ -31,7 +32,7 @@ export const MEMBER_SELECT = `
     WHERE s.status = 'active'
   ) active_sub ON active_sub.member_id = m.id AND active_sub.rn = 1
   LEFT JOIN (
-    SELECT member_id, SUM(price - discount) AS total FROM subscriptions
+    SELECT member_id, SUM(price - discount + addon_total) AS total FROM subscriptions
     WHERE status != 'cancelled' GROUP BY member_id
   ) billed ON billed.member_id = m.id
   LEFT JOIN (
@@ -105,9 +106,22 @@ function hasPhotoField(body) {
   return Boolean(body) && typeof body === 'object' && 'photo' in body;
 }
 
+/**
+ * The next code in this account's series — GM0001 for a gym, ST0001 for a
+ * study hall.
+ *
+ * The substr offset is bound from the prefix rather than hard-coded: a
+ * three-character prefix under a fixed `substr(code, 3)` reads 'STD0007' as
+ * 'D0007', casts to 0, and hands every single student STD0001 — which surfaces
+ * as an unhandled UNIQUE-constraint 500 on the *second* one added.
+ */
 function nextMemberCode() {
-  const row = get("SELECT MAX(CAST(substr(code, 3) AS INTEGER)) AS n FROM members WHERE code LIKE 'GM%'");
-  return `GM${String((row?.n || 0) + 1).padStart(4, '0')}`;
+  const prefix = currentVertical().memberCodePrefix;
+  const row = get('SELECT MAX(CAST(substr(code, ?) AS INTEGER)) AS n FROM members WHERE code LIKE ?', [
+    prefix.length + 1,
+    `${prefix}%`,
+  ]);
+  return `${prefix}${String((row?.n || 0) + 1).padStart(4, '0')}`;
 }
 
 memberRoutes.get('/', (req, res) => {

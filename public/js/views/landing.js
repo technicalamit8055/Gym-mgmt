@@ -43,7 +43,7 @@ const FEATURES = [
 ];
 
 /** "Already have a gym?" — turns a typed address into the URL it lives at. */
-function signInBox(urlMode, rootHost) {
+export function signInBox(urlMode, rootHost) {
   const input = h('input', {
     name: 'slug',
     placeholder: 'your-gym',
@@ -156,7 +156,8 @@ export function renderLanding({ context, navigate }) {
     h(
       'footer',
       { class: 'landing-foot muted' },
-      `GymBook — every gym on its own database. ${trialDays}-day trial, then a single monthly subscription.`,
+      `GymBook — every gym on its own database. ${trialDays}-day trial, then a single monthly subscription. `,
+      h('a', { href: '/library' }, 'Running a library or study hall? →'),
     ),
   );
 }

@@ -1,4 +1,4 @@
-import { ApiError, api, gymPathUrl, saveSessionFor } from '../api.js';
+import { ApiError, api, gymPathUrl, landingBrand, saveSessionFor } from '../api.js';
 import { h, toast } from '../ui.js';
 
 /**
@@ -21,6 +21,35 @@ const CURRENCIES = [
   { value: 'CAD', label: 'C$ Canadian dollar' },
   { value: 'ZAR', label: 'R South African rand' },
 ];
+
+/**
+ * Everything the business-type fork retitles. Chosen once, before any
+ * account exists — there is no self-service switch afterwards (see
+ * setTenantBusinessType in tenants.js), so this is the only place these
+ * labels ever need to live on the client.
+ */
+const TYPE_COPY = {
+  gym: {
+    heading: 'Set up your gym',
+    orgSection: 'Your gym',
+    orgLabel: 'Gym name',
+    orgPlaceholder: 'Iron House Fitness',
+    orgHint: 'Shown to your staff and printed on member ID cards.',
+    addressLabel: 'Gym address',
+    livesAt: 'Your gym lives at',
+    submitLabel: 'Create my gym',
+  },
+  library: {
+    heading: 'Set up your library',
+    orgSection: 'Your library',
+    orgLabel: 'Library name',
+    orgPlaceholder: 'Central Study Hall',
+    orgHint: 'Shown to your staff and printed on student ID cards.',
+    addressLabel: 'Library address',
+    livesAt: 'Your library lives at',
+    submitLabel: 'Create my hall',
+  },
+};
 
 /**
  * "Iron House Fitness" -> "iron-house-fitness", within the server's slug rule
@@ -55,21 +84,22 @@ function field(label, control, { hint, full = true } = {}) {
 /** The screen after a successful signup: the address, and the way in. */
 function renderDone({ result }) {
   const url = result.app_url || gymPathUrl(result.slug);
+  const isLibrary = result.business_type === 'library';
 
   return h(
     'div',
     { class: 'onboard' },
     h(
       'div',
-      { class: 'onboard-card onboard-done' },
+      { class: 'onboard-card onboard-done', 'data-brand': isLibrary ? 'library' : undefined },
       h('div', { class: 'onboard-tick' }, '✓'),
-      h('h1', {}, 'Your gym is ready'),
+      h('h1', {}, isLibrary ? 'Your library is ready' : 'Your gym is ready'),
       h('p', { class: 'sub' }, `${result.gym_name} is set up and your ${result.trial_label} has started.`),
 
       h(
         'div',
         { class: 'onboard-url' },
-        h('span', { class: 'muted' }, 'Your gym lives at'),
+        h('span', { class: 'muted' }, isLibrary ? 'Your library lives at' : 'Your gym lives at'),
         h('code', {}, url),
         h(
           'button',
@@ -99,9 +129,21 @@ function renderDone({ result }) {
             : `Sign in as ${result.admin_email} with the password you just chose.`,
         ),
         result.starter_plans
-          ? h('li', {}, `${result.starter_plans} starter plans are ready to edit under Plans.`)
+          ? h(
+              'li',
+              {},
+              isLibrary
+                ? `${result.starter_plans} starter passes are ready to edit under Passes.`
+                : `${result.starter_plans} starter plans are ready to edit under Plans.`,
+            )
           : null,
-        h('li', {}, 'Add your members, then print their QR cards from the check-in desk.'),
+        h(
+          'li',
+          {},
+          isLibrary
+            ? 'Map your seats — the seat map is where everything starts.'
+            : 'Add your members, then print their QR cards from the check-in desk.',
+        ),
         h('li', {}, 'Bookmark the link above — it is where your staff sign in.'),
       ),
 
@@ -121,6 +163,34 @@ function renderDone({ result }) {
 
 export function renderSignup({ context, navigate, rerender }) {
   const trialDays = context.trial_days ?? 7;
+
+  // Decided once, here, before any account exists — chosen first and above
+  // everything else because it retitles every field below it. Pre-selected
+  // from how the visitor arrived (the SeatBook landing vs. GymBook's own),
+  // but still just a starting point: either card can be picked.
+  let currentType = landingBrand === 'library' ? 'library' : 'gym';
+  const typeGym = h('input', { type: 'radio', name: 'business_type', value: 'gym' });
+  const typeLibrary = h('input', { type: 'radio', name: 'business_type', value: 'library' });
+  typeGym.checked = currentType === 'gym';
+  typeLibrary.checked = currentType === 'library';
+  const typeChoice = h(
+    'div',
+    { class: 'type-choice full' },
+    h(
+      'label',
+      { class: 'type-card' },
+      typeGym,
+      h('span', { class: 'icon' }, '🏋️'),
+      h('div', {}, h('strong', {}, 'Gym'), h('span', { class: 'muted' }, 'Memberships, check-ins, classes')),
+    ),
+    h(
+      'label',
+      { class: 'type-card' },
+      typeLibrary,
+      h('span', { class: 'icon' }, '📚'),
+      h('div', {}, h('strong', {}, 'Library / study hall'), h('span', { class: 'muted' }, 'Seats, shifts, passes')),
+    ),
+  );
 
   const gymName = h('input', { name: 'gym_name', placeholder: 'Iron House Fitness', autocomplete: 'organization' });
   const slug = h('input', {
@@ -198,7 +268,11 @@ export function renderSignup({ context, navigate, rerender }) {
     }, 300);
   }
 
-  const submit = h('button', { class: 'btn primary block lg', type: 'submit' }, `Create my gym`);
+  const submit = h('button', { class: 'btn primary block lg', type: 'submit' }, TYPE_COPY[currentType].submitLabel);
+  const orgSectionHeading = h('div', { class: 'onboard-section full' }, TYPE_COPY[currentType].orgSection);
+  const gymNameField = field(TYPE_COPY[currentType].orgLabel, gymName, { hint: TYPE_COPY[currentType].orgHint });
+  gymName.placeholder = TYPE_COPY[currentType].orgPlaceholder;
+  const addressLabelNode = h('span', {}, TYPE_COPY[currentType].addressLabel);
 
   const form = h(
     'form',
@@ -218,6 +292,7 @@ export function renderSignup({ context, navigate, rerender }) {
           admin_password: adminPassword.value,
           currency: currency.value,
           timezone: timezone.value.trim(),
+          business_type: currentType,
         };
 
         submit.disabled = true;
@@ -263,19 +338,20 @@ export function renderSignup({ context, navigate, rerender }) {
             slug.errorNode.textContent = err.message;
             slug.errorNode.style.display = 'block';
           }
-          toast(err.message || 'Could not create your gym', 'error');
+          toast(err.message || 'Could not create your account', 'error');
         } finally {
           submit.disabled = false;
         }
       },
     },
 
-    h('div', { class: 'onboard-section full' }, 'Your gym'),
-    field('Gym name', gymName, { hint: 'Shown to your staff and printed on member ID cards.' }),
+    typeChoice,
+    orgSectionHeading,
+    gymNameField,
     h(
       'label',
       { class: 'field full' },
-      h('span', {}, 'Gym address'),
+      addressLabelNode,
       h(
         'div',
         { class: 'onboard-slug' },
@@ -299,20 +375,38 @@ export function renderSignup({ context, navigate, rerender }) {
     h('div', { class: 'full' }, submit),
   );
 
-  return h(
+  const heading = h('h1', {}, TYPE_COPY[currentType].heading);
+  const onboardCard = h(
     'div',
-    { class: 'onboard' },
+    { class: 'onboard-card', 'data-brand': currentType === 'library' ? 'library' : undefined },
     h(
-      'div',
-      { class: 'onboard-card' },
-      h(
-        'button',
-        { class: 'btn sm ghost onboard-back', type: 'button', onclick: () => navigate('/') },
-        '← Back',
-      ),
-      h('h1', {}, 'Set up your gym'),
-      h('p', { class: 'sub' }, `${trialDays} days free. No card needed. About a minute.`),
-      form,
+      'button',
+      { class: 'btn sm ghost onboard-back', type: 'button', onclick: () => navigate('/') },
+      '← Back',
     ),
+    heading,
+    h('p', { class: 'sub' }, `${trialDays} days free. No card needed. About a minute.`),
+    form,
   );
+
+  /** Retitles the live form in place — the fork changes every label below it,
+   * so picking a card has to visibly repaint the page, not just tag a hidden
+   * field. */
+  function syncType(type) {
+    currentType = type;
+    const copy = TYPE_COPY[type];
+    heading.textContent = copy.heading;
+    orgSectionHeading.textContent = copy.orgSection;
+    gymNameField.querySelector('span').textContent = copy.orgLabel;
+    gymNameField.querySelector('.muted').textContent = copy.orgHint;
+    gymName.placeholder = copy.orgPlaceholder;
+    addressLabelNode.textContent = copy.addressLabel;
+    submit.textContent = copy.submitLabel;
+    if (type === 'library') onboardCard.setAttribute('data-brand', 'library');
+    else onboardCard.removeAttribute('data-brand');
+  }
+  typeGym.addEventListener('change', () => syncType('gym'));
+  typeLibrary.addEventListener('change', () => syncType('library'));
+
+  return h('div', { class: 'onboard' }, onboardCard);
 }

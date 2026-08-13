@@ -118,7 +118,7 @@ reportRoutes.get('/growth', (_req, res) => {
       `
       SELECT strftime('%Y-%m', start_date) AS month,
              COUNT(*) AS memberships,
-             SUM(price - discount) AS value
+             SUM(price - discount + addon_total) AS value
       FROM subscriptions
       WHERE status != 'cancelled' AND start_date >= ?
       GROUP BY month ORDER BY month

@@ -1,7 +1,12 @@
 import express, { Router } from 'express';
 import { performCheckIn } from '../checkin.js';
 import { get, tenantStorage } from '../db.js';
-import { findTenantSlugByDeviceSerial, tenantDbPath, touchDeviceLastSeen } from '../tenants.js';
+import {
+  findTenantBySlug,
+  findTenantSlugByDeviceSerial,
+  tenantDbPath,
+  touchDeviceLastSeen,
+} from '../tenants.js';
 
 /**
  * Raw wire protocol for eSSL/Realtime/ZKTeco-family fingerprint terminals
@@ -89,32 +94,45 @@ deviceAttendanceRoutes.post('/cdata', (req, res) => {
     return res.type('text/plain').send('OK');
   }
 
-  tenantStorage.run({ slug, dbFile: tenantDbPath(slug) }, () => {
-    const lines = String(req.body || '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
+  // The full registry row, not just the slug: a punch is an attendance write,
+  // and performCheckIn -> today() has to resolve in the gym's own timezone, not
+  // the server's. Falls back safely for a device whose registry row has gone.
+  const tenant = findTenantBySlug(slug);
 
-    for (const line of lines) {
-      const fields = line.split('\t');
-      const pin = Number(fields[0]);
-      if (!Number.isInteger(pin)) continue;
+  tenantStorage.run(
+    {
+      slug,
+      dbFile: tenantDbPath(slug),
+      timezone: tenant?.timezone || undefined,
+      businessType: tenant?.business_type || 'gym',
+    },
+    () => {
+      const lines = String(req.body || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
 
-      const member = get('SELECT * FROM members WHERE device_pin = ?', [pin]);
-      if (!member) {
-        console.log(`[iclock] no member enrolled with device_pin=${pin} (SN=${serial})`);
-        continue;
+      for (const line of lines) {
+        const fields = line.split('\t');
+        const pin = Number(fields[0]);
+        if (!Number.isInteger(pin)) continue;
+
+        const member = get('SELECT * FROM members WHERE device_pin = ?', [pin]);
+        if (!member) {
+          console.log(`[iclock] no member enrolled with device_pin=${pin} (SN=${serial})`);
+          continue;
+        }
+        try {
+          performCheckIn(member, 'device');
+        } catch (err) {
+          // A member punching while frozen/expired etc. is an expected
+          // outcome, not a protocol error — log and keep processing the
+          // rest of the batch rather than failing the whole upload.
+          console.log(`[iclock] check-in skipped for device_pin=${pin}: ${err.message}`);
+        }
       }
-      try {
-        performCheckIn(member, 'device');
-      } catch (err) {
-        // A member punching while frozen/expired etc. is an expected
-        // outcome, not a protocol error — log and keep processing the
-        // rest of the batch rather than failing the whole upload.
-        console.log(`[iclock] check-in skipped for device_pin=${pin}: ${err.message}`);
-      }
-    }
-  });
+    },
+  );
 
   res.type('text/plain').send('OK');
 });

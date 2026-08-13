@@ -12,8 +12,10 @@ import { config } from './config.js';
  *   as a column DEFAULT, and anything reading them for display or for an
  *   hour/day bucket must convert through src/clock.js first.
  * - **Calendar dates** (`joined_on`, `paid_on`, `start_date`, `end_date`,
- *   `frozen_on`, `class_date`) are the *gym's* local date, because "the day
- *   Rahul paid" is a wall-clock fact about the gym. SQLite cannot know the
+ *   `frozen_on`, `class_date`, `seat_allocations.start_date`/`end_date`,
+ *   `locker_allocations.start_date`/`end_date`, `released_on`,
+ *   `expenses.spent_on`) are the *gym's* local date, because "the day Rahul
+ *   paid" is a wall-clock fact about the gym. SQLite cannot know the
  *   tenant's timezone, so the `date('now')` DEFAULTs below are UTC and
  *   therefore only a last-resort fallback: every route inserts these
  *   explicitly from validate.js's today(). Adding a date column here means
@@ -374,6 +376,209 @@ const MIGRATIONS = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id)');
   },
+
+  /* ---------------------------------------------------------- SeatBook --- */
+  // Every tenant's database carries these tables regardless of vertical (see
+  // verticals.js's header comment) — a gym simply never writes to them.
+
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS seat_zones (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        active     INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS seats (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        code       TEXT NOT NULL UNIQUE,
+        zone_id    INTEGER REFERENCES seat_zones(id) ON DELETE SET NULL,
+        row_label  TEXT,
+        col_index  INTEGER,
+        seat_type  TEXT NOT NULL DEFAULT 'standard'
+                   CHECK (seat_type IN ('standard', 'cabin', 'ac', 'premium', 'window')),
+        has_power  INTEGER NOT NULL DEFAULT 0,
+        status     TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'maintenance', 'retired')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_seats_zone ON seats(zone_id)');
+  },
+  // The core invariant: one live allocation per (seat, shift). Renewal
+  // extends this row rather than inserting a second one, so the seat map
+  // stays a single-row-per-cell read — see allocateOrExtend in seats.js.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS seat_allocations (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        seat_id         INTEGER NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+        session_id      INTEGER NOT NULL REFERENCES sessions(id),
+        member_id       INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+        start_date      TEXT NOT NULL,
+        end_date        TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released')),
+        released_on     TEXT,
+        released_reason TEXT,
+        note            TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // Double-booking is structurally impossible, not merely checked: a
+    // transactional read-then-write race can still land two allocate calls in
+    // the same tick, and only a constraint the database itself enforces
+    // survives that.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_seat_alloc_live ON seat_allocations(seat_id, session_id) WHERE status = 'active'",
+    );
+    // One student cannot hold two desks in the same shift.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_seat_alloc_member_shift ON seat_allocations(member_id, session_id) WHERE status = 'active'",
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_seat_alloc_sub ON seat_allocations(subscription_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_seat_alloc_end ON seat_allocations(end_date)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS seat_waitlist (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id  INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        name       TEXT,
+        phone      TEXT,
+        session_id INTEGER REFERENCES sessions(id),
+        seat_type  TEXT,
+        status     TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'offered', 'converted', 'dropped')),
+        note       TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_status ON seat_waitlist(status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_session ON seat_waitlist(session_id)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lockers (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        code        TEXT NOT NULL UNIQUE,
+        zone_id     INTEGER REFERENCES seat_zones(id) ON DELETE SET NULL,
+        monthly_fee REAL NOT NULL DEFAULT 0 CHECK (monthly_fee >= 0),
+        status      TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'maintenance', 'retired')),
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS locker_allocations (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        locker_id       INTEGER NOT NULL REFERENCES lockers(id) ON DELETE CASCADE,
+        member_id       INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+        start_date      TEXT NOT NULL,
+        end_date        TEXT NOT NULL,
+        fee             REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
+        deposit         REAL NOT NULL DEFAULT 0 CHECK (deposit >= 0),
+        key_issued      INTEGER NOT NULL DEFAULT 0,
+        status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released')),
+        released_on     TEXT,
+        released_reason TEXT,
+        note            TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_locker_alloc_live ON locker_allocations(locker_id) WHERE status = 'active'",
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_locker_alloc_sub ON locker_allocations(subscription_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_locker_alloc_end ON locker_allocations(end_date)');
+  },
+  (db) => {
+    // category is free text with a suggested list on the client, not a CHECK —
+    // widening a CHECK means rebuilding the table (see the whatsapp_logs
+    // rebuild above), and an expense category list is exactly the kind of
+    // thing a hall owner wants to extend without a migration.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS expenses (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        category   TEXT NOT NULL,
+        amount     REAL NOT NULL CHECK (amount > 0),
+        spent_on   TEXT NOT NULL,
+        method     TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash', 'card', 'upi', 'bank', 'online')),
+        vendor     TEXT,
+        note       TEXT,
+        recurring  INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(spent_on)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category)');
+  },
+  (db) => {
+    // Own primary key, not member_id PK like member_photos: Aadhaar front,
+    // Aadhaar back and a college ID is three rows for one student.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_documents (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        kind        TEXT NOT NULL,
+        label       TEXT,
+        number      TEXT,
+        mime        TEXT NOT NULL,
+        bytes       BLOB NOT NULL,
+        verified    INTEGER NOT NULL DEFAULT 0,
+        uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_member_documents_member ON member_documents(member_id)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS library_settings (
+        id                   INTEGER PRIMARY KEY CHECK (id = 1),
+        seat_hold_days       INTEGER NOT NULL DEFAULT 3,
+        enforce_shift_window INTEGER NOT NULL DEFAULT 0,
+        allow_seat_change    INTEGER NOT NULL DEFAULT 1,
+        require_id_proof     INTEGER NOT NULL DEFAULT 0,
+        updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.prepare('INSERT OR IGNORE INTO library_settings (id) VALUES (1)').run();
+  },
+
+  // sessions -> real shifts. price is a surcharge on top of the plan price,
+  // not a replacement for it; capacity is nullable (unlimited).
+  (db) => {
+    ensureColumn(db, 'sessions', 'price', 'REAL NOT NULL DEFAULT 0');
+    ensureColumn(db, 'sessions', 'capacity', 'INTEGER');
+    ensureColumn(db, 'sessions', 'code', 'TEXT');
+    ensureColumn(db, 'sessions', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
+    // A shift that runs past midnight (e.g. 22:00-06:00) needs to know it: see
+    // the auto-checkout fix in maintenance.js that this column exists for.
+    ensureColumn(db, 'sessions', 'overnight', 'INTEGER NOT NULL DEFAULT 0');
+  },
+  // An optional lock + prefill on the plan; subscriptions.session_id (below)
+  // is the actual source of truth — see the shift-binding note in
+  // subscriptions.js.
+  (db) => ensureColumn(db, 'plans', 'session_id', 'INTEGER REFERENCES sessions(id)'),
+  (db) => {
+    ensureColumn(db, 'subscriptions', 'session_id', 'INTEGER REFERENCES sessions(id)');
+    // A billed figure (locker fee), not a stored due — dues stay computed,
+    // never stored, same as every other balance in this database.
+    ensureColumn(db, 'subscriptions', 'addon_total', 'REAL NOT NULL DEFAULT 0');
+  },
+  (db) => {
+    ensureColumn(db, 'attendance', 'seat_id', 'INTEGER REFERENCES seats(id)');
+    ensureColumn(db, 'attendance', 'session_id', 'INTEGER REFERENCES sessions(id)');
+  },
+  // UPSC/NEET/JEE — the category's top filter on a student roster.
+  (db) => ensureColumn(db, 'members', 'exam_target', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,
@@ -410,6 +615,18 @@ export function getDb() {
  * behaviour for any gym that hasn't set one. */
 export function getTenantTimezone() {
   return tenantStorage.getStore()?.timezone;
+}
+
+/**
+ * Which product this tenant runs: 'gym' or 'library'.
+ *
+ * Lives in the store rather than on `req` because bootstrap.js, maintenance.js,
+ * server.js's reminder sweep and platformAdmin.js all need it and none of them
+ * has a request. 'gym' is the fallback for the dev/single-tenant database and
+ * for every tenant provisioned before verticals existed.
+ */
+export function getBusinessType() {
+  return tenantStorage.getStore()?.businessType ?? 'gym';
 }
 
 /** Closes one tenant's handle (by file path), or every open handle when called

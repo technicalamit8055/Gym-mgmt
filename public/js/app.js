@@ -1,7 +1,9 @@
-import { ApiError, api, pathSlug, session } from './api.js';
+import { ApiError, api, landingBrand, pathSlug, session } from './api.js';
 import { buildForm, clear, h, isFullscreen, openModal, setCurrency, toast, toggleFullscreen, onFullscreenChange } from './ui.js';
 import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
+import { isLibrary, setVertical, t } from './vertical.js';
 import { renderLanding } from './views/landing.js';
+import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
 import { renderPlatformConsole } from './views/platform.js';
@@ -18,44 +20,94 @@ import { renderDevices } from './views/devices.js';
 import { renderSessions } from './views/sessions.js';
 import { renderReports } from './views/reports.js';
 import { renderWhatsApp } from './views/whatsapp.js';
+import { renderSeats } from './views/seats.js';
+import { renderLockers } from './views/lockers.js';
+import { renderExpenses } from './views/expenses.js';
 
-const NAV = [
-  { section: 'Daily' },
-  { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-  { path: '/check-in', label: 'Check-in desk', icon: '🎫' },
-  { path: '/members', label: 'Members', icon: '🧑' },
-  { section: 'Business' },
-  { path: '/billing', label: 'Memberships & billing', icon: '💳' },
-  { path: '/plans', label: 'Plans', icon: '🏷️' },
-  { path: '/reports', label: 'Reports', icon: '📈' },
-  // Sends under the gym's own WhatsApp number, so the API limits it to the
-  // billing roles — hide it rather than let a trainer click into a 403.
-  { path: '/whatsapp', label: 'WhatsApp', icon: '💬', roles: ['admin', 'manager'] },
-  { section: 'Operations' },
-  { path: '/classes', label: 'Classes', icon: '🧘' },
-  { path: '/equipment', label: 'Equipment', icon: '🏋️' },
-  { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
-  { path: '/sessions', label: 'Gym sessions', icon: '⏰' },
-  { path: '/staff', label: 'Staff', icon: '👥' },
-  { path: '/settings', label: 'Gym settings', icon: '⚙️' },
-];
+/**
+ * Built by buildNav()/buildRoutes(), called from boot() once the vertical is
+ * known — a gym and a library share this shell but not this sidebar, and the
+ * static import graph above runs before setVertical() does, so these cannot
+ * be module-level constants (see the t()-at-top-level trap in vertical.js).
+ */
+let NAV = [];
+let ROUTES = [];
 
-const ROUTES = [
-  { pattern: /^\/dashboard$/, title: 'Dashboard', view: renderDashboard },
-  { pattern: /^\/check-in$/, title: 'Check-in desk', view: renderCheckIn },
-  { pattern: /^\/members$/, title: 'Members', view: renderMembers },
-  { pattern: /^\/members\/(\d+)$/, title: 'Member', view: renderMemberDetail },
-  { pattern: /^\/billing$/, title: 'Memberships & billing', view: renderBilling },
-  { pattern: /^\/plans$/, title: 'Membership plans', view: renderPlans },
-  { pattern: /^\/reports$/, title: 'Reports', view: renderReports },
-  { pattern: /^\/whatsapp$/, title: 'WhatsApp Automation', view: renderWhatsApp },
-  { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
-  { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
-  { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
-  { pattern: /^\/sessions$/, title: 'Gym sessions', view: renderSessions },
-  { pattern: /^\/staff$/, title: 'Staff', view: renderStaff },
-  { pattern: /^\/settings$/, title: 'Gym settings', view: renderSettings },
-];
+function buildNav() {
+  if (isLibrary()) {
+    return [
+      { section: 'Daily' },
+      { path: '/dashboard', label: 'Dashboard', icon: '📊' },
+      { path: '/check-in', label: t('checkin'), icon: '🎫' },
+      { path: '/members', label: t('members'), icon: '🧑' },
+      { section: 'Business' },
+      { path: '/billing', label: t('memberships'), icon: '💳' },
+      { path: '/plans', label: t('plans'), icon: '🏷️' },
+      { path: '/reports', label: 'Reports', icon: '📈' },
+      // Sends under the library's own WhatsApp number, so the API limits it to
+      // the billing roles — hide it rather than let staff click into a 403.
+      { path: '/whatsapp', label: 'WhatsApp', icon: '💬', roles: ['admin', 'manager'] },
+      { section: 'Operations' },
+      { path: '/seats', label: t('seats'), icon: '🪑' },
+      { path: '/lockers', label: t('lockers'), icon: '🔒' },
+      { path: '/expenses', label: t('expenses'), icon: '🧾' },
+      { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
+      { path: '/sessions', label: t('shifts'), icon: '⏰' },
+      { path: '/staff', label: t('staff'), icon: '👥' },
+      { path: '/settings', label: t('settings'), icon: '⚙️' },
+    ];
+  }
+  return [
+    { section: 'Daily' },
+    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
+    { path: '/check-in', label: 'Check-in desk', icon: '🎫' },
+    { path: '/members', label: 'Members', icon: '🧑' },
+    { section: 'Business' },
+    { path: '/billing', label: 'Memberships & billing', icon: '💳' },
+    { path: '/plans', label: 'Plans', icon: '🏷️' },
+    { path: '/reports', label: 'Reports', icon: '📈' },
+    // Sends under the gym's own WhatsApp number, so the API limits it to the
+    // billing roles — hide it rather than let a trainer click into a 403.
+    { path: '/whatsapp', label: 'WhatsApp', icon: '💬', roles: ['admin', 'manager'] },
+    { section: 'Operations' },
+    { path: '/classes', label: 'Classes', icon: '🧘' },
+    { path: '/equipment', label: 'Equipment', icon: '🏋️' },
+    { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
+    { path: '/sessions', label: 'Gym sessions', icon: '⏰' },
+    { path: '/staff', label: 'Staff', icon: '👥' },
+    { path: '/settings', label: 'Gym settings', icon: '⚙️' },
+  ];
+}
+
+function buildRoutes() {
+  const shared = [
+    { pattern: /^\/dashboard$/, title: 'Dashboard', view: renderDashboard },
+    { pattern: /^\/check-in$/, title: t('checkin'), view: renderCheckIn },
+    { pattern: /^\/members$/, title: t('members'), view: renderMembers },
+    { pattern: /^\/members\/(\d+)$/, title: t('member'), view: renderMemberDetail },
+    { pattern: /^\/billing$/, title: t('memberships'), view: renderBilling },
+    { pattern: /^\/plans$/, title: t('plans'), view: renderPlans },
+    { pattern: /^\/reports$/, title: 'Reports', view: renderReports },
+    { pattern: /^\/whatsapp$/, title: 'WhatsApp Automation', view: renderWhatsApp },
+    { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
+    { pattern: /^\/sessions$/, title: t('shifts'), view: renderSessions },
+    { pattern: /^\/staff$/, title: t('staff'), view: renderStaff },
+    { pattern: /^\/settings$/, title: t('settings'), view: renderSettings },
+  ];
+  if (isLibrary()) {
+    return [
+      ...shared,
+      { pattern: /^\/seats(?:\/(\d+))?$/, title: t('seats'), view: renderSeats },
+      { pattern: /^\/lockers$/, title: t('lockers'), view: renderLockers },
+      { pattern: /^\/expenses$/, title: t('expenses'), view: renderExpenses },
+    ];
+  }
+  return [
+    ...shared,
+    { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
+    { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
+  ];
+}
 
 /**
  * Pages that exist before anyone signs in, and outside any one gym.
@@ -63,10 +115,19 @@ const ROUTES = [
  * These render full-page instead of inside the app shell: the shell's sidebar
  * is a gym's navigation, and on the root domain there is no gym for it to
  * navigate. Matched ahead of the authenticated routes above.
+ *
+ * The first entry is a dispatcher, not a fixed page: which marketing site it
+ * shows depends on landingBrand (the real URL path, read once in api.js), not
+ * on anything resolved from a tenant — there is no tenant yet.
  */
 const PUBLIC_ROUTES = [
-  { pattern: /^\/?$/, title: 'GymBook', view: renderLanding },
-  { pattern: /^\/signup$/, title: 'Set up your gym', view: renderSignup },
+  {
+    pattern: /^\/?$/,
+    landing: true,
+    title: () => (landingBrand === 'library' ? 'SeatBook — Study Hall Management' : 'GymBook — Gym Management'),
+    view: (ctx) => (landingBrand === 'library' ? renderLandingLibrary(ctx) : renderLanding(ctx)),
+  },
+  { pattern: /^\/signup$/, title: 'Set up your account', view: renderSignup },
   { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole },
   // Public by necessity — someone redeeming a reset link cannot sign in. The
   // pattern allows the trailing `?token=…` the link carries in the hash.
@@ -157,7 +218,7 @@ function renderLogin(message) {
   const tenant = platform.tenant;
   const logoNode = tenant?.logo_url
     ? h('img', { class: 'login-logo-img', src: tenant.logo_url, alt: gymName() })
-    : '🏋️';
+    : isLibrary() ? '📚' : '🏋️';
 
   clear(root()).append(
     h(
@@ -170,7 +231,9 @@ function renderLogin(message) {
         h(
           'p',
           { class: 'sub' },
-          tenant ? 'Sign in to your gym.' : 'Gym management — members, billing, classes and check-ins.',
+          tenant
+            ? `Sign in to your ${t('org')}.`
+            : 'Gym management — members, billing, classes and check-ins.',
         ),
         tenant?.status === 'suspended'
           ? h(
@@ -195,7 +258,7 @@ function renderBrandLogoNode() {
   if (logoUrl) {
     return h('div', { class: 'logo' }, h('img', { class: 'logo-img', src: logoUrl, alt: gymName() }));
   }
-  return h('div', { class: 'logo' }, '🏋️');
+  return h('div', { class: 'logo' }, isLibrary() ? '📚' : '🏋️');
 }
 
 function renderShell() {
@@ -358,7 +421,12 @@ let shell;
  */
 async function renderPublicRoute(publicRoute) {
   shell = undefined;
-  document.title = `${publicRoute.title} — GymBook`;
+  const ownTitle = typeof publicRoute.title === 'function' ? publicRoute.title() : publicRoute.title;
+  // The landing dispatcher already names its own brand; every other public
+  // page (signup, the operator console, password reset) is platform-owned and
+  // keeps the fixed suffix regardless of which marketing site sent someone
+  // there.
+  document.title = publicRoute.landing ? ownTitle : `${ownTitle} — GymBook`;
 
   const swap = (node) => {
     clear(root()).append(node);
@@ -468,7 +536,7 @@ async function dispatch() {
   // in. Inside a gym it means the dashboard, and a signed-in dev on the root
   // domain wants their dashboard too rather than bouncing off their own
   // marketing page on every reload. Signup and the console are always public.
-  const skipLanding = publicRoute?.view === renderLanding && Boolean(platform.tenant || session.token);
+  const skipLanding = publicRoute?.landing && Boolean(platform.tenant || session.token);
 
   if (publicRoute && !skipLanding) {
     await renderPublicRoute(publicRoute);
@@ -543,7 +611,12 @@ async function boot() {
     // The real fix for a currency that used to come from /api/health, which
     // never returned one — every gym rendered INR regardless of its setting.
     setCurrency(platform.tenant?.currency);
-    document.title = `${gymName()} — Gym Management`;
+    // Decides every label in the sidebar and every route title below — must
+    // run before buildNav()/buildRoutes(), and before anything reads t().
+    setVertical(platform.tenant?.business_type);
+    NAV = buildNav();
+    ROUTES = buildRoutes();
+    document.title = `${gymName()} — ${isLibrary() ? 'Study Hall Management' : 'Gym Management'}`;
     // A gym that uploaded a logo installs and appears in the tab strip under
     // its own brand, not GymBook's barbell.
     applyGymIcons(platform.tenant?.app_icon_url);

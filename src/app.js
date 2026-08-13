@@ -15,6 +15,7 @@ import { platformRoutes } from './routes/platform.js';
 import { pwaRoutes } from './routes/pwa.js';
 import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
+import { seatRoutes } from './routes/seats.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
@@ -102,6 +103,9 @@ export function createApp() {
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/whatsapp', whatsappRoutes);
+  // Gated inside the router itself (requireModule('seats')), not here — see
+  // verticals.js for why the mount list stays a plain map of paths to routers.
+  app.use('/api/seats', seatRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

@@ -16,6 +16,7 @@ import {
 } from '../tenants.js';
 import { addDays, parse, today } from '../validate.js';
 import { parsePhotoDataUrl } from '../photo.js';
+import { BUSINESS_TYPES, verticalFor } from '../verticals.js';
 import { billingRoutes } from './billing.js';
 import { platformAdminRoutes, isPlatformAdminConfigured } from './platformAdmin.js';
 
@@ -53,12 +54,24 @@ export const hasTenantIcon = (tenant) => Boolean(tenant?.icon_bytes && tenant?.i
  * is public. */
 function publicTenant(tenant) {
   const version = tenant.logo_version || 1;
+  const vertical = verticalFor(tenant.business_type);
   return {
     slug: tenant.slug,
     gym_name: tenant.gym_name ?? tenant.display_name,
     currency: tenant.currency,
     timezone: tenant.timezone ?? null,
     status: tenant.status,
+    // Which product this account runs. The SPA reads this before it renders
+    // anything — the sidebar, every page title and every noun follow from it —
+    // which is why it rides on this already-first, already-public call rather
+    // than needing one of its own.
+    business_type: vertical.key,
+    vertical: {
+      key: vertical.key,
+      brand: vertical.brand,
+      tagline: vertical.tagline,
+      modules: [...vertical.modules],
+    },
     trial_ends_on: tenant.trial_ends_on ?? null,
     logo_url: hasTenantLogo(tenant) ? tenantLogoUrl(tenant.slug, version) : null,
     // What the browser tab and an iOS home screen should show. The purpose-
@@ -133,6 +146,10 @@ platformRoutes.post('/signup', (req, res) => {
     admin_password: { type: 'string', required: true, min: 8 },
     currency: { type: 'string', max: 8, default: 'INR' },
     timezone: { type: 'string', max: 64 },
+    // Decided here and only here. There is no self-service switch afterwards:
+    // the nav, the seeded catalogue and the member-code prefix all follow from
+    // it, so changing it mid-life is an operator-console repair, not a setting.
+    business_type: { type: 'enum', values: BUSINESS_TYPES, default: 'gym' },
   });
 
   const slug = body.slug.toLowerCase();
@@ -147,13 +164,22 @@ platformRoutes.post('/signup', (req, res) => {
     currency: body.currency,
     timezone: body.timezone || null,
     trialEndsOn: addDays(today(), config.trialDays),
+    businessType: body.business_type,
   });
 
   // One scope for the whole of the new gym's provisioning: opening its DB file
   // is what creates it (schema + migrations run on first open), so the admin
   // account and the starter plans have to be written from inside it.
+  //
+  // businessType has to be in this store, not just on the registry row: the
+  // seeders below read it to decide which catalogue to write.
   const provisioned = tenantStorage.run(
-    { slug: tenant.slug, dbFile: tenantDbPath(tenant.slug), timezone: tenant.timezone || undefined },
+    {
+      slug: tenant.slug,
+      dbFile: tenantDbPath(tenant.slug),
+      timezone: tenant.timezone || undefined,
+      businessType: tenant.business_type || 'gym',
+    },
     () => {
       ensureAdminAccount({ email: body.admin_email, password: body.admin_password, name: body.admin_name });
       const plans = seedStarterPlans(tenant.currency);
@@ -167,6 +193,7 @@ platformRoutes.post('/signup', (req, res) => {
   res.status(201).json({
     slug: tenant.slug,
     admin_email: provisioned.admin?.email ?? body.admin_email,
+    business_type: tenant.business_type,
     starter_plans: provisioned.plans,
     app_url: tenantUrl(req, tenant.slug),
     trial_ends_on: tenant.trial_ends_on,

@@ -111,7 +111,8 @@ platformAdminRoutes.use(requirePlatformAdmin);
 function inTenant(tenant, fn) {
   const slug = typeof tenant === 'string' ? tenant : tenant.slug;
   const timezone = typeof tenant === 'string' ? undefined : tenant.timezone || undefined;
-  return tenantStorage.run({ slug, dbFile: tenantDbPath(slug), timezone }, fn);
+  const businessType = typeof tenant === 'string' ? 'gym' : tenant.business_type || 'gym';
+  return tenantStorage.run({ slug, dbFile: tenantDbPath(slug), timezone, businessType }, fn);
 }
 
 /** Cheap per-gym numbers for the console list. Opening a gym's DB to count
@@ -389,7 +390,12 @@ platformAdminRoutes.post('/tenants/:slug/password-reset', (req, res) => {
   const body = parse(req.body, { email: { type: 'email' } });
 
   const issued = tenantStorage.run(
-    { slug: tenant.slug, dbFile: tenantDbPath(tenant.slug), timezone: tenant.timezone || undefined },
+    {
+      slug: tenant.slug,
+      dbFile: tenantDbPath(tenant.slug),
+      timezone: tenant.timezone || undefined,
+      businessType: tenant.business_type || 'gym',
+    },
     () => issuePasswordReset(body.email),
   );
 

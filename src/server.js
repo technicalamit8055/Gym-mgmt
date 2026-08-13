@@ -36,7 +36,9 @@ const app = createApp();
  */
 function everyTenant() {
   if (!fs.existsSync(config.platformDbFile)) {
-    return [{ slug: DEFAULT_TENANT_SLUG, dbFile: config.dbFile, gymName: config.gymName }];
+    return [
+      { slug: DEFAULT_TENANT_SLUG, dbFile: config.dbFile, businessType: 'gym', gymName: config.gymName },
+    ];
   }
   return listTenants()
     .filter((tenant) => tenant.status !== 'cancelled')
@@ -44,6 +46,7 @@ function everyTenant() {
       slug: tenant.slug,
       dbFile: tenantDbPath(tenant.slug),
       timezone: tenant.timezone || undefined,
+      businessType: tenant.business_type || 'gym',
       gymName: tenant.gym_name || tenant.display_name || config.gymName,
     }));
 }
@@ -58,8 +61,14 @@ function everyTenant() {
 function sweepRenewalReminders() {
   for (const tenant of everyTenant()) {
     try {
-      tenantStorage.run({ slug: tenant.slug, dbFile: tenant.dbFile, timezone: tenant.timezone }, () =>
-        sendAutomatedRenewalReminders({ gymName: tenant.gymName }),
+      tenantStorage.run(
+        {
+          slug: tenant.slug,
+          dbFile: tenant.dbFile,
+          timezone: tenant.timezone,
+          businessType: tenant.businessType,
+        },
+        () => sendAutomatedRenewalReminders({ gymName: tenant.gymName }),
       );
     } catch (err) {
       console.error(`[whatsapp:${tenant.slug}] reminder sweep failed:`, err.message);

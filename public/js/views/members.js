@@ -20,10 +20,17 @@ import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js'
 import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../qrcard.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
+import { tl } from '../vertical.js';
 
-const FILTERS = [
-  { value: '', label: 'All memberships' },
-  { value: 'active', label: 'Active membership' },
+/**
+ * A function, not a module-level constant: every view here is statically
+ * imported by app.js, so a top-level const would freeze "membership" as the
+ * gym word before setVertical() ever runs. See the trap this guards against
+ * in vertical.js's header comment.
+ */
+const filters = () => [
+  { value: '', label: `All ${tl('membership')}s` },
+  { value: 'active', label: `Active ${tl('membership')}` },
   { value: 'expiring', label: 'Expiring in 7 days' },
   { value: 'expired', label: 'Expired' },
   { value: 'dues', label: 'Has dues' },
@@ -103,7 +110,7 @@ export async function renderMembers({ setActions, navigate }) {
         load();
       },
     },
-    ...FILTERS.map((f) => h('option', { value: f.value }, f.label)),
+    ...filters().map((f) => h('option', { value: f.value }, f.label)),
   );
 
   const statusSelect = h(

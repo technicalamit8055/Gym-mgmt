@@ -64,6 +64,18 @@ const MIGRATIONS = [
   // always change together.
   (db) => ensureColumn(db, 'tenants', 'icon_mime', 'TEXT'),
   (db) => ensureColumn(db, 'tenants', 'icon_bytes', 'BLOB'),
+  // Which product this tenant signed up for. 'gym' is the only thing that
+  // existed before this column, so it is both the right ALTER default and the
+  // correct value for every already-provisioned tenant — no backfill needed.
+  // Unlike most CHECKs added after the fact this one needs no table rebuild:
+  // SQLite accepts a column-level CHECK on ADD COLUMN.
+  (db) => ensureColumn(
+    db,
+    'tenants',
+    'business_type',
+    "TEXT NOT NULL DEFAULT 'gym' CHECK (business_type IN ('gym', 'library'))",
+  ),
+  (db) => db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_business_type ON tenants(business_type)'),
 ];
 
 let registryDb;
@@ -121,15 +133,46 @@ export function listTenants() {
   return getRegistryDb().prepare('SELECT * FROM tenants ORDER BY created_at').all().map(plain);
 }
 
-export function createTenant({ slug, displayName, gymName, currency = 'INR', timezone, trialEndsOn } = {}) {
+export function createTenant({
+  slug,
+  displayName,
+  gymName,
+  currency = 'INR',
+  timezone,
+  trialEndsOn,
+  businessType = 'gym',
+} = {}) {
   if (!isValidSlug(slug)) throw new Error(`Invalid tenant slug "${slug}"`);
   const dbFile = `tenants/${slug}.db`;
   getRegistryDb()
     .prepare(
-      `INSERT INTO tenants (slug, display_name, gym_name, currency, timezone, db_file, trial_ends_on)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tenants (slug, display_name, gym_name, currency, timezone, db_file, trial_ends_on, business_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(slug, displayName, gymName ?? displayName, currency, timezone ?? null, dbFile, trialEndsOn ?? null);
+    .run(
+      slug,
+      displayName,
+      gymName ?? displayName,
+      currency,
+      timezone ?? null,
+      dbFile,
+      trialEndsOn ?? null,
+      businessType,
+    );
+  return findTenantBySlug(slug);
+}
+
+/**
+ * Moves an existing tenant to another product. Deliberately not reachable from
+ * updateTenantProfile() below: an owner flipping their own vertical mid-life is
+ * not a supported operation — the nav, seeded catalogue and member-code prefix
+ * are all decided at signup. This exists for the operator console, to fix a
+ * type mis-selected during signup.
+ */
+export function setTenantBusinessType(slug, businessType) {
+  getRegistryDb()
+    .prepare('UPDATE tenants SET business_type = ? WHERE slug = ?')
+    .run(businessType, slug);
   return findTenantBySlug(slug);
 }
 

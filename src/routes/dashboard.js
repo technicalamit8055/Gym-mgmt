@@ -64,7 +64,7 @@ dashboardRoutes.get('/', (req, res) => {
   );
 
   const billed = get(
-    "SELECT COALESCE(SUM(price - discount), 0) AS total FROM subscriptions WHERE status != 'cancelled'",
+    "SELECT COALESCE(SUM(price - discount + addon_total), 0) AS total FROM subscriptions WHERE status != 'cancelled'",
   );
   const collected = get('SELECT COALESCE(SUM(amount), 0) AS total FROM payments');
   revenue.outstanding = Math.max(billed.total - collected.total, 0);
