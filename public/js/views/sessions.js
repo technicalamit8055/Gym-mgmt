@@ -1,10 +1,11 @@
 import { api, session } from '../api.js';
 import { buildForm, closeModal, confirmDialog, h, openModal, table, time, toast } from '../ui.js';
+import { t, tl } from '../vertical.js';
 
 function openSessionForm({ item, onSaved }) {
   const editing = Boolean(item);
   openModal({
-    title: editing ? `Edit ${item.name}` : 'Add a gym session',
+    title: editing ? `Edit ${item.name}` : `Add a ${tl('shift')}`,
     body: buildForm(
       [
         { name: 'name', label: 'Name', required: true, value: item?.name, placeholder: 'Morning' },
@@ -12,12 +13,12 @@ function openSessionForm({ item, onSaved }) {
         { name: 'end_time', label: 'Ends at', type: 'time', required: true, value: item?.end_time },
       ],
       {
-        submitLabel: editing ? 'Save' : 'Add session',
+        submitLabel: editing ? 'Save' : `Add ${tl('shift')}`,
         onSubmit: async (values) => {
           if (editing) await api.updateSession(item.id, values);
           else await api.createSession(values);
           closeModal();
-          toast(editing ? 'Session updated' : 'Session added');
+          toast(editing ? `${t('shiftCap')} updated` : `${t('shiftCap')} added`);
           await onSaved?.();
         },
       },
@@ -29,7 +30,7 @@ export async function renderSessions({ setActions, reload }) {
   const { items } = await api.sessions({});
 
   if (session.managesBilling) {
-    setActions(h('button', { class: 'btn primary', onclick: () => openSessionForm({ onSaved: reload }) }, '＋ Add session'));
+    setActions(h('button', { class: 'btn primary', onclick: () => openSessionForm({ onSaved: reload }) }, `＋ Add ${tl('shift')}`));
   }
 
   return h(
@@ -41,7 +42,7 @@ export async function renderSessions({ setActions, reload }) {
       h(
         'p',
         { class: 'muted', style: 'font-size:13px;margin:0 0 14px' },
-        'Members assigned to a session are checked out automatically once it ends, if they never scan or tap out themselves. Members with no assigned session are only checked out manually.',
+        `Members assigned to a ${tl('shift')} are checked out automatically once it ends, if they never scan or tap out themselves. Members with no assigned ${tl('shift')} are only checked out manually.`,
       ),
     ),
     h(
@@ -67,12 +68,12 @@ export async function renderSessions({ setActions, reload }) {
                         onclick: () =>
                           confirmDialog({
                             title: `Delete ${row.name}?`,
-                            message: 'Members currently assigned to this session must be reassigned first.',
+                            message: `Members currently assigned to this ${tl('shift')} must be reassigned first.`,
                             confirmLabel: 'Delete',
                             danger: true,
                             onConfirm: async () => {
                               await api.deleteSession(row.id);
-                              toast('Session deleted');
+                              toast(`${t('shiftCap')} deleted`);
                               await reload();
                             },
                           }),
@@ -84,7 +85,7 @@ export async function renderSessions({ setActions, reload }) {
           },
         ],
         items,
-        { empty: 'No gym sessions set up yet' },
+        { empty: `No ${tl('shifts')} set up yet` },
       ),
     ),
   );

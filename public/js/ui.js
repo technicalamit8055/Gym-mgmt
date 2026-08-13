@@ -29,6 +29,7 @@ export const svg = (tag, props = {}, ...children) => {
   for (const [key, value] of Object.entries(props)) {
     if (value === null || value === undefined) continue;
     if (key === 'class') el.setAttribute('class', value);
+    else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
     else el.setAttribute(key, value);
   }
   for (const child of children.flat(3)) {
@@ -422,16 +423,53 @@ export function table(columns, rows, { onRowClick, empty = 'Nothing here yet' } 
   );
 }
 
-export const stat = (label, value, hint, { accent = false } = {}) =>
+/**
+ * `trend` — { positive: boolean|null, text: string } — renders a colour-coded
+ * pill instead of the plain hint line. `pulse` adds a small live indicator next
+ * to the icon, for "this number is changing right now" cards (check-ins).
+ */
+export const stat = (label, value, hint, { accent = false, icon = null, trend = null, pulse = false, onClick = null } = {}) =>
   h(
     'div',
-    { class: `card stat ${accent ? 'accent' : ''}` },
+    {
+      class: `card stat ${accent ? 'accent' : ''} ${onClick ? 'clickable' : ''}`,
+      onclick: onClick,
+      tabindex: onClick ? '0' : null,
+    },
+    icon || pulse
+      ? h(
+          'div',
+          { class: 'stat-top' },
+          icon ? h('div', { class: 'stat-icon' }, icon) : null,
+          pulse ? h('span', { class: 'live-pulse' }, h('span', { class: 'live-pulse-core' })) : null,
+        )
+      : null,
     h('div', { class: 'label' }, label),
     h('div', { class: 'value' }, value),
-    hint ? h('div', { class: 'hint' }, hint) : null,
+    trend
+      ? h(
+          'span',
+          { class: `trend-pill ${trend.positive === true ? 'pos' : trend.positive === false ? 'neg' : ''}` },
+          trend.text,
+        )
+      : hint
+        ? h('div', { class: 'hint' }, hint)
+        : null,
   );
 
 /* ------------------------------------------------------------------- charts */
+
+/**
+ * Positions a chart's floating tooltip inside its wrapper, flipping to the
+ * left of the cursor once it would otherwise overhang the right edge.
+ */
+function positionChartTooltip(tooltip, wrap, clientX, clientY) {
+  const rect = wrap.getBoundingClientRect();
+  const relX = clientX - rect.left;
+  const relY = clientY - rect.top;
+  const overhang = relX + 150 > rect.width;
+  tooltip.style.transform = `translate(${overhang ? relX - 150 : relX + 14}px, ${Math.max(relY - 12, 0)}px)`;
+}
 
 /**
  * Bars drawn in a fixed 640-unit coordinate space so the SVG scales uniformly —
@@ -445,34 +483,45 @@ export function barChart(data, { height = 160, format = (v) => v, label = (d) =>
   const slot = width / data.length;
   const barWidth = Math.min(slot * 0.62, 70);
   const plot = height - 26;
+  const plotTop = 18;
   // With many bars there is no room for a caption on every one.
   const labelEvery = Math.ceil(data.length / 16);
   const showValues = data.length <= 12;
 
-  return svg(
+  const wrap = h('div', { class: 'chart-wrap' });
+  const tooltip = h('div', { class: 'chart-tooltip' });
+
+  const showTip = (event, d) => {
+    clear(tooltip).append(
+      h('div', { class: 'chart-tooltip-label' }, label(d)),
+      h('div', { class: 'chart-tooltip-value' }, format(d.value)),
+    );
+    tooltip.classList.add('show');
+    positionChartTooltip(tooltip, wrap, event.clientX, event.clientY);
+  };
+  const hideTip = () => tooltip.classList.remove('show');
+
+  const chart = svg(
     'svg',
-    {
-      class: 'chart',
-      viewBox: `0 0 ${width} ${height}`,
-      style: `height:${height}px;width:100%`,
-    },
+    { class: 'chart', viewBox: `0 0 ${width} ${height}`, style: `height:${height}px;width:100%`, onmouseleave: hideTip },
+    ...[0.25, 0.5, 0.75].map((frac) =>
+      svg('line', { class: 'grid-line', x1: 0, y1: plotTop + (plot - plotTop) * frac, x2: width, y2: plotTop + (plot - plotTop) * frac }),
+    ),
     svg('line', { class: 'axis', x1: 0, y1: plot, x2: width, y2: plot }),
     ...data.flatMap((d, i) => {
-      const barHeight = Math.max((d.value / max) * (plot - 18), d.value > 0 ? 2 : 0);
+      const barHeight = Math.max((d.value / max) * (plot - plotTop), d.value > 0 ? 2 : 0);
       const center = i * slot + slot / 2;
       return [
-        svg(
-          'rect',
-          {
-            class: 'bar',
-            x: center - barWidth / 2,
-            y: plot - barHeight,
-            width: barWidth,
-            height: barHeight,
-            rx: 3,
-          },
-          svg('title', {}, `${label(d)}: ${format(d.value)}`),
-        ),
+        svg('rect', {
+          class: 'bar',
+          x: center - barWidth / 2,
+          y: plot - barHeight,
+          width: barWidth,
+          height: barHeight,
+          rx: 3,
+          onmousemove: (event) => showTip(event, d),
+          onmouseleave: hideTip,
+        }),
         i % labelEvery === 0 ? svg('text', { x: center, y: plot + 13, 'text-anchor': 'middle' }, d.label) : null,
         showValues && d.value > 0
           ? svg('text', { x: center, y: plot - barHeight - 5, 'text-anchor': 'middle' }, format(d.value))
@@ -480,7 +529,12 @@ export function barChart(data, { height = 160, format = (v) => v, label = (d) =>
       ];
     }),
   );
+
+  wrap.append(chart, tooltip);
+  return wrap;
 }
+
+let chartGradientSeq = 0;
 
 export function lineChart(data, { height = 170, format = (v) => v } = {}) {
   if (data.length < 2) return h('div', { class: 'empty' }, 'Not enough data yet');
@@ -494,8 +548,50 @@ export function lineChart(data, { height = 170, format = (v) => v } = {}) {
   const path = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const area = `${path} L${points.at(-1)[0].toFixed(1)},${pad.top + plotHeight} L${points[0][0].toFixed(1)},${pad.top + plotHeight} Z`;
   const labelEvery = Math.ceil(data.length / 8);
+  const gradientId = `areaFill-${chartGradientSeq++}`;
 
-  return svg(
+  const wrap = h('div', { class: 'chart-wrap' });
+  const tooltip = h('div', { class: 'chart-tooltip' });
+  const crosshair = svg('line', { class: 'crosshair', x1: 0, y1: pad.top, x2: 0, y2: pad.top + plotHeight });
+  const hoverDot = svg('circle', { class: 'dot hover-dot', r: 4 });
+
+  const showAt = (index, clientX, clientY) => {
+    const [x, y] = points[index];
+    crosshair.setAttribute('x1', x);
+    crosshair.setAttribute('x2', x);
+    hoverDot.setAttribute('cx', x);
+    hoverDot.setAttribute('cy', y);
+    crosshair.classList.add('show');
+    hoverDot.classList.add('show');
+    clear(tooltip).append(
+      h('div', { class: 'chart-tooltip-label' }, data[index].label),
+      h('div', { class: 'chart-tooltip-value' }, format(data[index].value)),
+    );
+    tooltip.classList.add('show');
+    positionChartTooltip(tooltip, wrap, clientX, clientY);
+  };
+  const hide = () => {
+    crosshair.classList.remove('show');
+    hoverDot.classList.remove('show');
+    tooltip.classList.remove('show');
+  };
+
+  const overlay = svg('rect', {
+    x: 0,
+    y: 0,
+    width,
+    height,
+    fill: 'transparent',
+    onmousemove: (event) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const relX = ((event.clientX - rect.left) / rect.width) * width;
+      const index = Math.max(0, Math.min(data.length - 1, Math.round((relX - pad.left) / step)));
+      showAt(index, event.clientX, event.clientY);
+    },
+    onmouseleave: hide,
+  });
+
+  const chart = svg(
     'svg',
     { class: 'chart', viewBox: `0 0 ${width} ${height}`, style: `height:${height}px;width:100%` },
     svg(
@@ -503,22 +599,26 @@ export function lineChart(data, { height = 170, format = (v) => v } = {}) {
       {},
       svg(
         'linearGradient',
-        { id: 'areaFill', x1: 0, y1: 0, x2: 0, y2: 1 },
-        svg('stop', { offset: '0%', 'stop-color': '#f97316', 'stop-opacity': '0.35' }),
-        svg('stop', { offset: '100%', 'stop-color': '#f97316', 'stop-opacity': '0' }),
+        { id: gradientId, x1: 0, y1: 0, x2: 0, y2: 1 },
+        svg('stop', { offset: '0%', style: 'stop-color:var(--brand);stop-opacity:0.35' }),
+        svg('stop', { offset: '100%', style: 'stop-color:var(--brand);stop-opacity:0' }),
       ),
     ),
-    svg('path', { class: 'area', d: area }),
+    svg('path', { class: 'area', d: area, fill: `url(#${gradientId})` }),
     svg('path', { class: 'line', d: path }),
-    ...points.map(([x, y], i) =>
-      svg('circle', { class: 'dot', cx: x, cy: y, r: 2.5 }, svg('title', {}, `${data[i].label}: ${format(data[i].value)}`)),
-    ),
+    ...points.map(([x, y]) => svg('circle', { class: 'dot', cx: x, cy: y, r: 2.5 })),
     ...data.map((d, i) =>
       i % labelEvery === 0
         ? svg('text', { x: pad.left + i * step, y: height - 6, 'text-anchor': 'middle' }, d.label)
         : null,
     ),
+    crosshair,
+    hoverDot,
+    overlay,
   );
+
+  wrap.append(chart, tooltip);
+  return wrap;
 }
 
 /* ------------------------------------------------------------- fullscreen */

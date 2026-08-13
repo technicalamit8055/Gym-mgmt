@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, today, toast } from '../ui.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
+import { t } from '../vertical.js';
 
 /** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma".
  * Exported for seats.js and lockers.js, which need the same search-by-code-
@@ -43,14 +44,14 @@ export async function openMemberForm({ member, onSaved }) {
       },
       {
         name: 'session_id',
-        label: 'Gym session',
+        label: t('shiftCap'),
         type: 'select',
         value: member?.session_id || '',
         options: [
-          { value: '', label: 'No assigned session' },
+          { value: '', label: `No assigned ${t('shift')}` },
           ...sessions.map((s) => ({ value: s.id, label: `${s.name} (${s.start_time}–${s.end_time})` })),
         ],
-        hint: 'Auto-checks this member out once their session ends, if they never scan or tap out themselves',
+        hint: `Auto-checks this member out once their ${t('shift')} ends, if they never scan or tap out themselves`,
       },
       {
         name: 'gender',

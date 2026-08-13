@@ -32,10 +32,10 @@ dashboardRoutes.get('/', (req, res) => {
     `
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
-      SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END) AS frozen,
-      SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive,
-      SUM(CASE WHEN joined_on >= ? THEN 1 ELSE 0 END) AS joined_this_month
+      COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) AS active,
+      COALESCE(SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END), 0) AS frozen,
+      COALESCE(SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END), 0) AS inactive,
+      COALESCE(SUM(CASE WHEN joined_on >= ? THEN 1 ELSE 0 END), 0) AS joined_this_month
     FROM members
   `,
     [monthStart],
@@ -44,10 +44,10 @@ dashboardRoutes.get('/', (req, res) => {
   const memberships = get(
     `
     SELECT
-      SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
-      SUM(CASE WHEN status = 'active' AND end_date <= ? THEN 1 ELSE 0 END) AS expiring_soon,
-      SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired,
-      SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END) AS frozen
+      COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) AS active,
+      COALESCE(SUM(CASE WHEN status = 'active' AND end_date <= ? THEN 1 ELSE 0 END), 0) AS expiring_soon,
+      COALESCE(SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END), 0) AS expired,
+      COALESCE(SUM(CASE WHEN status = 'frozen' THEN 1 ELSE 0 END), 0) AS frozen
     FROM subscriptions
   `,
     [addDays(now, 7)],
@@ -74,9 +74,9 @@ dashboardRoutes.get('/', (req, res) => {
   const attendance = get(
     `
     SELECT
-      SUM(CASE WHEN ${day} = ? THEN 1 ELSE 0 END) AS today,
-      SUM(CASE WHEN ${day} >= ? THEN 1 ELSE 0 END) AS last_7_days,
-      SUM(CASE WHEN check_out IS NULL AND ${day} = ? THEN 1 ELSE 0 END) AS currently_in
+      COALESCE(SUM(CASE WHEN ${day} = ? THEN 1 ELSE 0 END), 0) AS today,
+      COALESCE(SUM(CASE WHEN ${day} >= ? THEN 1 ELSE 0 END), 0) AS last_7_days,
+      COALESCE(SUM(CASE WHEN check_out IS NULL AND ${day} = ? THEN 1 ELSE 0 END), 0) AS currently_in
     FROM attendance
   `,
     [now, addDays(now, -6), now],
@@ -144,7 +144,7 @@ dashboardRoutes.get('/', (req, res) => {
   const wraps = from > to;
   const birthdays = all(
     `
-    SELECT id, code, first_name, last_name, date_of_birth
+    SELECT id, code, first_name, last_name, phone, date_of_birth
     FROM members
     WHERE date_of_birth IS NOT NULL
       AND ${wraps

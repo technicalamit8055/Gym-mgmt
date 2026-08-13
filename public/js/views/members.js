@@ -23,7 +23,7 @@ import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js'
 import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../qrcard.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
-import { isLibrary, tl } from '../vertical.js';
+import { isLibrary, t, tl } from '../vertical.js';
 
 /**
  * A function, not a module-level constant: every view here is statically
@@ -355,13 +355,13 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       h('dd', {}, member.health_notes || '—'),
       h('dt', {}, 'Device PIN'),
       h('dd', {}, member.device_pin ?? h('span', { class: 'muted' }, 'Not enrolled')),
-      h('dt', {}, 'Gym session'),
+      h('dt', {}, t('shiftCap')),
       h(
         'dd',
         {},
         member.session_name
           ? `${member.session_name} (${member.session_start}–${member.session_end})`
-          : h('span', { class: 'muted' }, 'No assigned session'),
+          : h('span', { class: 'muted' }, `No assigned ${t('shift')}`),
       ),
     ),
     h(

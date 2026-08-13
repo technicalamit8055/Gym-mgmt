@@ -8,6 +8,7 @@
  */
 import { pathPrefix } from './api.js';
 import { h, openModal, toast } from './ui.js';
+import { isLibrary } from './vertical.js';
 
 const DISMISSED_KEY = 'gymbook.install.dismissed';
 /** Mirrors the banner's presence onto <body>, which is how app.css lifts the
@@ -31,10 +32,20 @@ function applyManifestLink() {
 
 /* ------------------------------------------------------------- gym branding */
 
-/** GymBook's own icon links, as index.html declares them. Held so that
- * removing a gym's logo puts them back without a reload. */
+/** index.html hardcodes GymBook's own icons — the only markup a browser has
+ * before the tenant's vertical is known. Held so a gym that clears its logo
+ * can be put back without a reload. */
 const DEFAULT_APPLE_ICON = document.querySelector('link[rel="apple-touch-icon"]')?.href;
 const DEFAULT_FAVICONS = [...document.querySelectorAll('link[rel="icon"]')];
+
+/** SeatBook's own mark, mirroring the iconDir split in src/verticals.js —
+ * a library tenant with no uploaded logo installs with the book, not the
+ * barbell index.html happens to declare. */
+const LIBRARY_APPLE_ICON = '/icons/library/apple-touch-icon.png';
+const LIBRARY_FAVICONS = [
+  { href: '/icons/library/favicon-32.png', sizes: '32x32' },
+  { href: '/icons/library/icon-192.png', sizes: '192x192' },
+];
 
 /**
  * Swaps in the gym's own logo as the home-screen and tab icon.
@@ -46,12 +57,19 @@ const DEFAULT_FAVICONS = [...document.querySelectorAll('link[rel="icon"]')];
  * link the same way.
  *
  * @param {string|null|undefined} iconUrl `app_icon_url` from
- *   /api/platform/tenant. Null (no logo, or one just removed) restores
- *   GymBook's own icons.
+ *   /api/platform/tenant. Null (no logo, or one just removed) restores this
+ *   vertical's own default icon — GymBook's barbell, or SeatBook's book for a
+ *   library tenant, rather than always falling back to whatever index.html
+ *   happened to declare.
  */
 export function applyGymIcons(iconUrl) {
+  const defaultAppleIcon = isLibrary() ? LIBRARY_APPLE_ICON : DEFAULT_APPLE_ICON;
+  const defaultFavicons = isLibrary()
+    ? LIBRARY_FAVICONS.map((f) => h('link', { rel: 'icon', type: 'image/png', ...f }))
+    : DEFAULT_FAVICONS;
+
   for (const link of document.querySelectorAll('link[rel="apple-touch-icon"]')) {
-    if (iconUrl || DEFAULT_APPLE_ICON) link.href = iconUrl || DEFAULT_APPLE_ICON;
+    if (iconUrl || defaultAppleIcon) link.href = iconUrl || defaultAppleIcon;
   }
 
   // Replaced rather than repointed: the markup declares two favicon sizes, and
@@ -60,7 +78,7 @@ export function applyGymIcons(iconUrl) {
   if (iconUrl) {
     document.head.append(h('link', { rel: 'icon', href: iconUrl }));
   } else {
-    document.head.append(...DEFAULT_FAVICONS);
+    document.head.append(...defaultFavicons);
   }
 }
 

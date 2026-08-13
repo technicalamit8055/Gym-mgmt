@@ -10,29 +10,34 @@
  */
 
 let vertical = 'gym';
-let currentTheme = localStorage.getItem('library_theme') || 'emerald';
+let currentLibraryTheme = localStorage.getItem('library_theme') || 'emerald';
+let currentGymTheme = localStorage.getItem('gym_theme') || 'flame';
 
 export function setVertical(type) {
   vertical = type === 'library' ? 'library' : 'gym';
   document.body.dataset.vertical = vertical;
+  const activeTheme = vertical === 'library' ? currentLibraryTheme : currentGymTheme;
+  document.body.dataset.theme = activeTheme;
+}
+
+export function setAppTheme(theme) {
   if (vertical === 'library') {
-    document.body.dataset.theme = currentTheme;
+    currentLibraryTheme = theme || 'emerald';
+    localStorage.setItem('library_theme', currentLibraryTheme);
+    document.body.dataset.theme = currentLibraryTheme;
   } else {
-    delete document.body.dataset.theme;
+    currentGymTheme = theme || 'flame';
+    localStorage.setItem('gym_theme', currentGymTheme);
+    document.body.dataset.theme = currentGymTheme;
   }
 }
 
-export function setLibraryTheme(theme) {
-  currentTheme = theme || 'emerald';
-  localStorage.setItem('library_theme', currentTheme);
-  if (vertical === 'library') {
-    document.body.dataset.theme = currentTheme;
-  }
+export function getAppTheme() {
+  return vertical === 'library' ? currentLibraryTheme : currentGymTheme;
 }
 
-export function getLibraryTheme() {
-  return currentTheme;
-}
+export function setLibraryTheme(theme) { setAppTheme(theme); }
+export function getLibraryTheme() { return getAppTheme(); }
 
 export const isLibrary = () => vertical === 'library';
 
@@ -59,6 +64,8 @@ const TERMS = {
     seats: 'Seat map',
     lockers: 'Lockers',
     expenses: 'Expenses',
+    shift: 'gym session',
+    shiftCap: 'Gym session',
   },
   library: {
     brand: 'SeatBook',
@@ -82,6 +89,8 @@ const TERMS = {
     seats: 'Seat map',
     lockers: 'Lockers',
     expenses: 'Expenses',
+    shift: 'shift',
+    shiftCap: 'Shift',
   },
 };
 
