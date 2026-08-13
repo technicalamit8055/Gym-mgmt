@@ -1,13 +1,15 @@
 import { Router } from 'express';
 import { config, DEFAULT_TENANT_SLUG } from '../config.js';
+import { verticalFor } from '../verticals.js';
 import { hasTenantIcon, hasTenantLogo, tenantIconUrl, tenantLogoUrl } from './platform.js';
 
 export const pwaRoutes = Router();
 
 /** The app's own dark palette (see :root in public/css/app.css). Used for the
- * Android splash screen and the system UI tint around an installed window. */
+ * Android splash screen and the system UI tint around an installed window.
+ * Deliberately the same for both verticals — see the in-app theming
+ * trade-off note in vertical.js; only the icon and copy switch. */
 const THEME_COLOR = '#0d1117';
-const BRAND_NAME = 'GymBook';
 
 /**
  * short_name is what fits under a home-screen icon — about 12 characters
@@ -28,27 +30,30 @@ const icon = (src, sizes, purpose, type = 'image/png') => ({
   ...(purpose ? { purpose } : {}),
 });
 
-/** GymBook's own mark, for the root domain and for gyms that have not uploaded
- * a logo. */
-const DEFAULT_ICONS = [
-  icon('/icons/icon-192.png', '192x192'),
-  icon('/icons/icon-512.png', '512x512'),
-  // Android crops icons to the launcher's own shape; the maskable pair keeps
-  // the barbell inside the safe zone when it does.
-  icon('/icons/maskable-192.png', '192x192', 'maskable'),
-  icon('/icons/maskable-512.png', '512x512', 'maskable'),
-];
+/** Each vertical's own mark, for the root domain and for any tenant that
+ * has not uploaded a logo — GymBook's barbell or SeatBook's book, generated
+ * by scripts/gen-icons.js and gen-icons-library.js respectively. */
+function defaultIcons(iconDir) {
+  return [
+    icon(`${iconDir}/icon-192.png`, '192x192'),
+    icon(`${iconDir}/icon-512.png`, '512x512'),
+    // Android crops icons to the launcher's own shape; the maskable pair
+    // keeps the mark inside the safe zone when it does.
+    icon(`${iconDir}/maskable-192.png`, '192x192', 'maskable'),
+    icon(`${iconDir}/maskable-512.png`, '512x512', 'maskable'),
+  ];
+}
 
 /**
- * The icons this gym installs with — its own logo wherever it has one.
+ * The icons this tenant installs with — its own logo wherever it has one.
  *
  * `sizes: "any"` rather than a declared pixel size: these are uploaded images,
  * and a browser that finds the bitmap is not the size the manifest claimed
  * discards the icon and falls back. "any" is both honest and unconditionally
  * accepted, and browsers still check the real bitmap meets their minimum.
  */
-function tenantIcons(tenant) {
-  if (!tenant) return DEFAULT_ICONS;
+function tenantIcons(tenant, vertical) {
+  if (!tenant) return defaultIcons(vertical.iconDir);
   const version = tenant.logo_version || 1;
 
   if (hasTenantIcon(tenant)) {
@@ -69,7 +74,7 @@ function tenantIcons(tenant) {
     return [icon(tenantLogoUrl(tenant.slug, version), 'any', undefined, tenant.logo_mime)];
   }
 
-  return DEFAULT_ICONS;
+  return defaultIcons(vertical.iconDir);
 }
 
 /**
@@ -80,13 +85,44 @@ function tenantIcons(tenant) {
  * would otherwise install as the same app, with the same name, and both would
  * launch into whichever one the static start_url named.
  */
+const DESCRIPTIONS = {
+  gym: 'Members, memberships, billing, check-ins, classes, trainers and equipment for your gym.',
+  library: 'Seats, shifts, passes, lockers, expenses and student records for your study hall.',
+};
+
+const CATEGORIES = {
+  gym: ['business', 'productivity', 'health', 'fitness'],
+  library: ['business', 'productivity', 'education'],
+};
+
+/** Long-press the home-screen icon on Android to reach these — the three
+ * screens each vertical's owner opens most often. */
+function shortcutLinks(vertical, prefix, icons) {
+  if (vertical.key === 'library') {
+    return [
+      { name: 'Seat map', url: `${prefix}/#/seats` },
+      { name: 'Students', url: `${prefix}/#/members` },
+      { name: 'Fees', short_name: 'Fees', url: `${prefix}/#/billing` },
+    ].map((s) => ({ ...s, icons }));
+  }
+  return [
+    { name: 'Check-in desk', short_name: 'Check-in', url: `${prefix}/#/check-in` },
+    { name: 'Members', url: `${prefix}/#/members` },
+    { name: 'Memberships & billing', short_name: 'Billing', url: `${prefix}/#/billing` },
+  ].map((s) => ({ ...s, icons }));
+}
+
 function buildManifest(req) {
   // resolveTenant strips this prefix off req.url before we see it, so it is
   // the only remaining record of how this gym was addressed.
   const prefix = req.tenantPathPrefix || '';
   const tenant = req.tenant?.slug === DEFAULT_TENANT_SLUG ? null : req.tenant;
-  const gymName = tenant?.gym_name || tenant?.display_name || config.gymName || BRAND_NAME;
-  const icons = tenantIcons(tenant);
+  // 'gym' for the root domain and the dev/single-tenant install, same
+  // fallback getBusinessType() itself uses — there is no real tenant here to
+  // ask.
+  const vertical = verticalFor(tenant?.business_type);
+  const gymName = tenant?.gym_name || tenant?.display_name || config.gymName || vertical.brand;
+  const icons = tenantIcons(tenant, vertical);
   // One icon per shortcut is all a launcher shows; the maskable duplicate would
   // only be a second copy of the same URL.
   const shortcutIcon = [icons.find((i) => i.purpose !== 'maskable') || icons[0]];
@@ -95,10 +131,9 @@ function buildManifest(req) {
     // Per-gym, so installing a second gym on this origin adds a second app
     // rather than overwriting the first.
     id: `${prefix}/`,
-    name: tenant ? `${gymName} — ${BRAND_NAME}` : `${BRAND_NAME} — Gym Management`,
+    name: tenant ? `${gymName} — ${vertical.brand}` : `${vertical.brand} — ${vertical.tagline}`,
     short_name: shortName(gymName),
-    description:
-      'Members, memberships, billing, check-ins, classes, trainers and equipment for your gym.',
+    description: DESCRIPTIONS[vertical.key] ?? DESCRIPTIONS.gym,
     // Straight to the dashboard for a real gym; the root domain has no gym to
     // show, so its install lands on the landing page instead.
     start_url: tenant ? `${prefix}/#/dashboard` : `${prefix}/`,
@@ -112,28 +147,9 @@ function buildManifest(req) {
     theme_color: THEME_COLOR,
     lang: 'en',
     dir: 'ltr',
-    categories: ['business', 'productivity', 'health', 'fitness'],
+    categories: CATEGORIES[vertical.key] ?? CATEGORIES.gym,
     icons,
-    // Long-press the home-screen icon on Android to reach these.
-    shortcuts: [
-      {
-        name: 'Check-in desk',
-        short_name: 'Check-in',
-        url: `${prefix}/#/check-in`,
-        icons: shortcutIcon,
-      },
-      {
-        name: 'Members',
-        url: `${prefix}/#/members`,
-        icons: shortcutIcon,
-      },
-      {
-        name: 'Memberships & billing',
-        short_name: 'Billing',
-        url: `${prefix}/#/billing`,
-        icons: shortcutIcon,
-      },
-    ],
+    shortcuts: shortcutLinks(vertical, prefix, shortcutIcon),
   };
 }
 

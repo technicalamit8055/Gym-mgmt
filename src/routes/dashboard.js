@@ -5,7 +5,9 @@ import { all, get } from '../db.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import { PHOTO_JOIN, PHOTO_PRESENT_COL, withPhotoUrl } from '../photo.js';
 import { config } from '../config.js';
+import { seatMap } from '../seats.js';
 import { addDays, startOfMonth, today } from '../validate.js';
+import { moduleEnabled } from '../verticals.js';
 
 export const dashboardRoutes = Router();
 dashboardRoutes.use(requireAuth);
@@ -170,6 +172,42 @@ dashboardRoutes.get('/', (req, res) => {
     [addDays(now, 14)],
   );
 
+  // Occupancy by shift and vacant-by-shift replace "Plan mix" and "Equipment"
+  // for a library — a seat map is the one thing a gym dashboard has no
+  // equivalent of. Reuses seatMap() rather than re-deriving state here, so
+  // the tile colour on the map and the number on this card can never drift
+  // apart.
+  let seats = null;
+  if (moduleEnabled('seats')) {
+    const map = seatMap({ on: now });
+    const totalSeats = map.seats.filter((s) => s.status === 'available').length;
+    const totalCells = totalSeats * map.shifts.length;
+    seats = {
+      occupancy_pct: totalCells ? Math.round((map.occupancy.length / totalCells) * 100) : 0,
+      total_seats: totalSeats,
+      occupied: map.occupancy.length,
+      expiring: map.occupancy.filter((o) => o.state === 'expiring').length,
+      dues: map.occupancy.filter((o) => o.state === 'dues').length,
+      by_shift: map.shifts.map((shift) => ({
+        session_id: shift.id,
+        name: shift.name,
+        occupied: map.occupancy.filter((o) => o.session_id === shift.id).length,
+        capacity: shift.capacity ?? totalSeats,
+      })),
+    };
+  }
+
+  // Collected / spent / net — the strip expenses.js's own summary computes,
+  // surfaced here too so it doesn't need its own dashboard visit.
+  let expenses = null;
+  if (moduleEnabled('expenses')) {
+    const spent = get('SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE spent_on >= ? AND spent_on <= ?', [
+      monthStart,
+      now,
+    ]);
+    expenses = { spent_this_month: spent.total, net_this_month: revenue.this_month - spent.total };
+  }
+
   res.json({
     gym: { name: req.tenant?.gym_name ?? config.gymName, currency: req.tenant?.currency ?? config.currency },
     members,
@@ -184,5 +222,7 @@ dashboardRoutes.get('/', (req, res) => {
     birthdays,
     planMix,
     equipmentAlerts,
+    seats,
+    expenses,
   });
 });

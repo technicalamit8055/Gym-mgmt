@@ -71,10 +71,35 @@ function seedShifts(vertical) {
  * per-currency because "1500" is a sane monthly fee in rupees and an absurd one
  * in dollars.
  */
+/**
+ * Applies a vertical's WhatsApp copy once, at signup.
+ *
+ * These can't be expressed as column defaults: the whatsapp_settings row is
+ * inserted by a migration before any seeding runs, so a defaults change would
+ * never reach an actual tenant — this UPDATEs the singleton row directly
+ * instead. Guarded on the row still holding gym wording, so it never
+ * overwrites a template an owner has already edited.
+ */
+function seedWhatsAppTemplates(vertical) {
+  const templates = vertical.whatsappTemplates;
+  if (!templates) return;
+
+  const current = get('SELECT receipt_template FROM whatsapp_settings WHERE id = 1');
+  if (!current || !current.receipt_template.includes('membership')) return;
+
+  run(
+    `UPDATE whatsapp_settings
+     SET receipt_template = ?, reminder_template = ?, welcome_template = ?, freeze_template = ?
+     WHERE id = 1`,
+    [templates.receipt_template, templates.reminder_template, templates.welcome_template, templates.freeze_template],
+  );
+}
+
 export function seedStarterPlans(currency = 'INR') {
   getDb();
   const vertical = currentVertical();
   seedShifts(vertical);
+  seedWhatsAppTemplates(vertical);
 
   if (get('SELECT COUNT(*) AS n FROM plans').n > 0) return 0;
 

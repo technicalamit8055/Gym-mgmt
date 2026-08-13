@@ -10,10 +10,28 @@
  */
 
 let vertical = 'gym';
+let currentTheme = localStorage.getItem('library_theme') || 'emerald';
 
 export function setVertical(type) {
   vertical = type === 'library' ? 'library' : 'gym';
   document.body.dataset.vertical = vertical;
+  if (vertical === 'library') {
+    document.body.dataset.theme = currentTheme;
+  } else {
+    delete document.body.dataset.theme;
+  }
+}
+
+export function setLibraryTheme(theme) {
+  currentTheme = theme || 'emerald';
+  localStorage.setItem('library_theme', currentTheme);
+  if (vertical === 'library') {
+    document.body.dataset.theme = currentTheme;
+  }
+}
+
+export function getLibraryTheme() {
+  return currentTheme;
 }
 
 export const isLibrary = () => vertical === 'library';

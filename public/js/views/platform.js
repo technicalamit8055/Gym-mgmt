@@ -157,6 +157,43 @@ function openEditModal(tenant, onSaved) {
 }
 
 /**
+ * The mis-selected-at-signup repair. Deliberately not exposed to the owner —
+ * the nav, the seeded catalogue and the member-code prefix all follow from
+ * this, so it lives only here, behind a confirmation naming exactly what
+ * carries over unchanged.
+ */
+function openBusinessTypeModal(tenant, onSaved) {
+  openModal({
+    title: `${tenant.gym_name} — change business type`,
+    body: buildForm(
+      [
+        {
+          name: 'business_type',
+          label: 'Business type',
+          type: 'select',
+          value: tenant.business_type || 'gym',
+          full: true,
+          options: [
+            { value: 'gym', label: 'Gym' },
+            { value: 'library', label: 'Library / study hall' },
+          ],
+          hint: 'Changes the nav, the seeded catalogue and future member-code numbering. Existing members, plans and history are untouched.',
+        },
+      ],
+      {
+        submitLabel: 'Apply',
+        onSubmit: async (values) => {
+          await api.platformSetBusinessType(tenant.slug, { business_type: values.business_type });
+          closeModal();
+          toast(`${tenant.gym_name} is now a ${values.business_type === 'library' ? 'library' : 'gym'} account`);
+          await onSaved();
+        },
+      },
+    ),
+  });
+}
+
+/**
  * Permanent deletion, behind a typed confirmation.
  *
  * The server independently refuses anything that is not already cancelled and
@@ -346,6 +383,7 @@ async function openDetailModal(row, onChanged) {
       h('button', { class: 'btn sm', onclick: () => { closeModal(); openEditModal(tenant, onChanged); } }, 'Edit details'),
       h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openStatusModal(tenant, onChanged); } }, 'Change status'),
       h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openPasswordResetModal(tenant); } }, 'Reset password'),
+      h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openBusinessTypeModal(tenant, onChanged); } }, 'Change type'),
       h('div', { class: 'spacer', style: 'flex:1' }),
       h('button', { class: 'btn sm danger', onclick: () => { closeModal(); openDeleteModal(tenant, onChanged); } }, 'Delete gym'),
     ),
@@ -570,7 +608,7 @@ export async function renderPlatformConsole({ context, rerender }) {
         .join(' + ')
     : amount(0);
 
-  const state = { q: '', status: '', sort: 'created:desc' };
+  const state = { q: '', status: '', businessType: '', sort: 'created:desc' };
   const tableNode = h('div', {});
 
   const SORTS = {
@@ -589,7 +627,12 @@ export async function renderPlatformConsole({ context, rerender }) {
         h(
           'div',
           {},
-          h('div', { style: 'font-weight:600' }, row.gym_name),
+          h(
+            'div',
+            { class: 'row', style: 'gap:6px' },
+            h('span', { style: 'font-weight:600' }, row.gym_name),
+            h('span', { class: `badge ${row.business_type === 'library' ? 'blue' : 'grey'}` }, row.business_type === 'library' ? 'Library' : 'Gym'),
+          ),
           h(
             'a',
             {
@@ -665,6 +708,7 @@ export async function renderPlatformConsole({ context, rerender }) {
     const needle = state.q.toLowerCase();
     const rows = data.items
       .filter((row) => !state.status || row.status === state.status)
+      .filter((row) => !state.businessType || row.business_type === state.businessType)
       .filter(
         (row) =>
           !needle ||
@@ -676,7 +720,7 @@ export async function renderPlatformConsole({ context, rerender }) {
     clear(tableNode).append(
       table(columns, rows, {
         onRowClick: (row) => openDetailModal(row, rerender),
-        empty: state.q || state.status ? 'No gym matches that' : 'No gyms have signed up yet',
+        empty: state.q || state.status || state.businessType ? 'No gym matches that' : 'No gyms have signed up yet',
       }),
     );
     // Appended separately rather than as a `cond ? node : null` argument above:
@@ -715,6 +759,24 @@ export async function renderPlatformConsole({ context, rerender }) {
     ...['active', 'trial', 'suspended', 'cancelled'].map((s) =>
       h('option', { value: s }, `${s[0].toUpperCase()}${s.slice(1)} (${counts[s] || 0})`),
     ),
+  );
+
+  const businessTypeCounts = data.items.reduce((acc, row) => {
+    const key = row.business_type || 'gym';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const businessTypeFilter = h(
+    'select',
+    {
+      onchange: (e) => {
+        state.businessType = e.target.value;
+        draw();
+      },
+    },
+    h('option', { value: '' }, 'Gym + Library'),
+    h('option', { value: 'gym' }, `Gym (${businessTypeCounts.gym || 0})`),
+    h('option', { value: 'library' }, `Library (${businessTypeCounts.library || 0})`),
   );
 
   const sortSelect = h(
@@ -793,6 +855,7 @@ export async function renderPlatformConsole({ context, rerender }) {
         { class: 'toolbar' },
         search,
         statusFilter,
+        businessTypeFilter,
         sortSelect,
       ),
 

@@ -253,6 +253,12 @@ subscriptionRoutes.post('/:id/resume', requireRole(...MANAGES_BILLING), (req, re
         sub.id,
       ]);
     }
+    if (moduleEnabled('lockers')) {
+      run("UPDATE locker_allocations SET end_date = ? WHERE subscription_id = ? AND status = 'active'", [
+        newEndDate,
+        sub.id,
+      ]);
+    }
   });
 
   res.json({ ...get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]), days_credited: frozenDays });
@@ -266,6 +272,12 @@ subscriptionRoutes.post('/:id/cancel', requireRole(...MANAGES_BILLING), (req, re
     if (moduleEnabled('seats')) {
       const allocation = get("SELECT id FROM seat_allocations WHERE subscription_id = ? AND status = 'active'", [sub.id]);
       if (allocation) releaseSeat(allocation.id, { reason: 'cancelled' });
+    }
+    if (moduleEnabled('lockers')) {
+      run(
+        "UPDATE locker_allocations SET status = 'released', released_on = ?, released_reason = 'cancelled' WHERE subscription_id = ? AND status = 'active'",
+        [today(), sub.id],
+      );
     }
   });
   res.json(get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]));

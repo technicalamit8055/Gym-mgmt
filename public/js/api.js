@@ -173,6 +173,8 @@ export const api = {
     request('GET', `/platform/admin/tenants/${slug}`, undefined, { token: platformSession.token }),
   platformSetStatus: (slug, payload) =>
     request('POST', `/platform/admin/tenants/${slug}/status`, payload, { token: platformSession.token }),
+  platformSetBusinessType: (slug, payload) =>
+    request('POST', `/platform/admin/tenants/${slug}/business-type`, payload, { token: platformSession.token }),
   platformUpdateTenant: (slug, payload) =>
     request('PATCH', `/platform/admin/tenants/${slug}`, payload, { token: platformSession.token }),
   platformDeleteTenant: (slug, payload) =>
@@ -260,6 +262,8 @@ export const api = {
   revenueReport: (params) => request('GET', `/reports/revenue${query(params)}`),
   attendanceReport: (params) => request('GET', `/reports/attendance${query(params)}`),
   growthReport: () => request('GET', '/reports/growth'),
+  occupancyReport: (params) => request('GET', `/reports/occupancy${query(params)}`),
+  pnlReport: (params) => request('GET', `/reports/pnl${query(params)}`),
   exportUrl: (entity) => `${pathPrefix}/api/reports/export/${entity}`,
   download: async (entity) => {
     const res = await fetch(`${pathPrefix}/api/reports/export/${entity}`, {
@@ -296,6 +300,24 @@ export const api = {
   updateWaitlistEntry: (id, payload) => request('PATCH', `/seats/waitlist/${id}`, payload),
   deleteWaitlistEntry: (id) => request('DELETE', `/seats/waitlist/${id}`),
   convertWaitlistEntry: (id, payload) => request('POST', `/seats/waitlist/${id}/convert`, payload),
+
+  lockers: (params) => request('GET', `/lockers${query(params)}`),
+  createLocker: (payload) => request('POST', '/lockers', payload),
+  updateLocker: (id, payload) => request('PATCH', `/lockers/${id}`, payload),
+  deleteLocker: (id) => request('DELETE', `/lockers/${id}`),
+  allocateLocker: (id, payload) => request('POST', `/lockers/${id}/allocate`, payload),
+  releaseLocker: (id) => request('POST', `/lockers/${id}/release`),
+
+  expenses: (params) => request('GET', `/expenses${query(params)}`),
+  expenseSummary: (params) => request('GET', `/expenses/summary${query(params)}`),
+  createExpense: (payload) => request('POST', '/expenses', payload),
+  updateExpense: (id, payload) => request('PATCH', `/expenses/${id}`, payload),
+  deleteExpense: (id) => request('DELETE', `/expenses/${id}`),
+
+  memberDocuments: (params) => request('GET', `/member-documents${query(params)}`),
+  createMemberDocument: (payload) => request('POST', '/member-documents', payload),
+  verifyMemberDocument: (id) => request('POST', `/member-documents/${id}/verify`),
+  deleteMemberDocument: (id) => request('DELETE', `/member-documents/${id}`),
 
   whatsappStatus: () => request('GET', '/whatsapp/status'),
   whatsappConnect: () => request('POST', '/whatsapp/connect'),

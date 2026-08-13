@@ -100,6 +100,74 @@ reportRoutes.get('/attendance', (req, res) => {
   });
 });
 
+/**
+ * Revenue by shift, and occupied-seats-per-day over the range — the two
+ * numbers a hall owner actually wants that a gym has no equivalent of.
+ * `daily` is capped at 400 days regardless of the requested range: it is
+ * built with a recursive day-series CTE, and an unbounded one is the one way
+ * a client-supplied from/to could turn this into an expensive query.
+ */
+reportRoutes.get('/occupancy', (req, res) => {
+  const { from, to: rawTo } = range(req, 30);
+  const to = addDays(from, Math.min(400, Math.round((Date.parse(rawTo) - Date.parse(from)) / 86_400_000)));
+
+  const byShift = all(
+    `SELECT sess.id AS session_id, sess.name AS shift_name,
+            COALESCE(SUM(pay.amount), 0) AS revenue
+     FROM sessions sess
+     LEFT JOIN subscriptions s ON s.session_id = sess.id
+     LEFT JOIN payments pay ON pay.subscription_id = s.id AND pay.paid_on BETWEEN ? AND ?
+     GROUP BY sess.id ORDER BY sess.sort_order, sess.start_time`,
+    [from, to],
+  );
+
+  const daily = all(
+    `WITH RECURSIVE days(d) AS (
+       SELECT ?
+       UNION ALL
+       SELECT date(d, '+1 day') FROM days WHERE d < ?
+     )
+     SELECT days.d AS day, COUNT(sa.id) AS occupied
+     FROM days
+     LEFT JOIN seat_allocations sa ON sa.start_date <= days.d AND sa.end_date >= days.d
+     GROUP BY days.d ORDER BY days.d`,
+    [from, to],
+  );
+
+  res.json({ from, to, by_shift: byShift, daily });
+});
+
+/** Collected vs. spent over time, plus a per-category breakdown — the chart
+ * expenses.js's own /summary condenses into today's single number. */
+reportRoutes.get('/pnl', (req, res) => {
+  const { from, to } = range(req, 180);
+  const bucket = req.query.group === 'day' ? '%Y-%m-%d' : '%Y-%m';
+
+  const revenue = all(
+    `SELECT strftime('${bucket}', paid_on) AS period, SUM(amount) AS amount
+     FROM payments WHERE paid_on BETWEEN ? AND ? GROUP BY period ORDER BY period`,
+    [from, to],
+  );
+  const spend = all(
+    `SELECT strftime('${bucket}', spent_on) AS period, SUM(amount) AS amount
+     FROM expenses WHERE spent_on BETWEEN ? AND ? GROUP BY period ORDER BY period`,
+    [from, to],
+  );
+  const byCategory = all(
+    `SELECT category, SUM(amount) AS amount FROM expenses WHERE spent_on BETWEEN ? AND ? GROUP BY category ORDER BY amount DESC`,
+    [from, to],
+  );
+
+  const periods = [...new Set([...revenue.map((r) => r.period), ...spend.map((s) => s.period)])].sort();
+  const series = periods.map((period) => {
+    const collected = revenue.find((r) => r.period === period)?.amount || 0;
+    const spent = spend.find((s) => s.period === period)?.amount || 0;
+    return { period, collected, spent, net: collected - spent };
+  });
+
+  res.json({ from, to, series, by_category: byCategory });
+});
+
 reportRoutes.get('/growth', (_req, res) => {
   // joined_on/start_date/end_date are already gym-local calendar dates; only
   // the window they are measured against needed rescuing from UTC.
@@ -182,6 +250,22 @@ const exportSpecs = () => ({
           JOIN members m ON m.id = s.member_id
           JOIN plans p ON p.id = s.plan_id
           ORDER BY s.start_date DESC`,
+  },
+  seats: {
+    filename: 'seats.csv',
+    sql: `SELECT se.code, z.name AS zone, se.row_label, se.col_index, se.seat_type, se.status
+          FROM seats se LEFT JOIN seat_zones z ON z.id = se.zone_id
+          ORDER BY se.zone_id, se.row_label, se.col_index`,
+  },
+  lockers: {
+    filename: 'lockers.csv',
+    sql: `SELECT lk.code, z.name AS zone, lk.monthly_fee, lk.status
+          FROM lockers lk LEFT JOIN seat_zones z ON z.id = lk.zone_id
+          ORDER BY lk.zone_id, lk.code`,
+  },
+  expenses: {
+    filename: 'expenses.csv',
+    sql: `SELECT spent_on, category, amount, method, vendor, note FROM expenses ORDER BY spent_on DESC`,
   },
 });
 

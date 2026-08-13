@@ -7,7 +7,10 @@ import { authRoutes, staffRoutes } from './routes/auth.js';
 import { bookingRoutes, classRoutes } from './routes/classes.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { equipmentRoutes } from './routes/equipment.js';
+import { expenseRoutes } from './routes/expenses.js';
+import { lockerRoutes } from './routes/lockers.js';
 import { memberRoutes } from './routes/members.js';
+import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocuments.js';
 import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
@@ -81,6 +84,9 @@ export function createApp() {
   // URLs are individually signed (src/photo.js), and a lapsed gym serving
   // broken avatars on the page that takes their payment helps nobody.
   app.use('/api/member-photos', memberPhotoRoutes);
+  // Same reasoning as member photos: an unauthenticated but signed URL, so an
+  // <img>/<a> tag can fetch it, and reachable even for a lapsed gym.
+  app.use('/api/document-files', documentFileRoutes);
 
   // Scoped to /api, not the whole app: the gate must not reach express.static
   // and the SPA fallback below, or a gym whose trial lapsed would get a JSON
@@ -103,9 +109,12 @@ export function createApp() {
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/whatsapp', whatsappRoutes);
-  // Gated inside the router itself (requireModule('seats')), not here — see
+  // Gated inside each router itself (requireModule(...)), not here — see
   // verticals.js for why the mount list stays a plain map of paths to routers.
   app.use('/api/seats', seatRoutes);
+  app.use('/api/lockers', lockerRoutes);
+  app.use('/api/expenses', expenseRoutes);
+  app.use('/api/member-documents', memberDocumentRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

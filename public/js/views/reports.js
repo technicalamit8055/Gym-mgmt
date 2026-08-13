@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { addDays, barChart, clear, date, fullName, h, labelledControl, lineChart, money, table, today, toast } from '../ui.js';
+import { isLibrary } from '../vertical.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -16,8 +17,9 @@ export async function renderReports({ setActions }) {
   const state = { from: addDays(today(), -90), to: today(), group: 'month' };
   const body = h('div', {});
 
+  const exportable = ['members', 'payments', 'attendance', 'subscriptions', ...(isLibrary() ? ['seats', 'lockers', 'expenses'] : [])];
   setActions(
-    ...['members', 'payments', 'attendance', 'subscriptions'].map((entity) =>
+    ...exportable.map((entity) =>
       h(
         'button',
         { class: 'btn sm', onclick: () => api.download(entity).catch((err) => toast(err.message, 'error')) },
@@ -60,10 +62,12 @@ export async function renderReports({ setActions }) {
   async function render() {
     clear(body).append(h('div', { class: 'empty' }, 'Crunching numbers…'));
 
-    const [revenue, attendance, growth] = await Promise.all([
+    const [revenue, attendance, growth, occupancy, pnl] = await Promise.all([
       api.revenueReport({ from: state.from, to: state.to, group: state.group }),
       api.attendanceReport({ from: state.from, to: state.to }),
       api.growthReport(),
+      isLibrary() ? api.occupancyReport({ from: state.from, to: state.to }) : Promise.resolve(null),
+      isLibrary() ? api.pnlReport({ from: state.from, to: state.to, group: state.group }) : Promise.resolve(null),
     ]);
 
     const avgVisits = attendance.per_day.length
@@ -240,6 +244,47 @@ export async function renderReports({ setActions }) {
             { empty: 'No membership history yet' },
           ),
         ),
+
+        occupancy
+          ? h(
+              'div',
+              { class: 'grid cols-2' },
+              h(
+                'div',
+                { class: 'card' },
+                h('div', { class: 'card-head' }, h('h3', {}, 'Revenue by shift')),
+                table(
+                  [
+                    { label: 'Shift', render: (row) => row.shift_name },
+                    { label: 'Revenue', align: 'right', render: (row) => money(row.revenue) },
+                  ],
+                  occupancy.by_shift,
+                  { empty: 'No shifts set up yet' },
+                ),
+              ),
+              h(
+                'div',
+                { class: 'card' },
+                h('div', { class: 'card-head' }, h('h3', {}, 'Seats occupied per day')),
+                lineChart(
+                  occupancy.daily.map((row) => ({ label: row.day.slice(5), value: row.occupied })),
+                  { format: (v) => `${v} seats` },
+                ),
+              ),
+            )
+          : null,
+
+        pnl
+          ? h(
+              'div',
+              { class: 'card' },
+              h('div', { class: 'card-head' }, h('h3', {}, `Collected vs. spent, ${state.group === 'month' ? 'by month' : 'by day'}`)),
+              barChart(
+                pnl.series.map((row) => ({ label: periodLabel(row.period), value: row.net })),
+                { format: (v) => money(v, { compact: true }) },
+              ),
+            )
+          : null,
       ),
     );
   }

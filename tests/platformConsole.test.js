@@ -323,3 +323,73 @@ describe('deleting a gym', () => {
     assert.equal(res.status, 404);
   });
 });
+
+// Last on purpose: every describe block above this one asserts exact tenant
+// counts/lists off the shared registry (analytics totals, "only ironworks
+// remains" after the delete block), so the extra tenants this block signs up
+// must not exist until those assertions have already run.
+describe('business type on the console', () => {
+  before(async () => {
+    const res = await call('POST', '/api/platform/signup', {
+      slug: 'focus-hall',
+      gym_name: 'Focus Study Hall',
+      admin_name: 'Priya Rao',
+      admin_email: 'owner@focus-hall.test',
+      admin_password: 'strongpass123',
+      business_type: 'library',
+    });
+    assert.equal(res.status, 201);
+  });
+
+  it('reports each tenant’s business type in the list, and filters by it', async () => {
+    const all = await call('GET', '/api/platform/admin/tenants', null, { token: ops });
+    const focusHall = all.body.items.find((t) => t.slug === 'focus-hall');
+    assert.equal(focusHall.business_type, 'library');
+    const ironworks = all.body.items.find((t) => t.slug === 'ironworks');
+    assert.equal(ironworks.business_type, 'gym');
+
+    const libraries = await call('GET', '/api/platform/admin/tenants?business_type=library', null, { token: ops });
+    assert.ok(libraries.body.items.every((t) => t.business_type === 'library'));
+    assert.ok(libraries.body.items.some((t) => t.slug === 'focus-hall'));
+  });
+
+  it('repairs a mis-selected-at-signup type from the console', async () => {
+    const signup = await call('POST', '/api/platform/signup', {
+      slug: 'oops-gym',
+      gym_name: 'Meant To Be A Library',
+      admin_name: 'Owner',
+      admin_email: 'owner@oops-gym.test',
+      admin_password: 'strongpass123',
+    });
+    assert.equal(signup.status, 201);
+    assert.equal(signup.body.business_type, 'gym');
+
+    const fixed = await call(
+      'POST',
+      '/api/platform/admin/tenants/oops-gym/business-type',
+      { business_type: 'library' },
+      { token: ops },
+    );
+    assert.equal(fixed.status, 200);
+    assert.equal(fixed.body.tenant.business_type, 'library');
+
+    const reread = await call('GET', '/g/oops-gym/api/platform/tenant');
+    assert.equal(reread.body.tenant.business_type, 'library');
+    assert.equal(reread.body.tenant.vertical.brand, 'SeatBook');
+  });
+
+  it('rejects a business type that is not a product this platform sells', async () => {
+    const res = await call(
+      'POST',
+      '/api/platform/admin/tenants/oops-gym/business-type',
+      { business_type: 'spa' },
+      { token: ops },
+    );
+    assert.equal(res.status, 400);
+  });
+
+  it('is not reachable without the operator token', async () => {
+    const res = await call('POST', '/api/platform/admin/tenants/oops-gym/business-type', { business_type: 'gym' });
+    assert.equal(res.status, 401);
+  });
+});

@@ -23,39 +23,45 @@ const ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
  * request, not a limit real uploads should ever approach. */
 export const MAX_PHOTO_BYTES = 512 * 1024;
 
-const DATA_URL_RE = /^data:([a-z]+\/[a-z0-9+.-]+);base64,([A-Za-z0-9+/=\s]+)$/i;
+/** ID-proof uploads: the same raster formats plus a scanned PDF. */
+export const DOCUMENT_MIMES = new Set([...ALLOWED_MIMES, 'application/pdf']);
+/** express.json({ limit: '5mb' }) in app.js means 2 MB of bytes is ~2.7 MB
+ * base64 with headroom; raising this without raising that limit would just
+ * turn a real upload into an opaque body-too-large failure. */
+export const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
+
+const DATA_URL_RE = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/i;
 
 /**
- * Turns the `data:image/jpeg;base64,…` the browser produces into bytes,
- * rejecting anything that is not a small raster image. Returns null for an
- * explicitly empty value, which is how a photo gets removed.
+ * Turns a `data:<mime>;base64,…` data URL into bytes, rejecting anything that
+ * isn't one of `allowed`'s mime types or exceeds `maxBytes`. Returns null for
+ * an explicitly empty value, which is how a photo or document gets cleared.
  */
-export function parsePhotoDataUrl(value) {
+export function parseUploadDataUrl(value, { allowed, maxBytes, field = 'file' }) {
   if (value === null || value === undefined || value === '') return null;
 
   const match = DATA_URL_RE.exec(String(value).trim());
   if (!match) {
-    throw badRequest('That photo could not be read', {
-      photo: 'expected a base64 image data URL',
-    });
+    throw badRequest('That file could not be read', { [field]: 'expected a base64 data URL' });
   }
 
   const mime = match[1].toLowerCase();
-  if (!ALLOWED_MIMES.has(mime)) {
-    throw badRequest('That image format is not supported', {
-      photo: `use one of: ${[...ALLOWED_MIMES].join(', ')}`,
-    });
+  if (!allowed.has(mime)) {
+    throw badRequest('That file format is not supported', { [field]: `use one of: ${[...allowed].join(', ')}` });
   }
 
   const bytes = Buffer.from(match[2], 'base64');
-  if (!bytes.length) throw badRequest('That photo is empty', { photo: 'no image data' });
-  if (bytes.length > MAX_PHOTO_BYTES) {
-    throw badRequest('That photo is too large', {
-      photo: `must be under ${Math.round(MAX_PHOTO_BYTES / 1024)} KB once encoded`,
-    });
+  if (!bytes.length) throw badRequest('That file is empty', { [field]: 'no file data' });
+  if (bytes.length > maxBytes) {
+    throw badRequest('That file is too large', { [field]: `must be under ${Math.round(maxBytes / 1024)} KB once encoded` });
   }
 
   return { mime, bytes };
+}
+
+/** One-line alias so the three existing photo call sites are untouched. */
+export function parsePhotoDataUrl(value) {
+  return parseUploadDataUrl(value, { allowed: ALLOWED_MIMES, maxBytes: MAX_PHOTO_BYTES, field: 'photo' });
 }
 
 /**

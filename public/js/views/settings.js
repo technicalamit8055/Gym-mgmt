@@ -1,6 +1,7 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
 import { buildForm, date, h, isFullscreen, relativeDays, setCurrency, toast, toggleFullscreen } from '../ui.js';
 import { cropAndResizeImage, makeAppIcon } from '../photo.js';
+import { getLibraryTheme, isLibrary, setLibraryTheme } from '../vertical.js';
 
 /**
  * The gym's own account page: identity, regional settings and subscription.
@@ -296,6 +297,41 @@ export async function renderSettings({ reload }) {
     h(
       'div',
       { class: 'grid', style: 'gap:16px' },
+      isLibrary()
+        ? h(
+            'div',
+            { class: 'card' },
+            h('div', { class: 'card-head' }, h('h3', {}, 'Aesthetic Theme Palette')),
+            h('p', { class: 'muted', style: 'margin:0 0 14px' }, 'Pick a custom color palette for your library interface.'),
+            h(
+              'div',
+              { style: 'display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px' },
+              [
+                { id: 'emerald', name: 'Emerald Lounge', color: '#10b981', bg: '#081017' },
+                { id: 'sapphire', name: 'Sapphire Night', color: '#38bdf8', bg: '#070c18' },
+                { id: 'violet', name: 'Nordic Violet', color: '#a78bfa', bg: '#0d0a18' },
+                { id: 'mocha', name: 'Mocha Academic', color: '#f59e0b', bg: '#140d0a' },
+              ].map((t) => {
+                const active = (getLibraryTheme() || 'emerald') === t.id;
+                return h(
+                  'button',
+                  {
+                    class: `btn ${active ? 'primary' : 'ghost'}`,
+                    type: 'button',
+                    style: `justify-content:flex-start;padding:10px;border-color:${active ? t.color : 'var(--border)'};background:${t.bg}`,
+                    onclick: async () => {
+                      setLibraryTheme(t.id);
+                      toast(`Switched to ${t.name} theme`);
+                      await reload();
+                    },
+                  },
+                  h('span', { style: `width:12px;height:12px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0` }),
+                  h('span', { style: 'font-size:13px' }, t.name),
+                );
+              }),
+            ),
+          )
+        : null,
       subscriptionCard(tenant, billing, reload),
       h(
         'div',

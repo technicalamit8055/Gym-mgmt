@@ -308,6 +308,34 @@ describe('the seat map and vacancy screens', () => {
   });
 });
 
+describe('a two-desk student does not break the roster', () => {
+  it('does not inflate the member list total or duplicate the row', async () => {
+    const morning = await shiftId('Morning');
+    const evening = await shiftId('Evening');
+    const student = await createMember('TwoDesks');
+    const seatA = await call('POST', '/api/seats', { code: 'ROSTER-A' });
+    const seatB = await call('POST', '/api/seats', { code: 'ROSTER-B' });
+
+    await call('POST', `/api/seats/${seatA.body.id}/allocate`, {
+      session_id: morning,
+      member_id: student,
+      start_date: today(),
+      end_date: addDays(today(), 30),
+    });
+    await call('POST', `/api/seats/${seatB.body.id}/allocate`, {
+      session_id: evening,
+      member_id: student,
+      start_date: today(),
+      end_date: addDays(today(), 30),
+    });
+
+    const before = await call('GET', '/api/members?limit=200');
+    const rows = before.body.items.filter((m) => m.id === student);
+    assert.equal(rows.length, 1, 'a student holding two desks must appear once in the roster, not twice');
+    assert.equal(before.body.total, before.body.items.length, 'the aggregated total must match the row count, not double it');
+  });
+});
+
 describe('the seats module does not leak into a gym', () => {
   let gymToken;
   let gymBase;

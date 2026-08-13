@@ -284,6 +284,80 @@ describe('icons', () => {
     assert.equal(status, 200);
     assert.equal(headers.get('content-type'), 'image/png');
   });
+
+  it('ships the same size matrix for SeatBook, under icons/library/', async () => {
+    const expected = {
+      'icon-192.png': 192,
+      'icon-512.png': 512,
+      'maskable-192.png': 192,
+      'maskable-512.png': 512,
+      'apple-touch-icon.png': 180,
+      'favicon-32.png': 32,
+    };
+
+    for (const [file, size] of Object.entries(expected)) {
+      const buf = fs.readFileSync(path.join(ROOT, 'public', 'icons', 'library', file));
+      assert.deepEqual([...buf.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], `${file} is not a PNG`);
+      assert.equal(buf.readUInt32BE(16), size, `${file} width`);
+      assert.equal(buf.readUInt32BE(20), size, `${file} height`);
+    }
+  });
+});
+
+describe('a library installs under its own brand', () => {
+  before(async () => {
+    const signups = [
+      { slug: 'focus-hall', gym_name: 'Focus Study Hall', business_type: 'library' },
+      // Unbranded on purpose: a fresh gym, not one of the tenants earlier
+      // describe blocks in this file upload a logo onto.
+      { slug: 'unbranded-gym', gym_name: 'Unbranded Gym' },
+    ];
+    for (const signup of signups) {
+      const res = await fetch(`${base}/api/platform/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_name: 'Owner',
+          admin_email: `owner@${signup.slug}.test`,
+          admin_password: 'strongpass123',
+          ...signup,
+        }),
+      });
+      assert.equal(res.status, 201, signup.slug);
+    }
+  });
+
+  it('names itself SeatBook, not GymBook, and links to the library icon set', async () => {
+    const { body } = await manifest('/g/focus-hall/manifest.webmanifest');
+    assert.ok(body.name.includes('SeatBook'), body.name);
+    assert.ok(!body.name.includes('GymBook'), body.name);
+    assert.match(body.description, /seat|shift|pass/i);
+    assert.ok(body.categories.includes('education'));
+    assert.ok(body.icons.every((i) => i.src.startsWith('/icons/library/')), JSON.stringify(body.icons));
+  });
+
+  it('links Seat map / Students / Fees shortcuts instead of the gym set', async () => {
+    const { body } = await manifest('/g/focus-hall/manifest.webmanifest');
+    const names = body.shortcuts.map((s) => s.name);
+    assert.deepEqual(names, ['Seat map', 'Students', 'Fees']);
+    for (const shortcut of body.shortcuts) {
+      assert.ok(shortcut.url.startsWith('/g/focus-hall/#/'), shortcut.url);
+    }
+  });
+
+  it('serves the SeatBook icon bytes it links to', async () => {
+    const { body } = await manifest('/g/focus-hall/manifest.webmanifest');
+    for (const src of new Set(body.icons.map((i) => i.src))) {
+      const res = await get(src);
+      assert.equal(res.status, 200, `${src} is referenced by the manifest but not served`);
+    }
+  });
+
+  it('leaves a gym tenant on GymBook branding, unaffected', async () => {
+    const { body } = await manifest('/g/unbranded-gym/manifest.webmanifest');
+    assert.ok(body.name.includes('GymBook'));
+    assert.ok(body.icons.every((i) => i.src.startsWith('/icons/') && !i.src.startsWith('/icons/library/')));
+  });
 });
 
 describe('app shell', () => {

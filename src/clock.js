@@ -125,6 +125,13 @@ export function gymMonthDay() {
   return gymNow().toISOString().slice(5, 10);
 }
 
+/** `HH:MM` — the current time of day, where the gym is. Comparable directly
+ * against sessions.start_time/end_time, which are typed in the same shape —
+ * see performCheckIn()'s shift resolution in checkin.js. */
+export function gymNowTime() {
+  return gymNow().toISOString().slice(11, 16);
+}
+
 /**
  * A UTC instant, `offsetMs` from now, in the exact `YYYY-MM-DD HH:MM:SS` shape
  * SQLite's `datetime('now')` writes — so it compares directly against a stored

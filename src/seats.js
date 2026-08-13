@@ -1,6 +1,7 @@
 import { addDays, today } from './validate.js';
 import { all, get, run } from './db.js';
 import { conflict, notFound } from './errors.js';
+import { releaseLapsedSeatAllocations } from './maintenance.js';
 
 /**
  * Seat allocation lifecycle: the one thing in SeatBook that is genuinely new
@@ -43,6 +44,10 @@ export function seatHolder(seatId, sessionId) {
  * seat is taken for this shift, or if this member already holds a different
  * seat in the same shift (one desk per student per shift). */
 export function allocateSeat({ seatId, sessionId, memberId, subscriptionId = null, startDate, endDate, note = null }) {
+  // A seat past its hold window belongs to no one yet — release it first so
+  // this allocate doesn't 409 against a holder who should already be gone.
+  releaseLapsedSeatAllocations();
+
   const seat = get('SELECT * FROM seats WHERE id = ?', [seatId]);
   if (!seat) throw notFound('Seat not found');
   if (seat.status !== 'available') throw conflict('That seat is not available');
@@ -207,6 +212,7 @@ function allocationState(row, asOf) {
  * partly full, and the client builds its lookup Map in one pass.
  */
 export function seatMap({ on } = {}) {
+  releaseLapsedSeatAllocations();
   const asOf = on || today();
   const shifts = all('SELECT * FROM sessions ORDER BY sort_order, start_time');
   const zones = all('SELECT * FROM seat_zones ORDER BY sort_order, name');
@@ -261,6 +267,7 @@ export function seatMap({ on } = {}) {
  * month needs both lists, not just the ones about to turn over.
  */
 export function seatVacancy({ on } = {}) {
+  releaseLapsedSeatAllocations();
   const targetDate = on || today();
   const seats = all("SELECT id, code FROM seats WHERE status = 'available'");
   const shifts = all('SELECT id, name FROM sessions ORDER BY sort_order, start_time');

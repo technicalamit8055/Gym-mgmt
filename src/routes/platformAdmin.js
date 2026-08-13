@@ -10,12 +10,14 @@ import { issuePasswordReset } from '../passwordReset.js';
 import { createLimiter } from '../rateLimit.js';
 import { s3Configured } from '../s3.js';
 import { tenantUrl } from '../tenant.js';
+import { BUSINESS_TYPES } from '../verticals.js';
 import {
   deleteTenant,
   expireOverdueTrials,
   findTenantBySlug,
   listDevicesForTenant,
   listTenants,
+  setTenantBusinessType,
   setTenantStatus,
   setTenantTrialEnd,
   tenantDbPath,
@@ -187,19 +189,23 @@ platformAdminRoutes.get('/tenants', (req, res) => {
   expireOverdueTrials();
 
   const withStats = req.query.stats === '1' || req.query.stats === 'true';
-  const items = listTenants().map((tenant) => ({
-    slug: tenant.slug,
-    gym_name: tenant.gym_name ?? tenant.display_name,
-    currency: tenant.currency,
-    timezone: tenant.timezone ?? null,
-    status: tenant.status,
-    trial_ends_on: tenant.trial_ends_on ?? null,
-    created_at: tenant.created_at,
-    suspended_at: tenant.suspended_at ?? null,
-    suspended_reason: tenant.suspended_reason ?? null,
-    razorpay_subscription_id: tenant.razorpay_subscription_id ?? null,
-    stats: withStats ? tenantStats(tenant) : undefined,
-  }));
+  const businessTypeFilter = req.query.business_type ? String(req.query.business_type) : null;
+  const items = listTenants()
+    .filter((tenant) => !businessTypeFilter || (tenant.business_type || 'gym') === businessTypeFilter)
+    .map((tenant) => ({
+      slug: tenant.slug,
+      gym_name: tenant.gym_name ?? tenant.display_name,
+      business_type: tenant.business_type || 'gym',
+      currency: tenant.currency,
+      timezone: tenant.timezone ?? null,
+      status: tenant.status,
+      trial_ends_on: tenant.trial_ends_on ?? null,
+      created_at: tenant.created_at,
+      suspended_at: tenant.suspended_at ?? null,
+      suspended_reason: tenant.suspended_reason ?? null,
+      razorpay_subscription_id: tenant.razorpay_subscription_id ?? null,
+      stats: withStats ? tenantStats(tenant) : undefined,
+    }));
   res.json({ items, total: items.length });
 });
 
@@ -436,4 +442,22 @@ platformAdminRoutes.post('/tenants/:slug/status', (req, res) => {
   if (body.trial_ends_on) setTenantTrialEnd(tenant.slug, body.trial_ends_on);
 
   res.json({ tenant: findTenantBySlug(tenant.slug) });
+});
+
+/**
+ * The mis-selected-at-signup repair: an owner who picked "Gym" when they
+ * meant "Library / study hall", or the other way round. Deliberately not
+ * reachable from the owner's own settings page — the nav, the seeded
+ * catalogue and the member-code prefix all follow from this, so changing it
+ * mid-life is an operator support action, not a self-service setting.
+ */
+platformAdminRoutes.post('/tenants/:slug/business-type', (req, res) => {
+  const tenant = findTenantBySlug(req.params.slug);
+  if (!tenant) throw notFound('No gym with that address');
+
+  const body = parse(req.body, {
+    business_type: { type: 'enum', values: BUSINESS_TYPES, required: true },
+  });
+
+  res.json({ tenant: setTenantBusinessType(tenant.slug, body.business_type) });
 });

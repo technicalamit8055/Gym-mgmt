@@ -12,6 +12,7 @@ import {
   table,
   time,
 } from '../ui.js';
+import { t } from '../vertical.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const monthLabel = (period) => {
@@ -49,13 +50,25 @@ export async function renderDashboard({ setActions, navigate }) {
           ? `${money(data.revenue.today)} collected today`
           : `${revenueChange >= 0 ? '▲' : '▼'} ${Math.abs(revenueChange)}% vs last month`,
       ),
-      stat('In the gym now', data.attendance.currently_in, `${data.attendance.today} check-ins today`),
+      stat(t('inNow'), data.attendance.currently_in, `${data.attendance.today} check-ins today`),
       stat(
         'Expiring in 7 days',
         data.memberships.expiring_soon,
         `${money(data.revenue.outstanding, { compact: true })} in unpaid dues`,
       ),
     ),
+
+    data.expenses
+      ? h(
+          'div',
+          { class: 'grid cols-3' },
+          stat('Collected this month', money(data.revenue.this_month, { compact: true })),
+          stat('Spent this month', money(data.expenses.spent_this_month, { compact: true })),
+          stat('Net this month', money(data.expenses.net_this_month, { compact: true }), null, {
+            accent: data.expenses.net_this_month >= 0,
+          }),
+        )
+      : null,
 
     h(
       'div',
@@ -156,31 +169,62 @@ export async function renderDashboard({ setActions, navigate }) {
             )
           : h('div', { class: 'empty' }, 'Nobody is in the gym right now'),
       ),
-      h(
-        'div',
-        { class: 'card' },
-        h('div', { class: 'card-head' }, h('h3', {}, 'Plan mix')),
-        data.planMix.length
-          ? h(
+      data.seats
+        ? h(
+            'div',
+            { class: 'card' },
+            h(
               'div',
-              { class: 'list' },
-              ...data.planMix.map((row) => {
-                const top = data.planMix[0].members || 1;
-                return h(
+              { class: 'card-head' },
+              h('h3', {}, 'Occupancy by shift'),
+              h('div', { class: 'spacer' }),
+              h('a', { href: '#/seats' }, 'Seat map'),
+            ),
+            data.seats.by_shift.length
+              ? h(
                   'div',
-                  { style: 'padding:8px 0' },
-                  h(
-                    'div',
-                    { class: 'row', style: 'justify-content:space-between;margin-bottom:6px' },
-                    h('span', {}, row.name),
-                    h('strong', {}, row.members),
+                  { class: 'list' },
+                  ...data.seats.by_shift.map((row) =>
+                    h(
+                      'div',
+                      { style: 'padding:8px 0' },
+                      h(
+                        'div',
+                        { class: 'row', style: 'justify-content:space-between;margin-bottom:6px' },
+                        h('a', { href: `#/seats/${row.session_id}` }, row.name),
+                        h('strong', {}, `${row.occupied}/${row.capacity}`),
+                      ),
+                      h('div', { class: 'meter' }, h('span', { style: `width:${Math.min((row.occupied / (row.capacity || 1)) * 100, 100)}%` })),
+                    ),
                   ),
-                  h('div', { class: 'meter' }, h('span', { style: `width:${(row.members / top) * 100}%` })),
-                );
-              }),
-            )
-          : h('div', { class: 'empty' }, 'No active memberships'),
-      ),
+                )
+              : h('div', { class: 'empty' }, 'No shifts set up yet'),
+          )
+        : h(
+            'div',
+            { class: 'card' },
+            h('div', { class: 'card-head' }, h('h3', {}, 'Plan mix')),
+            data.planMix.length
+              ? h(
+                  'div',
+                  { class: 'list' },
+                  ...data.planMix.map((row) => {
+                    const top = data.planMix[0].members || 1;
+                    return h(
+                      'div',
+                      { style: 'padding:8px 0' },
+                      h(
+                        'div',
+                        { class: 'row', style: 'justify-content:space-between;margin-bottom:6px' },
+                        h('span', {}, row.name),
+                        h('strong', {}, row.members),
+                      ),
+                      h('div', { class: 'meter' }, h('span', { style: `width:${(row.members / top) * 100}%` })),
+                    );
+                  }),
+                )
+              : h('div', { class: 'empty' }, 'No active memberships'),
+          ),
       h(
         'div',
         { class: 'card' },

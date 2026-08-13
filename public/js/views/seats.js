@@ -427,8 +427,6 @@ async function openSeatEditForm({ seat, zones, onSaved }) {
   });
 }
 
-/* -------------------------------------------------------------- the map --- */
-
 function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
   const cell = cellsByKey.get(`${seat.id}:${sessionId}`);
   let stateClass = 'vacant';
@@ -439,7 +437,7 @@ function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
   return h(
     'button',
     {
-      class: `seat-tile ${stateClass}`,
+      class: `seat-tile ${stateClass}${editMode && seat.status === 'available' ? ' editing' : ''}`,
       type: 'button',
       style,
       title: cell ? `${cell.member_name} (${cell.member_code}) — until ${cell.end_date}` : seat.code,
@@ -452,7 +450,8 @@ function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
         return cell ? handlers.onOccupied(cell, seat) : handlers.onVacant(seat);
       },
     },
-    seat.code,
+    h('span', { class: 'seat-icon-wrap', html: `<svg class="seat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><path d="M5 18v3"/><path d="M19 18v3"/></svg>` }),
+    h('span', { class: 'seat-code' }, seat.code),
   );
 }
 
@@ -464,10 +463,18 @@ function renderZone(zone, seats, cellsByKey, sessionId, editMode, handlers) {
     rows.get(key).push(seat);
   }
 
+  const availableSeats = seats.filter((s) => s.status === 'available');
+  const occupiedCount = availableSeats.filter((s) => cellsByKey.has(`${s.id}:${sessionId}`)).length;
+
   return h(
     'div',
     { class: 'seatmap-zone' },
-    h('div', { class: 'seatmap-zone-title' }, zone?.name || 'Unassigned'),
+    h(
+      'div',
+      { class: 'seatmap-zone-title' },
+      zone?.name || 'Unassigned',
+      availableSeats.length ? h('span', { class: 'seatmap-zone-count' }, `${occupiedCount}/${availableSeats.length}`) : null,
+    ),
     [...rows.entries()].map(([rowLabel, rowSeats]) =>
       h(
         'div',
@@ -479,8 +486,11 @@ function renderZone(zone, seats, cellsByKey, sessionId, editMode, handlers) {
   );
 }
 
-export async function renderSeats({ setActions, navigate }) {
-  const state = { sessionId: null, on: today(), editMode: false };
+export async function renderSeats({ setActions, navigate, params }) {
+  // A dashboard deep link (#/seats/<shift-id>) pre-selects that shift's tab;
+  // otherwise the map defaults to the first shift, same as a plain #/seats visit.
+  const requestedShift = params?.[0] ? Number(params[0]) : null;
+  const state = { sessionId: requestedShift, on: today(), editMode: false };
   const container = h('div', {});
 
   async function load() {
@@ -531,6 +541,7 @@ export async function renderSeats({ setActions, navigate }) {
       map.shifts.map((shift) => {
         const occupied = map.occupancy.filter((o) => o.session_id === shift.id).length;
         const capacity = shift.capacity ?? map.seats.length;
+        const pct = capacity ? Math.min(Math.round((occupied / capacity) * 100), 100) : 0;
         return h(
           'button',
           {
@@ -538,8 +549,9 @@ export async function renderSeats({ setActions, navigate }) {
             type: 'button',
             onclick: () => { state.sessionId = shift.id; render(map); },
           },
-          h('div', {}, shift.name),
-          h('div', { class: 'muted', style: 'font-size:12px' }, `${occupied}/${capacity}`),
+          h('div', { class: 'seatmap-tab-name' }, shift.name),
+          h('div', { class: 'seatmap-tab-count' }, `${occupied}/${capacity}`),
+          h('div', { class: 'seatmap-tab-bar' }, h('i', { style: `width:${pct}%` })),
         );
       }),
       h('input', {
@@ -604,6 +616,7 @@ export async function renderSeats({ setActions, navigate }) {
     container.append(tabs, stats, legend, hall);
   }
 
+  container.append(h('div', { class: 'empty' }, 'Loading seat map…'));
   load();
   return container;
 }

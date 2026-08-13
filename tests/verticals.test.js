@@ -167,6 +167,15 @@ describe('the seeded catalogue matches the product', () => {
     assert.ok(names.includes('Morning Monthly'), `expected a shift pass, got ${names.join(', ')}`);
     assert.ok(!names.includes('Annual'));
   });
+
+  it('seeds library-worded WhatsApp templates instead of the gym defaults', async () => {
+    const token = (await call('POST', '/g/focus-hall/api/auth/login', {
+      email: 'owner@focus-hall.test', password: 'strongpass123',
+    })).body.token;
+    const { body } = await call('GET', '/g/focus-hall/api/whatsapp/settings', null, { token });
+    assert.ok(!/membership/i.test(body.receipt_template), `expected no gym wording, got: ${body.receipt_template}`);
+    assert.match(body.reminder_template, /seat/i);
+  });
 });
 
 /* ── Backward compatibility ──────────────────────────────────────────── */

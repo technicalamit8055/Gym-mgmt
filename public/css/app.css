@@ -31,15 +31,108 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
-/* SeatBook's marketing surface only — the /library landing and the signup
-   form's live preview. Everything already-signed-in stays GymBook orange for
-   both verticals (see the trade-off note in vertical.js): this rule is scoped
-   to [data-brand='library'], never to body, so it cascades to a page's own
-   subtree and nothing else. */
+/* --------------------------------------------- Library Management Themes */
+
+/* Default Library Aesthetic: Modern Emerald & Abyssal Slate */
+body[data-vertical='library'],
 [data-brand='library'] {
+  --bg: #081017;
+  --bg-alt: #0d1722;
+  --surface: #13202e;
+  --surface-2: #192a3c;
+  --border: #22384e;
+  --text: #f0fdfa;
+  --muted: #799bb0;
+  --brand: #10b981;
+  --brand-soft: rgba(16, 185, 129, 0.15);
+  --brand-glow: rgba(16, 185, 129, 0.22);
+  --green: #34d399;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --blue: #38bdf8;
+  --violet: #a78bfa;
+}
+
+/* Preset 2: Sapphire Night */
+body[data-vertical='library'][data-theme='sapphire'],
+[data-brand='library'][data-theme='sapphire'] {
+  --bg: #070c18;
+  --bg-alt: #0d1428;
+  --surface: #131c36;
+  --surface-2: #1b2647;
+  --border: #24355c;
+  --text: #f0f6ff;
+  --muted: #7b94c4;
   --brand: #38bdf8;
-  --brand-soft: rgba(56, 189, 248, 0.14);
-  --brand-glow: rgba(56, 189, 248, 0.15);
+  --brand-soft: rgba(56, 189, 248, 0.15);
+  --brand-glow: rgba(56, 189, 248, 0.22);
+}
+
+/* Preset 3: Nordic Violet */
+body[data-vertical='library'][data-theme='violet'],
+[data-brand='library'][data-theme='violet'] {
+  --bg: #0d0a18;
+  --bg-alt: #131024;
+  --surface: #1c1733;
+  --surface-2: #241f42;
+  --border: #332b57;
+  --text: #f5f3ff;
+  --muted: #958abf;
+  --brand: #a78bfa;
+  --brand-soft: rgba(167, 139, 250, 0.16);
+  --brand-glow: rgba(167, 139, 250, 0.24);
+}
+
+/* Preset 4: Dark Mocha */
+body[data-vertical='library'][data-theme='mocha'],
+[data-brand='library'][data-theme='mocha'] {
+  --bg: #140d0a;
+  --bg-alt: #1c130e;
+  --surface: #261a14;
+  --surface-2: #33231a;
+  --border: #473226;
+  --text: #fff8f0;
+  --muted: #ba9d8a;
+  --brand: #f59e0b;
+  --brand-soft: rgba(245, 158, 11, 0.16);
+  --brand-glow: rgba(245, 158, 11, 0.24);
+}
+
+/* Enhancements for Library Mode UI elements */
+body[data-vertical='library'] .btn.primary,
+[data-brand='library'] .btn.primary {
+  color: #051a14;
+  font-weight: 700;
+  box-shadow: 0 4px 14px var(--brand-glow);
+}
+body[data-vertical='library'][data-theme='sapphire'] .btn.primary,
+[data-brand='library'][data-theme='sapphire'] .btn.primary {
+  color: #041424;
+}
+body[data-vertical='library'][data-theme='violet'] .btn.primary,
+[data-brand='library'][data-theme='violet'] .btn.primary {
+  color: #140826;
+}
+body[data-vertical='library'][data-theme='mocha'] .btn.primary,
+[data-brand='library'][data-theme='mocha'] .btn.primary {
+  color: #241202;
+}
+
+body[data-vertical='library'] .nav-link.active {
+  box-shadow: inset 3px 0 0 var(--brand), 0 2px 10px var(--brand-soft);
+}
+
+body[data-vertical='library'] .topbar {
+  background: rgba(8, 16, 23, 0.88);
+}
+body[data-vertical='library'][data-theme='sapphire'] .topbar {
+  background: rgba(7, 12, 24, 0.88);
+}
+body[data-vertical='library'][data-theme='violet'] .topbar {
+  background: rgba(13, 10, 24, 0.88);
+}
+body[data-vertical='library'][data-theme='mocha'] .topbar {
+  background: rgba(20, 13, 10, 0.88);
 }
 
 * { box-sizing: border-box; }
@@ -373,33 +466,67 @@ tbody tr.clickable { cursor: pointer; }
 /* ---------------------------------------------------------- seat map UI */
 
 .seatmap-tabs {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px;
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin-bottom: 16px;
 }
 .seatmap-tab {
+  position: relative;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 8px 14px; cursor: pointer; text-align: left; color: var(--text); font: inherit;
+  padding: 10px 16px; cursor: pointer; text-align: left; color: var(--text); font: inherit;
+  min-width: 128px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-.seatmap-tab.active { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
-.seatmap-date { margin-left: auto; }
+.seatmap-tab:hover { border-color: var(--brand); transform: translateY(-1px); }
+.seatmap-tab.active { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); background: var(--brand-soft); }
+.seatmap-tab-name { font-weight: 600; font-size: 14px; }
+.seatmap-tab-count { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.seatmap-tab-bar { height: 4px; border-radius: 2px; background: var(--border); margin-top: 8px; overflow: hidden; }
+.seatmap-tab-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 2px; transition: width 0.3s; }
+.seatmap-date { margin-left: auto; max-width: 170px; }
 
-.seatmap-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin: 14px 0; }
-.seatmap-legend-item { display: flex; align-items: center; gap: 6px; }
-.seat-tile.swatch { width: 16px; height: 16px; padding: 0; pointer-events: none; }
+.seatmap-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.seatmap-legend-item {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 10px 5px 8px; font-size: 12px; color: var(--muted);
+}
+.seat-tile.swatch { width: 14px; height: 14px; border-radius: 4px; padding: 0; pointer-events: none; flex: none; display: inline-block; }
+.seat-tile.swatch .seat-icon-wrap,
+.seat-tile.swatch .seat-code { display: none; }
 
 /* The hall scrolls sideways, never the page — a 30-wide row must not widen
    the document on a phone. */
-.seatmap-card { overflow-x: auto; display: flex; flex-direction: column; gap: 18px; }
-.seatmap-zone-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.seatmap-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.seatmap-row-label { width: 20px; flex: none; color: var(--muted); font-size: 12px; font-weight: 700; }
-.seatmap-row-grid { display: grid; grid-template-columns: repeat(60, 36px); gap: 6px; }
+.seatmap-card { overflow-x: auto; display: flex; flex-direction: column; padding: 20px; }
+.seatmap-zone { padding: 14px 0; }
+.seatmap-zone + .seatmap-zone { border-top: 1px dashed var(--border); }
+.seatmap-zone-title {
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  margin-bottom: 14px;
+}
+.seatmap-zone-count {
+  font-size: 11px; font-weight: 600; letter-spacing: normal; text-transform: none;
+  color: var(--text); background: var(--surface-2); border-radius: 999px; padding: 2px 9px;
+}
+.seatmap-row { display: flex; align-items: center; gap: 12px; padding: 3px 4px; border-radius: 8px; }
+.seatmap-row:hover { background: var(--surface-2); }
+.seatmap-row-label { width: 22px; flex: none; color: var(--muted); font-size: 12px; font-weight: 700; text-align: center; }
+.seatmap-row-grid { display: grid; grid-template-columns: repeat(60, 42px); gap: 8px; }
 
 .seat-tile {
-  width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border);
+  width: 42px; height: 44px; border-radius: 9px; border: 1px solid var(--border);
   background: var(--surface-2); color: var(--text);
-  font-size: 11px; font-weight: 700; cursor: pointer; padding: 0;
-  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; cursor: pointer; padding: 4px 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; position: relative;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
+.seat-icon-wrap { display: flex; align-items: center; justify-content: center; line-height: 1; }
+.seat-icon { width: 14px; height: 14px; stroke-width: 2; flex-shrink: 0; opacity: 0.85; transition: transform 0.12s ease, opacity 0.12s ease; }
+.seat-code { font-size: 10.5px; font-weight: 700; line-height: 1; letter-spacing: -0.2px; white-space: nowrap; }
+.seat-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35); filter: brightness(1.12); }
+.seat-tile:hover .seat-icon { transform: scale(1.15); opacity: 1; }
+.seat-tile:active { transform: translateY(0) scale(0.94); }
+.seat-tile:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .seat-tile.vacant { background: var(--surface-2); border-style: dashed; color: var(--muted); }
 .seat-tile.occupied { background: rgba(52, 211, 153, 0.16); border-color: var(--green); color: var(--green); }
 .seat-tile.expiring { background: rgba(251, 191, 36, 0.18); border-color: var(--amber); color: var(--amber); }
@@ -409,6 +536,21 @@ tbody tr.clickable { cursor: pointer; }
 .seat-tile.oos {
   background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 4px, var(--bg-alt) 4px, var(--bg-alt) 8px);
   color: var(--muted); opacity: 0.45; cursor: not-allowed;
+}
+.seat-tile.oos:hover { transform: none; box-shadow: none; filter: none; }
+/* Edit mode: every open seat gets a dashed brand outline so it's obvious
+   the whole map is now clickable-to-edit rather than clickable-to-assign. */
+.seat-tile.editing::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 11px;
+  border: 1px dashed var(--brand); pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .seatmap-row-grid { grid-template-columns: repeat(60, 34px); gap: 5px; }
+  .seat-tile { width: 34px; height: 38px; padding: 2px 1px; gap: 1px; }
+  .seat-icon { width: 12px; height: 12px; }
+  .seat-code { font-size: 9px; }
+  .seatmap-date { margin-left: 0; }
 }
 
 /* -------------------------------------------------------- biometric UI */

@@ -21,7 +21,10 @@ export const MEMBER_SELECT = `
     COALESCE(visits.count, 0)   AS visit_count,
     gym_session.name            AS session_name,
     gym_session.start_time      AS session_start,
-    gym_session.end_time        AS session_end
+    gym_session.end_time        AS session_end,
+    seat.seat_codes             AS seat_codes,
+    seat.shift_names            AS shift_names,
+    seat.seat_end_date          AS seat_end_date
   FROM members m
   ${PHOTO_JOIN}
   LEFT JOIN sessions gym_session ON gym_session.id = m.session_id
@@ -42,6 +45,22 @@ export const MEMBER_SELECT = `
     SELECT member_id, MAX(check_in) AS last_visit, COUNT(*) AS count
     FROM attendance GROUP BY member_id
   ) visits ON visits.member_id = m.id
+  -- A student can hold more than one seat (the Morning+Evening upsell), so
+  -- this has to pre-aggregate to one row per member itself — joining
+  -- seat_allocations directly here would multiply every other join above by
+  -- however many shifts a student holds, inflating COUNT(*) in the paginated
+  -- roster query that wraps this SELECT.
+  LEFT JOIN (
+    SELECT sa.member_id,
+           GROUP_CONCAT(st.code, ', ')   AS seat_codes,
+           GROUP_CONCAT(sess.name, ', ') AS shift_names,
+           MIN(sa.end_date)              AS seat_end_date
+    FROM seat_allocations sa
+    JOIN seats st ON st.id = sa.seat_id
+    JOIN sessions sess ON sess.id = sa.session_id
+    WHERE sa.status = 'active'
+    GROUP BY sa.member_id
+  ) seat ON seat.member_id = m.id
 `;
 
 const MEMBER_FIELDS = {

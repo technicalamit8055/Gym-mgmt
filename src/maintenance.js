@@ -20,20 +20,27 @@ export function expireOverdueSubscriptions() {
 }
 
 /**
- * Closes any open visit whose member has an assigned gym session (e.g. a
- * 5am-10am morning batch) once that session's end time has passed for the
- * day the visit started. Members with no assigned session are unaffected —
- * their visits only close on an explicit checkout or the toggle-on-rescan
- * in performCheckIn().
+ * Closes any open visit whose shift has ended for the day the visit started.
+ * Which shift applies is `attendance.session_id` if the check-in recorded one
+ * (a library visit, or any check-in performCheckIn() could resolve to a
+ * shift), falling back to the member's own assigned `session_id` (the plain
+ * gym-batch case this always supported). Visits with neither are unaffected —
+ * they only close on an explicit checkout or the toggle-on-rescan in
+ * performCheckIn().
  *
- * sessions.start_time/end_time are wall-clock hours as a gym admin would
- * type them ("05:00"), so the session's end instant for a given visit has to
- * be computed in the *gym's* timezone and converted back to UTC to compare
- * against/store alongside check_in and check_out, which are always UTC
- * (SQLite's `datetime('now')` default). The server's own timezone is only the
- * right answer for a single-gym install — on the platform it is whatever
- * region the machine happens to run in, which is why the modifiers below are
- * bound per request from the gym's own setting.
+ * sessions.start_time/end_time are wall-clock hours as typed ("05:00"), so
+ * the shift's end instant for a given visit has to be computed in the *gym's*
+ * timezone and converted back to UTC to compare against/store alongside
+ * check_in and check_out, which are always UTC (SQLite's `datetime('now')`
+ * default). The server's own timezone is only the right answer for a
+ * single-gym install — on the platform it is whatever region the machine
+ * happens to run in, which is why the modifiers below are bound per request
+ * from the gym's own setting.
+ *
+ * A shift flagged `overnight` (22:00-06:00) ends the *next* calendar day
+ * relative to the visit's start — without the extra day, "06:00 of the
+ * check-in's own day" is a time already in the past, and every night-shift
+ * visit would auto-close the instant it opened.
  *
  * Lazy, like expireOverdueSubscriptions() above: there is no scheduler (the
  * Fly.io deployment suspends the machine when idle, so an in-process timer
@@ -42,17 +49,59 @@ export function expireOverdueSubscriptions() {
  */
 export function autoCloseFinishedVisits() {
   const [toLocal, toUtc] = localtimeModifiers();
+  const shiftEndAt =
+    "datetime(date(attendance.check_in, ?) || ' ' || sessions.end_time, CASE WHEN sessions.overnight = 1 THEN '+1 day' ELSE '+0 days' END, ?)";
   return run(
     `
     UPDATE attendance
-    SET check_out = datetime(date(attendance.check_in, ?) || ' ' || sessions.end_time, ?)
+    SET check_out = ${shiftEndAt}
     FROM members, sessions
-    WHERE attendance.member_id = members.id
-      AND members.session_id = sessions.id
+    WHERE sessions.id = COALESCE(attendance.session_id, members.session_id)
       AND attendance.check_out IS NULL
-      AND datetime('now') >= datetime(date(attendance.check_in, ?) || ' ' || sessions.end_time, ?)
+      AND datetime('now') >= ${shiftEndAt}
   `,
     [toLocal, toUtc, toLocal, toUtc],
+  ).changes;
+}
+
+/**
+ * Releases a seat whose paid-for time has lapsed, once the hold grace period
+ * (library_settings.seat_hold_days) has also passed — before that, the seat
+ * stays reserved in case the student comes back to renew. A frozen
+ * subscription's seat is excluded unconditionally: a paused pass must never
+ * lose its desk, no matter how long its stored end_date has already been in
+ * the past — see the lifecycle test this guards.
+ *
+ * Separate from expireOverdueSubscriptions(): that one runs on every
+ * members-list read for gym tenants too, and this one only matters — and is
+ * only ever called — for a seats-enabled tenant.
+ */
+export function releaseLapsedSeatAllocations() {
+  const holdDays = get('SELECT seat_hold_days FROM library_settings WHERE id = 1')?.seat_hold_days ?? 0;
+  const cutoff = addDays(today(), -holdDays);
+  return run(
+    `UPDATE seat_allocations SET status = 'released', released_on = ?, released_reason = 'lapsed'
+      WHERE status = 'active' AND end_date < ?
+        AND NOT EXISTS (
+          SELECT 1 FROM subscriptions s WHERE s.id = seat_allocations.subscription_id AND s.status = 'frozen'
+        )`,
+    [today(), cutoff],
+  ).changes;
+}
+
+/** As releaseLapsedSeatAllocations(), for lockers. Shares seat_hold_days
+ * rather than a locker-specific setting — one "how long do we hold a spot"
+ * knob for the whole hall, not two to keep in sync. */
+export function releaseLapsedLockerAllocations() {
+  const holdDays = get('SELECT seat_hold_days FROM library_settings WHERE id = 1')?.seat_hold_days ?? 0;
+  const cutoff = addDays(today(), -holdDays);
+  return run(
+    `UPDATE locker_allocations SET status = 'released', released_on = ?, released_reason = 'lapsed'
+      WHERE status = 'active' AND end_date < ?
+        AND NOT EXISTS (
+          SELECT 1 FROM subscriptions s WHERE s.id = locker_allocations.subscription_id AND s.status = 'frozen'
+        )`,
+    [today(), cutoff],
   ).changes;
 }
 

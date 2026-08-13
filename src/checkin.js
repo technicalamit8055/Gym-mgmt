@@ -1,9 +1,10 @@
-import { utcTimestamp } from './clock.js';
+import { gymNowTime, utcTimestamp } from './clock.js';
 import { badRequest } from './errors.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from './maintenance.js';
-import { get, run, tx } from './db.js';
+import { all, get, run, tx } from './db.js';
 import { PHOTO_JOIN, PHOTO_PRESENT_COL, withPhotoUrl } from './photo.js';
 import { today } from './validate.js';
+import { moduleEnabled } from './verticals.js';
 
 /**
  * How far back a rescan looks for a still-open visit to close.
@@ -49,6 +50,36 @@ export const ATTENDANCE_SELECT = `
 export const publicVisit = (row) => withPhotoUrl(row, 'member_id');
 
 /**
+ * Which of a member's active passes applies right now.
+ *
+ * A gym member has at most one active subscription (the overlap guard in
+ * subscriptions.js sees to that), so this only has real work to do for a
+ * library student who can hold Morning *and* Evening passes at once — the
+ * full-day upsell. Picks whichever shift's window contains the current
+ * gym-local time; falls back to the most recently ending pass if none does
+ * (an early or late arrival still gets checked in against *a* pass rather
+ * than being turned away).
+ */
+function resolveShiftSubscription(memberId) {
+  const subs = all(
+    `SELECT s.*, sess.name AS session_name, sess.start_time, sess.end_time, sess.overnight
+     FROM subscriptions s
+     LEFT JOIN sessions sess ON sess.id = s.session_id
+     WHERE s.member_id = ? AND s.status = 'active' AND ? BETWEEN s.start_date AND s.end_date
+     ORDER BY s.end_date DESC`,
+    [memberId, today()],
+  );
+  if (subs.length <= 1) return subs[0] ?? null;
+
+  const nowTime = gymNowTime();
+  const within = subs.find((s) => {
+    if (!s.start_time || !s.end_time) return false;
+    return s.overnight ? nowTime >= s.start_time || nowTime <= s.end_time : nowTime >= s.start_time && nowTime <= s.end_time;
+  });
+  return within ?? subs[0];
+}
+
+/**
  * Shared by front-desk check-in, QR scan, WebAuthn check-in, and physical
  * device check-in — the four ways a member can be marked present all funnel
  * through the same rules.
@@ -77,19 +108,43 @@ export function performCheckIn(member, source) {
   if (member.status === 'inactive') throw badRequest(`${member.first_name}'s membership is inactive`);
 
   expireOverdueSubscriptions();
+  const seatsOn = moduleEnabled('seats');
   // start_date/end_date are gym-local calendar dates, so the day they are
-  // checked against has to be the gym's, not UTC's.
-  const sub = get(
-    "SELECT * FROM subscriptions WHERE member_id = ? AND status = 'active' AND ? BETWEEN start_date AND end_date ORDER BY end_date DESC LIMIT 1",
-    [member.id, today()],
-  );
+  // checked against has to be the gym's, not UTC's. A gym member has at most
+  // one active subscription, so the plain query is exact for it; a library
+  // student can hold more than one shift at once, which is what
+  // resolveShiftSubscription() picks between.
+  const sub = seatsOn
+    ? resolveShiftSubscription(member.id)
+    : get(
+        "SELECT * FROM subscriptions WHERE member_id = ? AND status = 'active' AND ? BETWEEN start_date AND end_date ORDER BY end_date DESC LIMIT 1",
+        [member.id, today()],
+      );
   if (!sub) throw badRequest(`${member.first_name} has no active membership — renew before checking in`);
   if (sub.sessions_total !== null && sub.sessions_used >= sub.sessions_total) {
     throw badRequest(`${member.first_name} has used all ${sub.sessions_total} sessions on this plan`);
   }
 
+  // The seat this check-in belongs to, if the resolved pass has one —
+  // recorded on the visit so autoCloseFinishedVisits() closes it against the
+  // shift actually attended, not just the member's default assigned session.
+  const seat =
+    seatsOn && sub.session_id
+      ? get(
+          `SELECT sa.seat_id, se.code AS seat_code FROM seat_allocations sa
+           JOIN seats se ON se.id = sa.seat_id
+           WHERE sa.member_id = ? AND sa.session_id = ? AND sa.status = 'active'`,
+          [member.id, sub.session_id],
+        )
+      : null;
+
   const visitId = tx(() => {
-    const info = run('INSERT INTO attendance (member_id, source) VALUES (?, ?)', [member.id, source]);
+    const info = run('INSERT INTO attendance (member_id, source, seat_id, session_id) VALUES (?, ?, ?, ?)', [
+      member.id,
+      source,
+      seat?.seat_id ?? null,
+      seatsOn ? (sub.session_id ?? null) : null,
+    ]);
     if (sub.sessions_total !== null) {
       run('UPDATE subscriptions SET sessions_used = sessions_used + 1 WHERE id = ?', [sub.id]);
     }
@@ -104,6 +159,9 @@ export function performCheckIn(member, source) {
       end_date: sub.end_date,
       sessions_total: sub.sessions_total,
       sessions_left: sub.sessions_total === null ? null : sub.sessions_total - (sub.sessions_used + 1),
+      session_id: sub.session_id ?? null,
+      session_name: sub.session_name ?? null,
+      seat_code: seat?.seat_code ?? null,
     },
   };
 }

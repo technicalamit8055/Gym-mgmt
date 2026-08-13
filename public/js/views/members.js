@@ -1,6 +1,8 @@
 import { api, session } from '../api.js';
 import {
+  buildForm,
   clear,
+  closeModal,
   confirmDialog,
   date,
   expiryLabel,
@@ -8,6 +10,7 @@ import {
   h,
   initials,
   money,
+  openModal,
   personCell,
   sourceBadge,
   statusBadge,
@@ -20,7 +23,7 @@ import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js'
 import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../qrcard.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
-import { tl } from '../vertical.js';
+import { isLibrary, tl } from '../vertical.js';
 
 /**
  * A function, not a module-level constant: every view here is statically
@@ -948,6 +951,136 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     ),
   );
 
+  /* ── ID documents (library only) ─────────────────────────────────── */
+
+  const docsBody = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
+
+  async function renderDocs() {
+    const { items } = await api.memberDocuments({ member_id: member.id });
+    clear(docsBody).append(
+      items.length
+        ? h(
+            'div',
+            { class: 'list' },
+            items.map((doc) =>
+              h(
+                'div',
+                { class: 'list-item' },
+                h(
+                  'div',
+                  {},
+                  h('div', { style: 'font-weight:600' }, doc.label || doc.kind.replace(/_/g, ' ')),
+                  h('div', { class: 'muted', style: 'font-size:12px' }, doc.number || ''),
+                ),
+                h('div', { class: 'spacer' }),
+                doc.verified ? h('span', { class: 'badge green' }, 'Verified') : h('span', { class: 'badge amber' }, 'Unverified'),
+                h('a', { class: 'btn sm ghost', href: doc.file_url, target: '_blank', rel: 'noopener' }, 'View'),
+                session.managesBilling && !doc.verified
+                  ? h(
+                      'button',
+                      {
+                        class: 'btn sm',
+                        onclick: async () => {
+                          await api.verifyMemberDocument(doc.id);
+                          toast('Marked verified');
+                          renderDocs();
+                        },
+                      },
+                      'Verify',
+                    )
+                  : null,
+                session.managesBilling
+                  ? h(
+                      'button',
+                      {
+                        class: 'btn sm danger',
+                        onclick: () =>
+                          confirmDialog({
+                            title: 'Remove this document?',
+                            message: 'This cannot be undone.',
+                            confirmLabel: 'Remove',
+                            danger: true,
+                            onConfirm: async () => {
+                              await api.deleteMemberDocument(doc.id);
+                              toast('Document removed');
+                              renderDocs();
+                            },
+                          }),
+                      },
+                      'Remove',
+                    )
+                  : null,
+              ),
+            ),
+          )
+        : h('div', { class: 'empty' }, 'No documents on file'),
+    );
+  }
+
+  function openDocumentUploadForm() {
+    const fileInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,application/pdf' });
+    const form = buildForm(
+      [
+        {
+          name: 'kind',
+          label: 'Document',
+          type: 'select',
+          required: true,
+          options: [
+            { value: 'aadhaar_front', label: 'Aadhaar (front)' },
+            { value: 'aadhaar_back', label: 'Aadhaar (back)' },
+            { value: 'college_id', label: 'College ID' },
+            { value: 'photo_id', label: 'Other photo ID' },
+            { value: 'other', label: 'Other' },
+          ],
+        },
+        { name: 'label', label: 'Label (optional)', placeholder: 'e.g. Aadhaar card' },
+        { name: 'number', label: 'Document number (optional)' },
+      ],
+      {
+        submitLabel: 'Upload',
+        onSubmit: async (values) => {
+          const file = fileInput.files?.[0];
+          if (!file) {
+            toast('Choose a file first', 'error');
+            return;
+          }
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Could not read that file'));
+            reader.readAsDataURL(file);
+          });
+          await api.createMemberDocument({ member_id: member.id, kind: values.kind, label: values.label || undefined, number: values.number || undefined, file: dataUrl });
+          closeModal();
+          toast('Document uploaded');
+          renderDocs();
+        },
+      },
+    );
+    form.querySelector('.form-grid').prepend(
+      h('label', { class: 'field full' }, h('span', {}, 'File (image or PDF, under 2 MB)'), fileInput),
+    );
+    openModal({ title: `Upload a document · ${fullName(member)}`, body: form });
+  }
+
+  renderDocs();
+
+  const documentsCard = isLibrary()
+    ? h(
+        'div',
+        { class: 'card' },
+        h(
+          'div',
+          { class: 'card-head' },
+          h('h3', {}, '🪪 ID documents'),
+          h('div', { class: 'spacer' }),
+          session.managesBilling ? h('button', { class: 'btn sm', onclick: openDocumentUploadForm }, '＋ Upload') : null,
+        ),
+        docsBody,
+      )
+    : null;
+
   return h(
     'div',
     { class: 'grid', style: 'gap:16px' },
@@ -955,6 +1088,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     h('div', { class: 'grid cols-3' }, profileCard, membershipCard, accountCard),
     qrCardSection,
     biometricCard,
+    documentsCard,
     history,
   );
 }
