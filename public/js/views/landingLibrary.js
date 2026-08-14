@@ -1,5 +1,5 @@
 import { signInBox } from './landing.js';
-import { h } from '../ui.js';
+import { h, renderIcon } from '../ui.js';
 
 /**
  * The root domain's SeatBook marketing page, served at /library.
@@ -10,34 +10,35 @@ import { h } from '../ui.js';
  * list are SeatBook's own.
  */
 
+/** Icon-set names, as on GymBook's own landing page — see FEATURES there. */
 const FEATURES = [
   {
-    icon: '🪑',
+    icon: 'seats',
     title: 'A live seat map',
     body: 'Every desk, every shift, at a glance. Assign, transfer or release a seat in one tap — the map is always in sync with who is actually sitting there.',
   },
   {
-    icon: '⏰',
+    icon: 'clock',
     title: 'Passes sold per shift',
     body: 'Morning, Afternoon, Evening, Night or Full Day. A desk sold for the morning is free again in the evening — nothing double-books, ever.',
   },
   {
-    icon: '💳',
+    icon: 'billing',
     title: 'Fees, dues and reminders',
     body: 'Sell passes, take cash, card or UPI, and see outstanding dues per student. Send a fee reminder over WhatsApp with one tap.',
   },
   {
-    icon: '🔒',
+    icon: 'lockers',
     title: 'Lockers, tracked like seats',
     body: 'One live allocation per locker, billed alongside the pass, released the moment a student leaves — no separate spreadsheet.',
   },
   {
-    icon: '🧾',
+    icon: 'expenses',
     title: 'Expenses, not just income',
     body: 'Rent, electricity, wifi, staff — log what goes out, and see collected vs. spent at a glance instead of guessing at month end.',
   },
   {
-    icon: '🪪',
+    icon: 'idCard',
     title: 'ID proof on file',
     body: 'Aadhaar, college ID, whatever you ask for — uploaded once, stored per student, and never mixed up with anyone else’s.',
   },
@@ -53,7 +54,7 @@ export function renderLandingLibrary({ context, navigate }) {
     h(
       'header',
       { class: 'landing-top' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo' }, '📚'), 'SeatBook'),
+      h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('book', { size: 18 })), 'SeatBook'),
       h('div', { class: 'spacer' }),
       context.platform_admin
         ? h('a', { class: 'btn sm ghost', href: '#/platform' }, 'Operator console')
@@ -76,7 +77,12 @@ export function renderLandingLibrary({ context, navigate }) {
         h('button', { class: 'btn primary lg', onclick: () => navigate('/signup') }, `Start your ${trialDays}-day free trial`),
         h('span', { class: 'muted', style: 'font-size:13px' }, 'No card needed. Ready in about a minute.'),
       ),
-      signInBox(context.url_mode, rootHost),
+      signInBox(context.url_mode, rootHost, {
+        placeholder: 'your-hall',
+        ariaLabel: 'Your hall address',
+        errorMessage: 'Enter your hall address first',
+        buttonLabel: 'Go to my hall',
+      }),
     ),
 
     h(
@@ -86,7 +92,7 @@ export function renderLandingLibrary({ context, navigate }) {
         h(
           'div',
           { class: 'card landing-feature' },
-          h('div', { class: 'landing-feature-icon' }, feature.icon),
+          h('div', { class: 'landing-feature-icon' }, renderIcon(feature.icon, { size: 20 })),
           h('h3', {}, feature.title),
           h('p', { class: 'muted' }, feature.body),
         ),

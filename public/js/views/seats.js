@@ -5,6 +5,7 @@ import {
   clear,
   closeModal,
   confirmDialog,
+  fullName,
   h,
   money,
   openModal,
@@ -13,6 +14,7 @@ import {
   toast,
 } from '../ui.js';
 import { datalist, memberOptions, openPaymentForm, resolveMember } from './forms.js';
+import { t } from '../vertical.js';
 
 /**
  * The seat map — SeatBook's centrepiece. No drag-drop, no canvas: a seat is
@@ -238,6 +240,159 @@ async function openSeatAssignForm({ seat, sessionId, shiftName, onSaved }) {
     title: `Assign seat ${seat.code} — ${shiftName}`,
     wide: true,
     body: h('div', {}, datalist('member-options', options), form),
+  });
+}
+
+/**
+ * The reverse of openSeatAssignForm: started from a known member (e.g. their
+ * profile page) rather than from a seat tile. Staff pick a shift, then a
+ * vacant seat within it, computed client-side from the same seat map the
+ * seat screen uses — no separate "vacant seats for shift X" endpoint needed.
+ */
+export async function openMemberSeatAssignForm({ member, onSaved }) {
+  const [map, { items: allPlans }] = await Promise.all([api.seatMap({}), api.plans({ active: 'true' })]);
+
+  if (!map.shifts.length) {
+    toast('Set up shifts before assigning a seat', 'error');
+    return;
+  }
+
+  const occupiedKeys = new Set(map.occupancy.map((o) => `${o.seat_id}:${o.session_id}`));
+  const availableSeats = map.seats.filter((s) => s.status === 'available');
+  const vacantSeatsFor = (sessionId) =>
+    availableSeats.filter((seat) => !occupiedKeys.has(`${seat.id}:${sessionId}`));
+
+  const initialShift = map.shifts.find((s) => vacantSeatsFor(s.id).length > 0) || map.shifts[0];
+
+  const fields = [
+    {
+      name: 'session_id',
+      label: t('shift'),
+      type: 'select',
+      full: true,
+      value: initialShift?.id ?? '',
+      options: map.shifts.map((s) => ({ value: s.id, label: `${s.name} (${vacantSeatsFor(s.id).length} vacant)` })),
+    },
+    {
+      name: 'seat_id',
+      label: 'Seat',
+      type: 'select',
+      full: true,
+      options: vacantSeatsFor(initialShift?.id).map((s) => ({ value: s.id, label: s.code })),
+    },
+    {
+      name: 'plan_id',
+      label: 'Pass',
+      type: 'select',
+      full: true,
+      options: [{ value: '', label: 'No pass — just hold the seat' }],
+    },
+    { name: 'start_date', label: 'Starts on', type: 'date', value: today() },
+    {
+      name: 'end_date',
+      label: 'Holds until',
+      type: 'date',
+      value: addDays(today(), 30),
+      hint: 'Set automatically once a pass is picked — edit freely for a manual hold with no pass.',
+    },
+    { name: 'discount', label: 'Discount', type: 'number', value: 0, min: 0, step: '0.01' },
+    { name: 'payment_amount', label: 'Amount collected now', type: 'number', min: 0, step: '0.01', value: 0 },
+    {
+      name: 'payment_method',
+      label: 'Payment method',
+      type: 'select',
+      value: 'cash',
+      options: ['cash', 'card', 'upi', 'bank', 'online'].map((v) => ({ value: v, label: v.toUpperCase() })),
+    },
+    { name: 'reference', label: 'Reference / receipt no.' },
+    { name: 'note', label: 'Note', full: true },
+  ];
+
+  const form = buildForm(fields, {
+    submitLabel: 'Assign seat',
+    onSubmit: async (values) => {
+      const seatId = Number(values.seat_id);
+      const sessionId = Number(values.session_id);
+      if (!seatId) {
+        toast('Pick a vacant seat first', 'error');
+        return;
+      }
+
+      if (values.plan_id) {
+        const sub = await api.createSubscription({
+          member_id: member.id,
+          plan_id: values.plan_id,
+          session_id: sessionId,
+          seat_id: seatId,
+          start_date: values.start_date || undefined,
+          discount: values.discount || 0,
+          payment_amount: values.payment_amount || undefined,
+          payment_method: values.payment_method,
+          reference: values.reference || undefined,
+          note: values.note || undefined,
+        });
+        closeModal();
+        toast(`Seat assigned — ${sub.plan_name} activated`);
+      } else {
+        await api.allocateSeat(seatId, {
+          session_id: sessionId,
+          member_id: member.id,
+          start_date: values.start_date || today(),
+          end_date: values.end_date,
+          note: values.note || undefined,
+        });
+        closeModal();
+        toast('Seat assigned');
+      }
+      await onSaved?.();
+    },
+  });
+
+  const sessionSelect = form.querySelector('[name=session_id]');
+  const seatSelect = form.querySelector('[name=seat_id]');
+  const planSelect = form.querySelector('[name=plan_id]');
+  const endInput = form.querySelector('[name=end_date]');
+  const startInput = form.querySelector('[name=start_date]');
+  const amountInput = form.querySelector('[name=payment_amount]');
+  const discountInput = form.querySelector('[name=discount]');
+
+  let plans = [];
+  const syncPlans = () => {
+    const sessionId = Number(sessionSelect.value);
+    plans = allPlans.filter((p) => !p.session_id || p.session_id === sessionId);
+    clear(planSelect);
+    planSelect.append(
+      h('option', { value: '' }, 'No pass — just hold the seat'),
+      ...plans.map((p) => h('option', { value: p.id }, `${p.name} — ${money(p.price)} / ${p.duration_days} days`)),
+    );
+  };
+
+  const syncSeats = () => {
+    const sessionId = Number(sessionSelect.value);
+    const vacant = vacantSeatsFor(sessionId);
+    clear(seatSelect);
+    seatSelect.append(...vacant.map((s) => h('option', { value: s.id }, s.code)));
+    syncPlans();
+  };
+
+  const syncAmount = () => {
+    const plan = plans.find((p) => String(p.id) === planSelect.value);
+    if (!plan) return;
+    endInput.value = addDays(startInput.value || today(), plan.duration_days);
+    amountInput.value = Math.max(plan.price - Number(discountInput.value || 0), 0);
+  };
+
+  sessionSelect.addEventListener('change', syncSeats);
+  planSelect.addEventListener('change', syncAmount);
+  startInput.addEventListener('change', syncAmount);
+  discountInput.addEventListener('input', syncAmount);
+
+  syncSeats();
+
+  openModal({
+    title: `Assign seat — ${fullName(member)}`,
+    wide: true,
+    body: form,
   });
 }
 

@@ -11,6 +11,7 @@ import {
   initials,
   lineChart,
   money,
+  renderIcon,
   stat,
   table,
   time,
@@ -24,7 +25,9 @@ const monthLabel = (period) => {
   return `${MONTHS[Number(month) - 1]} ${String(year).slice(2)}`;
 };
 
-const METHOD_ICON = { cash: '💵', card: '💳', upi: '📲', bank: '🏦', online: '🌐' };
+/** Icon-set names (see ui.js), not glyphs — the method badge has to line up
+ * with the rest of the app's iconography, not with the desk's emoji font. */
+const METHOD_ICON = { cash: 'cash', card: 'card', upi: 'smartphone', bank: 'bank', online: 'globe' };
 
 function greetingFor(hour) {
   if (hour < 5) return 'Good night';
@@ -48,24 +51,28 @@ export async function renderDashboard({ setActions, navigate, reload }) {
     h(
       'button',
       { class: 'btn', title: 'Refresh dashboard data', onclick: () => reload() },
-      isLibrary() ? '🔄 Refresh analytics' : '🔄 Refresh',
+      renderIcon('refresh', { size: 16 }),
+      isLibrary() ? 'Refresh analytics' : 'Refresh',
     ),
     h(
       'button',
       { class: 'btn', onclick: () => navigate('/check-in') },
-      isLibrary() ? '🎫 Attendance check-in' : '🎫 Quick check-in',
+      renderIcon('checkin', { size: 16 }),
+      isLibrary() ? 'Attendance check-in' : 'Quick check-in',
     ),
     session.managesBilling
       ? h(
           'button',
           { class: 'btn', onclick: () => openPaymentForm({ onSaved: reload }) },
-          isLibrary() ? '💳 Collect fee' : '💳 Record payment',
+          renderIcon('billing', { size: 16 }),
+          isLibrary() ? 'Collect fee' : 'Record payment',
         )
       : null,
     h(
       'button',
       { class: 'btn primary', onclick: () => openMemberForm({ onSaved: (saved) => navigate(`/members/${saved.id}`) }) },
-      isLibrary() ? `📝 Register ${tl('member')}` : '＋ New member',
+      renderIcon('plus', { size: 16 }),
+      isLibrary() ? `Register ${tl('member')}` : 'New member',
     ),
   );
 
@@ -99,7 +106,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       { class: 'live-badge' },
       h('span', { class: 'live-pulse' }, h('span', { class: 'live-pulse-core' })),
       isLibrary()
-        ? `LIVE ⚡ · ${data.attendance.currently_in} seated`
+        ? `LIVE · ${data.attendance.currently_in} seated`
         : `LIVE · ${data.attendance.currently_in} in the gym`,
     ),
   );
@@ -115,7 +122,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       null,
       {
         accent: true,
-        icon: isLibrary() ? '📚' : '🧑‍🤝‍🧑',
+        icon: 'members',
         trend: {
           positive: growth > 0,
           text: `${data.members.total} on the books · ${data.members.frozen || 0} frozen · +${growth} this month`,
@@ -128,7 +135,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       money(data.revenue.this_month, { compact: true }),
       null,
       {
-        icon: '💰',
+        icon: 'revenue',
         trend:
           revenueChange === null
             ? { positive: null, text: `${money(data.revenue.today)} collected today` }
@@ -141,7 +148,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       data.attendance.currently_in,
       `${data.attendance.today} ${isLibrary() ? 'sittings' : 'check-ins'} today`,
       {
-        icon: isLibrary() ? '🪑' : '🏃',
+        icon: isLibrary() ? 'seats' : 'activity',
         pulse: data.attendance.currently_in > 0,
         onClick: () => navigate('/check-in'),
       },
@@ -151,7 +158,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       data.memberships.expiring_soon,
       null,
       {
-        icon: '⏳',
+        icon: 'hourglass',
         trend: data.revenue.outstanding
           ? { positive: false, text: `${money(data.revenue.outstanding, { compact: true })} in unpaid dues` }
           : { positive: true, text: 'No outstanding dues' },
@@ -164,11 +171,11 @@ export async function renderDashboard({ setActions, navigate, reload }) {
     ? h(
         'div',
         { class: 'grid cols-3' },
-        stat('Collected this month', money(data.revenue.this_month, { compact: true }), null, { icon: '📥' }),
-        stat('Spent this month', money(data.expenses.spent_this_month, { compact: true }), null, { icon: '📤' }),
+        stat('Collected this month', money(data.revenue.this_month, { compact: true }), null, { icon: 'incoming' }),
+        stat('Spent this month', money(data.expenses.spent_this_month, { compact: true }), null, { icon: 'outgoing' }),
         stat('Net this month', money(data.expenses.net_this_month, { compact: true }), null, {
           accent: data.expenses.net_this_month >= 0,
-          icon: data.expenses.net_this_month >= 0 ? '📈' : '📉',
+          icon: data.expenses.net_this_month >= 0 ? 'trendUp' : 'trendDown',
         }),
       )
     : null;
@@ -267,7 +274,8 @@ export async function renderDashboard({ setActions, navigate, reload }) {
                       }
                     },
                   },
-                  '💬 Alert',
+                  renderIcon('whatsapp', { size: 15 }),
+                  'Alert',
                 ),
               ),
           },
@@ -293,7 +301,8 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       { label: 'Member', render: (row) => fullName(row) },
       {
         label: 'Method',
-        render: (row) => h('span', { class: 'badge grey' }, `${METHOD_ICON[row.method] || '💳'} ${row.method}`),
+        render: (row) =>
+          h('span', { class: 'badge grey' }, renderIcon(METHOD_ICON[row.method] || 'card', { size: 13 }), row.method),
       },
       { label: 'Date', render: (row) => date(row.paid_on) },
       { label: 'Amount', align: 'right', render: (row) => money(row.amount) },
@@ -306,8 +315,9 @@ export async function renderDashboard({ setActions, navigate, reload }) {
             h(
               'button',
               {
-                class: 'btn sm ghost',
+                class: 'btn sm ghost icon-only',
                 title: 'Print receipt',
+                'aria-label': 'Print receipt',
                 onclick: async (event) => {
                   event.stopPropagation();
                   try {
@@ -318,13 +328,14 @@ export async function renderDashboard({ setActions, navigate, reload }) {
                   }
                 },
               },
-              '🧾',
+              renderIcon('print', { size: 15 }),
             ),
             h(
               'button',
               {
-                class: 'btn sm ghost',
+                class: 'btn sm ghost icon-only',
                 title: 'Download receipt',
+                'aria-label': 'Download receipt',
                 onclick: async (event) => {
                   event.stopPropagation();
                   try {
@@ -335,7 +346,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
                   }
                 },
               },
-              '⬇️',
+              renderIcon('download', { size: 15 }),
             ),
           ),
       },
@@ -550,20 +561,28 @@ export async function renderDashboard({ setActions, navigate, reload }) {
             { class: 'list-item' },
             h('a', { href: `#/members/${member.id}` }, fullName(member)),
             h('div', { class: 'spacer' }),
-            h('span', { class: 'badge violet' }, `🎂 ${date(member.date_of_birth).slice(0, 6)}`),
+            h('span', { class: 'badge violet' }, renderIcon('cake', { size: 13 }), date(member.date_of_birth).slice(0, 6)),
             member.phone
               ? h(
-                  'a',
+                  'button',
                   {
                     class: 'btn sm ghost',
                     title: 'Send a birthday wish on WhatsApp',
-                    target: '_blank',
-                    rel: 'noopener',
-                    href: `https://wa.me/${String(member.phone).replace(/\D/g, '')}?text=${encodeURIComponent(
-                      `Happy birthday, ${member.first_name}! 🎉 Wishing you a great year ahead from all of us at ${data.gym?.name || 'the gym'}.`,
-                    )}`,
+                    onclick: async (event) => {
+                      const button = event.currentTarget;
+                      button.disabled = true;
+                      try {
+                        await api.sendWhatsAppBirthday(member.id);
+                        toast('Birthday wish sent on WhatsApp');
+                      } catch (err) {
+                        toast(err.message || 'Could not send the birthday wish', 'error');
+                      } finally {
+                        button.disabled = false;
+                      }
+                    },
                   },
-                  '🎁 Wish',
+                  renderIcon('gift', { size: 15 }),
+                  'Wish',
                 )
               : null,
           ),

@@ -212,6 +212,7 @@ describe('settings are per gym', () => {
         reminder_template: 'Expiring {{end_date}} — {{gym_name}}',
         welcome_template: 'Welcome {{first_name}}',
         freeze_template: 'Frozen {{plan_name}} — {{gym_name}}',
+        birthday_template: 'Happy birthday {{first_name}} — {{gym_name}}',
       },
       { token: acmeToken, tenant: 'acmewa' },
     );

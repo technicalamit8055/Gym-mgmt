@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { clear, date, fullName, h, initials, isFullscreen, money, sourceBadge, statusBadge, table, time, toast, today, toggleFullscreen } from '../ui.js';
+import { clear, date, fullName, h, initials, isFullscreen, money, renderIcon, sourceBadge, statusBadge, table, time, toast, today, toggleFullscreen } from '../ui.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -530,7 +530,10 @@ export async function renderCheckIn({ setActions }) {
       class: 'btn ghost',
       onclick: () => toggleFullscreen(),
     },
-    isFullscreen() ? '🗗 Exit Fullscreen' : '⛶ Kiosk Fullscreen',
+    // The icon pair here has to match what app.js's updateFullscreenButtons
+    // repaints this button with when the mode changes underneath it.
+    renderIcon(isFullscreen() ? 'minimize' : 'maximize', { size: 15 }),
+    isFullscreen() ? 'Exit Fullscreen' : 'Kiosk Fullscreen',
   );
   setActions(kioskFullscreenBtn, h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
   await refreshLists();

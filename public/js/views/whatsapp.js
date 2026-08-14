@@ -242,6 +242,24 @@ export async function renderWhatsApp({ setActions, reload }) {
           value: settings.freeze_template || '',
           hint: 'Tags: {{first_name}} {{last_name}} {{plan_name}} {{end_date}} {{gym_name}}',
         },
+        {
+          name: 'auto_birthday',
+          label: 'Send birthday wishes automatically',
+          type: 'select',
+          value: String(settings.auto_birthday ?? 1),
+          options: [
+            { value: '1', label: 'On' },
+            { value: '0', label: 'Off' },
+          ],
+        },
+        {
+          name: 'birthday_template',
+          label: 'Birthday wish message',
+          type: 'textarea',
+          full: true,
+          value: settings.birthday_template || '',
+          hint: 'Tags: {{first_name}} {{last_name}} {{gym_name}}',
+        },
       ],
       {
         submitLabel: 'Save',
@@ -253,6 +271,7 @@ export async function renderWhatsApp({ setActions, reload }) {
             auto_reminder: values.auto_reminder === '1',
             reminder_days_before: Number(values.reminder_days_before),
             auto_freeze: values.auto_freeze === '1',
+            auto_birthday: values.auto_birthday === '1',
           });
           toast('WhatsApp settings saved');
           reload();
@@ -345,7 +364,9 @@ export async function renderWhatsApp({ setActions, reload }) {
                         ? 'amber'
                         : row.type === 'freeze'
                           ? 'violet'
-                          : 'grey'
+                          : row.type === 'birthday'
+                            ? 'green'
+                            : 'grey'
                   }`,
                 },
                 row.type,

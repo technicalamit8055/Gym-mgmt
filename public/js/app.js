@@ -1,7 +1,18 @@
 import { ApiError, api, landingBrand, pathSlug, session } from './api.js';
-import { buildForm, clear, h, isFullscreen, openModal, setCurrency, toast, toggleFullscreen, onFullscreenChange } from './ui.js';
+import {
+  buildForm,
+  clear,
+  h,
+  isFullscreen,
+  openModal,
+  renderIcon,
+  setCurrency,
+  toast,
+  toggleFullscreen,
+  onFullscreenChange,
+} from './ui.js';
 import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
-import { isLibrary, setVertical, t } from './vertical.js';
+import { getAppMode, isLibrary, setVertical, t, toggleAppMode } from './vertical.js';
 import { renderLanding } from './views/landing.js';
 import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderSignup } from './views/signup.js';
@@ -33,49 +44,51 @@ import { renderExpenses } from './views/expenses.js';
 let NAV = [];
 let ROUTES = [];
 
+/** `icon` names an entry in the icon set in ui.js — never a glyph, so the
+ * sidebar renders identically on a Windows desk terminal and an iPad. */
 function buildNav() {
   if (isLibrary()) {
     return [
       { section: 'Daily' },
-      { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-      { path: '/check-in', label: t('checkin'), icon: '🎫' },
-      { path: '/members', label: t('members'), icon: '🧑' },
+      { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+      { path: '/check-in', label: t('checkin'), icon: 'checkin' },
+      { path: '/members', label: t('members'), icon: 'members' },
       { section: 'Business' },
-      { path: '/billing', label: t('memberships'), icon: '💳' },
-      { path: '/plans', label: t('plans'), icon: '🏷️' },
-      { path: '/reports', label: 'Reports', icon: '📈' },
+      { path: '/billing', label: t('memberships'), icon: 'billing' },
+      { path: '/plans', label: t('plans'), icon: 'plans' },
+      { path: '/reports', label: 'Reports', icon: 'reports' },
       // Sends under the library's own WhatsApp number, so the API limits it to
       // the billing roles — hide it rather than let staff click into a 403.
-      { path: '/whatsapp', label: 'WhatsApp', icon: '💬', roles: ['admin', 'manager'] },
+      { path: '/whatsapp', label: 'WhatsApp', icon: 'whatsapp', roles: ['admin', 'manager'] },
       { section: 'Operations' },
-      { path: '/seats', label: t('seats'), icon: '🪑' },
-      { path: '/lockers', label: t('lockers'), icon: '🔒' },
-      { path: '/expenses', label: t('expenses'), icon: '🧾' },
-      { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
-      { path: '/sessions', label: t('shifts'), icon: '⏰' },
-      { path: '/staff', label: t('staff'), icon: '👥' },
-      { path: '/settings', label: t('settings'), icon: '⚙️' },
+      { path: '/seats', label: t('seats'), icon: 'seats' },
+      { path: '/lockers', label: t('lockers'), icon: 'lockers' },
+      { path: '/expenses', label: t('expenses'), icon: 'expenses' },
+      { path: '/devices', label: 'Biometric devices', icon: 'devices' },
+      { path: '/sessions', label: t('shifts'), icon: 'sessions' },
+      { path: '/staff', label: t('staff'), icon: 'staff' },
+      { path: '/settings', label: t('settings'), icon: 'settings' },
     ];
   }
   return [
     { section: 'Daily' },
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/check-in', label: 'Check-in desk', icon: '🎫' },
-    { path: '/members', label: 'Members', icon: '🧑' },
+    { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { path: '/check-in', label: 'Check-in desk', icon: 'checkin' },
+    { path: '/members', label: 'Members', icon: 'members' },
     { section: 'Business' },
-    { path: '/billing', label: 'Memberships & billing', icon: '💳' },
-    { path: '/plans', label: 'Plans', icon: '🏷️' },
-    { path: '/reports', label: 'Reports', icon: '📈' },
+    { path: '/billing', label: 'Memberships & billing', icon: 'billing' },
+    { path: '/plans', label: 'Plans', icon: 'plans' },
+    { path: '/reports', label: 'Reports', icon: 'reports' },
     // Sends under the gym's own WhatsApp number, so the API limits it to the
     // billing roles — hide it rather than let a trainer click into a 403.
-    { path: '/whatsapp', label: 'WhatsApp', icon: '💬', roles: ['admin', 'manager'] },
+    { path: '/whatsapp', label: 'WhatsApp', icon: 'whatsapp', roles: ['admin', 'manager'] },
     { section: 'Operations' },
-    { path: '/classes', label: 'Classes', icon: '🧘' },
-    { path: '/equipment', label: 'Equipment', icon: '🏋️' },
-    { path: '/devices', label: 'Biometric devices', icon: '🖐️' },
-    { path: '/sessions', label: 'Gym sessions', icon: '⏰' },
-    { path: '/staff', label: 'Staff', icon: '👥' },
-    { path: '/settings', label: 'Gym settings', icon: '⚙️' },
+    { path: '/classes', label: 'Classes', icon: 'classes' },
+    { path: '/equipment', label: 'Equipment', icon: 'equipment' },
+    { path: '/devices', label: 'Biometric devices', icon: 'devices' },
+    { path: '/sessions', label: 'Gym sessions', icon: 'sessions' },
+    { path: '/staff', label: 'Staff', icon: 'staff' },
+    { path: '/settings', label: 'Gym settings', icon: 'settings' },
   ];
 }
 
@@ -218,7 +231,7 @@ function renderLogin(message) {
   const tenant = platform.tenant;
   const logoNode = tenant?.logo_url
     ? h('img', { class: 'login-logo-img', src: tenant.logo_url, alt: gymName() })
-    : isLibrary() ? '📚' : '🏋️';
+    : h('span', { class: 'login-logo-mark' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 24 }));
 
   clear(root()).append(
     h(
@@ -258,7 +271,27 @@ function renderBrandLogoNode() {
   if (logoUrl) {
     return h('div', { class: 'logo' }, h('img', { class: 'logo-img', src: logoUrl, alt: gymName() }));
   }
-  return h('div', { class: 'logo' }, isLibrary() ? '📚' : '🏋️');
+  return h('div', { class: 'logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 19 }));
+}
+
+/** "Amit Singh" -> "AS", for the sidebar's account chip. */
+const userInitials = (name = '') =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] || '')
+    .join('')
+    .toUpperCase() || '?';
+
+/**
+ * Repaints a control that means two different things depending on state — the
+ * fullscreen pair and the light/dark pair both swap their icon rather than
+ * their position, so the button never moves under a thumb already on it.
+ */
+function setControlIcon(button, name, label) {
+  clear(button).append(renderIcon(name, { size: label ? 15 : 17 }));
+  if (label) button.append(label);
 }
 
 function renderShell() {
@@ -283,7 +316,7 @@ function renderShell() {
           // renderRoute's close never runs — close here too.
           onclick: () => setNavOpen(false),
         },
-        h('span', { class: 'icon' }, item.icon),
+        h('span', { class: 'icon' }, renderIcon(item.icon)),
         item.label,
       ),
     );
@@ -296,7 +329,8 @@ function renderShell() {
   const installBtn = h(
     'button',
     { class: 'btn sm ghost install-hidden', onclick: () => promptInstall() },
-    '📲 Install app',
+    renderIcon('download', { size: 15 }),
+    'Install app',
   );
   unsubscribeInstall?.();
   unsubscribeInstall = onInstallChange((available) =>
@@ -307,19 +341,29 @@ function renderShell() {
     h(
       'div',
       { class: 'sidebar-footer' },
-      h('div', {}, user?.name || ''),
-      h('div', { style: 'text-transform:capitalize;font-size:12px' }, user?.role || ''),
       h(
         'div',
-        { class: 'row', style: 'margin-top:10px;gap:6px;flex-wrap:wrap' },
+        { class: 'sidebar-user' },
+        h('div', { class: 'avatar sm' }, userInitials(user?.name)),
+        h(
+          'div',
+          { class: 'sidebar-user-meta' },
+          h('div', { class: 'sidebar-user-name' }, user?.name || ''),
+          h('div', { class: 'sidebar-user-role' }, user?.role || ''),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'sidebar-actions' },
         installBtn,
         h(
           'button',
           { id: 'btn-fullscreen-sidebar', class: 'btn sm ghost', onclick: () => toggleFullscreen() },
-          isFullscreen() ? '🗗 Fullscreen' : '⛶ Fullscreen',
+          renderIcon(isFullscreen() ? 'minimize' : 'maximize', { size: 15 }),
+          'Fullscreen',
         ),
-        h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, 'Password'),
-        h('button', { class: 'btn sm ghost', onclick: signOut }, 'Sign out'),
+        h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, renderIcon('key', { size: 15 }), 'Password'),
+        h('button', { class: 'btn sm ghost', onclick: signOut }, renderIcon('logout', { size: 15 }), 'Sign out'),
       ),
     ),
   );
@@ -338,7 +382,25 @@ function renderShell() {
       'aria-label': isFullscreen() ? 'Exit Fullscreen' : 'Enter Fullscreen Mode',
       onclick: () => toggleFullscreen(),
     },
-    isFullscreen() ? '🗗' : '⛶',
+    renderIcon(isFullscreen() ? 'minimize' : 'maximize'),
+  );
+
+  const modeTopbarBtn = h(
+    'button',
+    {
+      id: 'btn-mode-topbar',
+      class: 'btn ghost icon-only',
+      type: 'button',
+      title: getAppMode() === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode',
+      'aria-label': getAppMode() === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode',
+      onclick: () => {
+        const mode = toggleAppMode();
+        modeTopbarBtn.title = mode === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode';
+        modeTopbarBtn.setAttribute('aria-label', modeTopbarBtn.title);
+        setControlIcon(modeTopbarBtn, mode === 'light' ? 'sun' : 'moon');
+      },
+    },
+    renderIcon(getAppMode() === 'light' ? 'sun' : 'moon'),
   );
 
   const navToggle = h(
@@ -350,7 +412,7 @@ function renderShell() {
       'aria-expanded': 'false',
       onclick: () => setNavOpen(!nav.classList.contains('open')),
     },
-    '☰',
+    renderIcon('menu', { size: 19 }),
   );
   const scrim = h('div', { class: 'nav-scrim', onclick: () => setNavOpen(false) });
 
@@ -363,7 +425,7 @@ function renderShell() {
       h(
         'div',
         { class: 'main' },
-        h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions, fullscreenTopbarBtn),
+        h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions, modeTopbarBtn, fullscreenTopbarBtn),
         content,
       ),
     ),
@@ -681,21 +743,24 @@ window.matchMedia('(min-width: 901px)').addEventListener('change', (event) => {
 
 function updateFullscreenButtons(active = isFullscreen()) {
   document.body.classList.toggle('is-fullscreen', active);
+  const label = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
+  const icon = active ? 'minimize' : 'maximize';
+
   const topbarBtn = document.getElementById('btn-fullscreen-topbar');
   if (topbarBtn) {
-    topbarBtn.title = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
-    topbarBtn.setAttribute('aria-label', active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode');
-    topbarBtn.innerHTML = active ? '🗗' : '⛶';
+    topbarBtn.title = label;
+    topbarBtn.setAttribute('aria-label', label);
+    setControlIcon(topbarBtn, icon);
   }
   const sidebarBtn = document.getElementById('btn-fullscreen-sidebar');
   if (sidebarBtn) {
-    sidebarBtn.title = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
-    sidebarBtn.innerHTML = active ? '🗗 Fullscreen' : '⛶ Fullscreen';
+    sidebarBtn.title = label;
+    setControlIcon(sidebarBtn, icon, 'Fullscreen');
   }
   const checkinBtn = document.getElementById('btn-fullscreen-checkin');
   if (checkinBtn) {
-    checkinBtn.title = active ? 'Exit Fullscreen' : 'Enter Fullscreen Mode';
-    checkinBtn.innerHTML = active ? '🗗 Exit Fullscreen' : '⛶ Kiosk Fullscreen';
+    checkinBtn.title = label;
+    setControlIcon(checkinBtn, icon, active ? 'Exit Fullscreen' : 'Kiosk Fullscreen');
   }
 }
 

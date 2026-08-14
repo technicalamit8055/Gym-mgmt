@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="http://localhost:3000/css/app.css" />
+</head>
+<body data-vertical="library" data-theme="emerald" data-mode="dark">
+  <div class="login">
+    <div class="login-card">
+      <h1><span class="login-logo-mark">📚</span>SeatBook</h1>
+      <p class="sub">Sign in to your library account</p>
+      <div class="form-grid">
+        <input placeholder="Email" />
+        <input placeholder="Password" type="password" style="margin-top:10px" />
+      </div>
+      <button class="btn primary block" style="margin-top:16px">Sign in</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" style="position:fixed">
+    <div class="modal" style="margin-top:40px">
+      <div class="modal-head"><h2>Add student</h2><div class="spacer"></div><button class="icon-btn">×</button></div>
+      <div class="modal-body">
+        <input placeholder="Full name" />
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost">Cancel</button>
+        <button class="btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" style="position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px">
+    <div class="toast success">Saved successfully</div>
+    <div class="toast error">Something went wrong</div>
+    <div class="toast info">Switched to Sapphire theme</div>
+  </div>
+</body>
+</html>

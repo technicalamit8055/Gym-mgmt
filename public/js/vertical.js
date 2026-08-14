@@ -12,12 +12,29 @@
 let vertical = 'gym';
 let currentLibraryTheme = localStorage.getItem('library_theme') || 'emerald';
 let currentGymTheme = localStorage.getItem('gym_theme') || 'flame';
+let currentMode = localStorage.getItem('app_mode') || 'dark';
 
 export function setVertical(type) {
   vertical = type === 'library' ? 'library' : 'gym';
   document.body.dataset.vertical = vertical;
   const activeTheme = vertical === 'library' ? currentLibraryTheme : currentGymTheme;
   document.body.dataset.theme = activeTheme;
+  document.body.dataset.mode = currentMode;
+}
+
+export function setAppMode(mode) {
+  currentMode = mode === 'light' ? 'light' : 'dark';
+  localStorage.setItem('app_mode', currentMode);
+  document.body.dataset.mode = currentMode;
+}
+
+export function getAppMode() {
+  return currentMode;
+}
+
+export function toggleAppMode() {
+  setAppMode(currentMode === 'light' ? 'dark' : 'light');
+  return currentMode;
 }
 
 export function setAppTheme(theme) {

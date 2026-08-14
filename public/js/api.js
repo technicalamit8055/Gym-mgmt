@@ -329,6 +329,7 @@ export const api = {
   sendWhatsAppIdCard: (memberId, imageBase64) =>
     request('POST', '/whatsapp/send-id-card', { member_id: memberId, image_base64: imageBase64 }),
   sendWhatsAppReminder: (payload) => request('POST', '/whatsapp/send-reminder', payload),
+  sendWhatsAppBirthday: (memberId) => request('POST', '/whatsapp/send-birthday', { member_id: memberId }),
   sendWhatsAppTest: (payload) => request('POST', '/whatsapp/send-test', payload),
   whatsappLogs: (params) => request('GET', `/whatsapp/logs${query(params)}`),
 };

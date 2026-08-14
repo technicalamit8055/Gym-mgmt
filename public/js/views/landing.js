@@ -1,5 +1,5 @@
 import { gymPathUrl } from '../api.js';
-import { h, toast } from '../ui.js';
+import { h, renderIcon, toast } from '../ui.js';
 
 /**
  * The root domain's public page: what the product is, a way in for gyms that
@@ -9,45 +9,54 @@ import { h, toast } from '../ui.js';
  * put a sidebar for, and every nav item would 404.
  */
 
+/** `icon` names one of the vectors in ui.js — the marketing page is the first
+ * thing a visitor sees, and an emoji renders differently on every platform. */
 const FEATURES = [
   {
-    icon: '🎫',
+    icon: 'checkin',
     title: 'Check-in that keeps up',
     body: 'QR ID cards, phone biometrics or a fingerprint terminal at the door. One rescan checks a member back out, and assigned shifts close forgotten visits on their own.',
   },
   {
-    icon: '💳',
+    icon: 'billing',
     title: 'Memberships and money',
     body: 'Sell plans, take payments in cash, card, UPI or bank, and see outstanding dues per member. Renewals pick up the day the old membership ends.',
   },
   {
-    icon: '🧑',
+    icon: 'idCard',
     title: 'Members, properly filed',
     body: 'Contact and emergency details, health notes, a full history of visits, payments and bookings on one page — and a printable ID card for each.',
   },
   {
-    icon: '🧘',
+    icon: 'equipment',
     title: 'Classes and equipment',
     body: 'A weekly timetable with trainers, rooms and capacity, live seat counts, plus an equipment register with service dates and maintenance alerts.',
   },
   {
-    icon: '📈',
+    icon: 'reports',
     title: 'Numbers you can act on',
     body: 'Revenue by period, method and plan. Attendance by hour and weekday. Joins, renewals and churn. Every report exports to CSV.',
   },
   {
-    icon: '🔒',
+    icon: 'database',
     title: 'Your data, on its own',
     body: 'Every gym gets its own separate database file. Not a shared table with a filter on it — a different file, so one gym’s data cannot be queried from another.',
   },
 ];
 
 /** "Already have a gym?" — turns a typed address into the URL it lives at. */
-export function signInBox(urlMode, rootHost) {
+export function signInBox(urlMode, rootHost, copy = {}) {
+  const {
+    placeholder = 'your-gym',
+    ariaLabel = 'Your gym address',
+    errorMessage = 'Enter your gym address first',
+    buttonLabel = 'Go to my gym',
+  } = copy;
+
   const input = h('input', {
     name: 'slug',
-    placeholder: 'your-gym',
-    'aria-label': 'Your gym address',
+    placeholder,
+    'aria-label': ariaLabel,
     autocapitalize: 'none',
     autocorrect: 'off',
     spellcheck: 'false',
@@ -56,7 +65,7 @@ export function signInBox(urlMode, rootHost) {
   const go = () => {
     const slug = input.value.trim().toLowerCase();
     if (!slug) {
-      toast('Enter your gym address first', 'error');
+      toast(errorMessage, 'error');
       input.focus();
       return;
     }
@@ -80,7 +89,7 @@ export function signInBox(urlMode, rootHost) {
       input,
       urlMode === 'subdomain' ? h('span', { class: 'affix' }, `.${rootHost}`) : null,
     ),
-    h('button', { class: 'btn', type: 'submit' }, 'Go to my gym'),
+    h('button', { class: 'btn', type: 'submit' }, buttonLabel),
   );
 }
 
@@ -94,7 +103,7 @@ export function renderLanding({ context, navigate }) {
     h(
       'header',
       { class: 'landing-top' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo' }, '🏋️'), 'GymBook'),
+      h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('dumbbell', { size: 18 })), 'GymBook'),
       h('div', { class: 'spacer' }),
       context.platform_admin
         ? h('a', { class: 'btn sm ghost', href: '#/platform' }, 'Operator console')
@@ -127,7 +136,7 @@ export function renderLanding({ context, navigate }) {
         h(
           'div',
           { class: 'card landing-feature' },
-          h('div', { class: 'landing-feature-icon' }, feature.icon),
+          h('div', { class: 'landing-feature-icon' }, renderIcon(feature.icon, { size: 20 })),
           h('h3', {}, feature.title),
           h('p', { class: 'muted' }, feature.body),
         ),

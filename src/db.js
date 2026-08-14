@@ -196,6 +196,8 @@ CREATE TABLE IF NOT EXISTS whatsapp_settings (
   reminder_template       TEXT NOT NULL DEFAULT 'Hi {{first_name}}, your membership ({{plan_name}}) expires on {{end_date}}. Please renew to continue your workouts! - {{gym_name}}',
   welcome_template        TEXT NOT NULL DEFAULT 'Welcome to {{gym_name}}, {{first_name}}! We are thrilled to have you on board.',
   freeze_template         TEXT NOT NULL DEFAULT 'Hi {{first_name}}, your membership ({{plan_name}}) has been frozen. It will resume once you or the gym reactivates it. - {{gym_name}}',
+  auto_birthday           INTEGER NOT NULL DEFAULT 1,
+  birthday_template       TEXT NOT NULL DEFAULT 'Happy birthday, {{first_name}}! 🎉 Wishing you a great year ahead from all of us at {{gym_name}}.',
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -203,7 +205,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_logs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   phone       TEXT NOT NULL,
   member_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
-  type        TEXT NOT NULL CHECK (type IN ('receipt', 'reminder', 'welcome', 'freeze', 'custom')),
+  type        TEXT NOT NULL CHECK (type IN ('receipt', 'reminder', 'welcome', 'freeze', 'birthday', 'custom')),
   message     TEXT NOT NULL,
   status      TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
   error       TEXT,
@@ -364,6 +366,40 @@ const MIGRATIONS = [
         phone       TEXT NOT NULL,
         member_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
         type        TEXT NOT NULL CHECK (type IN ('receipt', 'reminder', 'welcome', 'freeze', 'custom')),
+        message     TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+        error       TEXT,
+        sent_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('INSERT INTO whatsapp_logs_new SELECT * FROM whatsapp_logs');
+    db.exec('DROP TABLE whatsapp_logs');
+    db.exec('ALTER TABLE whatsapp_logs_new RENAME TO whatsapp_logs');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id)');
+  },
+  (db) =>
+    ensureColumn(
+      db,
+      'whatsapp_settings',
+      'birthday_template',
+      "TEXT NOT NULL DEFAULT 'Happy birthday, {{first_name}}! 🎉 Wishing you a great year ahead from all of us at {{gym_name}}.'",
+    ),
+  (db) => ensureColumn(db, 'whatsapp_settings', 'auto_birthday', 'INTEGER NOT NULL DEFAULT 1'),
+  // Widening the `type` CHECK again, this time to allow 'birthday' — same
+  // rebuild-the-table dance as the 'freeze' migration above.
+  (db) => {
+    const row = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'whatsapp_logs'")
+      .get();
+    if (!row || row.sql.includes("'birthday'")) return;
+
+    db.exec(`
+      CREATE TABLE whatsapp_logs_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone       TEXT NOT NULL,
+        member_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        type        TEXT NOT NULL CHECK (type IN ('receipt', 'reminder', 'welcome', 'freeze', 'birthday', 'custom')),
         message     TEXT NOT NULL,
         status      TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
         error       TEXT,

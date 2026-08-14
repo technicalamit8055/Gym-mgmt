@@ -15,7 +15,38 @@
   --blue: #60a5fa;
   --violet: #a78bfa;
   --radius: 12px;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --radius-sm: 9px;
+  --radius-lg: 16px;
+
+  /*
+   * Elevation in three steps rather than one, so a resting card, a lifted card
+   * and a modal are distinguishable instead of all wearing the same drop
+   * shadow. Negative spreads keep the shadow tight under the element and let
+   * the blur fall away, which is what stops a panel looking like it is floating
+   * on a grey smudge.
+   */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 6px -2px rgba(0, 0, 0, 0.22);
+  --shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 60px -12px rgba(0, 0, 0, 0.55);
+  /*
+   * The micro-border: a 1px top highlight, inset, that reads as light catching
+   * the upper edge of a raised surface. It is the whole difference between a
+   * flat rectangle and a panel, and it has to invert in light mode — a white
+   * highlight on white is invisible, so light mode makes it a faint shade.
+   */
+  --hairline: rgba(255, 255, 255, 0.07);
+  /* Focus ring, as one token so every control's ring matches the brand. */
+  --ring: 0 0 0 3px var(--brand-glow);
+
+  /*
+   * Interface font. System-first and entirely local: the app runs offline from
+   * a service worker, so a webfont would either block first paint or arrive
+   * only for users who happen to be online. 'Inter' is honoured if the desk
+   * machine has it installed, which many do.
+   */
+  --font-sans: 'Inter var', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+
   color-scheme: dark;
 
   /*
@@ -103,7 +134,7 @@ body[data-vertical='library'] .btn.primary,
 [data-brand='library'] .btn.primary {
   color: #051a14;
   font-weight: 700;
-  box-shadow: 0 4px 14px var(--brand-glow);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 14px var(--brand-glow);
 }
 body[data-vertical='library'][data-theme='sapphire'] .btn.primary,
 [data-brand='library'][data-theme='sapphire'] .btn.primary {
@@ -118,22 +149,9 @@ body[data-vertical='library'][data-theme='mocha'] .btn.primary,
   color: #241202;
 }
 
-body[data-vertical='library'] .nav-link.active {
-  box-shadow: inset 3px 0 0 var(--brand), 0 2px 10px var(--brand-soft);
-}
-
-body[data-vertical='library'] .topbar {
-  background: rgba(8, 16, 23, 0.88);
-}
-body[data-vertical='library'][data-theme='sapphire'] .topbar {
-  background: rgba(7, 12, 24, 0.88);
-}
-body[data-vertical='library'][data-theme='violet'] .topbar {
-  background: rgba(13, 10, 24, 0.88);
-}
-body[data-vertical='library'][data-theme='mocha'] .topbar {
-  background: rgba(20, 13, 10, 0.88);
-}
+/* The active-item accent and the topbar's glass are both mixed from --bg and
+   --brand (see .nav-link.active and .topbar), so every preset and both modes
+   get them without a per-theme override here. */
 
 /* ------------------------------------------------ GymBook Management Themes */
 
@@ -198,7 +216,7 @@ body[data-vertical='gym'][data-theme='ultramarine'] {
 body[data-vertical='gym'] .btn.primary {
   color: #1a1005;
   font-weight: 700;
-  box-shadow: 0 4px 14px var(--brand-glow);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 14px var(--brand-glow);
 }
 body[data-vertical='gym'][data-theme='crimson'] .btn.primary {
   color: #240404;
@@ -210,10 +228,6 @@ body[data-vertical='gym'][data-theme='ultramarine'] .btn.primary {
   color: #041026;
 }
 
-body[data-vertical='gym'] .nav-link.active {
-  box-shadow: inset 3px 0 0 var(--brand), 0 2px 10px var(--brand-soft);
-}
-
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
@@ -222,8 +236,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font: 15px/1.55 var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   /* Installed-app feel on touch devices: no grey flash on every tap, and no
      iOS "text inflation" resizing body copy when a phone turns landscape. */
   -webkit-tap-highlight-color: transparent;
@@ -234,8 +249,20 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Headings tighten as they grow: at display sizes the default tracking reads as
+   gappy, and this is most of what separates a modern product page from a
+   default-stylesheet one. */
+h1, h2, h3, h4, .stat .value, .dash-greeting { letter-spacing: -0.015em; }
+h1, h2 { font-weight: 700; }
+h3, h4 { font-weight: 600; }
+
 a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
+
+/* Every icon from renderIcon() in js/ui.js. Sized by its own width/height
+   attributes; these rules only stop flex containers from stretching or
+   squashing them, and hand the stroke its colour from the parent. */
+.svg-icon { flex: none; display: block; stroke: currentColor; }
 
 /* The doubled height/min-height declarations through this file are a fallback
    pair, not a mistake: mobile browser chrome makes 100vh taller than what you
@@ -257,12 +284,21 @@ a:hover { text-decoration: underline; }
   width: min(400px, 100%);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 32px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
 }
 .login-card h1 { margin: 0 0 4px; font-size: 26px; display: flex; align-items: center; gap: 10px; }
 .login-logo-img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border); flex-shrink: 0; }
+/* Stand-in for a gym that has not uploaded a logo — the same tinted tile the
+   sidebar brand uses, at login size. */
+.login-logo-mark {
+  width: 42px; height: 42px; border-radius: 12px;
+  background: var(--brand-soft); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+  box-shadow: inset 0 1px 0 var(--hairline);
+  display: grid; place-items: center; flex-shrink: 0;
+}
 .login-card p.sub { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
 
 /* ------------------------------------------------------------------ layout */
@@ -282,11 +318,13 @@ a:hover { text-decoration: underline; }
   height: 100dvh;
   overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; font-weight: 700; font-size: 19px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; font-weight: 700; font-size: 19px; letter-spacing: -0.02em; }
 .brand .logo {
   width: 34px; height: 34px; border-radius: 10px;
   background: var(--brand-soft); color: var(--brand);
   display: grid; place-items: center; font-size: 18px;
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+  box-shadow: inset 0 1px 0 var(--hairline), 0 2px 10px -4px var(--brand-glow);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -309,15 +347,67 @@ a:hover { text-decoration: underline; }
   width: 100%; height: 100%; object-fit: cover;
 }
 .nav-link {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 9px;
+  padding: 9px 12px; border-radius: var(--radius-sm);
   color: var(--muted); font-weight: 500; font-size: 14px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .nav-link:hover { background: var(--surface); color: var(--text); text-decoration: none; }
-.nav-link.active { background: var(--brand-soft); color: var(--brand); }
-.nav-link .icon { width: 18px; text-align: center; }
-.nav-section { margin: 16px 12px 6px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #5d6b7d; }
-.sidebar-footer { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+/*
+ * The active item: a brand wash that fades out across the link, plus an accent
+ * bar on the left edge with a soft ambient glow around it. The wash alone reads
+ * as a flat selected row; the bar is what makes it look like the page it points
+ * at is lit up.
+ */
+.nav-link.active {
+  background: linear-gradient(90deg, var(--brand-soft) 0%, transparent 130%);
+  color: var(--brand);
+  box-shadow: 0 2px 14px -4px var(--brand-glow);
+}
+.nav-link.active::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0;
+  background: var(--brand);
+  box-shadow: 0 0 10px var(--brand);
+}
+.nav-link .icon {
+  width: 18px; height: 18px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.75; transition: opacity 0.15s ease;
+}
+.nav-link:hover .icon, .nav-link.active .icon { opacity: 1; }
+
+.nav-section {
+  margin: 18px 12px 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); opacity: 0.65;
+}
+
+.sidebar-footer { margin-top: auto; padding: 12px 6px 0; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+/* The account chip: who is signed in, as an object rather than two loose lines
+   of text above the buttons. */
+.sidebar-user {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+.sidebar-user-meta { min-width: 0; }
+.sidebar-user-name {
+  color: var(--text); font-weight: 600; font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-user-role { font-size: 11.5px; text-transform: capitalize; letter-spacing: 0.02em; }
+/* Two even columns, so four small actions read as one block instead of a
+   ragged wrapped row. */
+.sidebar-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.sidebar-actions .btn {
+  justify-content: flex-start; gap: 6px;
+  padding: 7px 9px; font-size: 12.5px;
+  min-width: 0; overflow: hidden; white-space: nowrap;
+}
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
@@ -325,32 +415,66 @@ a:hover { text-decoration: underline; }
   /* The top pad carries the status-bar clearance: this is the first thing
      under the notch in an installed window, and it stays sticky there. */
   padding: calc(16px + var(--safe-top)) 28px 16px; border-bottom: 1px solid var(--border);
-  background: rgba(13, 17, 23, 0.85); backdrop-filter: blur(8px);
+  /*
+   * Glass, mixed from the active theme's own --bg rather than a hardcoded
+   * colour per preset: every gym and library palette, in both modes, gets a
+   * topbar that is unmistakably the page's own background with the content
+   * blurring through it. The saturate() is what keeps colour in what shows
+   * through — a plain blur greys it out.
+   */
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
   position: sticky; top: 0; z-index: 20;
 }
-.topbar h1 { margin: 0; font-size: 20px; }
+.topbar h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .topbar .spacer { flex: 1; }
 .content { padding: 24px 28px calc(60px + var(--safe-bottom)); }
 
 /* Drawer handle. Shown only where the drawer exists — see the responsive
    section at the foot of this file. */
-.nav-toggle { font-size: 17px; line-height: 1; padding: 8px 12px; flex: none; }
+.nav-toggle { line-height: 0; padding: 8px 10px; flex: none; }
 
 /* ---------------------------------------------------------------- elements */
 
 .btn {
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
-  padding: 8px 14px; border-radius: 9px; font-size: 14px; font-weight: 500;
-  cursor: pointer; transition: filter 0.15s, background 0.15s;
+  padding: 8px 14px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500;
+  cursor: pointer;
+  /* The inset top highlight — see --hairline. On a button it is what gives the
+     surface a lit upper edge instead of a printed-on look. */
+  box-shadow: inset 0 1px 0 var(--hairline);
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease,
+    transform 0.12s ease, color 0.15s ease;
 }
-.btn:hover { filter: brightness(1.18); text-decoration: none; }
+/*
+ * Hover tints towards the brand and lifts the border, rather than the old
+ * brightness() filter — a filter also washed out the icon inside and behaved
+ * backwards in light mode, where "brighter" means less contrast.
+ */
+.btn:hover {
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  text-decoration: none;
+}
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: inset 0 1px 0 var(--hairline), var(--ring); border-color: var(--brand); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled:hover { transform: none; background: var(--surface-2); border-color: var(--border); }
+.btn .svg-icon { opacity: 0.9; }
+.btn:hover .svg-icon { opacity: 1; }
+
 .btn.primary { background: var(--brand); border-color: var(--brand); color: #1a1005; font-weight: 600; }
-.btn.ghost { background: transparent; }
+.btn.primary:hover { background: var(--brand); border-color: var(--brand); filter: brightness(1.07); }
+.btn.primary .svg-icon { opacity: 1; }
+.btn.ghost { background: transparent; box-shadow: none; }
+.btn.ghost:hover { background: color-mix(in srgb, var(--brand) 8%, var(--surface-2)); }
 .btn.danger { color: var(--red); border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); }
-.btn.sm { padding: 5px 10px; font-size: 13px; }
-.btn.icon-only { padding: 6px 10px; font-size: 16px; line-height: 1; }
+.btn.danger:hover { background: rgba(248, 113, 113, 0.16); border-color: rgba(248, 113, 113, 0.65); }
+.btn.sm { padding: 5px 10px; font-size: 13px; gap: 6px; }
+/* Square, so a lone icon sits centred instead of off to one side of a pill. */
+.btn.icon-only { padding: 7px; line-height: 0; }
 .btn.block { width: 100%; justify-content: center; }
 
 /* Fullscreen mode enhancements */
@@ -360,11 +484,23 @@ body.is-fullscreen .topbar {
 
 
 input, select, textarea {
-  width: 100%; padding: 9px 12px; border-radius: 9px;
+  width: 100%; padding: 9px 12px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--bg);
   color: var(--text); font: inherit; font-size: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+input:hover:not(:focus), select:hover:not(:focus), textarea:hover:not(:focus) {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+}
+/* A soft ring outside the border rather than a hard outline: the ring reads as
+   the field lighting up, and unlike outline it follows the border radius. */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+  background: var(--bg-alt);
+}
+::placeholder { color: color-mix(in srgb, var(--muted) 78%, transparent); }
 textarea { resize: vertical; min-height: 72px; }
 label.field { display: block; margin-bottom: 14px; }
 label.field > span { display: block; margin-bottom: 5px; font-size: 13px; color: var(--muted); }
@@ -375,6 +511,7 @@ label.field > span { display: block; margin-bottom: 5px; font-size: 13px; color:
 .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 18px;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
   /* Grid/flex items default to min-width:auto, which lets a wide child (a
      table, a chart) push the track wider than the screen. */
   min-width: 0;
@@ -406,29 +543,40 @@ label.field > span { display: block; margin-bottom: 5px; font-size: 13px; color:
   background: linear-gradient(160deg, var(--surface) 0%, var(--surface-2) 130%);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
-.stat:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--brand) 35%, transparent); }
-.stat .label { color: var(--muted); font-size: 13px; }
-.stat .value { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; }
+.stat:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+  box-shadow: var(--shadow), 0 0 22px -12px var(--brand), inset 0 1px 0 var(--hairline);
+}
+.stat .label { color: var(--muted); font-size: 13px; font-weight: 500; }
+.stat .value { font-size: 27px; font-weight: 700; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; }
 .stat .hint { font-size: 12px; color: var(--muted); }
 .stat.accent { border-left: 3px solid var(--brand); }
 .stat.clickable { cursor: pointer; }
 .stat.clickable:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-.stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: -2px; }
+.stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+/* The metric tile: a brand-tinted square holding the card's icon. The border
+   and the inset highlight are what stop it reading as a flat colour patch. */
 .stat-icon {
-  width: 30px; height: 30px; border-radius: 9px;
+  width: 34px; height: 34px; border-radius: 10px;
   background: var(--brand-soft); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  box-shadow: inset 0 1px 0 var(--hairline);
   display: grid; place-items: center; font-size: 15px; flex: none;
+  transition: background 0.18s ease, transform 0.18s ease;
 }
+.stat:hover .stat-icon { background: color-mix(in srgb, var(--brand) 22%, transparent); transform: scale(1.05); }
 
 .trend-pill {
-  display: inline-flex; align-self: flex-start;
-  padding: 3px 9px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+  padding: 3px 10px; border-radius: 999px;
   font-size: 11.5px; font-weight: 600;
+  border: 1px solid var(--border);
   background: var(--surface-2); color: var(--muted);
 }
-.trend-pill.pos { background: rgba(52, 211, 153, 0.14); color: var(--green); }
-.trend-pill.neg { background: rgba(248, 113, 113, 0.14); color: var(--red); }
+.trend-pill.pos { background: rgba(52, 211, 153, 0.14); color: var(--green); border-color: rgba(52, 211, 153, 0.26); }
+.trend-pill.neg { background: rgba(248, 113, 113, 0.14); color: var(--red); border-color: rgba(248, 113, 113, 0.26); }
 
 /* Small live-activity indicator — used in stat cards and the dashboard header. */
 .live-pulse {
@@ -449,33 +597,64 @@ label.field > span { display: block; margin-bottom: 5px; font-size: 13px; color:
 }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
+/* A faint tinted band, mixed from --muted so it lands on the right side of the
+   surface in both modes, marks the header row without a heavy rule. */
 th {
   text-align: left; padding: 10px 12px; color: var(--muted);
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
+  background: color-mix(in srgb, var(--muted) 6%, transparent);
   border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-td { padding: 11px 12px; border-bottom: 1px solid rgba(38, 49, 64, 0.6); vertical-align: middle; }
-tbody tr:hover { background: var(--surface-2); }
+th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+/* Row rules mixed from --border rather than a fixed rgba: the old hardcoded
+   slate stayed dark-mode slate on a white table. */
+td {
+  padding: 11px 12px; vertical-align: middle;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+tbody tr { transition: background 0.12s ease; }
+tbody tr:hover { background: color-mix(in srgb, var(--brand) 5%, var(--surface-2)); }
+tbody tr:last-child td { border-bottom: none; }
 tbody tr.clickable { cursor: pointer; }
 .table-wrap { overflow-x: auto; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 
+/*
+ * Status pills. Translucent rather than solid, with a border in the same tone
+ * so the shape survives on any surface, and inline-flex so a pill can carry an
+ * icon or a status dot beside its label.
+ */
 .badge {
-  display: inline-block; padding: 3px 9px; border-radius: 99px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid transparent;
   font-size: 12px; font-weight: 600; white-space: nowrap;
+  vertical-align: middle;
 }
-.badge.green { background: rgba(52, 211, 153, 0.14); color: var(--green); }
-.badge.red { background: rgba(248, 113, 113, 0.14); color: var(--red); }
-.badge.amber { background: rgba(251, 191, 36, 0.14); color: var(--amber); }
-.badge.blue { background: rgba(96, 165, 250, 0.14); color: var(--blue); }
-.badge.violet { background: rgba(167, 139, 250, 0.16); color: var(--violet); }
-.badge.grey { background: rgba(139, 155, 176, 0.14); color: var(--muted); }
+.badge .svg-icon { opacity: 0.85; }
+/* The state dot: same colour as the label, with a soft halo. Added by
+   statusBadge() in js/ui.js, where a change of state is what matters. */
+.badge.dot::before {
+  content: ''; flex: none;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, transparent);
+}
+.badge.green { background: rgba(52, 211, 153, 0.14); color: var(--green); border-color: rgba(52, 211, 153, 0.26); }
+.badge.red { background: rgba(248, 113, 113, 0.14); color: var(--red); border-color: rgba(248, 113, 113, 0.26); }
+.badge.amber { background: rgba(251, 191, 36, 0.14); color: var(--amber); border-color: rgba(251, 191, 36, 0.28); }
+.badge.blue { background: rgba(96, 165, 250, 0.14); color: var(--blue); border-color: rgba(96, 165, 250, 0.26); }
+.badge.violet { background: rgba(167, 139, 250, 0.16); color: var(--violet); border-color: rgba(167, 139, 250, 0.28); }
+.badge.grey { background: rgba(139, 155, 176, 0.14); color: var(--muted); border-color: rgba(139, 155, 176, 0.24); }
 
 .avatar {
   width: 34px; height: 34px; border-radius: 50%;
   background: var(--brand-soft); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 18%, transparent);
   display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none;
 }
+.avatar.sm { width: 30px; height: 30px; font-size: 11.5px; }
 .avatar.lg { width: 64px; height: 64px; font-size: 22px; }
 .person { display: flex; align-items: center; gap: 10px; }
 .person .meta { min-width: 0; }
@@ -504,7 +683,7 @@ tbody tr.clickable { cursor: pointer; }
 .list { display: flex; flex-direction: column; }
 .list-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 10px 0; border-bottom: 1px solid rgba(38, 49, 64, 0.6);
+  padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 .list-item:last-child { border-bottom: none; }
 .list-item .spacer { flex: 1; }
@@ -603,12 +782,17 @@ body[data-vertical='library'] .stat,
 /* -------------------------------------------------------- modal and toasts */
 
 .modal-backdrop {
-  position: fixed; inset: 0; background: rgba(3, 6, 11, 0.72);
+  position: fixed; inset: 0; background: rgba(3, 6, 11, 0.66);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: grid; place-items: start center; padding: 40px 16px; overflow-y: auto; z-index: 60;
+  animation: fade 0.14s ease-out;
 }
 .modal {
   width: min(680px, 100%); background: var(--surface);
-  border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
+  animation: rise 0.18s ease-out;
 }
 .modal.wide { width: min(880px, 100%); }
 .modal-head { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
@@ -616,11 +800,22 @@ body[data-vertical='library'] .stat,
 .modal-head .spacer { flex: 1; }
 .modal-body { padding: 20px; }
 .modal-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 16px 20px; border-top: 1px solid var(--border); }
-.icon-btn {
-  background: none; border: none; color: var(--muted);
-  font-size: 20px; cursor: pointer; line-height: 1; padding: 4px 8px; border-radius: 8px;
+/* Only the modal's own footer gets the tinted tray — buildForm() reuses this
+   class for a form's inline button row, which sits in the body. */
+.modal > .modal-foot {
+  background: color-mix(in srgb, var(--muted) 5%, transparent);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
-.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  font-size: 20px; cursor: pointer; line-height: 0;
+  display: inline-grid; place-items: center;
+  padding: 7px; border-radius: var(--radius-sm);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.icon-btn:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--brand); }
+@keyframes fade { from { opacity: 0; } }
 
 .toasts {
   position: fixed;
@@ -1035,10 +1230,13 @@ body[data-vertical='library'] .stat,
   border: none; background: none; margin: 0; min-width: 0;
   padding: 9px 4px;
 }
-.landing-signin-field input:focus, .onboard-slug input:focus { outline: none; }
+/* The wrapper owns the focus ring here — the input is only part of the control,
+   so its own ring is suppressed rather than drawn inside the affixes. */
+.landing-signin-field input:focus, .onboard-slug input:focus { outline: none; box-shadow: none; background: none; }
+.landing-signin-field, .onboard-slug { transition: border-color 0.15s ease, box-shadow 0.15s ease; }
 .landing-signin-field:focus-within, .onboard-slug:focus-within {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  box-shadow: var(--ring);
 }
 .affix { padding: 0 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
 
@@ -1050,12 +1248,27 @@ body[data-vertical='library'] .stat,
   margin: 0 auto;
   padding: 0 clamp(16px, 5vw, 48px);
 }
+/* Marketing cards lift on hover — the only hover state on the page, and what
+   makes a static feature grid feel like a product rather than a brochure. */
+.landing-feature { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+.landing-feature:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--brand) 32%, var(--border));
+  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+}
 .landing-feature h3 { margin: 10px 0 6px; font-size: 16px; }
 .landing-feature p { margin: 0; font-size: 14px; }
 .landing-feature-icon {
   width: 38px; height: 38px; border-radius: 10px;
   background: var(--brand-soft); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  box-shadow: inset 0 1px 0 var(--hairline);
   display: grid; place-items: center; font-size: 19px;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.landing-feature:hover .landing-feature-icon {
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+  transform: scale(1.06);
 }
 
 .landing-steps {
@@ -1136,9 +1349,23 @@ body[data-vertical='library'] .stat,
   padding: 14px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--bg-alt);
   cursor: pointer; text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-.type-card input { margin: 0; accent-color: var(--brand); }
-.type-card .icon { font-size: 22px; }
+.type-card:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+/* width:auto and flex:none undo the global `input { width: 100% }` — as a flex
+   item a full-width radio takes a basis of the whole card and squeezes the icon
+   and copy into the remainder. */
+.type-card input { margin: 0; width: auto; flex: none; accent-color: var(--brand); }
+/* min-width:0 lets the copy wrap inside the card rather than forcing the row
+   wider than its column. */
+.type-card > div { min-width: 0; flex: 1; }
+.type-card .icon {
+  width: 36px; height: 36px; border-radius: 10px; flex: none;
+  background: var(--brand-soft); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  box-shadow: inset 0 1px 0 var(--hairline);
+  display: grid; place-items: center;
+}
 .type-card strong { display: block; font-size: 14px; }
 .type-card span.muted { font-size: 12px; }
 .type-card:has(input:checked) { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
@@ -1377,17 +1604,20 @@ body[data-vertical='library'] .stat,
   /* Table rows carry two or three of these, so this trades the 44px ideal for
      something that doesn't double the height of every row. */
   .btn.sm { padding: 9px 13px; }
-  .icon-btn { font-size: 22px; padding: 8px 10px; }
+  .btn.icon-only { padding: 10px; }
+  .icon-btn { font-size: 22px; padding: 9px; }
   .nav-link { padding: 12px; font-size: 15px; }
   th, td { padding-top: 13px; padding-bottom: 13px; }
   .list-item { padding: 13px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar, .nav-scrim, .btn, .bio-btn, .stat { transition: none; }
-  .toast { animation: none; }
+  .sidebar, .nav-scrim, .btn, .bio-btn, .stat, .stat-icon, .card, .type-card,
+  .landing-feature, .landing-feature-icon, tbody tr, input, select, textarea { transition: none; }
+  .toast, .modal, .modal-backdrop, .install-banner { animation: none; }
   .bio-pulse, .live-pulse-core { animation: none; }
-  .bio-btn:not(:disabled):hover, .stat:hover { transform: none; }
+  .bio-btn:not(:disabled):hover, .stat:hover, .btn:active,
+  .landing-feature:hover, .stat:hover .stat-icon, .landing-feature:hover .landing-feature-icon { transform: none; }
 }
 
 /* -------------------------------------------------------- Member Photo Picker */
@@ -1497,7 +1727,12 @@ body.nav-open .install-banner { display: none; }
    is up (set by js/pwa.js) rather than stacking one on top of the other. */
 body.has-install-banner .toasts { bottom: calc(96px + var(--safe-bottom)); }
 
-.install-icon { font-size: 22px; flex: none; }
+.install-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex: none;
+  background: var(--brand-soft); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  display: grid; place-items: center;
+}
 .install-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .install-copy strong { font-size: 14px; }
 .install-copy .muted { font-size: 12px; }
@@ -1542,6 +1777,65 @@ body.is-offline .topbar::after {
   background: rgba(251, 191, 36, 0.1);
   border-radius: 999px;
   padding: 3px 9px;
+}
+
+/* ---------------------------------------------------------------- light mode
+   Toggled via body[data-mode='light'] (see js/theme.js). Only surface/text
+   variables are overridden — --brand* stays whatever the active color preset
+   set, so accent colors carry across both modes. Selectors are duplicated
+   per preset combo to match or beat that preset's specificity; a plain
+   [data-mode='light'] rule would lose the cascade to e.g.
+   body[data-vertical='gym'][data-theme='crimson']. */
+body[data-mode='light'] {
+  --bg: #f7f8fa;
+  --bg-alt: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #e2e6ec;
+  --text: #101418;
+  --muted: #5b6472;
+  /* Softer and cooler than the dark-mode set: a hard black shadow on a white
+     page reads as dirt rather than depth. */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 2px 6px -2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 24px 60px -12px rgba(15, 23, 42, 0.16);
+  /* Inverted: a white top highlight is invisible on a white panel, so light
+     mode draws the micro-border as the faintest possible shade instead. */
+  --hairline: rgba(15, 23, 42, 0.05);
+  color-scheme: light;
+}
+body[data-vertical='library'][data-mode='light'],
+body[data-vertical='library'][data-theme='sapphire'][data-mode='light'],
+body[data-vertical='library'][data-theme='violet'][data-mode='light'],
+body[data-vertical='library'][data-theme='mocha'][data-mode='light'],
+body[data-vertical='gym'][data-mode='light'],
+body[data-vertical='gym'][data-theme='flame'][data-mode='light'],
+body[data-vertical='gym'][data-theme='crimson'][data-mode='light'],
+body[data-vertical='gym'][data-theme='cyber'][data-mode='light'],
+body[data-vertical='gym'][data-theme='ultramarine'][data-mode='light'] {
+  --bg: #f7f8fa;
+  --bg-alt: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #e2e6ec;
+  --text: #101418;
+  --muted: #5b6472;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 2px 6px -2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 24px 60px -12px rgba(15, 23, 42, 0.16);
+  --hairline: rgba(15, 23, 42, 0.05);
+  color-scheme: light;
+}
+
+/* No light-mode .topbar override: the glass is mixed from --bg, which the
+   blocks above have already swapped for the light surface. */
+
+body[data-mode='light'] .modal-backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+body[data-mode='light'] .login {
+  background: radial-gradient(1000px 600px at 15% -10%, var(--brand-glow), transparent 60%), var(--bg);
 }
 
 

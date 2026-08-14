@@ -1,8 +1,8 @@
-import { localtimeModifiers } from './clock.js';
+import { gymMonthDay, localtimeModifiers } from './clock.js';
 import { config } from './config.js';
 import { run, get, all } from './db.js';
 import { today, addDays } from './validate.js';
-import { getWhatsAppStatus, reminderMessage, sendWhatsAppMessage } from './whatsapp.js';
+import { birthdayMessage, getWhatsAppStatus, reminderMessage, sendWhatsAppMessage } from './whatsapp.js';
 
 /**
  * Flips memberships whose end date has passed to "expired". Cheap enough to run
@@ -162,6 +162,64 @@ export function sendAutomatedRenewalReminders({ gymName = config.gymName } = {})
     return expiring.length;
   } catch (err) {
     console.error('[whatsapp] renewal-reminder sweep failed:', err.message);
+    return 0;
+  }
+}
+
+/**
+ * Sends a birthday wish to every member of *the current gym* whose birthday
+ * (month and day, ignoring birth year) is today, in the gym's own timezone.
+ *
+ * Must be called inside a tenantStorage context, same as
+ * sendAutomatedRenewalReminders() above — the scheduler in server.js is what
+ * walks the tenants.
+ *
+ * Wishes already sent today are excluded by joining against whatsapp_logs
+ * rather than by a "last_wished_on" column, so the sweep is safe to run
+ * hourly: a member gets at most one wish a day no matter how often it fires.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.gymName] Name to render into {{gym_name}}.
+ * @returns {number} How many wishes were queued.
+ */
+export function sendAutomatedBirthdayWishes({ gymName = config.gymName } = {}) {
+  try {
+    const settings = get('SELECT auto_birthday, birthday_template FROM whatsapp_settings WHERE id = 1');
+    if (!settings?.auto_birthday || !getWhatsAppStatus().connected) return 0;
+
+    const now = today();
+    const monthDay = gymMonthDay();
+
+    const celebrating = all(
+      `SELECT id, first_name, last_name, phone
+       FROM members
+       WHERE date_of_birth IS NOT NULL
+         AND strftime('%m-%d', date_of_birth) = ?
+         AND phone IS NOT NULL AND TRIM(phone) != ''
+         AND NOT EXISTS (
+           SELECT 1 FROM whatsapp_logs l
+           WHERE l.member_id = members.id
+             AND l.type = 'birthday'
+             AND l.status = 'sent'
+             AND date(l.sent_at) = ?
+         )`,
+      [monthDay, now],
+    );
+
+    for (const member of celebrating) {
+      // Queued, not awaited: sendWhatsAppMessage paces sends internally and
+      // logs both outcomes, so there is nothing useful to block on here.
+      sendWhatsAppMessage({
+        phone: member.phone,
+        message: birthdayMessage(member, { gymName, template: settings.birthday_template }),
+        type: 'birthday',
+        memberId: member.id,
+      }).catch((err) => console.error('[whatsapp] birthday wish failed:', err.message));
+    }
+
+    return celebrating.length;
+  } catch (err) {
+    console.error('[whatsapp] birthday-wish sweep failed:', err.message);
     return 0;
   }
 }

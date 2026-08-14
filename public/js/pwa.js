@@ -7,7 +7,7 @@
  * domain instead of the gym the owner is actually looking at.
  */
 import { pathPrefix } from './api.js';
-import { h, openModal, toast } from './ui.js';
+import { h, openModal, renderIcon, toast } from './ui.js';
 import { isLibrary } from './vertical.js';
 
 const DISMISSED_KEY = 'gymbook.install.dismissed';
@@ -211,7 +211,7 @@ function maybeShowBanner() {
   const banner = h(
     'div',
     { class: 'install-banner', role: 'region', 'aria-label': 'Install GymBook' },
-    h('span', { class: 'install-icon' }, '📲'),
+    h('span', { class: 'install-icon' }, renderIcon('download', { size: 20 })),
     h(
       'div',
       { class: 'install-copy' },

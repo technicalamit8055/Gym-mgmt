@@ -43,6 +43,253 @@ export function clear(node) {
   return node;
 }
 
+/* ------------------------------------------------------------------- icons */
+
+/**
+ * The app's icon set — stroke-drawn vectors on a 24x24 grid, in the Lucide
+ * idiom: no fills, round caps, and `currentColor` throughout so an icon takes
+ * the colour of whatever it sits in (a nav link, a badge, a stat card's tinted
+ * tile) without a per-context override.
+ *
+ * Kept as geometry rather than markup so renderIcon() can build real nodes
+ * with svg() instead of parsing an HTML string on every call. A bare string is
+ * a <path d="…">; an object is any other shape — { tag, ...attributes }.
+ */
+const ICONS = {
+  /* --- navigation and domain objects --- */
+  dashboard: [
+    { tag: 'rect', x: 3, y: 3, width: 7, height: 9, rx: 1 },
+    { tag: 'rect', x: 14, y: 3, width: 7, height: 5, rx: 1 },
+    { tag: 'rect', x: 14, y: 12, width: 7, height: 9, rx: 1 },
+    { tag: 'rect', x: 3, y: 16, width: 7, height: 5, rx: 1 },
+  ],
+  checkin: [
+    'M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z',
+    'M13 5v2',
+    'M13 11v2',
+    'M13 17v2',
+  ],
+  members: [
+    'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2',
+    { tag: 'circle', cx: 9, cy: 7, r: 4 },
+    'M22 21v-2a4 4 0 0 0-3-3.87',
+    'M16 3.13a4 4 0 0 1 0 7.75',
+  ],
+  member: ['M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2', { tag: 'circle', cx: 12, cy: 7, r: 4 }],
+  billing: [{ tag: 'rect', x: 2, y: 5, width: 20, height: 14, rx: 2 }, 'M2 10h20', 'M6 15h4'],
+  plans: [
+    'M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z',
+    { tag: 'circle', cx: 7.5, cy: 7.5, r: 1.25, fill: 'currentColor', stroke: 'none' },
+  ],
+  reports: ['M3 3v18h18', 'M18 17V9', 'M13 17V5', 'M8 17v-3'],
+  whatsapp: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
+  classes: [
+    { tag: 'rect', x: 3, y: 4, width: 18, height: 18, rx: 2 },
+    'M16 2v4',
+    'M8 2v4',
+    'M3 10h18',
+    'M8 14h.01',
+    'M12 14h.01',
+    'M16 14h.01',
+  ],
+  equipment: ['m6.5 6.5 11 11', 'm21 21-1-1', 'm3 3 1 1', 'm18 22 4-4', 'm2 6 4-4', 'm3 10 7-7', 'm14 21 7-7'],
+  devices: [
+    'M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4',
+    'M5 19.5C5.5 18 6 15 6 12c0-.7.12-1.37.34-2',
+    'M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2',
+    'M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4',
+    'M14 13.12c0 2.38 0 6.38-1 8.88',
+    'M17.29 21.02c.12-.6.43-2.3.5-3.02',
+    'M8.65 22c.21-.66.45-1.32.57-2',
+  ],
+  sessions: [{ tag: 'circle', cx: 12, cy: 12, r: 9 }, 'M12 7v5l3.5 2'],
+  staff: ['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', { tag: 'circle', cx: 9, cy: 7, r: 4 }, 'm16 11 2 2 4-4'],
+  settings: [
+    'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
+    { tag: 'circle', cx: 12, cy: 12, r: 3 },
+  ],
+  seats: [
+    'M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3',
+    'M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z',
+    'M5 18v3',
+    'M19 18v3',
+  ],
+  lockers: [{ tag: 'rect', x: 3, y: 11, width: 18, height: 11, rx: 2 }, 'M7 11V7a5 5 0 0 1 10 0v4'],
+  expenses: [
+    'M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z',
+    'M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8',
+    'M12 17.5v-11',
+  ],
+  book: ['M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z', 'M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z'],
+  shield: [
+    'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z',
+  ],
+  database: [
+    { tag: 'ellipse', cx: 12, cy: 5, rx: 9, ry: 3 },
+    'M3 5v14a9 3 0 0 0 18 0V5',
+    'M3 12a9 3 0 0 0 18 0',
+  ],
+  idCard: [
+    { tag: 'rect', x: 2, y: 4, width: 20, height: 16, rx: 2 },
+    { tag: 'circle', cx: 9, cy: 10, r: 2.5 },
+    'M5.5 16.5c.8-1.4 2-2.1 3.5-2.1s2.7.7 3.5 2.1',
+    'M15.5 9.5H19',
+    'M15.5 13.5H18',
+  ],
+
+  /* --- money and metrics --- */
+  revenue: [
+    { tag: 'rect', x: 2, y: 6, width: 20, height: 12, rx: 2 },
+    { tag: 'circle', cx: 12, cy: 12, r: 2.5 },
+    'M6 12h.01',
+    'M18 12h.01',
+  ],
+  wallet: [
+    'M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5',
+    'M16 12h3',
+  ],
+  incoming: ['M12 3v14', 'm6 11 6 6 6-6', 'M5 21h14'],
+  outgoing: ['M12 21V7', 'm6 13 6-6 6 6', 'M5 3h14'],
+  trendUp: ['m22 7-8.5 8.5-5-5L2 17', 'M16 7h6v6'],
+  trendDown: ['m22 17-8.5-8.5-5 5L2 7', 'M16 17h6v-6'],
+  hourglass: [
+    'M5 2h14',
+    'M5 22h14',
+    'M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2',
+    'M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22',
+  ],
+  activity: ['M22 12h-4l-3 9L9 3l-3 9H2'],
+
+  /* --- payment methods --- */
+  smartphone: [{ tag: 'rect', x: 6, y: 2, width: 12, height: 20, rx: 2 }, 'M11 18h2'],
+  bank: ['M3 21h18', 'M6 21V11', 'M10 21V11', 'M14 21V11', 'M18 21V11', 'm2 11 10-6 10 6z'],
+  globe: [
+    { tag: 'circle', cx: 12, cy: 12, r: 9 },
+    'M3 12h18',
+    'M12 3a15 15 0 0 1 4 9 15 15 0 0 1-4 9 15 15 0 0 1-4-9 15 15 0 0 1 4-9z',
+  ],
+
+  /* --- controls --- */
+  sun: [
+    { tag: 'circle', cx: 12, cy: 12, r: 4 },
+    'M12 2v2',
+    'M12 20v2',
+    'm4.93 4.93 1.41 1.41',
+    'm17.66 17.66 1.41 1.41',
+    'M2 12h2',
+    'M20 12h2',
+    'm6.34 17.66-1.41 1.41',
+    'm19.07 4.93-1.41 1.41',
+  ],
+  moon: ['M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z'],
+  maximize: [
+    'M8 3H5a2 2 0 0 0-2 2v3',
+    'M21 8V5a2 2 0 0 0-2-2h-3',
+    'M3 16v3a2 2 0 0 0 2 2h3',
+    'M16 21h3a2 2 0 0 0 2-2v-3',
+  ],
+  minimize: [
+    'M8 3v3a2 2 0 0 1-2 2H3',
+    'M21 8h-3a2 2 0 0 1-2-2V3',
+    'M3 16h3a2 2 0 0 1 2 2v3',
+    'M16 21v-3a2 2 0 0 1 2-2h3',
+  ],
+  menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+  download: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'm7 10 5 5 5-5', 'M12 15V3'],
+  logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9'],
+  key: [
+    'M2.59 17.41A2 2 0 0 0 2 18.83V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.17a2 2 0 0 0 1.42-.59l.81-.81a6.5 6.5 0 1 0-4-4z',
+    { tag: 'circle', cx: 16.5, cy: 7.5, r: 1.25, fill: 'currentColor', stroke: 'none' },
+  ],
+  plus: ['M5 12h14', 'M12 5v14'],
+  search: [{ tag: 'circle', cx: 11, cy: 11, r: 8 }, 'm21 21-4.3-4.3'],
+  refresh: ['M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5'],
+  check: ['M20 6 9 17l-5-5'],
+  close: ['M18 6 6 18', 'm6 6 12 12'],
+  print: [
+    'M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2',
+    'M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6',
+    { tag: 'rect', x: 6, y: 14, width: 12, height: 8, rx: 1 },
+  ],
+  cake: [
+    'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8',
+    'M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1',
+    'M2 21h20',
+    'M7 8v3',
+    'M12 8v3',
+    'M17 8v3',
+    'M7 4h.01',
+    'M12 4h.01',
+    'M17 4h.01',
+  ],
+  gift: [
+    'M20 12v10H4V12',
+    { tag: 'rect', x: 2, y: 7, width: 20, height: 5, rx: 1 },
+    'M12 22V7',
+    'M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z',
+    'M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z',
+  ],
+};
+
+/** Same drawing under a second name, where a view reads better naming the
+ * thing than the picture (a clock vs. a shift, a card vs. billing). */
+Object.assign(ICONS, {
+  clock: ICONS.sessions,
+  user: ICONS.member,
+  users: ICONS.members,
+  card: ICONS.billing,
+  cash: ICONS.revenue,
+  dumbbell: ICONS.equipment,
+  lock: ICONS.lockers,
+  receipt: ICONS.expenses,
+  ticket: ICONS.checkin,
+  calendar: ICONS.classes,
+  fingerprint: ICONS.devices,
+});
+
+/**
+ * An <svg> node for `name`, or null if there is no such icon — so a caller
+ * holding something that may not be an icon name can fall back to it (see
+ * iconOrText).
+ *
+ * `title` turns the icon into a labelled image for assistive tech; without one
+ * it is decoration and stays hidden, which is right wherever a visible label
+ * sits beside it.
+ */
+export function renderIcon(name, { size = 18, class: className, stroke = 1.75, title } = {}) {
+  const parts = ICONS[name];
+  if (!parts) return null;
+  return svg(
+    'svg',
+    {
+      class: `svg-icon${className ? ` ${className}` : ''}`,
+      viewBox: '0 0 24 24',
+      width: size,
+      height: size,
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': stroke,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      role: title ? 'img' : null,
+      'aria-hidden': title ? null : 'true',
+      focusable: 'false',
+    },
+    title ? svg('title', {}, title) : null,
+    ...parts.map((part) => {
+      if (typeof part === 'string') return svg('path', { d: part });
+      const { tag, ...attrs } = part;
+      return svg(tag, attrs);
+    }),
+  );
+}
+
+/** An icon name, a ready-made node, or plain text — whichever it is, something
+ * appendable comes back. Lets a builder like stat() take `icon: 'members'`
+ * without every caller having to import renderIcon. */
+export const iconOrText = (value, options) =>
+  typeof value === 'string' ? renderIcon(value, options) ?? value : value;
+
 /* ------------------------------------------------------------- formatting */
 
 let currency = 'INR';
@@ -141,8 +388,11 @@ export const SOURCE_TONE = {
 export const sourceBadge = (source) =>
   h('span', { class: `badge ${SOURCE_TONE[source] || 'grey'}` }, source);
 
+/** `dot` prefixes the pill with a filled status dot in the same tone — the
+ * lifecycle badges are scanned down a column, and the dot is what makes a
+ * change of state visible before the word is read. */
 export const statusBadge = (status) =>
-  h('span', { class: `badge ${STATUS_TONE[status] || 'grey'}` }, String(status || '').replace('_', ' '));
+  h('span', { class: `badge dot ${STATUS_TONE[status] || 'grey'}` }, String(status || '').replace('_', ' '));
 
 /**
  * A toolbar control with its caption attached — "From [date]".
@@ -218,7 +468,7 @@ export function openModal({ title, body, footer, wide = false, onClose }) {
         { class: 'modal-head' },
         h('h2', {}, title),
         h('div', { class: 'spacer' }),
-        h('button', { class: 'icon-btn', onclick: closeModal, title: 'Close' }, '×'),
+        h('button', { class: 'icon-btn', onclick: closeModal, title: 'Close', 'aria-label': 'Close' }, renderIcon('close', { size: 18 })),
       ),
       h('div', { class: 'modal-body' }, body),
       footer ? h('div', { class: 'modal-foot' }, footer) : null,
@@ -427,6 +677,10 @@ export function table(columns, rows, { onRowClick, empty = 'Nothing here yet' } 
  * `trend` — { positive: boolean|null, text: string } — renders a colour-coded
  * pill instead of the plain hint line. `pulse` adds a small live indicator next
  * to the icon, for "this number is changing right now" cards (check-ins).
+ *
+ * `icon` takes an icon name ('members', 'revenue', …) and renders it in a
+ * tinted tile; anything renderIcon() doesn't know is used as-is, so a node or a
+ * bare glyph still works.
  */
 export const stat = (label, value, hint, { accent = false, icon = null, trend = null, pulse = false, onClick = null } = {}) =>
   h(
@@ -440,7 +694,7 @@ export const stat = (label, value, hint, { accent = false, icon = null, trend = 
       ? h(
           'div',
           { class: 'stat-top' },
-          icon ? h('div', { class: 'stat-icon' }, icon) : null,
+          icon ? h('div', { class: 'stat-icon' }, iconOrText(icon, { size: 17 })) : null,
           pulse ? h('span', { class: 'live-pulse' }, h('span', { class: 'live-pulse-core' })) : null,
         )
       : null,

@@ -20,6 +20,7 @@ import {
   today,
 } from '../ui.js';
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
+import { openMemberSeatAssignForm } from './seats.js';
 import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../qrcard.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
@@ -363,11 +364,30 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           ? `${member.session_name} (${member.session_start}–${member.session_end})`
           : h('span', { class: 'muted' }, `No assigned ${t('shift')}`),
       ),
+      isLibrary()
+        ? h('dt', {}, 'Seat')
+        : null,
+      isLibrary()
+        ? h(
+            'dd',
+            {},
+            member.seat_codes
+              ? `${member.seat_codes} (${member.shift_names}) · until ${date(member.seat_end_date)}`
+              : h('span', { class: 'muted' }, 'No seat assigned'),
+          )
+        : null,
     ),
     h(
       'div',
       { class: 'row wrap', style: 'margin-top:16px;gap:8px' },
       h('button', { class: 'btn sm', onclick: () => openMemberForm({ member, onSaved: reload }) }, 'Edit details'),
+      isLibrary()
+        ? h(
+            'button',
+            { class: 'btn sm', onclick: () => openMemberSeatAssignForm({ member, onSaved: reload }) },
+            '🪑 Assign seat',
+          )
+        : null,
       h(
         'button',
         {

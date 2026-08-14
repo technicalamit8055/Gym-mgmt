@@ -1,7 +1,7 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
 import { buildForm, date, h, isFullscreen, relativeDays, setCurrency, toast, toggleFullscreen } from '../ui.js';
 import { cropAndResizeImage, makeAppIcon } from '../photo.js';
-import { getAppTheme, isLibrary, setAppTheme, tl } from '../vertical.js';
+import { getAppMode, getAppTheme, isLibrary, setAppMode, setAppTheme, tl } from '../vertical.js';
 
 /**
  * The gym's own account page: identity, regional settings and subscription.
@@ -300,6 +300,40 @@ export async function renderSettings({ reload }) {
       h(
         'div',
         { class: 'card' },
+        h('div', { class: 'card-head' }, h('h3', {}, 'Display Mode')),
+        h('p', { class: 'muted', style: 'margin:0 0 14px' }, 'Switch between a dark and light interface.'),
+        h(
+          'div',
+          { class: 'row', style: 'gap:10px' },
+          h(
+            'button',
+            {
+              class: `btn ${getAppMode() !== 'light' ? 'primary' : 'ghost'}`,
+              type: 'button',
+              onclick: async () => {
+                setAppMode('dark');
+                await reload();
+              },
+            },
+            '🌙 Dark',
+          ),
+          h(
+            'button',
+            {
+              class: `btn ${getAppMode() === 'light' ? 'primary' : 'ghost'}`,
+              type: 'button',
+              onclick: async () => {
+                setAppMode('light');
+                await reload();
+              },
+            },
+            '☀️ Light',
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'card' },
         h('div', { class: 'card-head' }, h('h3', {}, 'Aesthetic Theme Palette')),
         h('p', { class: 'muted', style: 'margin:0 0 14px' }, `Pick a custom color palette for your ${isLibrary() ? 'library' : 'gym'} interface.`),
         h(
@@ -307,25 +341,31 @@ export async function renderSettings({ reload }) {
           { style: 'display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px' },
           (isLibrary()
             ? [
-                { id: 'emerald', name: 'Emerald Lounge', color: '#10b981', bg: '#081017' },
-                { id: 'sapphire', name: 'Sapphire Night', color: '#38bdf8', bg: '#070c18' },
-                { id: 'violet', name: 'Nordic Violet', color: '#a78bfa', bg: '#0d0a18' },
-                { id: 'mocha', name: 'Mocha Academic', color: '#f59e0b', bg: '#140d0a' },
+                { id: 'emerald', name: 'Emerald Lounge', color: '#10b981' },
+                { id: 'sapphire', name: 'Sapphire Night', color: '#38bdf8' },
+                { id: 'violet', name: 'Nordic Violet', color: '#a78bfa' },
+                { id: 'mocha', name: 'Mocha Academic', color: '#f59e0b' },
               ]
             : [
-                { id: 'flame', name: 'Flame Orange', color: '#f97316', bg: '#0d1117' },
-                { id: 'crimson', name: 'Crimson Power', color: '#ef4444', bg: '#120909' },
-                { id: 'cyber', name: 'Cyber Volt Lime', color: '#84cc16', bg: '#0a1207' },
-                { id: 'ultramarine', name: 'Ultramarine Blue', color: '#3b82f6', bg: '#090e1a' },
+                { id: 'flame', name: 'Flame Orange', color: '#f97316' },
+                { id: 'crimson', name: 'Crimson Power', color: '#ef4444' },
+                { id: 'cyber', name: 'Cyber Volt Lime', color: '#84cc16' },
+                { id: 'ultramarine', name: 'Ultramarine Blue', color: '#3b82f6' },
               ]
           ).map((t) => {
             const active = (getAppTheme() || (isLibrary() ? 'emerald' : 'flame')) === t.id;
+            // Tinted from the current surface rather than a hardcoded dark hex,
+            // so the swatch preview reads correctly in both light and dark mode
+            // instead of always rendering as a near-black box. The active swatch
+            // is left to .btn.primary's own background/text-color handling.
             return h(
               'button',
               {
                 class: `btn ${active ? 'primary' : 'ghost'}`,
                 type: 'button',
-                style: `justify-content:flex-start;padding:10px;border-color:${active ? t.color : 'var(--border)'};background:${t.bg}`,
+                style: `justify-content:flex-start;padding:10px;border-color:${active ? t.color : 'var(--border)'}${
+                  active ? '' : `;background:color-mix(in srgb, ${t.color} 12%, var(--surface-2))`
+                }`,
                 onclick: async () => {
                   setAppTheme(t.id);
                   toast(`Switched to ${t.name} theme`);

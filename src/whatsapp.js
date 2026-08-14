@@ -420,6 +420,16 @@ export function freezeMessage(sub, { gymName, template }) {
   });
 }
 
+/** Builds the birthday-wish message, shared by the dashboard button and any
+ * future auto-send. */
+export function birthdayMessage(member, { gymName, template }) {
+  return renderTemplate(template, {
+    first_name: member.first_name,
+    last_name: member.last_name,
+    gym_name: gymName,
+  });
+}
+
 /** Closes every socket — for graceful shutdown. */
 export function closeAllWhatsAppSessions() {
   for (const session of sessions.values()) teardown(session);

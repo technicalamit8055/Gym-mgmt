@@ -5,7 +5,7 @@ import { ensureAdminAccount } from './bootstrap.js';
 import { assertProductionReady, config, DEFAULT_TENANT_SLUG } from './config.js';
 import { closeDb, tenantStorage } from './db.js';
 import { closeRegistryDb, listTenants, tenantDbPath } from './tenants.js';
-import { sendAutomatedRenewalReminders } from './maintenance.js';
+import { sendAutomatedBirthdayWishes, sendAutomatedRenewalReminders } from './maintenance.js';
 import { closeAllWhatsAppSessions, connectWhatsApp, hasStoredCredentials } from './whatsapp.js';
 
 assertProductionReady();
@@ -52,13 +52,13 @@ function everyTenant() {
 }
 
 /**
- * Reminders are per-gym: the settings, the memberships and the delivery log all
- * live in that gym's own database, so each sweep has to run inside that gym's
- * tenant context. Hourly rather than daily because the host suspends idle
- * machines — a once-a-day timer would simply never fire. Re-running is safe;
- * the sweep skips anyone already reminded today.
+ * Reminders and birthday wishes are per-gym: the settings, the members and the
+ * delivery log all live in that gym's own database, so each sweep has to run
+ * inside that gym's tenant context. Hourly rather than daily because the host
+ * suspends idle machines — a once-a-day timer would simply never fire.
+ * Re-running is safe; each sweep skips anyone already messaged today.
  */
-function sweepRenewalReminders() {
+function sweepAutomatedMessages() {
   for (const tenant of everyTenant()) {
     try {
       tenantStorage.run(
@@ -68,10 +68,13 @@ function sweepRenewalReminders() {
           timezone: tenant.timezone,
           businessType: tenant.businessType,
         },
-        () => sendAutomatedRenewalReminders({ gymName: tenant.gymName }),
+        () => {
+          sendAutomatedRenewalReminders({ gymName: tenant.gymName });
+          sendAutomatedBirthdayWishes({ gymName: tenant.gymName });
+        },
       );
     } catch (err) {
-      console.error(`[whatsapp:${tenant.slug}] reminder sweep failed:`, err.message);
+      console.error(`[whatsapp:${tenant.slug}] message sweep failed:`, err.message);
     }
   }
 }
@@ -97,9 +100,9 @@ const server = app.listen(config.port, host, () => {
 });
 
 // Delayed so the first sweep does not compete with startup, and so a crash-loop
-// cannot fire reminders on every restart.
-const firstSweep = setTimeout(sweepRenewalReminders, 60_000);
-const sweepTimer = setInterval(sweepRenewalReminders, REMINDER_INTERVAL_MS);
+// cannot fire reminders/wishes on every restart.
+const firstSweep = setTimeout(sweepAutomatedMessages, 60_000);
+const sweepTimer = setInterval(sweepAutomatedMessages, REMINDER_INTERVAL_MS);
 
 const stopBackups = startBackupSchedule();
 

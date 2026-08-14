@@ -6,6 +6,7 @@ import { badRequest, notFound } from '../errors.js';
 import { parse, toInt } from '../validate.js';
 import { generateReceiptPdf } from '../receiptPdf.js';
 import {
+  birthdayMessage,
   connectWhatsApp,
   getWhatsAppStatus,
   logoutWhatsApp,
@@ -35,6 +36,7 @@ function settingsFor() {
       auto_reminder: 1,
       reminder_days_before: 3,
       auto_freeze: 1,
+      auto_birthday: 1,
       receipt_template:
         'Hi {{first_name}}, thank you for your payment of {{amount}} for {{plan_name}}. Your membership is valid until {{end_date}}. - {{gym_name}}',
       reminder_template:
@@ -42,6 +44,8 @@ function settingsFor() {
       welcome_template: 'Welcome to {{gym_name}}, {{first_name}}! We are thrilled to have you on board.',
       freeze_template:
         'Hi {{first_name}}, your membership ({{plan_name}}) has been frozen. It will resume once you or the gym reactivates it. - {{gym_name}}',
+      birthday_template:
+        'Happy birthday, {{first_name}}! 🎉 Wishing you a great year ahead from all of us at {{gym_name}}.',
     }
   );
 }
@@ -86,17 +90,19 @@ whatsappRoutes.put('/settings', (req, res) => {
     auto_reminder: { type: 'boolean', default: 0 },
     reminder_days_before: { type: 'int', default: 3, min: 0, max: 60 },
     auto_freeze: { type: 'boolean', default: 0 },
+    auto_birthday: { type: 'boolean', default: 0 },
     receipt_template: { type: 'string', max: 1000, required: true },
     reminder_template: { type: 'string', max: 1000, required: true },
     welcome_template: { type: 'string', max: 1000, required: true },
     freeze_template: { type: 'string', max: 1000, required: true },
+    birthday_template: { type: 'string', max: 1000, required: true },
   });
 
   run(
     `INSERT INTO whatsapp_settings
        (id, auto_receipt, send_pdf_receipt, auto_reminder, reminder_days_before, auto_freeze,
-        receipt_template, reminder_template, welcome_template, freeze_template, updated_at)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        receipt_template, reminder_template, welcome_template, freeze_template, auto_birthday, birthday_template, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET
        auto_receipt         = excluded.auto_receipt,
        send_pdf_receipt     = excluded.send_pdf_receipt,
@@ -107,6 +113,8 @@ whatsappRoutes.put('/settings', (req, res) => {
        reminder_template    = excluded.reminder_template,
        welcome_template     = excluded.welcome_template,
        freeze_template      = excluded.freeze_template,
+       auto_birthday        = excluded.auto_birthday,
+       birthday_template    = excluded.birthday_template,
        updated_at           = excluded.updated_at`,
     [
       body.auto_receipt,
@@ -118,6 +126,8 @@ whatsappRoutes.put('/settings', (req, res) => {
       body.reminder_template,
       body.welcome_template,
       body.freeze_template,
+      body.auto_birthday,
+      body.birthday_template,
     ],
   );
 
@@ -245,6 +255,35 @@ whatsappRoutes.post('/send-reminder', async (req, res, next) => {
       }),
       type: 'reminder',
       memberId: sub.member_id,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/whatsapp/send-birthday */
+whatsappRoutes.post('/send-birthday', async (req, res, next) => {
+  try {
+    const memberId = toInt(req.body?.member_id);
+    if (!memberId) throw badRequest('member_id is required');
+
+    const member = get(
+      'SELECT id, first_name, last_name, phone FROM members WHERE id = ?',
+      [memberId],
+    );
+    if (!member) throw notFound('Member not found');
+    if (!member.phone) throw badRequest('That member has no phone number on file');
+
+    await sendWhatsAppMessage({
+      phone: member.phone,
+      message: birthdayMessage(member, {
+        gymName: gymNameFor(req),
+        template: settingsFor().birthday_template,
+      }),
+      type: 'birthday',
+      memberId: member.id,
     });
 
     res.json({ ok: true });

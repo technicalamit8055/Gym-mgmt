@@ -26,6 +26,11 @@
     <link rel="stylesheet" href="/css/app.css" />
   </head>
   <body>
+    <script>
+      // Set before first paint so the boot sequence (which awaits network
+      // calls before setVertical() runs) never flashes the wrong mode.
+      document.body.dataset.mode = localStorage.getItem('app_mode') === 'light' ? 'light' : 'dark';
+    </script>
     <div id="app" class="app-loading">Loading…</div>
     <div id="toasts" class="toasts"></div>
     <div id="modal-root"></div>

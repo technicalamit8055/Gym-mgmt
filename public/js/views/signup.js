@@ -1,5 +1,5 @@
 import { ApiError, api, gymPathUrl, landingBrand, saveSessionFor } from '../api.js';
-import { h, toast } from '../ui.js';
+import { h, renderIcon, toast } from '../ui.js';
 
 /**
  * Gym onboarding: name the gym, claim an address, create the owner account.
@@ -92,7 +92,7 @@ function renderDone({ result }) {
     h(
       'div',
       { class: 'onboard-card onboard-done', 'data-brand': isLibrary ? 'library' : undefined },
-      h('div', { class: 'onboard-tick' }, '✓'),
+      h('div', { class: 'onboard-tick' }, renderIcon('check', { size: 26, stroke: 2.5 })),
       h('h1', {}, isLibrary ? 'Your library is ready' : 'Your gym is ready'),
       h('p', { class: 'sub' }, `${result.gym_name} is set up and your ${result.trial_label} has started.`),
 
@@ -180,14 +180,14 @@ export function renderSignup({ context, navigate, rerender }) {
       'label',
       { class: 'type-card' },
       typeGym,
-      h('span', { class: 'icon' }, '🏋️'),
+      h('span', { class: 'icon' }, renderIcon('dumbbell', { size: 20 })),
       h('div', {}, h('strong', {}, 'Gym'), h('span', { class: 'muted' }, 'Memberships, check-ins, classes')),
     ),
     h(
       'label',
       { class: 'type-card' },
       typeLibrary,
-      h('span', { class: 'icon' }, '📚'),
+      h('span', { class: 'icon' }, renderIcon('book', { size: 20 })),
       h('div', {}, h('strong', {}, 'Library / study hall'), h('span', { class: 'muted' }, 'Seats, shifts, passes')),
     ),
   );
