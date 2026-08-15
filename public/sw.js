@@ -15,7 +15,7 @@
  * Bump VERSION whenever a shell file changes in a way that must not wait for
  * revalidation; installs then re-run and the old caches are dropped.
  */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `gymbook-shell-${VERSION}`;
 const RUNTIME_CACHE = `gymbook-runtime-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, RUNTIME_CACHE]);

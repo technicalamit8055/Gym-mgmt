@@ -467,7 +467,10 @@ export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchan
   });
 
   setIso(isoValue, { silent: true });
-  if (name) wrap.dataset.name = name;
+  if (name) {
+    wrap.dataset.name = name;
+    wrap.setAttribute('name', name);
+  }
 
   Object.defineProperty(wrap, 'value', {
     get: () => isoValue,

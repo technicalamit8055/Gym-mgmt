@@ -110,6 +110,21 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
     [member.id, sessionId],
   );
 
+  // Signup often leaves the shift undecided (session_id NULL) and a seat gets
+  // assigned to that same membership minutes later once a shift is picked.
+  // That is one membership, not two, so it must not sail past the check above
+  // as a different "slot" — but two *different* real shifts (Morning then
+  // Evening) are genuinely separate seats and must still both be allowed.
+  // Hence this only fires when a shift is being set for the first time, never
+  // shift-to-shift or shift-to-none.
+  const noShiftYet =
+    sessionId != null
+      ? get(
+          "SELECT * FROM subscriptions WHERE member_id = ? AND status = 'active' AND session_id IS NULL ORDER BY end_date DESC LIMIT 1",
+          [member.id],
+        )
+      : null;
+
   // A renewal picks up the day after the current one (in this shift) ends, so
   // members never lose days they already paid for.
   const startDate = body.start_date || (current && current.end_date >= today() ? addDays(current.end_date, 1) : today());
@@ -118,6 +133,11 @@ subscriptionRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
       sessionId
         ? `This student already has a pass for this shift until ${current.end_date}`
         : `This member already has an active membership until ${current.end_date}`,
+    );
+  }
+  if (noShiftYet && startDate <= noShiftYet.end_date) {
+    throw conflict(
+      `This member already has an active membership until ${noShiftYet.end_date} — assign the seat to it instead of selling a new one`,
     );
   }
 

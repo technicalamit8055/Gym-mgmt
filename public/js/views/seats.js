@@ -266,12 +266,22 @@ async function openSeatAssignForm({ seat, sessionId, shiftName, onSaved }) {
  * seat screen uses — no separate "vacant seats for shift X" endpoint needed.
  */
 export async function openMemberSeatAssignForm({ member, onSaved }) {
-  const [map, { items: allPlans }] = await Promise.all([api.seatMap({}), api.plans({ active: 'true' })]);
+  const [map, { items: allPlans }, { items: activeSubs }] = await Promise.all([
+    api.seatMap({}),
+    api.plans({ active: 'true' }),
+    api.subscriptions({ member_id: member.id, status: 'active' }),
+  ]);
 
   if (!map.shifts.length) {
     toast('Set up shifts before assigning a seat', 'error');
     return;
   }
+
+  // Already has a live membership: this member needs a desk, not a second
+  // sale. Selling a shift-agnostic plan again here would just double the
+  // membership (same plan, two active rows) — so send the existing
+  // subscription along and skip the "Pass" picker entirely.
+  const existingSub = activeSubs.find((s) => !s.session_id) || activeSubs[0] || null;
 
   const occupiedKeys = new Set(map.occupancy.map((o) => `${o.seat_id}:${o.session_id}`));
   const availableSeats = map.seats.filter((s) => s.status === 'available');
@@ -301,14 +311,19 @@ export async function openMemberSeatAssignForm({ member, onSaved }) {
       label: 'Pass',
       type: 'select',
       full: true,
-      options: [{ value: '', label: 'No pass — just hold the seat' }],
+      hint: existingSub
+        ? `Already has an active membership until ${existingSub.end_date} — this seat will be attached to it.`
+        : undefined,
+      options: existingSub
+        ? [{ value: '', label: 'Uses existing membership' }]
+        : [{ value: '', label: 'No pass — just hold the seat' }],
     },
     { name: 'start_date', label: 'Starts on', type: 'date', value: today() },
     {
       name: 'end_date',
       label: 'Holds until',
       type: 'date',
-      value: addDays(today(), 30),
+      value: existingSub ? existingSub.end_date : addDays(today(), 30),
       hint: 'Set automatically once a pass is picked — edit freely for a manual hold with no pass.',
     },
     { name: 'discount', label: 'Discount', type: 'number', value: 0, min: 0, step: '0.01' },
@@ -353,6 +368,7 @@ export async function openMemberSeatAssignForm({ member, onSaved }) {
         await api.allocateSeat(seatId, {
           session_id: sessionId,
           member_id: member.id,
+          subscription_id: existingSub?.id ?? undefined,
           start_date: values.start_date || today(),
           end_date: values.end_date,
           note: values.note || undefined,
@@ -372,8 +388,14 @@ export async function openMemberSeatAssignForm({ member, onSaved }) {
   const amountInput = form.querySelector('[name=payment_amount]');
   const discountInput = form.querySelector('[name=discount]');
 
+  // Already has a live membership — selling another plan here would just
+  // create a second active subscription for the same member, so the "Pass"
+  // picker is locked to "uses existing membership" instead of offered.
+  if (existingSub) planSelect.disabled = true;
+
   let plans = [];
   const syncPlans = () => {
+    if (existingSub) return;
     const sessionId = Number(sessionSelect.value);
     plans = allPlans.filter((p) => !p.session_id || p.session_id === sessionId);
     clear(planSelect);

@@ -258,6 +258,34 @@ describe('selling a pass locks in the shift', () => {
     assert.equal(second.status, 409);
   });
 
+  it('registering with no shift, then filling in a shift for the same plan, renews rather than double-selling', async () => {
+    // The reported bug's exact shape: signup picks a plan with no shift
+    // decided yet (session_id null), then staff assign a seat/shift for that
+    // same student minutes later. That must renew the one membership, not
+    // leave two active subscriptions for one student.
+    const plans = await call('GET', '/api/plans');
+    const anyShift = plans.body.items.find((p) => p.name === 'Any Shift Monthly');
+    const student = await createStudent('ShiftFilledInLater');
+
+    const signup = await call('POST', '/api/subscriptions', {
+      member_id: student,
+      plan_id: anyShift.id,
+    });
+    assert.equal(signup.status, 201);
+    assert.equal(signup.body.session_id, null);
+
+    const seated = await call('POST', '/api/subscriptions', {
+      member_id: student,
+      plan_id: anyShift.id,
+      session_id: morning.id,
+      start_date: signup.body.start_date,
+    });
+    assert.equal(seated.status, 409, 'must reject a second sale instead of silently stacking a second active membership');
+
+    const active = await call('GET', `/api/subscriptions?member_id=${student}&status=active`);
+    assert.equal(active.body.items.length, 1);
+  });
+
   it('assigns and renews a seat through a sale, extending rather than duplicating the allocation', async () => {
     const plans = await call('GET', '/api/plans');
     const anyShift = plans.body.items.find((p) => p.name === 'Any Shift Monthly');
