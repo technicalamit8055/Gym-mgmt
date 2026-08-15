@@ -4,6 +4,7 @@ import { all, get, run } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import {
   allocateSeat,
+  liveSeatMap,
   releaseSeat,
   seatHolder,
   seatMap,
@@ -54,6 +55,10 @@ const ALLOCATE_FIELDS = {
   note: { type: 'string', max: 300 },
 };
 
+/** Seat-hold/ID-proof/seat-change rules stay seats-module-only — the shift-
+ * enforcement toggle moved to /api/attendance/settings, which every vertical
+ * (gym batches included) can reach. See src/routes/attendance.js. */
+
 /* --------------------------------------------------------------- seats --- */
 
 seatRoutes.get('/', (req, res) => {
@@ -85,6 +90,12 @@ seatRoutes.get('/map', (req, res) => {
 
 seatRoutes.get('/vacancy', (req, res) => {
   res.json(seatVacancy({ on: req.query.on ? String(req.query.on) : undefined }));
+});
+
+/** Today's map with attendance layered on — always "now", never a date, since
+ * "who is sitting there" is only a question about the present. */
+seatRoutes.get('/live', (req, res) => {
+  res.json(liveSeatMap());
 });
 
 seatRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {

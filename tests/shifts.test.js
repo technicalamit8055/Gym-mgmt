@@ -336,6 +336,97 @@ describe('a gym tenant still guards against duplicate memberships', () => {
   });
 });
 
+describe('a gym tenant can also enforce its batch/session window', () => {
+  let gymBase;
+  let gymToken;
+
+  before(async () => {
+    const signup = await call(
+      'POST',
+      '/api/platform/signup',
+      {
+        slug: 'batch-gym',
+        gym_name: 'Batch Gym',
+        admin_name: 'Sana',
+        admin_email: 'owner@batch-gym.test',
+        admin_password: 'strongpass123',
+        currency: 'INR',
+      },
+      { useToken: null },
+    );
+    assert.equal(signup.status, 201);
+    gymToken = signup.body.token;
+    gymBase = base.replace('/g/focus-hall', '/g/batch-gym');
+  });
+
+  after(async () => {
+    await gymCall('PUT', '/api/attendance/settings', { enforce_shift_window: false });
+  });
+
+  const gymCall = async (method, urlPath, body) => {
+    const res = await fetch(`${gymBase}${urlPath}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gymToken}` },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, body: text ? JSON.parse(text) : null };
+  };
+
+  // A window that cannot possibly contain "now", whatever time the suite runs.
+  const nowTime = new Date().toISOString().slice(11, 16);
+  const farBatchStart = nowTime < '02:00' ? '12:00' : '01:00';
+  const farBatchEnd = nowTime < '02:00' ? '12:05' : '01:05';
+
+  it('does not gate check-in on a batch by default, even with a batch assigned', async () => {
+    const batch = await gymCall('POST', '/api/sessions', { name: 'Early Batch', start_time: farBatchStart, end_time: farBatchEnd });
+    assert.equal(batch.status, 201);
+
+    const member = await gymCall('POST', '/api/members', { first_name: 'DefaultOff' });
+    assert.equal((await gymCall('PATCH', `/api/members/${member.body.id}`, { session_id: batch.body.id })).status, 200);
+
+    const plans = await gymCall('GET', '/api/plans');
+    const sub = await gymCall('POST', '/api/subscriptions', { member_id: member.body.id, plan_id: plans.body.items[0].id });
+    assert.equal(sub.status, 201);
+
+    const checkedIn = await gymCall('POST', '/api/attendance/check-in', { member_id: member.body.id });
+    assert.equal(checkedIn.status, 201);
+    assert.equal(checkedIn.body.action, 'checked_in');
+  });
+
+  it('rejects a check-in outside the assigned batch once enforcement is turned on', async () => {
+    assert.equal((await gymCall('PUT', '/api/attendance/settings', { enforce_shift_window: true })).status, 200);
+
+    const batch = await gymCall('POST', '/api/sessions', { name: 'Early Batch Enforced', start_time: farBatchStart, end_time: farBatchEnd });
+    const member = await gymCall('POST', '/api/members', { first_name: 'OutOfBatch' });
+    assert.equal((await gymCall('PATCH', `/api/members/${member.body.id}`, { session_id: batch.body.id })).status, 200);
+
+    const plans = await gymCall('GET', '/api/plans');
+    const sub = await gymCall('POST', '/api/subscriptions', { member_id: member.body.id, plan_id: plans.body.items[0].id });
+    assert.equal(sub.status, 201);
+
+    const res = await gymCall('POST', '/api/attendance/check-in', { member_id: member.body.id });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /batch|shift/i);
+
+    await gymCall('PUT', '/api/attendance/settings', { enforce_shift_window: false });
+  });
+
+  it('does not gate a member with no batch assigned, even with enforcement on', async () => {
+    assert.equal((await gymCall('PUT', '/api/attendance/settings', { enforce_shift_window: true })).status, 200);
+
+    const member = await gymCall('POST', '/api/members', { first_name: 'NoBatch' });
+    const plans = await gymCall('GET', '/api/plans');
+    const sub = await gymCall('POST', '/api/subscriptions', { member_id: member.body.id, plan_id: plans.body.items[0].id });
+    assert.equal(sub.status, 201);
+
+    const res = await gymCall('POST', '/api/attendance/check-in', { member_id: member.body.id });
+    assert.equal(res.status, 201, 'a member with no assigned batch must never be gated by shift enforcement');
+
+    await gymCall('PUT', '/api/attendance/settings', { enforce_shift_window: false });
+  });
+});
+
 /* ------------------------------------------------ overnight auto-checkout */
 
 describe('a night shift is not auto-closed the instant it opens', () => {
@@ -361,5 +452,108 @@ describe('a night shift is not auto-closed the instant it opens', () => {
     // (which runs lazily on this very read) would have closed it on the spot.
     const open = await call('GET', `/api/attendance?member_id=${student.body.id}&open=true`);
     assert.equal(open.body.items.length, 1, 'a night-shift visit must not auto-close before its shift has actually ended');
+  });
+});
+
+describe('a library sitting is never auto-checked-out, unlike a gym batch', () => {
+  it('leaves a shift-locked sitting open long after the shift has ended', async () => {
+    // A shift that ended a minute ago, wall-clock — the exact shape that
+    // auto-closes a gym visit on the very next read (see api.test.js's
+    // "auto-checks a member out once their assigned session has ended").
+    // A seats-enabled tenant must never do the same: study-hall time is paid
+    // for, not a shift the student is expected to leave by.
+    const now = new Date();
+    const endMinutes = Math.max(now.getHours() * 60 + now.getMinutes() - 1, 1);
+    const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+
+    const shift = await call('POST', '/api/sessions', { name: 'Already Over (Library)', start_time: '00:00', end_time: endTime });
+    assert.equal(shift.status, 201);
+
+    const student = await call('POST', '/api/members', { first_name: 'StillSeated' });
+    const plans = await call('GET', '/api/plans');
+    const anyShift = plans.body.items.find((p) => p.name === 'Any Shift Monthly') ?? plans.body.items[0];
+    const sub = await call('POST', '/api/subscriptions', { member_id: student.body.id, plan_id: anyShift.id, session_id: shift.body.id });
+    assert.equal(sub.status, 201);
+
+    const checkedIn = await call('POST', '/api/attendance/check-in', { member_id: student.body.id });
+    assert.equal(checkedIn.status, 201);
+    assert.equal(checkedIn.body.action, 'checked_in');
+
+    // The sweep runs lazily on every read, same as the gym case — if it ran
+    // here too, this would already show zero open visits.
+    const open = await call('GET', `/api/attendance?member_id=${student.body.id}&open=true`);
+    assert.equal(open.body.items.length, 1, 'a library sitting must stay open past its shift end — only the student checking out should close it');
+  });
+});
+
+describe('checking in outside an assigned shift window', () => {
+  // A window that cannot possibly contain "now", whatever time the suite runs.
+  const nowTime = new Date().toISOString().slice(11, 16);
+  const farShiftStart = nowTime < '02:00' ? '12:00' : '01:00';
+  const farShiftEnd = nowTime < '02:00' ? '12:05' : '01:05';
+
+  after(async () => {
+    // Leave enforcement off for every other describe block in this file.
+    await call('PUT', '/api/attendance/settings', { enforce_shift_window: false });
+  });
+
+  async function createStudentWithShiftPass(firstName, sessionId) {
+    const student = await call('POST', '/api/members', { first_name: firstName });
+    assert.equal(student.status, 201);
+    const plans = await call('GET', '/api/plans');
+    const anyPlan = plans.body.items.find((p) => p.name === 'Any Shift Monthly') ?? plans.body.items[0];
+    // The library vertical locks a shift through the subscription's own
+    // session_id (resolveShiftSubscription in src/checkin.js), not the
+    // member's default batch — see "selling a pass locks in the shift" above.
+    const sub = await call('POST', '/api/subscriptions', {
+      member_id: student.body.id,
+      plan_id: anyPlan.id,
+      session_id: sessionId,
+    });
+    assert.equal(sub.status, 201);
+    return student.body.id;
+  }
+
+  it('is off by default — a shift-locked pass still checks in any time', async () => {
+    const shift = await call('POST', '/api/sessions', { name: 'Narrow Window', start_time: farShiftStart, end_time: farShiftEnd });
+    assert.equal(shift.status, 201);
+
+    const memberId = await createStudentWithShiftPass('OffByDefault', shift.body.id);
+
+    const checkedIn = await call('POST', '/api/attendance/check-in', { member_id: memberId });
+    assert.equal(checkedIn.status, 201);
+    assert.equal(checkedIn.body.action, 'checked_in');
+  });
+
+  it('rejects a check-in outside the shift window once enforcement is turned on', async () => {
+    const settingsOn = await call('PUT', '/api/attendance/settings', { enforce_shift_window: true });
+    assert.equal(settingsOn.status, 200);
+    assert.equal(settingsOn.body.enforce_shift_window, 1);
+
+    const shift = await call('POST', '/api/sessions', { name: 'Narrow Window Enforced', start_time: farShiftStart, end_time: farShiftEnd });
+    const memberId = await createStudentWithShiftPass('OutOfWindow', shift.body.id);
+
+    const res = await call('POST', '/api/attendance/check-in', { member_id: memberId });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /shift/i);
+
+    await call('PUT', '/api/attendance/settings', { enforce_shift_window: false });
+  });
+
+  it('still allows check-in inside the shift window with enforcement on', async () => {
+    assert.equal((await call('PUT', '/api/attendance/settings', { enforce_shift_window: true })).status, 200);
+
+    const session = await call('POST', '/api/sessions', {
+      name: 'Wide Open',
+      start_time: '00:00',
+      end_time: '23:59',
+    });
+    const memberId = await createStudentWithShiftPass('InWindow', session.body.id);
+
+    const res = await call('POST', '/api/attendance/check-in', { member_id: memberId });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.action, 'checked_in');
+
+    await call('PUT', '/api/attendance/settings', { enforce_shift_window: false });
   });
 });

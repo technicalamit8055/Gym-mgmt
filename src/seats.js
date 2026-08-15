@@ -1,7 +1,8 @@
 import { addDays, today } from './validate.js';
+import { gymDateOf, gymDatetimeOf } from './clock.js';
 import { all, get, run } from './db.js';
 import { conflict, notFound } from './errors.js';
-import { releaseLapsedSeatAllocations } from './maintenance.js';
+import { autoCloseFinishedVisits, releaseLapsedSeatAllocations } from './maintenance.js';
 
 /**
  * Seat allocation lifecycle: the one thing in SeatBook that is genuinely new
@@ -259,6 +260,104 @@ export function seatMap({ on } = {}) {
   };
 
   return { as_of: asOf, shifts, zones, seats, occupancy, totals };
+}
+
+/**
+ * The seat map plus *who is actually sitting there right now* — the live view
+ * the dashboard's "Seated now" card opens into.
+ *
+ * seatMap() answers "who is this desk rented to", which is a question about
+ * paperwork; this answers "is that person in the room", which is a question
+ * about today's attendance. They are deliberately separate reads joined here
+ * rather than one query, because a seat has exactly three live states and only
+ * one of them involves attendance at all:
+ *
+ *   present  — allocated AND checked in today with the visit still open (red)
+ *   assigned — allocated but nobody has checked in against it today (yellow)
+ *   vacant   — not allocated for this shift (default)
+ *
+ * Walk-ins are the reason `present` is not simply "has an open visit": a visit
+ * carries its own seat_id (see performCheckIn), so someone checked in against a
+ * seat they were never allocated still lights that seat up. And a visit with no
+ * seat_id at all — a student who has a pass but no desk — is counted in
+ * `unseated` rather than dropped, so the card's headline number always ties out
+ * against the dashboard's `currently_in`.
+ */
+export function liveSeatMap() {
+  autoCloseFinishedVisits();
+  const map = seatMap({});
+
+  // Open visits only: check_out IS NULL is what "still in the room" means, and
+  // the gym-local date keeps a 5am arrival on today's list rather than
+  // yesterday's (see clock.js).
+  const visits = all(
+    `SELECT a.id, a.seat_id, a.session_id, a.member_id,
+            ${gymDatetimeOf('a.check_in')} AS check_in,
+            m.first_name, m.last_name, m.code AS member_code,
+            se.code AS seat_code, sess.name AS shift_name
+     FROM attendance a
+     JOIN members m ON m.id = a.member_id
+     LEFT JOIN seats se ON se.id = a.seat_id
+     LEFT JOIN sessions sess ON sess.id = a.session_id
+     WHERE a.check_out IS NULL AND ${gymDateOf('a.check_in')} = ?
+     ORDER BY a.check_in DESC`,
+    [map.as_of],
+  );
+
+  const present = visits.map((v) => ({
+    attendance_id: v.id,
+    seat_id: v.seat_id,
+    seat_code: v.seat_code,
+    session_id: v.session_id,
+    shift_name: v.shift_name,
+    member_id: v.member_id,
+    member_code: v.member_code,
+    member_name: `${v.first_name} ${v.last_name}`.trim(),
+    check_in: v.check_in,
+  }));
+
+  // Keyed by seat alone, not (seat, shift): the map is drawn one shift at a
+  // time, but a visit's own session_id can disagree with the allocation's when
+  // someone sits early or late, and the desk still wants that seat lit.
+  const presentBySeat = new Map();
+  for (const p of present) {
+    if (p.seat_id != null && !presentBySeat.has(p.seat_id)) presentBySeat.set(p.seat_id, p);
+  }
+
+  const occupancy = map.occupancy.map((cell) => {
+    const visit = presentBySeat.get(cell.seat_id);
+    return {
+      ...cell,
+      live_state: visit ? 'present' : 'assigned',
+      checked_in_at: visit?.check_in ?? null,
+      attendance_id: visit?.attendance_id ?? null,
+      // Whoever is in the chair, if it isn't the student it is rented to.
+      present_member_id: visit?.member_id ?? null,
+      present_member_name: visit && visit.member_id !== cell.member_id ? visit.member_name : null,
+    };
+  });
+
+  // Someone checked in against a seat that has no active allocation at all —
+  // a walk-in, or a hold released while they were still sitting. Surfaced as
+  // its own list so the map can paint the tile without inventing an allocation.
+  const allocatedSeatIds = new Set(map.occupancy.map((o) => o.seat_id));
+  const walkIns = present.filter((p) => p.seat_id != null && !allocatedSeatIds.has(p.seat_id));
+  const unseated = present.filter((p) => p.seat_id == null);
+
+  return {
+    ...map,
+    occupancy,
+    present,
+    walk_ins: walkIns,
+    unseated,
+    live_totals: {
+      present: present.length,
+      present_seated: present.length - unseated.length,
+      unseated: unseated.length,
+      walk_ins: walkIns.length,
+      assigned_not_in: occupancy.filter((o) => o.live_state === 'assigned').length,
+    },
+  };
 }
 
 /**

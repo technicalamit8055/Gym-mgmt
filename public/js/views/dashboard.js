@@ -1,10 +1,12 @@
 import { api, session } from '../api.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { openMemberForm, openMembershipForm, openPaymentForm } from './forms.js';
+import { openLiveSeatMap } from './seats.js';
 import {
   barChart,
   clear,
   date,
+  dayMonth,
   expiryLabel,
   fullName,
   h,
@@ -150,7 +152,12 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       {
         icon: isLibrary() ? 'seats' : 'activity',
         pulse: data.attendance.currently_in > 0,
-        onClick: () => navigate('/check-in'),
+        // With seats on, "who is in" is a question about the hall, so this
+        // opens the live map rather than the check-in desk. Without seats
+        // there is no map to show and the desk is still the right answer.
+        onClick: data.seats
+          ? () => openLiveSeatMap({ navigate })
+          : () => navigate('/check-in'),
       },
     ),
     stat(
@@ -561,7 +568,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
             { class: 'list-item' },
             h('a', { href: `#/members/${member.id}` }, fullName(member)),
             h('div', { class: 'spacer' }),
-            h('span', { class: 'badge violet' }, renderIcon('cake', { size: 13 }), date(member.date_of_birth).slice(0, 6)),
+            h('span', { class: 'badge violet' }, renderIcon('cake', { size: 13 }), dayMonth(member.date_of_birth)),
             member.phone
               ? h(
                   'button',

@@ -2,6 +2,7 @@ import { gymMonthDay, localtimeModifiers } from './clock.js';
 import { config } from './config.js';
 import { run, get, all } from './db.js';
 import { today, addDays } from './validate.js';
+import { moduleEnabled } from './verticals.js';
 import { birthdayMessage, getWhatsAppStatus, reminderMessage, sendWhatsAppMessage } from './whatsapp.js';
 
 /**
@@ -21,12 +22,17 @@ export function expireOverdueSubscriptions() {
 
 /**
  * Closes any open visit whose shift has ended for the day the visit started.
- * Which shift applies is `attendance.session_id` if the check-in recorded one
- * (a library visit, or any check-in performCheckIn() could resolve to a
- * shift), falling back to the member's own assigned `session_id` (the plain
- * gym-batch case this always supported). Visits with neither are unaffected —
- * they only close on an explicit checkout or the toggle-on-rescan in
- * performCheckIn().
+ * Gym-only: a gym batch is a work shift with a real end time a member is
+ * expected to leave by, so auto-closing at that instant is the right default.
+ * A library seat, by contrast, is time the student paid for and is free to
+ * leave early or stay put in — SeatBook never auto-checks anyone out, on
+ * purpose, so a student's sitting only ends when they scan out themselves
+ * (see performCheckIn()'s rescan-to-checkout toggle in checkin.js).
+ *
+ * Which shift applies is `attendance.session_id` if the check-in recorded one,
+ * falling back to the member's own assigned `session_id` (the plain gym-batch
+ * case this always supported). Visits with neither are unaffected — they only
+ * close on an explicit checkout or the toggle-on-rescan in performCheckIn().
  *
  * sessions.start_time/end_time are wall-clock hours as typed ("05:00"), so
  * the shift's end instant for a given visit has to be computed in the *gym's*
@@ -48,6 +54,8 @@ export function expireOverdueSubscriptions() {
  * before any read/write that reports on attendance instead.
  */
 export function autoCloseFinishedVisits() {
+  if (moduleEnabled('seats')) return 0;
+
   const [toLocal, toUtc] = localtimeModifiers();
   const shiftEndAt =
     "datetime(date(attendance.check_in, ?) || ' ' || sessions.end_time, CASE WHEN sessions.overnight = 1 THEN '+1 day' ELSE '+0 days' END, ?)";

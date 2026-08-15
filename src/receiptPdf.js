@@ -5,11 +5,10 @@ function formatDate(value) {
   const iso = String(value).includes('T') ? value : String(value).replace(' ', 'T');
   const parsed = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
   if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 function formatMoney(amount, currency = 'INR') {
@@ -180,7 +179,7 @@ export function generateReceiptPdf(data, options = {}) {
       });
       y += 18;
 
-      const timestamp = new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+      const timestamp = `${formatDate(new Date())}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
       doc.fillColor('#9ca3af').font('Helvetica').fontSize(10).text(`Printed on ${timestamp}`, MARGIN_X, y, {
         width: CONTENT_WIDTH,
         align: 'center',

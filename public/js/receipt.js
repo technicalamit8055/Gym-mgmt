@@ -23,10 +23,7 @@ function receiptNode(data, { gymName = 'GymBook', logoUrl } = {}) {
     : data.member_name || 'Member';
 
   const now = new Date();
-  const timestamp = now.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
+  const timestamp = `${date(now)}, ${now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 
   const finalLogoUrl = logoUrl ?? getGymLogoUrl();
   const gymHeading = finalLogoUrl
@@ -173,7 +170,8 @@ function wrapText(ctx, text, maxWidth) {
  */
 function layoutReceipt(ctx, data, { gymName, logoImg }) {
   const memberName = data.first_name ? fullName(data) : data.member_name || 'Member';
-  const timestamp = new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const nowTs = new Date();
+  const timestamp = `${date(nowTs)}, ${nowTs.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 
   const ops = [];
   let y = MARGIN_X;

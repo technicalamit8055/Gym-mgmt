@@ -6,6 +6,7 @@ import {
   closeModal,
   confirmDialog,
   date,
+  dayMonth,
   fullName,
   h,
   openModal,
@@ -103,7 +104,7 @@ export async function renderClasses({ setActions, reload }) {
       return h(
         'div',
         { class: `day-col ${day === today() ? 'today' : ''}` },
-        h('h4', {}, `${dayName.slice(0, 3)} ${date(day).slice(0, 6)}`),
+        h('h4', {}, `${dayName.slice(0, 3)} ${dayMonth(day)}`),
         inDay.length
           ? h(
               'div',

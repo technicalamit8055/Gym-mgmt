@@ -316,12 +316,23 @@ export function date(value, { withTime = false } = {}) {
   const iso = String(value).includes('T') ? value : String(value).replace(' ', 'T');
   const parsed = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
   if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}),
-  });
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const year = parsed.getFullYear();
+  const formatted = `${day}/${month}/${year}`;
+  if (!withTime) return formatted;
+  const time = parsed.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return `${formatted}, ${time}`;
+}
+
+export function dayMonth(value) {
+  if (!value) return '—';
+  const iso = String(value).includes('T') ? value : String(value).replace(' ', 'T');
+  const parsed = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}`;
 }
 
 export function time(value) {

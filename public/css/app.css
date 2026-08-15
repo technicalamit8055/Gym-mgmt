@@ -935,12 +935,91 @@ body[data-vertical='library'] .stat,
   border: 1px dashed var(--brand); pointer-events: none;
 }
 
+/* ------------------------------------------------------- live seat map */
+
+/* A presence scale, not a tenancy one: red = the student is in the chair,
+   yellow = the desk is rented but empty, plain dashed = nobody's desk. It
+   deliberately reuses .seat-tile so the grid geometry stays identical to the
+   allocation map, and only the fill differs. */
+.seat-tile.live-present {
+  background: rgba(248, 113, 113, 0.2); border-color: var(--red); color: var(--red);
+}
+.seat-tile.live-assigned {
+  background: rgba(251, 191, 36, 0.2); border-color: var(--amber); color: var(--amber);
+}
+.seat-tile.live-vacant { background: var(--surface-2); border-style: dashed; color: var(--muted); }
+
+/* The occupant's initials, under the seat code. Only present/assigned tiles
+   carry one, so the extra line never shifts a vacant tile's layout. */
+.seat-who {
+  font-size: 8.5px; font-weight: 700; line-height: 1; letter-spacing: 0.3px;
+  opacity: 0.8; text-transform: uppercase;
+}
+.seat-tile.live-present .seat-icon { opacity: 1; }
+/* The one tile state that is genuinely "happening now" gets the only motion
+   on the map, so a full hall still reads at a glance. */
+.seat-tile.live-present::after {
+  content: ''; position: absolute; top: 3px; right: 3px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--red);
+  animation: live-seat-pulse 2s ease-in-out infinite;
+}
+@keyframes live-seat-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+/* min-width:0 on the column is what actually lets the hall scroll: without it
+   the flex item takes its 60-column grid as its minimum size and shoves the
+   whole modal off-screen instead of clipping. */
+.live-map { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.live-map > * { min-width: 0; }
+/* The hall grid is wider than any phone, and a grid item sizes its track to
+   max-content unless told otherwise — without this the modal itself stretches
+   past the viewport instead of letting .seatmap-card scroll inside it. The
+   class is stamped on by openLiveSeatMap() rather than matched with :has(),
+   since this has to hold on every browser the front desk might run. */
+.modal.live-map-modal { min-width: 0; max-width: 100%; }
+.modal.live-map-modal .modal-body { min-width: 0; }
+.live-map-summary {
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-2);
+}
+.live-map-figure { display: flex; flex-direction: column; gap: 2px; line-height: 1.2; }
+.live-map-figure > strong { font-size: 20px; font-weight: 700; }
+.live-map-figure > .muted { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+/* The hall is a fixed 60-column grid, far wider than the modal. It scrolls
+   inside its own box — the modal itself must never scroll sideways. */
+.live-map .seatmap-card {
+  border: 1px solid var(--border); border-radius: 12px;
+  overflow-x: auto; padding: 14px; max-width: 100%;
+}
+/* Column count itself is set inline per hall — see openLiveSeatMap(). */
+.live-map .seatmap-row-grid { gap: 6px; }
+.live-map .seatmap-tabs { overflow-x: auto; padding-bottom: 4px; }
+.live-map .seatmap-tab { flex: 0 0 auto; min-width: 130px; }
+.live-map-strays { border-top: 1px dashed var(--border); padding-top: 12px; }
+.live-map-strays-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--muted); margin-bottom: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seat-tile.live-present::after { animation: none; }
+}
+
 @media (max-width: 640px) {
   .seatmap-row-grid { grid-template-columns: repeat(60, 34px); gap: 5px; }
+  /* The live map's column count is inline (and so unbeatable from here); the
+     tiles shrink to 34px under the shared .seat-tile rule below, which just
+     leaves a little slack in each 40px track. Only the gap needs closing. */
+  .live-map .seatmap-row-grid { gap: 5px; }
   .seat-tile { width: 34px; height: 38px; padding: 2px 1px; gap: 1px; }
   .seat-icon { width: 12px; height: 12px; }
   .seat-code { font-size: 9px; }
   .seatmap-date { margin-left: 0; }
+  .seat-who { display: none; }
+  .live-map-summary { gap: 14px; }
 }
 
 /* -------------------------------------------------------- biometric UI */

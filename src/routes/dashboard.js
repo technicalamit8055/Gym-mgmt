@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
-import { gymDateOf, gymMonthDay } from '../clock.js';
+import { gymDateOf, gymDatetimeOf, gymMonthDay } from '../clock.js';
 import { all, get } from '../db.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import { PHOTO_JOIN, PHOTO_PRESENT_COL, withPhotoUrl } from '../photo.js';
@@ -123,7 +123,7 @@ dashboardRoutes.get('/', (req, res) => {
 
   const checkedInNow = all(
     `
-    SELECT a.id, a.check_in, m.id AS member_id, m.code, m.first_name, m.last_name,
+    SELECT a.id, ${gymDatetimeOf('a.check_in')} AS check_in, m.id AS member_id, m.code, m.first_name, m.last_name,
            m.photo_version, ${PHOTO_PRESENT_COL}
     FROM attendance a
     JOIN members m ON m.id = a.member_id

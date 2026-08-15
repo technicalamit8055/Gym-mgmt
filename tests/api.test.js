@@ -286,12 +286,13 @@ describe('gym sessions', () => {
 
     const latest = await call('GET', '/api/attendance?member_id=2&limit=1');
     assert.ok(latest.body.items[0].check_out);
-    // check_out is stored in UTC; endTime was the session's end in local wall-
-    // clock time, so compare instants rather than the raw HH:MM text — with
-    // slack for the minute-level (no seconds) precision of a session's end_time.
+    // check_out is stored in UTC but the API renders it in the gym's own
+    // wall clock (ATTENDANCE_SELECT converts it), so it should read back as
+    // the plain local HH:MM the session ended at — with slack for the
+    // minute-level (no seconds) precision of a session's end_time.
     const expectedClose = new Date(now);
     expectedClose.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
-    const closedAt = new Date(`${latest.body.items[0].check_out.replace(' ', 'T')}Z`);
+    const closedAt = new Date(`${latest.body.items[0].check_out.replace(' ', 'T')}`);
     assert.ok(
       Math.abs(closedAt.getTime() - expectedClose.getTime()) < 65_000,
       `expected check_out near ${expectedClose.toISOString()}, got ${closedAt.toISOString()}`,

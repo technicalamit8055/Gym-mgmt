@@ -1,15 +1,18 @@
 import { api } from '../api.js';
 import {
   addDays,
+  append,
   buildForm,
   clear,
   closeModal,
   confirmDialog,
   fullName,
   h,
+  initials,
   money,
   openModal,
   stat,
+  time,
   today,
   toast,
 } from '../ui.js';
@@ -29,6 +32,18 @@ const STATE_LABEL = {
   expired: 'Expired',
   dues: 'Dues pending',
   frozen: 'On hold (frozen)',
+};
+
+/** The chair glyph both maps stamp on every tile — one copy, since the live
+ * map and the allocation map draw the identical tile. */
+const SEAT_ICON_SVG =
+  '<svg class="seat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><path d="M5 18v3"/><path d="M19 18v3"/></svg>';
+
+/** ui.js's initials() takes (first, last); the live map carries pre-joined
+ * `member_name` strings, so split before handing them over. */
+const nameInitials = (name = '') => {
+  const parts = String(name).trim().split(/\s+/);
+  return initials(parts[0] || '', parts.length > 1 ? parts[parts.length - 1] : '');
 };
 
 /* --------------------------------------------------------- bulk setup --- */
@@ -509,6 +524,290 @@ async function openTransferForm({ seat, sessionId, shiftName, onSaved }) {
   openModal({ title: `Transfer from ${seat.code} — ${shiftName}`, body: form });
 }
 
+/* -------------------------------------------------------------- live map --- */
+
+/**
+ * The live seat map — what "Seated now" on the dashboard opens into.
+ *
+ * A different question from the main seat map, so a different colour scale:
+ * that one paints the *tenancy* (expiring, dues, frozen), this one paints
+ * only presence, because at the front desk the whole point is spotting which
+ * rented desks are empty right now.
+ *
+ *   red    — the student is in the chair (checked in, visit still open)
+ *   yellow — the desk is assigned but nobody has checked in against it today
+ *   plain  — not assigned for this shift
+ *
+ * Seat tiles reuse .seat-tile so the layout, sizing and grid-column aisle
+ * trick are identical to the main map; only the state class differs.
+ */
+function liveSeatTile(seat, cell, visit, onPick) {
+  let stateClass = 'live-vacant';
+  if (seat.status !== 'available') stateClass = 'oos';
+  else if (visit) stateClass = 'live-present';
+  else if (cell) stateClass = 'live-assigned';
+
+  const who = visit || cell;
+  const title = visit
+    ? `${visit.member_name} (${visit.member_code}) — seated since ${time(visit.check_in.slice(11))}`
+    : cell
+      ? `${cell.member_name} (${cell.member_code}) — assigned, not checked in`
+      : `${seat.code} — vacant`;
+
+  const style = Number.isInteger(seat.col_index) ? `grid-column:${seat.col_index}` : '';
+  return h(
+    'button',
+    {
+      class: `seat-tile ${stateClass}`,
+      type: 'button',
+      style,
+      title,
+      onclick: () => onPick(seat, cell, visit),
+    },
+    h('span', { class: 'seat-icon-wrap', html: SEAT_ICON_SVG }),
+    h('span', { class: 'seat-code' }, seat.code),
+    who ? h('span', { class: 'seat-who' }, nameInitials(who.member_name)) : null,
+  );
+}
+
+export async function openLiveSeatMap({ navigate } = {}) {
+  const body = h('div', { class: 'live-map' }, h('div', { class: 'empty' }, 'Loading live seat map…'));
+  const state = { sessionId: null };
+
+  const backdrop = openModal({ title: 'Live seat map', wide: true, body });
+  // Lets the hall scroll inside the dialog instead of widening it — see the
+  // .live-map-modal rule in app.css.
+  backdrop.querySelector('.modal')?.classList.add('live-map-modal');
+
+  async function load() {
+    let map;
+    try {
+      map = await api.liveSeatMap();
+    } catch (err) {
+      clear(body).append(h('div', { class: 'empty' }, err.message || 'Could not load the live seat map'));
+      return;
+    }
+    if (!body.isConnected) return; // modal closed while the request was in flight
+    render(map);
+  }
+
+  function render(map) {
+    clear(body);
+
+    if (!map.seats.length) {
+      body.append(h('div', { class: 'empty' }, 'No seats set up yet.'));
+      return;
+    }
+
+    // Default to the shift with the most people actually in it — at 9am that
+    // is Morning, at 7pm it is Evening, with no clock arithmetic here.
+    if (!state.sessionId || !map.shifts.some((s) => s.id === state.sessionId)) {
+      const busiest = [...map.shifts].sort(
+        (a, b) =>
+          map.present.filter((p) => p.session_id === b.id).length -
+          map.present.filter((p) => p.session_id === a.id).length,
+      )[0];
+      state.sessionId = busiest?.id ?? map.shifts[0]?.id ?? null;
+    }
+
+    const cellsByKey = new Map(map.occupancy.map((o) => [`${o.seat_id}:${o.session_id}`, o]));
+    // Seat-keyed, matching the server: a visit lights its seat whichever shift
+    // the tab is showing, so an early arrival is never invisible.
+    const visitsBySeat = new Map();
+    for (const p of map.present) {
+      if (p.seat_id != null && !visitsBySeat.has(p.seat_id)) visitsBySeat.set(p.seat_id, p);
+    }
+
+    const assignedInShift = map.occupancy.filter((o) => o.session_id === state.sessionId);
+
+    const summary = h(
+      'div',
+      { class: 'live-map-summary' },
+      h(
+        'div',
+        { class: 'live-map-figure' },
+        h('strong', {}, map.live_totals.present),
+        h('span', { class: 'muted' }, 'in right now'),
+      ),
+      h(
+        'div',
+        { class: 'live-map-figure' },
+        h('strong', {}, map.live_totals.assigned_not_in),
+        h('span', { class: 'muted' }, 'assigned, not in'),
+      ),
+      map.live_totals.walk_ins
+        ? h(
+            'div',
+            { class: 'live-map-figure' },
+            h('strong', {}, map.live_totals.walk_ins),
+            h('span', { class: 'muted' }, 'unassigned seat'),
+          )
+        : null,
+      map.live_totals.unseated
+        ? h(
+            'div',
+            { class: 'live-map-figure' },
+            h('strong', {}, map.live_totals.unseated),
+            h('span', { class: 'muted' }, 'in, no seat'),
+          )
+        : null,
+      h('div', { class: 'spacer' }),
+      h('button', { class: 'btn sm ghost', onclick: load, title: 'Reload the live map' }, 'Refresh'),
+    );
+
+    const tabs = h(
+      'div',
+      { class: 'seatmap-tabs' },
+      map.shifts.map((shift) => {
+        const shiftAssigned = map.occupancy.filter((o) => o.session_id === shift.id);
+        const shiftIn = shiftAssigned.filter((o) => o.live_state === 'present').length;
+        const pct = shiftAssigned.length ? Math.round((shiftIn / shiftAssigned.length) * 100) : 0;
+        return h(
+          'button',
+          {
+            class: `seatmap-tab ${shift.id === state.sessionId ? 'active' : ''}`,
+            type: 'button',
+            onclick: () => {
+              state.sessionId = shift.id;
+              render(map);
+            },
+          },
+          h('div', { class: 'seatmap-tab-name' }, shift.name),
+          h('div', { class: 'seatmap-tab-count' }, `${shiftIn} of ${shiftAssigned.length} seated`),
+          h('div', { class: 'seatmap-tab-bar' }, h('i', { style: `width:${pct}%` })),
+        );
+      }),
+    );
+
+    const legend = h(
+      'div',
+      { class: 'seatmap-legend' },
+      [
+        ['live-present', 'Checked in'],
+        ['live-assigned', 'Assigned, not in'],
+        ['live-vacant', 'Not assigned'],
+        ['oos', 'Out of service'],
+      ].map(([cls, label]) => h('span', { class: 'seatmap-legend-item' }, h('i', { class: `seat-tile ${cls} swatch` }), label)),
+    );
+
+    const onPick = (seat, cell, visit) => {
+      const who = visit || cell;
+      if (!who) {
+        toast(`${seat.code} is not assigned for this shift`);
+        return;
+      }
+      if (navigate) {
+        closeModal();
+        navigate(`/members/${who.member_id}`);
+      }
+    };
+
+    const zoneGroups = new Map();
+    for (const seat of map.seats) {
+      const key = seat.zone_id ?? 'none';
+      if (!zoneGroups.has(key)) zoneGroups.set(key, []);
+      zoneGroups.get(key).push(seat);
+    }
+
+    // The seat-map page hard-codes 60 grid columns; in a modal that is ~2500px
+    // of empty track. Sizing to the hall's own widest column keeps the aisle
+    // trick (a skipped col_index is still a gap) without the dead space.
+    const widest = map.seats.reduce((max, s) => Math.max(max, s.col_index || 0), 0) || 1;
+
+    const hall = h(
+      'div',
+      { class: 'seatmap-card' },
+      [...zoneGroups.entries()].map(([key, seats]) => {
+        const zone = key === 'none' ? null : map.zones.find((z) => z.id === Number(key));
+        const rows = new Map();
+        for (const seat of seats) {
+          const rowKey = seat.row_label || '';
+          if (!rows.has(rowKey)) rows.set(rowKey, []);
+          rows.get(rowKey).push(seat);
+        }
+        return h(
+          'div',
+          { class: 'seatmap-zone' },
+          h('div', { class: 'seatmap-zone-title' }, zone?.name || 'Unassigned'),
+          [...rows.entries()].map(([rowLabel, rowSeats]) =>
+            h(
+              'div',
+              { class: 'seatmap-row' },
+              rowLabel ? h('div', { class: 'seatmap-row-label' }, rowLabel) : null,
+              h(
+                'div',
+                { class: 'seatmap-row-grid', style: `grid-template-columns:repeat(${widest}, 40px)` },
+                rowSeats.map((seat) =>
+                  liveSeatTile(seat, cellsByKey.get(`${seat.id}:${state.sessionId}`), visitsBySeat.get(seat.id), onPick),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+
+    // Anyone in the building the grid can't show — no seat at all, or sitting
+    // at a desk that isn't theirs. Both are exactly what the front desk is
+    // looking at this screen to find.
+    const strays = [
+      ...map.unseated.map((p) => ({ ...p, why: 'no seat assigned' })),
+      ...map.walk_ins.map((p) => ({ ...p, why: `at ${p.seat_code}, not allocated` })),
+    ];
+    const strayList = strays.length
+      ? h(
+          'div',
+          { class: 'live-map-strays' },
+          h('div', { class: 'live-map-strays-title' }, 'In the hall, off the map'),
+          h(
+            'div',
+            { class: 'list' },
+            ...strays.map((p) =>
+              h(
+                'div',
+                { class: 'list-item' },
+                h('div', { class: 'avatar' }, nameInitials(p.member_name)),
+                h(
+                  'div',
+                  {},
+                  h('div', { style: 'font-weight:600' }, p.member_name),
+                  h('div', { class: 'muted', style: 'font-size:12px' }, `${p.why} · since ${time(p.check_in.slice(11))}`),
+                ),
+                h('div', { class: 'spacer' }),
+                navigate
+                  ? h(
+                      'button',
+                      {
+                        class: 'btn sm ghost',
+                        onclick: () => {
+                          closeModal();
+                          navigate(`/members/${p.member_id}`);
+                        },
+                      },
+                      'Open',
+                    )
+                  : null,
+              ),
+            ),
+          ),
+        )
+      : null;
+
+    // ui.js's append(), not the DOM's — the latter stringifies a null child
+    // into the literal text "null" rather than skipping it.
+    append(body, [
+      summary,
+      tabs,
+      legend,
+      assignedInShift.length ? null : h('div', { class: 'empty' }, 'Nobody is assigned to this shift yet'),
+      hall,
+      strayList,
+    ]);
+  }
+
+  load();
+}
+
 /* ------------------------------------------------------------------ edit --- */
 
 async function openSeatEditForm({ seat, zones, onSaved }) {
@@ -605,7 +904,7 @@ function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
         return cell ? handlers.onOccupied(cell, seat) : handlers.onVacant(seat);
       },
     },
-    h('span', { class: 'seat-icon-wrap', html: `<svg class="seat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><path d="M5 18v3"/><path d="M19 18v3"/></svg>` }),
+    h('span', { class: 'seat-icon-wrap', html: SEAT_ICON_SVG }),
     h('span', { class: 'seat-code' }, seat.code),
   );
 }

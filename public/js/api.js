@@ -217,6 +217,8 @@ export const api = {
   attendance: (params) => request('GET', `/attendance${query(params)}`),
   checkIn: (payload) => request('POST', '/attendance/check-in', payload),
   checkOut: (payload) => request('POST', '/attendance/check-out', payload),
+  attendanceSettings: () => request('GET', '/attendance/settings'),
+  updateAttendanceSettings: (payload) => request('PUT', '/attendance/settings', payload),
 
   sessions: (params) => request('GET', `/sessions${query(params)}`),
   createSession: (payload) => request('POST', '/sessions', payload),
@@ -282,6 +284,7 @@ export const api = {
   seats: (params) => request('GET', `/seats${query(params)}`),
   seatMap: (params) => request('GET', `/seats/map${query(params)}`),
   seatVacancy: (params) => request('GET', `/seats/vacancy${query(params)}`),
+  liveSeatMap: () => request('GET', '/seats/live'),
   createSeat: (payload) => request('POST', '/seats', payload),
   bulkCreateSeats: (payload) => request('POST', '/seats/bulk', payload),
   updateSeat: (id, payload) => request('PATCH', `/seats/${id}`, payload),

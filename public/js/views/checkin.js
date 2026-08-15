@@ -1,5 +1,24 @@
-import { api } from '../api.js';
-import { clear, date, fullName, h, initials, isFullscreen, money, renderIcon, sourceBadge, statusBadge, table, time, toast, today, toggleFullscreen } from '../ui.js';
+import { api, session } from '../api.js';
+import {
+  buildForm,
+  clear,
+  closeModal,
+  date,
+  fullName,
+  h,
+  initials,
+  isFullscreen,
+  money,
+  openModal,
+  renderIcon,
+  sourceBadge,
+  statusBadge,
+  table,
+  time,
+  toast,
+  today,
+  toggleFullscreen,
+} from '../ui.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -118,6 +137,39 @@ function loadJsQr() {
     document.head.append(script);
   });
   return jsQrLoad;
+}
+
+/** Lets an admin/manager require a check-in to fall inside the member's
+ * assigned shift/batch/session — off by default, see enforce_shift_window
+ * in src/checkin.js. */
+async function openCheckInSettingsForm() {
+  const settings = await api.attendanceSettings();
+
+  const form = buildForm(
+    [
+      {
+        name: 'enforce_shift_window',
+        label: 'Only allow check-in during a member’s assigned shift',
+        type: 'select',
+        value: String(settings.enforce_shift_window ?? 0),
+        options: [
+          { value: '0', label: 'Off — any assigned shift can check in any time' },
+          { value: '1', label: 'On — reject check-in outside the shift’s hours' },
+        ],
+        hint: 'Applies to members with a shift/batch/session assigned. Members with no shift assigned are never restricted.',
+      },
+    ],
+    {
+      submitLabel: 'Save',
+      onSubmit: async (values) => {
+        await api.updateAttendanceSettings({ enforce_shift_window: values.enforce_shift_window === '1' });
+        closeModal();
+        toast('Check-in settings saved');
+      },
+    },
+  );
+
+  openModal({ title: 'Check-in settings', body: form });
 }
 
 export async function renderCheckIn({ setActions }) {
@@ -535,7 +587,10 @@ export async function renderCheckIn({ setActions }) {
     renderIcon(isFullscreen() ? 'minimize' : 'maximize', { size: 15 }),
     isFullscreen() ? 'Exit Fullscreen' : 'Kiosk Fullscreen',
   );
-  setActions(kioskFullscreenBtn, h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
+  const settingsBtn = session.managesBilling
+    ? h('button', { class: 'btn ghost', onclick: () => openCheckInSettingsForm() }, '⚙ Settings')
+    : null;
+  setActions(settingsBtn, kioskFullscreenBtn, h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
   await refreshLists();
   setTimeout(() => input.focus(), 50);
 

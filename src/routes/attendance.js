@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../auth.js';
+import { MANAGES_BILLING, requireAuth, requireRole } from '../auth.js';
 import { ATTENDANCE_SELECT, performCheckIn, publicVisit } from '../checkin.js';
 import { gymDateOf } from '../clock.js';
 import { all, get, run } from '../db.js';
@@ -9,6 +9,32 @@ import { parse, toInt } from '../validate.js';
 
 export const attendanceRoutes = Router();
 attendanceRoutes.use(requireAuth);
+
+/**
+ * Whether to reject a check-in outside a member's assigned shift, gym batch
+ * or study-hall session — one switch either vertical can flip, so it lives
+ * outside the seats module (library_settings is created for every tenant
+ * regardless of vertical; see shiftWindowEnforced() in src/checkin.js).
+ */
+function checkInSettingsFor() {
+  return get('SELECT enforce_shift_window FROM library_settings WHERE id = 1') ?? { enforce_shift_window: 0 };
+}
+
+/** GET /api/attendance/settings */
+attendanceRoutes.get('/settings', (_req, res) => {
+  res.json(checkInSettingsFor());
+});
+
+/** PUT /api/attendance/settings */
+attendanceRoutes.put('/settings', requireRole(...MANAGES_BILLING), (req, res) => {
+  const body = parse(req.body, { enforce_shift_window: { type: 'boolean', default: 0 } });
+  run(
+    `INSERT INTO library_settings (id, enforce_shift_window, updated_at) VALUES (1, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET enforce_shift_window = excluded.enforce_shift_window, updated_at = excluded.updated_at`,
+    [body.enforce_shift_window],
+  );
+  res.json(checkInSettingsFor());
+});
 
 attendanceRoutes.get('/', (req, res) => {
   autoCloseFinishedVisits();
