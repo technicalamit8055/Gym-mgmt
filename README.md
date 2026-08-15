@@ -1,11 +1,17 @@
-# GymBook — Gym Management Software
+# GymBook / SeatBook — Gym & Study Hall Management Software
 
-A complete gym management system in the spirit of GymBook: members and their
-memberships, billing and dues, front-desk check-ins, class timetables and
-bookings, trainers, equipment maintenance, and the reports that tie it together.
+One platform, two products, one deployment. **GymBook** runs gyms — members
+and their memberships, billing and dues, front-desk check-ins, class
+timetables and bookings, trainers, equipment maintenance. **SeatBook** runs
+study halls and reading rooms on the same codebase — students, seat plans, a
+live seat map, lockers, expenses and ID documents in place of classes and
+equipment. A tenant's `business_type` decides which nouns it sees, which
+modules it gets, and what it's seeded with at signup; everything else —
+billing, check-ins, reports, WhatsApp automation, the operator console — is
+shared.
 
-Runs on Node.js with SQLite. No build step, no native modules, one dependency
-(Express) — clone, install, seed, open.
+Runs on Node.js with SQLite. No build step, no bundler, no native modules —
+clone, install, seed, open.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -30,6 +36,16 @@ After seeding, these demo logins also work — all with the password `demo12345`
 | `desk@gymbook.local` | front desk | Members, check-ins, classes |
 
 ## What it does
+
+**Two verticals, one codebase.** Every tenant database carries every table
+regardless of which product it runs — a gym simply never writes to `seats`.
+`src/verticals.js` is the single place the two products diverge: it swaps the
+vocabulary (`member` ↔ `student`, `membership` ↔ `seat plan`, `session` ↔
+`shift`), the member-code prefix (`GM0001` vs `ST0001`), the module set
+(classes/bookings/equipment for a gym; seats/lockers/expenses/documents for a
+hall), the starter plans and prices, and the WhatsApp message templates. A
+misclassified signup is fixable from the operator console, not a
+re-provisioning job.
 
 **Members** — searchable, filterable roster with member codes (`GM0001`),
 contact and emergency details, health notes for trainers, join date and status.
@@ -109,18 +125,57 @@ service dates. Send an item to maintenance and mark it serviced in one click;
 the next service date rolls forward automatically. Overdue services surface on
 the dashboard.
 
+**Live seat map (SeatBook)** — the centrepiece of the study-hall vertical.
+Seats are laid out in zones as rows and columns; each cell shows at a glance
+whether it's vacant, occupied, expiring soon, expired, has dues, or is frozen.
+No drag-and-drop or canvas — a seat is `(zone_id, row_label, col_index)` and the
+layout is a CSS grid per row, with a skipped column index drawing the aisle.
+Allocating a seat locks it to one member for one shift; a partial unique index
+on `(seat_id, session_id) WHERE status='active'` makes double-booking
+structurally impossible rather than merely checked for, and a clear conflict
+message names who is currently holding it. Bulk seat setup fills a whole zone
+from a form. Shifts (Morning, Afternoon, Evening, Night, Full Day) carry their
+own time windows, including an `overnight` flag so a shift that crosses
+midnight doesn't get auto-checked-out at the moment it starts.
+
+**Lockers (SeatBook)** — tracked the same way as seats, minus the shift: one
+live allocation per locker, released the moment a student leaves. Zones,
+monthly fee, deposit and key-issued tracking.
+
+**Expenses (SeatBook)** — what goes out, not just what comes in: rent,
+electricity, wifi, staff. Category, amount, vendor, payment method and an
+optional recurring flag. A collected-vs-spent strip for the current period is
+shared verbatim with the dashboard.
+
+**Member documents (SeatBook)** — ID proof on file (Aadhaar front/back,
+college ID, other), each behind its own short-lived signed URL — 15 minutes,
+deliberately shorter than a member photo's, since a scanned ID sitting in
+browser history all day is a bigger leak than a stale avatar.
+
 **Staff** — accounts with four roles. Admins manage staff and can delete
-records; managers handle billing, plans, classes and equipment; trainers and
-front-desk staff work with members, check-ins and bookings.
+records; managers handle billing, plans, classes/seats and equipment/lockers;
+trainers and front-desk staff work with members, check-ins and bookings.
+
+**WhatsApp automation** — each gym or hall pairs its own WhatsApp number
+(scan a QR once, via Baileys — no WhatsApp Business API account needed) and
+the platform sends on its behalf: a payment receipt with the PDF attached,
+a renewal reminder a configurable number of days before expiry, a freeze
+notice, and a birthday message — each one individually toggleable, with an
+editable template using `{{first_name}}`, `{{plan_name}}`, `{{end_date}}` and
+similar placeholders. Sessions and message templates are per-tenant, and a
+send queue paces messages a few seconds apart so a reminder sweep across a
+full roster doesn't read as a spam blast to WhatsApp's abuse detection.
 
 **Reports** — revenue by month or day, split by payment method and by plan;
 check-ins per day, per hour and per weekday; most regular members; members at
 risk (no visit in 14 days); new members per month; memberships sold versus
-lapsed. Everything exports to CSV: members, payments, attendance, memberships.
+lapsed; expense totals by category (SeatBook). Everything exports to CSV:
+members, payments, attendance, memberships.
 
 **Dashboard** — active members, revenue this month against last, who is in the
-gym right now, renewals due, unpaid dues, plan mix, upcoming birthdays and
-equipment needing attention.
+gym or hall right now, renewals due, unpaid dues, plan mix, upcoming
+birthdays, equipment needing attention (GymBook) and live seat occupancy
+(SeatBook).
 
 ## Install it on a phone or tablet (PWA)
 
@@ -204,14 +259,19 @@ All optional — sensible defaults apply.
 | `BACKUP_KEEP` | `14` | Local backup folders to keep; older ones are pruned so a daily backup can't fill the disk |
 | `BACKUP_S3_BUCKET` / `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` | — | Off-site backup destination. Uploads stay off until **all four** are set |
 | `BACKUP_S3_REGION` / `BACKUP_S3_PREFIX` | `auto` / — | Region (`auto` suits Cloudflare R2) and an optional key prefix |
+| `WHATSAPP_AUTH_DIR` | `<platform db dir>/whatsapp_auth` | Where each gym's paired WhatsApp session credentials are stored |
+| `WHATSAPP_MESSAGE_GAP_MS` | `2500` | Minimum gap between queued WhatsApp sends, per gym — keeps a reminder sweep from reading as a spam blast |
+| `WHATSAPP_COUNTRY_CODE` | `91` | Default country code used to normalise a member's phone number when none is given |
 
-## Onboarding: how a gym joins
+## Onboarding: how a gym (or hall) joins
 
-The root domain is a public landing page. A gym owner clicks **Start free trial**,
-picks a name and an address, creates their owner account, and lands in a working
-gym — signed in, with three starter plans they can edit and sell straight away.
-Signup provisions a registry row, a dedicated SQLite file, the admin account and
-those plans in one step.
+The root domain is a public landing page for each vertical — `landing.js` for
+GymBook, `landingLibrary.js` for SeatBook. An owner clicks **Start free
+trial**, picks a name and an address, creates their owner account, and lands
+in a working account — signed in, with starter plans (or passes) already in
+place to edit and sell straight away. Signup provisions a registry row with
+the chosen `business_type`, a dedicated SQLite file, the admin account and
+those starter plans, prices and — for a hall — starter shifts, in one step.
 
 Each gym is then reachable two ways, and both work at the same time:
 
@@ -384,28 +444,37 @@ src/
   backup.js        snapshot, verify, upload, prune
   s3.js            minimal SigV4 PUT, for off-site backups
   validate.js      request validation and date helpers
-  maintenance.js   expires memberships past their end date
-  bootstrap.js     first-run admin account
+  maintenance.js   expires memberships, releases lapsed seats/lockers
+  bootstrap.js     first-run admin account, per-vertical seed data
+  verticals.js     GymBook vs SeatBook: vocabulary, modules, starter data
+  seats.js         seat allocation lifecycle (SeatBook)
+  whatsapp.js      per-tenant WhatsApp Web sessions (Baileys)
+  receiptPdf.js    PDF payment receipts
   routes/          auth, members, plans, subscriptions, payments,
-                   attendance, classes, equipment, dashboard, reports,
+                   attendance, classes, equipment, seats, lockers,
+                   expenses, memberDocuments, whatsapp, dashboard, reports,
                    pwa (the per-gym web app manifest)
 public/
   index.html       single page app shell
   offline.html     shown when even the shell cannot be reached
   sw.js            service worker: caches the shell, never the API
   manifest         generated per gym — see src/routes/pwa.js
-  css/app.css      dark theme
-  icons/           installed-app icons (npm run icons:gen)
+  css/app.css      theme (light + dark)
+  icons/           installed-app icons (npm run icons:gen), icons/library/
+                   for SeatBook (npm run icons:gen:library)
   js/api.js        typed API client and session storage
   js/ui.js         DOM helpers, formatting, tables, modals, SVG charts
+  js/vertical.js   client-side copy of the vocabulary swap (t() helper)
   js/photo.js      member photo upload/camera capture, crop and compress
   js/pwa.js        install prompt, worker registration, update and offline UI
   js/app.js        router and layout
-  js/views/        one module per screen
+  js/views/        one module per screen, including seats.js (live seat
+                   map), lockers.js, expenses.js and whatsapp.js
 scripts/
   seed.js          demo data
   backup.js        take a backup now
-  gen-icons.js     draws public/icons/*.png with no dependencies
+  gen-icons.js / gen-icons-library.js   draw public/icons/*.png with no
+                   dependencies, one generator per vertical
   reset-password.js  recover a lost password from the shell
 tests/             one suite per area
 ```
@@ -416,7 +485,7 @@ tests/             one suite per area
 npm test
 ```
 
-330 tests over throwaway databases cover authentication and token tampering,
+425 tests over throwaway databases cover authentication and token tampering,
 validation, member codes and duplicate detection, membership end-date maths,
 overlap rejection, renewal start dates, dues, check-in rules and idempotency,
 freeze/resume day credits, class capacity and weekday enforcement, role
@@ -425,9 +494,13 @@ trial/billing lifecycle and webhook signatures, login lockout, fingerprint
 terminal uploads, WebAuthn enrollment and check-in against a software
 authenticator, QR card issuing, scanning, reissue and forgery rejection,
 gym-local date handling across timezones, member photo storage and its signed
-URLs, password-reset issue/redeem/expiry, backup verification and pruning, and
-the installable-app surface — per-gym manifest, the gym logo as the installed
-app icon, icon sizes, service worker headers and precache list.
+URLs, password-reset issue/redeem/expiry, backup verification and pruning, the
+installable-app surface — per-gym manifest, the gym logo as the installed app
+icon, icon sizes, service worker headers and precache list — plus the SeatBook
+vertical: seat allocation and conflict messages, the live seat map lifecycle,
+shift handling (including overnight shifts), lockers, expenses, member
+documents and their signed URLs, per-vertical seeding, and WhatsApp message
+building and the automated send flows (receipt, reminder, freeze, birthday).
 
 ## Notes on the design
 
@@ -450,6 +523,17 @@ app icon, icon sizes, service worker headers and precache list.
   carries a version, so a changed photo is a new URL and no cache can go stale.
 - **Plans in use are archived, not deleted**, so historical memberships keep
   pointing at a real plan.
-- **`node:sqlite` and Express only.** No ORM, no bundler, no CSS framework, no
-  native compilation — `npm install` is fast and the app runs anywhere Node 22.5+
-  does.
+- **Every tenant carries every table.** GymBook and SeatBook share one schema;
+  a gym's `seats` table just stays empty. That keeps migrations linear and a
+  wrong business-type pick at signup fixable from the operator console instead
+  of a re-provisioning job. `src/verticals.js` is the one file where the two
+  products actually diverge — vocabulary, enabled modules, starter data.
+- **Seat/locker allocation is enforced by the database, not just checked.** A
+  partial unique index on the active-allocation rows makes a double-booking
+  impossible under concurrent requests; the pre-check query exists only to
+  turn a raw constraint violation into a message naming who already holds it.
+- **`node:sqlite` and Express, plus a short, deliberate dependency list**
+  (`@simplewebauthn/server` for passkey check-in, `@whiskeysockets/baileys` for
+  WhatsApp, `pdfkit` for receipts, `qrcode` for ID cards, `pino` for logging).
+  No ORM, no bundler, no CSS framework, no native compilation — `npm install`
+  is fast and the app runs anywhere Node 22.5+ does.
