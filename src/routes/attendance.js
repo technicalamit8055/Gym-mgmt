@@ -17,7 +17,12 @@ attendanceRoutes.use(requireAuth);
  * regardless of vertical; see shiftWindowEnforced() in src/checkin.js).
  */
 function checkInSettingsFor() {
-  return get('SELECT enforce_shift_window FROM library_settings WHERE id = 1') ?? { enforce_shift_window: 0 };
+  return (
+    get('SELECT enforce_shift_window, auto_close_shift_visits FROM library_settings WHERE id = 1') ?? {
+      enforce_shift_window: 0,
+      auto_close_shift_visits: 0,
+    }
+  );
 }
 
 /** GET /api/attendance/settings */
@@ -27,11 +32,15 @@ attendanceRoutes.get('/settings', (_req, res) => {
 
 /** PUT /api/attendance/settings */
 attendanceRoutes.put('/settings', requireRole(...MANAGES_BILLING), (req, res) => {
-  const body = parse(req.body, { enforce_shift_window: { type: 'boolean', default: 0 } });
+  const body = parse(req.body, {
+    enforce_shift_window: { type: 'boolean', default: 0 },
+    auto_close_shift_visits: { type: 'boolean', default: 0 },
+  });
   run(
-    `INSERT INTO library_settings (id, enforce_shift_window, updated_at) VALUES (1, ?, datetime('now'))
-     ON CONFLICT(id) DO UPDATE SET enforce_shift_window = excluded.enforce_shift_window, updated_at = excluded.updated_at`,
-    [body.enforce_shift_window],
+    `INSERT INTO library_settings (id, enforce_shift_window, auto_close_shift_visits, updated_at) VALUES (1, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET enforce_shift_window = excluded.enforce_shift_window,
+       auto_close_shift_visits = excluded.auto_close_shift_visits, updated_at = excluded.updated_at`,
+    [body.enforce_shift_window, body.auto_close_shift_visits],
   );
   res.json(checkInSettingsFor());
 });

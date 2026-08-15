@@ -343,6 +343,143 @@ export function time(value) {
   return `${display}:${String(minutes).padStart(2, '0')} ${suffix}`;
 }
 
+/* -------------------------------------------------------------- date field */
+
+const isoToDisplay = (iso) => {
+  if (!iso || iso.length < 10) return '';
+  const [year, month, day] = iso.split('-');
+  return `${day}/${month}/${year}`;
+};
+
+const displayToIso = (display) => {
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(display.trim());
+  if (!match) return '';
+  const [, d, m, y] = match;
+  const day = Number(d);
+  const month = Number(m);
+  const probe = new Date(`${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`);
+  if (Number.isNaN(probe.getTime()) || probe.getDate() !== day || probe.getMonth() + 1 !== month) return '';
+  return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function calendarGrid(viewYear, viewMonth, selectedIso, onPick) {
+  const firstOfMonth = new Date(viewYear, viewMonth, 1);
+  const startOffset = (firstOfMonth.getDay() + 6) % 7; // week starts Monday
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const todayIso = today();
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(h('span', { class: 'date-cell empty' }));
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const classes = ['date-cell'];
+    if (iso === selectedIso) classes.push('selected');
+    if (iso === todayIso) classes.push('today');
+    cells.push(
+      h('button', { type: 'button', class: classes.join(' '), onclick: () => onPick(iso) }, String(day)),
+    );
+  }
+
+  return h('div', { class: 'date-grid' }, ...cells);
+}
+
+/**
+ * A text field that always shows and accepts DD/MM/YYYY, backed by a real
+ * ISO value so every existing caller — buildForm's `values[name] = input.value`,
+ * direct `input.value = x` assignment, `onchange: (e) => e.target.value` — keeps
+ * working exactly as it did with a native `<input type="date">`. The native
+ * picker's on-screen format follows OS/browser locale and can't be forced to
+ * DD/MM/YYYY from app code, so this replaces it outright rather than fighting it.
+ */
+export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchange, class: className } = {}) {
+  let isoValue = value || '';
+  const listeners = new Set();
+  if (typeof onchange === 'function') listeners.add(onchange);
+
+  const text = h('input', { type: 'text', inputmode: 'numeric', placeholder, autocomplete: 'off' });
+  const toggle = h('button', { type: 'button', class: 'date-toggle', 'aria-label': 'Open calendar' }, renderIcon('calendar', { size: 16 }));
+  const panel = h('div', { class: 'date-panel', style: 'display:none' });
+  const wrap = h('div', { class: `date-field${className ? ` ${className}` : ''}` }, text, toggle, panel);
+
+  const fireChange = () => {
+    for (const fn of listeners) fn({ target: wrap });
+  };
+
+  const setIso = (iso, { silent = false } = {}) => {
+    isoValue = iso || '';
+    text.value = isoToDisplay(isoValue);
+    if (!silent) fireChange();
+  };
+
+  let view = (() => {
+    const base = isoValue ? new Date(`${isoValue}T00:00:00`) : new Date(`${today()}T00:00:00`);
+    return { year: base.getFullYear(), month: base.getMonth() };
+  })();
+
+  function renderPanel() {
+    const header = h(
+      'div',
+      { class: 'date-panel-head' },
+      h('button', { type: 'button', class: 'icon-btn', onclick: () => { view = view.month === 0 ? { year: view.year - 1, month: 11 } : { ...view, month: view.month - 1 }; renderPanel(); } }, '‹'),
+      h('span', {}, `${MONTH_NAMES[view.month]} ${view.year}`),
+      h('button', { type: 'button', class: 'icon-btn', onclick: () => { view = view.month === 11 ? { year: view.year + 1, month: 0 } : { ...view, month: view.month + 1 }; renderPanel(); } }, '›'),
+    );
+    const weekdays = h('div', { class: 'date-grid date-weekdays' }, ...['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => h('span', {}, d)));
+    const grid = calendarGrid(view.year, view.month, isoValue, (iso) => {
+      setIso(iso);
+      closePanel();
+    });
+    clear(panel).append(header, weekdays, grid);
+  }
+
+  function openPanel() {
+    const base = isoValue ? new Date(`${isoValue}T00:00:00`) : new Date(`${today()}T00:00:00`);
+    view = { year: base.getFullYear(), month: base.getMonth() };
+    renderPanel();
+    panel.style.display = 'block';
+    document.addEventListener('mousedown', onOutsideClick, true);
+  }
+
+  function closePanel() {
+    panel.style.display = 'none';
+    document.removeEventListener('mousedown', onOutsideClick, true);
+  }
+
+  function onOutsideClick(event) {
+    if (!wrap.contains(event.target)) closePanel();
+  }
+
+  toggle.addEventListener('click', () => {
+    if (panel.style.display === 'none') openPanel();
+    else closePanel();
+  });
+
+  text.addEventListener('change', () => {
+    if (text.value.trim() === '') {
+      setIso('');
+      return;
+    }
+    const iso = displayToIso(text.value);
+    if (iso) setIso(iso);
+    else text.value = isoToDisplay(isoValue); // invalid typed text: revert to last good value
+  });
+
+  setIso(isoValue, { silent: true });
+  if (name) wrap.dataset.name = name;
+
+  Object.defineProperty(wrap, 'value', {
+    get: () => isoValue,
+    set: (v) => setIso(v, { silent: true }),
+  });
+  Object.defineProperty(wrap, 'name', { value: name, writable: true });
+  wrap.addEventListener = (type, fn) => { if (type === 'change') listeners.add(fn); };
+  wrap.focus = () => text.focus();
+
+  return wrap;
+}
+
 export function relativeDays(isoDate) {
   if (!isoDate) return null;
   const target = new Date(`${String(isoDate).slice(0, 10)}T00:00:00`);
@@ -517,6 +654,8 @@ export function buildForm(fields, { onSubmit, submitLabel = 'Save', wide = false
       );
     } else if (field.type === 'textarea') {
       input = h('textarea', { name: field.name, placeholder: field.placeholder || '' }, field.value ?? '');
+    } else if (field.type === 'date') {
+      input = dateField({ name: field.name, value: field.value ?? '' });
     } else {
       input = h('input', {
         name: field.name,

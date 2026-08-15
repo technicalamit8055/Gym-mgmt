@@ -615,6 +615,12 @@ const MIGRATIONS = [
   },
   // UPSC/NEET/JEE — the category's top filter on a student roster.
   (db) => ensureColumn(db, 'members', 'exam_target', 'TEXT'),
+  // Off by default: a gym batch's end time used to auto-checkout anyone still
+  // inside the instant it passed (see autoCloseFinishedVisits() in
+  // maintenance.js), which surprised staff when a member was simply running
+  // late leaving. Existing tenants keep today's behaviour off; front desk now
+  // checks people out by hand from "in the gym now".
+  (db) => ensureColumn(db, 'library_settings', 'auto_close_shift_visits', 'INTEGER NOT NULL DEFAULT 0'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

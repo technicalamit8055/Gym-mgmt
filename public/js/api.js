@@ -289,6 +289,7 @@ export const api = {
   bulkCreateSeats: (payload) => request('POST', '/seats/bulk', payload),
   updateSeat: (id, payload) => request('PATCH', `/seats/${id}`, payload),
   deleteSeat: (id) => request('DELETE', `/seats/${id}`),
+  bulkDeleteSeats: (seatIds) => request('DELETE', '/seats/bulk', { seat_ids: seatIds }),
   allocateSeat: (id, payload) => request('POST', `/seats/${id}/allocate`, payload),
   releaseSeat: (id, payload) => request('POST', `/seats/${id}/release`, payload),
   transferSeat: (id, payload) => request('POST', `/seats/${id}/transfer`, payload),

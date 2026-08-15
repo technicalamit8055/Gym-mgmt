@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { addDays, barChart, clear, date, fullName, h, labelledControl, lineChart, money, table, today, toast } from '../ui.js';
+import { addDays, barChart, clear, date, dateField, fullName, h, labelledControl, lineChart, money, table, today, toast } from '../ui.js';
 import { isLibrary } from '../vertical.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -28,19 +28,15 @@ export async function renderReports({ setActions }) {
     ),
   );
 
-  const fromInput = h('input', {
-    type: 'date',
+  const fromInput = dateField({
     value: state.from,
-    style: 'width:auto',
     onchange: (e) => {
       state.from = e.target.value;
       render();
     },
   });
-  const toInput = h('input', {
-    type: 'date',
+  const toInput = dateField({
     value: state.to,
-    style: 'width:auto',
     onchange: (e) => {
       state.to = e.target.value;
       render();

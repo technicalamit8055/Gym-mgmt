@@ -141,7 +141,10 @@ function loadJsQr() {
 
 /** Lets an admin/manager require a check-in to fall inside the member's
  * assigned shift/batch/session — off by default, see enforce_shift_window
- * in src/checkin.js. */
+ * in src/checkin.js. Also controls whether a finished shift auto-checks a
+ * member out (auto_close_shift_visits) — off by default, so a member still
+ * on the floor after their batch's end time is never silently marked out;
+ * staff check them out by hand from "in the gym now" instead. */
 async function openCheckInSettingsForm() {
   const settings = await api.attendanceSettings();
 
@@ -158,11 +161,25 @@ async function openCheckInSettingsForm() {
         ],
         hint: 'Applies to members with a shift/batch/session assigned. Members with no shift assigned are never restricted.',
       },
+      {
+        name: 'auto_close_shift_visits',
+        label: 'Auto checkout when a member’s shift ends',
+        type: 'select',
+        value: String(settings.auto_close_shift_visits ?? 0),
+        options: [
+          { value: '0', label: 'Off — check out manually from "In the gym now"' },
+          { value: '1', label: 'On — check out automatically once the shift’s hours end' },
+        ],
+        hint: 'Off by default. When off, a member stays checked in until front desk checks them out.',
+      },
     ],
     {
       submitLabel: 'Save',
       onSubmit: async (values) => {
-        await api.updateAttendanceSettings({ enforce_shift_window: values.enforce_shift_window === '1' });
+        await api.updateAttendanceSettings({
+          enforce_shift_window: values.enforce_shift_window === '1',
+          auto_close_shift_visits: values.auto_close_shift_visits === '1',
+        });
         closeModal();
         toast('Check-in settings saved');
       },

@@ -900,7 +900,18 @@ body[data-vertical='library'] .stat,
 .seatmap-row { display: flex; align-items: center; gap: 12px; padding: 3px 4px; border-radius: 8px; }
 .seatmap-row:hover { background: var(--surface-2); }
 .seatmap-row-label { width: 22px; flex: none; color: var(--muted); font-size: 12px; font-weight: 700; text-align: center; }
+.seatmap-row-label.pickable { cursor: pointer; border-radius: 6px; transition: background 0.12s ease, color 0.12s ease; }
+.seatmap-row-label.pickable:hover { background: var(--brand); color: #fff; }
 .seatmap-row-grid { display: grid; grid-template-columns: repeat(60, 42px); gap: 8px; }
+
+/* Select-mode column header: one button per used col_index, sat above the
+   grid at the same grid-column as its seats so it lines up visually. */
+.seatmap-col-picker {
+  width: 42px; height: 22px; border-radius: 6px; border: 1px dashed var(--border);
+  background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.seatmap-col-picker:hover { background: var(--brand); border-color: var(--brand); color: #fff; }
 
 .seat-tile {
   width: 42px; height: 44px; border-radius: 9px; border: 1px solid var(--border);
@@ -933,6 +944,18 @@ body[data-vertical='library'] .stat,
 .seat-tile.editing::after {
   content: ''; position: absolute; inset: -4px; border-radius: 11px;
   border: 1px dashed var(--brand); pointer-events: none;
+}
+/* Select-seats mode: a checked-off tile gets a solid brand fill instead of
+   the dashed editing outline, so "picked for deletion" reads at a glance. */
+.seat-tile.selected {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+.seat-tile.selected::after { border-style: solid; border-color: #fff; }
+
+.bulk-select-bar {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; margin: 0 0 16px;
 }
 
 /* ------------------------------------------------------- live seat map */
@@ -1916,5 +1939,93 @@ body[data-mode='light'] .modal-backdrop {
 body[data-mode='light'] .login {
   background: radial-gradient(1000px 600px at 15% -10%, var(--brand-glow), transparent 60%), var(--bg);
 }
+
+/* ---------------------------------------------------------------- date field */
+
+/* Replaces the native <input type="date">, whose on-screen digit order
+   follows OS/browser locale and can't be forced to DD/MM/YYYY from app code. */
+.date-field {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  max-width: 160px;
+}
+.form-grid .date-field { max-width: none; }
+.date-field input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  padding-right: 36px;
+}
+.date-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.date-toggle:hover { background: var(--surface-2); color: var(--text); }
+.date-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.date-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
+  padding: 12px;
+  width: 260px;
+}
+.date-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.date-panel-head .icon-btn {
+  font-size: 16px;
+  padding: 4px 9px;
+}
+.date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.date-weekdays {
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.date-weekdays span { padding: 4px 0; }
+.date-cell {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.date-cell:hover { background: var(--surface); border-color: var(--border); }
+.date-cell.today { border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.date-cell.selected { background: var(--brand); color: #fff; border-color: var(--brand); }
+.date-cell.empty { cursor: default; }
 
 

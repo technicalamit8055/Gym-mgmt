@@ -22,8 +22,12 @@ export function expireOverdueSubscriptions() {
 
 /**
  * Closes any open visit whose shift has ended for the day the visit started.
- * Gym-only: a gym batch is a work shift with a real end time a member is
- * expected to leave by, so auto-closing at that instant is the right default.
+ * Gym-only, and off unless the gym opts in via
+ * library_settings.auto_close_shift_visits (default 0): a gym batch is a work
+ * shift with a real end time a member is *expected* to leave by, but plenty of
+ * members linger past it, and finding themselves auto-checked-out while still
+ * on the gym floor was a recurring surprise for staff. Front desk checks
+ * people out by hand from "in the gym now" unless this is turned on.
  * A library seat, by contrast, is time the student paid for and is free to
  * leave early or stay put in — SeatBook never auto-checks anyone out, on
  * purpose, so a student's sitting only ends when they scan out themselves
@@ -55,6 +59,7 @@ export function expireOverdueSubscriptions() {
  */
 export function autoCloseFinishedVisits() {
   if (moduleEnabled('seats')) return 0;
+  if (!get('SELECT auto_close_shift_visits FROM library_settings WHERE id = 1')?.auto_close_shift_visits) return 0;
 
   const [toLocal, toUtc] = localtimeModifiers();
   const shiftEndAt =

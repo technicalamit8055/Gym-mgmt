@@ -3,6 +3,7 @@ import {
   clear,
   confirmDialog,
   date,
+  dateField,
   expiryLabel,
   fullName,
   h,
@@ -306,17 +307,13 @@ export async function renderBilling({ setActions, reload }) {
     );
   }
 
-  const dateFrom = h('input', {
-    type: 'date',
-    style: 'width:auto',
+  const dateFrom = dateField({
     onchange: (event) => {
       state.from = event.target.value;
       render();
     },
   });
-  const dateTo = h('input', {
-    type: 'date',
-    style: 'width:auto',
+  const dateTo = dateField({
     onchange: (event) => {
       state.to = event.target.value;
       render();

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { MANAGES_BILLING, requireAuth, requireRole } from '../auth.js';
-import { all, get, run } from '../db.js';
+import { all, get, run, tx } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import {
   allocateSeat,
@@ -181,6 +181,40 @@ seatRoutes.patch('/:id', requireRole(...MANAGES_BILLING), (req, res) => {
     id,
   ]);
   res.json(get('SELECT * FROM seats WHERE id = ?', [id]));
+});
+
+/**
+ * The teardown counterpart to POST /bulk — clearing out a hall laid out
+ * wrong beats retiring 120 desks one at a time. Same retire-if-referenced
+ * rule as the single delete below, just applied to a whole batch inside one
+ * transaction so the count reported back always matches what actually
+ * happened to the database.
+ */
+seatRoutes.delete('/bulk', requireRole(...MANAGES_BILLING), (req, res) => {
+  const ids = Array.isArray(req.body?.seat_ids) ? [...new Set(req.body.seat_ids.map(Number))] : [];
+  if (!ids.length) throw badRequest('No seats to delete');
+  if (ids.length > 2000) throw badRequest('That is too many seats for one request');
+
+  const found = all(`SELECT id FROM seats WHERE id IN (${ids.map(() => '?').join(', ')})`, ids);
+  if (!found.length) throw notFound('Seat not found');
+
+  const result = tx(() => {
+    let deleted = 0;
+    let retired = 0;
+    for (const { id } of found) {
+      const hasHistory = get('SELECT COUNT(*) AS n FROM seat_allocations WHERE seat_id = ?', [id]).n > 0;
+      if (hasHistory) {
+        run("UPDATE seats SET status = 'retired' WHERE id = ?", [id]);
+        retired += 1;
+      } else {
+        run('DELETE FROM seats WHERE id = ?', [id]);
+        deleted += 1;
+      }
+    }
+    return { deleted, retired };
+  });
+
+  res.json({ ok: true, requested: ids.length, not_found: ids.length - found.length, ...result });
 });
 
 /** Retires rather than deletes once a seat has any allocation history — same

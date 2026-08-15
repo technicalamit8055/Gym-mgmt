@@ -255,7 +255,35 @@ describe('gym sessions', () => {
     assert.equal((await call('PATCH', '/api/members/2', { session_id: '' })).status, 200);
   });
 
-  it('auto-checks a member out once their assigned session has ended', async () => {
+  it('leaves a member checked in past their assigned session end by default', async () => {
+    // A session that ended earlier *today, in local wall-clock terms* — see
+    // the "auto-checks a member out" test below for why the clamping.
+    const now = new Date();
+    const endMinutes = Math.max(now.getHours() * 60 + now.getMinutes() - 1, 1);
+    const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+
+    const session = await call('POST', '/api/sessions', { name: 'Already Over (Default)', start_time: '00:00', end_time: endTime });
+    assert.equal(session.status, 201);
+
+    assert.equal((await call('POST', '/api/subscriptions', { member_id: 2, plan_id: 1 })).status, 201);
+    assert.equal((await call('PATCH', '/api/members/2', { session_id: session.body.id })).status, 200);
+
+    const checkedIn = await call('POST', '/api/attendance/check-in', { member_id: 2 });
+    assert.equal(checkedIn.status, 201);
+    assert.equal(checkedIn.body.action, 'checked_in');
+
+    // auto_close_shift_visits is off by default — the sweep must not close
+    // this visit even though the session ended and the sweep runs lazily on
+    // this very read.
+    const open = await call('GET', '/api/attendance?member_id=2&open=true');
+    assert.equal(open.body.items.length, 1, 'a visit must stay open past shift end unless auto-close is turned on');
+
+    await call('POST', '/api/attendance/check-out', { member_id: 2 });
+  });
+
+  it('auto-checks a member out once their assigned session has ended, when auto-close is turned on', async () => {
+    assert.equal((await call('PUT', '/api/attendance/settings', { auto_close_shift_visits: true })).status, 200);
+
     // A session that ended earlier *today, in local wall-clock terms*.
     //
     // Naively subtracting five minutes from now breaks in the first few minutes
@@ -272,7 +300,6 @@ describe('gym sessions', () => {
     const session = await call('POST', '/api/sessions', { name: 'Already Over', start_time: '00:00', end_time: endTime });
     assert.equal(session.status, 201);
 
-    assert.equal((await call('POST', '/api/subscriptions', { member_id: 2, plan_id: 1 })).status, 201);
     assert.equal((await call('PATCH', '/api/members/2', { session_id: session.body.id })).status, 200);
 
     const checkedIn = await call('POST', '/api/attendance/check-in', { member_id: 2 });
@@ -297,6 +324,9 @@ describe('gym sessions', () => {
       Math.abs(closedAt.getTime() - expectedClose.getTime()) < 65_000,
       `expected check_out near ${expectedClose.toISOString()}, got ${closedAt.toISOString()}`,
     );
+
+    // Leave auto-close off for every other test in this file.
+    await call('PUT', '/api/attendance/settings', { auto_close_shift_visits: false });
   });
 });
 

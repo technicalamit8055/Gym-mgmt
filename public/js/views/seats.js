@@ -6,6 +6,7 @@ import {
   clear,
   closeModal,
   confirmDialog,
+  dateField,
   fullName,
   h,
   initials,
@@ -881,7 +882,7 @@ async function openSeatEditForm({ seat, zones, onSaved }) {
   });
 }
 
-function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
+function seatTile(seat, cellsByKey, sessionId, editMode, handlers, selectMode, selected) {
   const cell = cellsByKey.get(`${seat.id}:${sessionId}`);
   let stateClass = 'vacant';
   if (seat.status !== 'available') stateClass = 'oos';
@@ -891,11 +892,12 @@ function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
   return h(
     'button',
     {
-      class: `seat-tile ${stateClass}${editMode && seat.status === 'available' ? ' editing' : ''}`,
+      class: `seat-tile ${stateClass}${editMode && seat.status === 'available' ? ' editing' : ''}${selected ? ' selected' : ''}`,
       type: 'button',
       style,
-      title: cell ? `${cell.member_name} (${cell.member_code}) — until ${cell.end_date}` : seat.code,
+      title: selectMode ? `${seat.code} — click to ${selected ? 'deselect' : 'select'}` : cell ? `${cell.member_name} (${cell.member_code}) — until ${cell.end_date}` : seat.code,
       onclick: () => {
+        if (selectMode) return handlers.onToggleSelect(seat);
         if (editMode) return handlers.onEdit(seat);
         if (seat.status !== 'available') {
           toast('This seat is out of service', 'error');
@@ -909,7 +911,7 @@ function seatTile(seat, cellsByKey, sessionId, editMode, handlers) {
   );
 }
 
-function renderZone(zone, seats, cellsByKey, sessionId, editMode, handlers) {
+function renderZone(zone, seats, cellsByKey, sessionId, editMode, handlers, selectMode, selectedIds) {
   const rows = new Map();
   for (const seat of seats) {
     const key = seat.row_label || '';
@@ -920,6 +922,37 @@ function renderZone(zone, seats, cellsByKey, sessionId, editMode, handlers) {
   const availableSeats = seats.filter((s) => s.status === 'available');
   const occupiedCount = availableSeats.filter((s) => cellsByKey.has(`${s.id}:${sessionId}`)).length;
 
+  // Only offered in select mode: a header of column numbers above the grid,
+  // one click ticks every seat in that column across every row in this zone —
+  // the fast path for "delete the whole back column" instead of tile-by-tile.
+  const columns = selectMode
+    ? [...new Set(seats.map((s) => s.col_index).filter((c) => Number.isInteger(c)))].sort((a, b) => a - b)
+    : [];
+  const columnHeader = columns.length
+    ? h(
+        'div',
+        { class: 'seatmap-row' },
+        h('div', { class: 'seatmap-row-label' }),
+        h(
+          'div',
+          { class: 'seatmap-row-grid' },
+          columns.map((col) =>
+            h(
+              'button',
+              {
+                class: 'seatmap-col-picker',
+                type: 'button',
+                style: `grid-column:${col}`,
+                title: `Select column ${col}`,
+                onclick: () => handlers.onToggleGroup(seats.filter((s) => s.col_index === col)),
+              },
+              String(col),
+            ),
+          ),
+        ),
+      )
+    : null;
+
   return h(
     'div',
     { class: 'seatmap-zone' },
@@ -929,12 +962,27 @@ function renderZone(zone, seats, cellsByKey, sessionId, editMode, handlers) {
       zone?.name || 'Unassigned',
       availableSeats.length ? h('span', { class: 'seatmap-zone-count' }, `${occupiedCount}/${availableSeats.length}`) : null,
     ),
+    columnHeader,
     [...rows.entries()].map(([rowLabel, rowSeats]) =>
       h(
         'div',
         { class: 'seatmap-row' },
-        rowLabel ? h('div', { class: 'seatmap-row-label' }, rowLabel) : null,
-        h('div', { class: 'seatmap-row-grid' }, rowSeats.map((seat) => seatTile(seat, cellsByKey, sessionId, editMode, handlers))),
+        rowLabel
+          ? h(
+              'div',
+              {
+                class: `seatmap-row-label${selectMode ? ' pickable' : ''}`,
+                title: selectMode ? `Select row ${rowLabel}` : undefined,
+                onclick: selectMode ? () => handlers.onToggleGroup(rowSeats) : undefined,
+              },
+              rowLabel,
+            )
+          : h('div', { class: 'seatmap-row-label' }),
+        h(
+          'div',
+          { class: 'seatmap-row-grid' },
+          rowSeats.map((seat) => seatTile(seat, cellsByKey, sessionId, editMode, handlers, selectMode, selectedIds.has(seat.id))),
+        ),
       ),
     ),
   );
@@ -944,7 +992,7 @@ export async function renderSeats({ setActions, navigate, params }) {
   // A dashboard deep link (#/seats/<shift-id>) pre-selects that shift's tab;
   // otherwise the map defaults to the first shift, same as a plain #/seats visit.
   const requestedShift = params?.[0] ? Number(params[0]) : null;
-  const state = { sessionId: requestedShift, on: today(), editMode: false };
+  const state = { sessionId: requestedShift, on: today(), editMode: false, selectMode: false, selectedIds: new Set() };
   const container = h('div', {});
 
   async function load() {
@@ -983,9 +1031,30 @@ export async function renderSeats({ setActions, navigate, params }) {
     setActions(
       h(
         'button',
-        { class: `btn sm ${state.editMode ? 'primary' : 'ghost'}`, onclick: () => { state.editMode = !state.editMode; render(map); } },
+        {
+          class: `btn sm ${state.editMode ? 'primary' : 'ghost'}`,
+          onclick: () => {
+            state.editMode = !state.editMode;
+            if (!state.editMode) { state.selectMode = false; state.selectedIds.clear(); }
+            render(map);
+          },
+        },
         state.editMode ? '✓ Editing layout' : 'Edit layout',
       ),
+      state.editMode
+        ? h(
+            'button',
+            {
+              class: `btn sm ${state.selectMode ? 'primary' : 'ghost'}`,
+              onclick: () => {
+                state.selectMode = !state.selectMode;
+                if (!state.selectMode) state.selectedIds.clear();
+                render(map);
+              },
+            },
+            state.selectMode ? '✓ Selecting seats' : 'Select seats',
+          )
+        : null,
       h('button', { class: 'btn sm ghost', onclick: () => openSeatBulkForm({ zones: map.zones, onSaved: load }) }, '+ Add seats'),
     );
 
@@ -1008,8 +1077,7 @@ export async function renderSeats({ setActions, navigate, params }) {
           h('div', { class: 'seatmap-tab-bar' }, h('i', { style: `width:${pct}%` })),
         );
       }),
-      h('input', {
-        type: 'date',
+      dateField({
         value: state.on,
         class: 'seatmap-date',
         onchange: (e) => { state.on = e.target.value || today(); load(); },
@@ -1050,6 +1118,23 @@ export async function renderSeats({ setActions, navigate, params }) {
       onOccupied: (cell, seat) =>
         openSeatDetailModal({ cell, seat, sessionId: state.sessionId, shiftName: currentShift?.name || '', onSaved: load, navigate }),
       onEdit: (seat) => openSeatEditForm({ seat, zones: map.zones, onSaved: load }),
+      onToggleSelect: (seat) => {
+        if (state.selectedIds.has(seat.id)) state.selectedIds.delete(seat.id);
+        else state.selectedIds.add(seat.id);
+        render(map);
+      },
+      // Shared by row-label and column-header clicks: if every seat in the
+      // group is already selected, the click clears them; otherwise it fills
+      // in whichever are missing. Matches how "select all" checkboxes behave
+      // elsewhere, so one click always does something useful either way.
+      onToggleGroup: (groupSeats) => {
+        const allSelected = groupSeats.every((s) => state.selectedIds.has(s.id));
+        for (const s of groupSeats) {
+          if (allSelected) state.selectedIds.delete(s.id);
+          else state.selectedIds.add(s.id);
+        }
+        render(map);
+      },
     };
 
     const zoneGroups = new Map();
@@ -1063,11 +1148,66 @@ export async function renderSeats({ setActions, navigate, params }) {
       { class: 'seatmap-card card' },
       [...zoneGroups.entries()].map(([key, seats]) => {
         const zone = key === 'none' ? null : map.zones.find((z) => z.id === Number(key));
-        return renderZone(zone, seats, cellsByKey, state.sessionId, state.editMode, handlers);
+        return renderZone(zone, seats, cellsByKey, state.sessionId, state.editMode, handlers, state.selectMode, state.selectedIds);
       }),
     );
 
-    container.append(tabs, stats, legend, hall);
+    const bulkBar = state.selectMode
+      ? h(
+          'div',
+          { class: 'bulk-select-bar' },
+          h('strong', {}, `${state.selectedIds.size} seat${state.selectedIds.size === 1 ? '' : 's'} selected`),
+          h('span', { class: 'muted', style: 'font-size:12px' }, 'Click a row letter or column number to select the whole line'),
+          h('div', { class: 'spacer' }),
+          h(
+            'button',
+            {
+              class: 'btn sm ghost',
+              onclick: () => { map.seats.forEach((s) => state.selectedIds.add(s.id)); render(map); },
+            },
+            'Select all',
+          ),
+          h(
+            'button',
+            {
+              class: 'btn sm ghost',
+              disabled: !state.selectedIds.size,
+              onclick: () => { state.selectedIds.clear(); render(map); },
+            },
+            'Clear',
+          ),
+          h(
+            'button',
+            {
+              class: 'btn sm danger',
+              disabled: !state.selectedIds.size,
+              onclick: () => {
+                const ids = [...state.selectedIds];
+                const codes = map.seats.filter((s) => ids.includes(s.id)).map((s) => s.code);
+                confirmDialog({
+                  title: `Delete ${ids.length} seat${ids.length === 1 ? '' : 's'}?`,
+                  message: `${codes.slice(0, 12).join(', ')}${codes.length > 12 ? `, +${codes.length - 12} more` : ''}. Seats with allocation history are retired instead of removed.`,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                  onConfirm: async () => {
+                    const res = await api.bulkDeleteSeats(ids);
+                    state.selectedIds.clear();
+                    state.selectMode = false;
+                    const parts = [];
+                    if (res.deleted) parts.push(`${res.deleted} deleted`);
+                    if (res.retired) parts.push(`${res.retired} retired (had history)`);
+                    toast(parts.join(', ') || 'No seats changed');
+                    await load();
+                  },
+                });
+              },
+            },
+            'Delete selected',
+          ),
+        )
+      : null;
+
+    append(container, [tabs, stats, legend, bulkBar, hall]);
   }
 
   container.append(h('div', { class: 'empty' }, 'Loading seat map…'));

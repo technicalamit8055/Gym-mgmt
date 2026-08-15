@@ -118,6 +118,41 @@ describe('setting up a hall', () => {
     const still = await call('GET', '/api/seats');
     assert.ok(still.body.items.some((s) => s.id === seat.body.id && s.status === 'retired'));
   });
+
+  it('bulk-deletes a batch of seats, retiring any with allocation history', async () => {
+    const plain = await call('POST', '/api/seats', { code: 'BULKDEL-1' });
+    const withHistory = await call('POST', '/api/seats', { code: 'BULKDEL-2' });
+    const member = await createMember('BulkDel');
+    const morning = await shiftId('Morning');
+
+    await call('POST', `/api/seats/${withHistory.body.id}/allocate`, {
+      session_id: morning,
+      member_id: member,
+      start_date: today(),
+      end_date: addDays(today(), 30),
+    });
+
+    const res = await call('DELETE', '/api/seats/bulk', {
+      seat_ids: [plain.body.id, withHistory.body.id],
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.deleted, 1);
+    assert.equal(res.body.retired, 1);
+
+    const list = await call('GET', '/api/seats');
+    assert.ok(!list.body.items.some((s) => s.id === plain.body.id));
+    assert.ok(list.body.items.some((s) => s.id === withHistory.body.id && s.status === 'retired'));
+  });
+
+  it('refuses a bulk delete with no seat ids', async () => {
+    const res = await call('DELETE', '/api/seats/bulk', { seat_ids: [] });
+    assert.equal(res.status, 400);
+  });
+
+  it('404s a bulk delete when none of the ids exist', async () => {
+    const res = await call('DELETE', '/api/seats/bulk', { seat_ids: [999999] });
+    assert.equal(res.status, 404);
+  });
 });
 
 describe('one seat, many shifts', () => {
