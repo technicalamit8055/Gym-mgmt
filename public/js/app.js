@@ -34,6 +34,7 @@ import { renderWhatsApp } from './views/whatsapp.js';
 import { renderSeats } from './views/seats.js';
 import { renderLockers } from './views/lockers.js';
 import { renderExpenses } from './views/expenses.js';
+import { renderPortal } from './views/portal.js';
 
 /**
  * Built by buildNav()/buildRoutes(), called from boot() once the vertical is
@@ -145,6 +146,16 @@ const PUBLIC_ROUTES = [
   // Public by necessity — someone redeeming a reset link cannot sign in. The
   // pattern allows the trailing `?token=…` the link carries in the hash.
   { pattern: /^\/reset(\?|$)/, title: 'Set a new password', view: renderReset },
+  // The member app: its own sign-in (member code/phone + PIN, a different
+  // credential from any staff login) and its own tab shell. Rendered full-page
+  // like every other entry here — a member has no staff sidebar to sit inside.
+  // Both patterns share one view: renderPortal itself decides sign-in vs. app
+  // shell from whether a member session exists, which is what lets a
+  // just-completed sign-in on /portal/login redraw straight into the app
+  // (ctx.rerender() re-enters this same route) instead of looping back to the
+  // sign-in screen a route-level "always show login" flag would force.
+  { pattern: /^\/portal\/login$/, title: 'Member Sign in', view: renderPortal },
+  { pattern: /^\/portal(\/.*)?$/, title: 'Member Portal', view: renderPortal },
 ];
 
 const root = () => document.getElementById('app');
@@ -257,6 +268,12 @@ function renderLogin(message) {
           : null,
         message ? h('p', { class: 'field-error' }, message) : null,
         form,
+        h(
+          'p',
+          { class: 'muted', style: 'text-align:center;margin-top:14px;font-size:13px' },
+          `${t('member')}? `,
+          h('a', { href: '#/portal' }, `Open the ${t('member')} app →`),
+        ),
       ),
     ),
   );
@@ -680,8 +697,12 @@ async function boot() {
     ROUTES = buildRoutes();
     document.title = `${gymName()} — ${isLibrary() ? 'Study Hall Management' : 'Gym Management'}`;
     // A gym that uploaded a logo installs and appears in the tab strip under
-    // its own brand, not GymBook's barbell.
-    applyGymIcons(platform.tenant?.app_icon_url);
+    // its own brand, not GymBook's barbell. A member landing straight on
+    // #/portal (their normal entry point — a link or QR code from the gym,
+    // not a click-through from the staff app) sees install copy that calls
+    // it "<Gym> Member", matching the distinct manifest applyManifestLink()
+    // picks for that route.
+    applyGymIcons(platform.tenant?.app_icon_url, currentPath().startsWith('/portal') ? `${gymName()} Member` : gymName());
     await dispatch();
     awaitingReconnect = false;
   } catch (err) {
@@ -717,12 +738,21 @@ window.addEventListener('gymbook:signed-out', () => {
   signOut('Your session expired — please sign in again');
 });
 
+// The member portal manages its own session entirely inside views/portal.js —
+// api.js already cleared memberSession by the time this fires, so all that's
+// needed here is to re-enter the portal route, which will now paint its
+// sign-in screen instead of the app shell. A no-op anywhere else: nothing
+// outside the portal depends on a member session.
+window.addEventListener('gymbook:member-signed-out', () => {
+  if (currentPath().startsWith('/portal')) dispatch().catch(renderBootFailure);
+});
+
 // Raised by the settings page after a rename or logo change. Repainting the brand
 // element beats rebuilding the shell and losing scroll position.
 window.addEventListener('gymbook:gym-updated', (event) => {
   platform = { ...platform, tenant: event.detail };
   document.title = `${gymName()} — Gym Management`;
-  applyGymIcons(platform.tenant?.app_icon_url);
+  applyGymIcons(platform.tenant?.app_icon_url, gymName());
   const brand = shell?.nav.querySelector('.brand');
   if (brand) {
     brand.setAttribute('title', gymName());

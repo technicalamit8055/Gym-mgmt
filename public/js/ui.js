@@ -434,17 +434,48 @@ export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchan
     clear(panel).append(header, weekdays, grid);
   }
 
+  // Fixed-position + JS placement (rather than absolute + CSS anchoring) so the
+  // panel escapes any scroll-clipping ancestor (.table-wrap, .seatmap-tabs) and
+  // stays on-screen when the field sits near the right edge of a narrow viewport.
+  function placePanel() {
+    const rect = wrap.getBoundingClientRect();
+    const panelWidth = panel.offsetWidth || 260;
+    const panelHeight = panel.offsetHeight || 300;
+    const margin = 8;
+
+    let left = rect.left;
+    if (left + panelWidth > window.innerWidth - margin) left = window.innerWidth - panelWidth - margin;
+    if (left < margin) left = margin;
+
+    let top = rect.bottom + 6;
+    if (top + panelHeight > window.innerHeight - margin && rect.top - panelHeight - 6 > margin) {
+      top = rect.top - panelHeight - 6;
+    }
+
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  }
+
+  function onReposition() {
+    if (panel.style.display !== 'none') placePanel();
+  }
+
   function openPanel() {
     const base = isoValue ? new Date(`${isoValue}T00:00:00`) : new Date(`${today()}T00:00:00`);
     view = { year: base.getFullYear(), month: base.getMonth() };
     renderPanel();
     panel.style.display = 'block';
+    placePanel();
     document.addEventListener('mousedown', onOutsideClick, true);
+    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onReposition);
   }
 
   function closePanel() {
     panel.style.display = 'none';
     document.removeEventListener('mousedown', onOutsideClick, true);
+    window.removeEventListener('scroll', onReposition, true);
+    window.removeEventListener('resize', onReposition);
   }
 
   function onOutsideClick(event) {

@@ -15,6 +15,7 @@ import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
+import { portalRoutes } from './routes/portal.js';
 import { pwaRoutes } from './routes/pwa.js';
 import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
@@ -96,6 +97,7 @@ export function createApp() {
   app.use('/api/staff', staffRoutes);
   app.use('/api/devices', deviceRoutes);
   app.use('/api/members', memberRoutes);
+  app.use('/api/portal', portalRoutes);
   app.use('/api/plans', planRoutes);
   app.use('/api/subscriptions', subscriptionRoutes);
   app.use('/api/payments', paymentRoutes);

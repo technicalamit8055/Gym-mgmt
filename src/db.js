@@ -621,6 +621,15 @@ const MIGRATIONS = [
   // late leaving. Existing tenants keep today's behaviour off; front desk now
   // checks people out by hand from "in the gym now".
   (db) => ensureColumn(db, 'library_settings', 'auto_close_shift_visits', 'INTEGER NOT NULL DEFAULT 0'),
+
+  /* ------------------------------------------------------- Member portal --- */
+  // A member's own PIN for the self-service portal, scrypt-hashed the same as
+  // a staff password (see hashPassword in auth.js). NULL means the member has
+  // never set one — the portal login route accepts the last 4 digits of their
+  // phone (or member code) as a one-time bootstrap PIN in that case, and
+  // prompts them to set a real one, which is what actually populates this.
+  (db) => ensureColumn(db, 'members', 'portal_pin_hash', 'TEXT'),
+  (db) => ensureColumn(db, 'members', 'last_portal_login', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

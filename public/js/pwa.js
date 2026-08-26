@@ -18,16 +18,26 @@ const BANNER_FLAG = 'has-install-banner';
 /* ---------------------------------------------------------------- manifest */
 
 /**
- * Points <link rel="manifest"> at the tenant-scoped manifest.
+ * Points <link rel="manifest"> at the tenant-scoped manifest — and, while on
+ * the member portal, at that tenant's *member* manifest instead of the staff
+ * one, so a member installing from /#/portal gets an icon that opens back
+ * into the portal rather than the staff dashboard's login screen.
  *
  * Two gyms addressed by path (/g/acme/, /g/pulse/) share one origin, so a
  * single static manifest would give both installs the same name, icon and
- * start_url. The server generates the manifest per gym; this picks the right
- * URL for the address this tab was opened at.
+ * start_url. The server generates the manifest per gym (and per persona);
+ * this picks the right URL for the address this tab was opened at.
+ *
+ * Re-run on every hashchange, not just at load: a browser reads whichever
+ * manifest is linked at the moment install is triggered, and a tab can move
+ * between the staff app and #/portal (e.g. the "Open the member app" link on
+ * the staff login screen) without a full reload in between.
  */
 function applyManifestLink() {
   const link = document.querySelector('link[rel="manifest"]');
-  if (link && pathPrefix) link.href = `${pathPrefix}/manifest.webmanifest`;
+  if (!link || !pathPrefix) return;
+  const isPortal = window.location.hash.replace(/^#/, '').startsWith('/portal');
+  link.href = `${pathPrefix}/${isPortal ? 'portal-manifest.webmanifest' : 'manifest.webmanifest'}`;
 }
 
 /* ------------------------------------------------------------- gym branding */
@@ -47,8 +57,14 @@ const LIBRARY_FAVICONS = [
   { href: '/icons/library/icon-192.png', sizes: '192x192' },
 ];
 
+/** What the install banner/modal/toast call the app. Defaults to the
+ * vertical's own brand until applyGymIcons() names a real gym — set once at
+ * boot from platform.tenant, which is known before any of these can fire. */
+let appName = isLibrary() ? 'SeatBook' : 'GymBook';
+
 /**
- * Swaps in the gym's own logo as the home-screen and tab icon.
+ * Swaps in the gym's own logo as the home-screen and tab icon, and names it
+ * in the install UI instead of the generic GymBook/SeatBook brand.
  *
  * iOS ignores the manifest entirely for "Add to Home Screen" and reads
  * <link rel="apple-touch-icon"> off the live document at the moment you tap it
@@ -61,8 +77,12 @@ const LIBRARY_FAVICONS = [
  *   vertical's own default icon — GymBook's barbell, or SeatBook's book for a
  *   library tenant, rather than always falling back to whatever index.html
  *   happened to declare.
+ * @param {string|null|undefined} name What to call the app in install copy —
+ *   pass the gym's own name (app.js's gymName()) once it's known. Falls back
+ *   to the vertical brand when absent.
  */
-export function applyGymIcons(iconUrl) {
+export function applyGymIcons(iconUrl, name) {
+  appName = name || (isLibrary() ? 'SeatBook' : 'GymBook');
   const defaultAppleIcon = isLibrary() ? LIBRARY_APPLE_ICON : DEFAULT_APPLE_ICON;
   const defaultFavicons = isLibrary()
     ? LIBRARY_FAVICONS.map((f) => h('link', { rel: 'icon', type: 'image/png', ...f }))
@@ -131,14 +151,14 @@ window.addEventListener('appinstalled', () => {
   document.querySelector('.install-banner')?.remove();
   document.body.classList.remove(BANNER_FLAG);
   notify();
-  toast('GymBook is installed — open it from your home screen');
+  toast(`${appName} is installed — open it from your home screen`);
 });
 
 /** iOS has no programmatic install, so the only honest thing to offer is the
  * exact sequence of taps, naming the buttons as Safari labels them. */
 function showIosInstructions() {
   openModal({
-    title: 'Add GymBook to your home screen',
+    title: `Add ${appName} to your home screen`,
     body: h(
       'div',
       { class: 'install-steps' },
@@ -149,7 +169,7 @@ function showIosInstructions() {
         h('li', {}, 'Open this page in ', h('strong', {}, 'Safari'), ' (Chrome on iOS cannot install apps).'),
         h('li', {}, 'Tap the ', h('strong', {}, 'Share'), ' button — the square with an arrow, at the bottom of the screen.'),
         h('li', {}, 'Scroll down and tap ', h('strong', {}, 'Add to Home Screen'), '.'),
-        h('li', {}, 'Tap ', h('strong', {}, 'Add'), '. GymBook then opens full-screen, without the browser bars.'),
+        h('li', {}, 'Tap ', h('strong', {}, 'Add'), `. ${appName} then opens full-screen, without the browser bars.`),
       ),
     ),
   });
@@ -178,7 +198,7 @@ export async function promptInstall() {
   }
 
   openModal({
-    title: 'Install GymBook',
+    title: `Install ${appName}`,
     body: h(
       'div',
       { class: 'install-steps' },
@@ -210,12 +230,12 @@ function maybeShowBanner() {
 
   const banner = h(
     'div',
-    { class: 'install-banner', role: 'region', 'aria-label': 'Install GymBook' },
+    { class: 'install-banner', role: 'region', 'aria-label': `Install ${appName}` },
     h('span', { class: 'install-icon' }, renderIcon('download', { size: 20 })),
     h(
       'div',
       { class: 'install-copy' },
-      h('strong', {}, 'Install GymBook'),
+      h('strong', {}, `Install ${appName}`),
       h('span', { class: 'muted' }, 'Full screen, opens from your home screen, works offline.'),
     ),
     h(
@@ -258,7 +278,7 @@ function offerUpdate(registration) {
   const node = h(
     'div',
     { class: 'toast info toast-update' },
-    h('span', {}, 'A new version of GymBook is ready.'),
+    h('span', {}, `A new version of ${appName} is ready.`),
     h(
       'button',
       {
@@ -349,6 +369,9 @@ function watchConnection() {
 }
 
 applyManifestLink();
+// The manifest link also needs correcting if this tab moves between the
+// staff app and #/portal without a full reload — see applyManifestLink().
+window.addEventListener('hashchange', applyManifestLink);
 registerServiceWorker();
 watchConnection();
 if (isStandalone()) document.body.classList.add('is-installed');

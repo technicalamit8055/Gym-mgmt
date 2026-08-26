@@ -90,6 +90,13 @@ const DESCRIPTIONS = {
   library: 'Seats, shifts, passes, lockers, expenses and student records for your study hall.',
 };
 
+/** For the member-facing manifest — written for the person carrying the
+ * phone, not the gym running it. */
+const PORTAL_DESCRIPTIONS = {
+  gym: 'Your digital membership pass, class schedule, payments and check-ins.',
+  library: 'Your digital seat pass, shifts, payments and attendance.',
+};
+
 const CATEGORIES = {
   gym: ['business', 'productivity', 'health', 'fitness'],
   library: ['business', 'productivity', 'education'],
@@ -154,6 +161,48 @@ function buildManifest(req) {
 }
 
 /**
+ * Builds the manifest a *member* installs from the self-service portal.
+ *
+ * Deliberately its own manifest rather than reusing buildManifest(): the two
+ * personas need different start_urls (a member opening their home-screen icon
+ * must land on /#/portal, never the staff /#/dashboard, which would show them
+ * a staff login screen they have no credentials for) and a distinct `id` so a
+ * gym owner can install both the staff app and hand this one to members
+ * without the second install overwriting the first. Everything that should
+ * match — icons, theme — is shared via the same tenantIcons() the staff
+ * manifest uses, so a member's icon is the same logo the gym uploaded.
+ */
+function buildPortalManifest(req) {
+  const prefix = req.tenantPathPrefix || '';
+  const tenant = req.tenant?.slug === DEFAULT_TENANT_SLUG ? null : req.tenant;
+  const vertical = verticalFor(tenant?.business_type);
+  const gymName = tenant?.gym_name || tenant?.display_name || config.gymName || vertical.brand;
+  const name = `${gymName} Member`;
+  const icons = tenantIcons(tenant, vertical);
+
+  return {
+    id: `${prefix}/portal`,
+    name,
+    short_name: shortName(name),
+    description: PORTAL_DESCRIPTIONS[vertical.key] ?? PORTAL_DESCRIPTIONS.gym,
+    start_url: `${prefix}/#/portal`,
+    // Same scope (and so the same service worker) as the staff manifest —
+    // only the id/start_url/name differ, which is what the manifest spec
+    // uses to tell two related installable apps apart on one origin.
+    scope: `${prefix}/`,
+    display: 'standalone',
+    display_override: ['standalone', 'minimal-ui', 'browser'],
+    orientation: 'any',
+    background_color: THEME_COLOR,
+    theme_color: THEME_COLOR,
+    lang: 'en',
+    dir: 'ltr',
+    categories: CATEGORIES[vertical.key] ?? CATEGORIES.gym,
+    icons,
+  };
+}
+
+/**
  * Mounted ahead of the /api subscription gate on purpose: a gym whose trial
  * lapsed still needs its installed icon to open the page that takes payment.
  */
@@ -163,4 +212,10 @@ pwaRoutes.get('/manifest.webmanifest', (req, res) => {
   // already-installed app on its next launch rather than a week later.
   res.set('Cache-Control', 'no-cache');
   res.json(buildManifest(req));
+});
+
+pwaRoutes.get('/portal-manifest.webmanifest', (req, res) => {
+  res.type('application/manifest+json');
+  res.set('Cache-Control', 'no-cache');
+  res.json(buildPortalManifest(req));
 });

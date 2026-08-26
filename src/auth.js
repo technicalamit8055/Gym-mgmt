@@ -80,10 +80,54 @@ export function readToken(token) {
   }
 }
 
+/**
+ * Member-portal token, for the self-service app a member/student signs into
+ * directly — a different person from any `users` row, and a different shape
+ * of token again: `scope: 'member'` (vs. a staff token's bare `role`, and a
+ * platform token's `scope: 'platform'`), so a token lifted from any one of
+ * the three surfaces is inert on the other two in both directions.
+ */
+export function issueMemberToken(member, tenantSlug) {
+  const payload = b64url(
+    JSON.stringify({
+      scope: 'member',
+      sub: member.id,
+      member_id: member.id,
+      code: member.code,
+      tenant: tenantSlug ?? DEFAULT_TENANT_SLUG,
+      exp: Math.floor(Date.now() / 1000) + config.tokenTtlSeconds,
+    }),
+  );
+  return `${payload}.${sign(payload)}`;
+}
+
+export function requireMemberAuth(req, _res, next) {
+  const header = req.get('authorization') || '';
+  const claims = readToken(header.startsWith('Bearer ') ? header.slice(7) : header);
+  if (!claims || claims.scope !== 'member') {
+    return next(unauthorized('Your session has expired, please sign in again'));
+  }
+
+  const currentTenant = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
+  if (claims.tenant !== currentTenant) {
+    return next(unauthorized('Your session has expired, please sign in again'));
+  }
+
+  const member = get('SELECT * FROM members WHERE id = ?', [claims.sub]);
+  if (!member) return next(unauthorized('This account no longer exists'));
+
+  req.member = member;
+  return next();
+}
+
 export function requireAuth(req, _res, next) {
   const header = req.get('authorization') || '';
   const claims = readToken(header.startsWith('Bearer ') ? header.slice(7) : header);
-  if (!claims) return next(unauthorized('Your session has expired, please sign in again'));
+  // A staff token carries no `scope` at all — only a member token (`'member'`)
+  // and a platform token (`'platform'`) do. Without this check, a member
+  // token's `sub` (a members.id) would be looked up against `users.id` below,
+  // and the two ID spaces both start at 1 and collide constantly.
+  if (!claims || claims.scope) return next(unauthorized('Your session has expired, please sign in again'));
 
   const currentTenant = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
   if (claims.tenant !== currentTenant) {

@@ -75,6 +75,37 @@ export function saveSessionFor(slug, token, user) {
 }
 
 /**
+ * A member's own portal session — a different person from whoever is signed
+ * into the staff app on this same device, so it gets its own storage slot
+ * (scoped by gym the same way `session` is) rather than sharing `session`'s.
+ * A staff session and a member session can be signed in side by side without
+ * either clobbering the other.
+ */
+const MEMBER_TOKEN_KEY = `gymbook.member.token${SCOPE}`;
+const MEMBER_USER_KEY = `gymbook.member.user${SCOPE}`;
+
+export const memberSession = {
+  get token() {
+    return localStorage.getItem(MEMBER_TOKEN_KEY);
+  },
+  get member() {
+    try {
+      return JSON.parse(localStorage.getItem(MEMBER_USER_KEY));
+    } catch {
+      return null;
+    }
+  },
+  save(token, member) {
+    localStorage.setItem(MEMBER_TOKEN_KEY, token);
+    localStorage.setItem(MEMBER_USER_KEY, JSON.stringify(member));
+  },
+  clear() {
+    localStorage.removeItem(MEMBER_TOKEN_KEY);
+    localStorage.removeItem(MEMBER_USER_KEY);
+  },
+};
+
+/**
  * The operator console's own credentials, kept apart from every gym session.
  *
  * A platform token and a gym token are different shapes that the server
@@ -105,10 +136,10 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body, { token, anonymous = false } = {}) {
+async function request(method, path, body, { token, anonymous = false, member = false } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const bearer = token ?? (anonymous ? null : session.token);
+  const bearer = token ?? (member ? memberSession.token : anonymous ? null : session.token);
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
 
   const res = await fetch(`${pathPrefix}/api${path}`, {
@@ -117,13 +148,19 @@ async function request(method, path, body, { token, anonymous = false } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-  // An explicit token means this call is not the gym session's — tearing that
-  // session down over someone else's 401 would sign the user out of a gym
-  // they are still validly signed in to.
-  const ownsGymSession = !token && !anonymous;
+  // An explicit token means this call is not the calling session's own —
+  // tearing that session down over someone else's 401 would sign someone out
+  // of a session they are still validly signed in to.
+  const ownsGymSession = !token && !anonymous && !member;
   if (res.status === 401 && ownsGymSession && !path.startsWith('/auth/login')) {
     session.clear();
     window.dispatchEvent(new CustomEvent('gymbook:signed-out'));
+    throw new ApiError(401, 'Your session expired — please sign in again');
+  }
+  const ownsMemberSession = !token && member;
+  if (res.status === 401 && ownsMemberSession && !path.startsWith('/portal/login')) {
+    memberSession.clear();
+    window.dispatchEvent(new CustomEvent('gymbook:member-signed-out'));
     throw new ApiError(401, 'Your session expired — please sign in again');
   }
 
@@ -336,4 +373,35 @@ export const api = {
   sendWhatsAppBirthday: (memberId) => request('POST', '/whatsapp/send-birthday', { member_id: memberId }),
   sendWhatsAppTest: (payload) => request('POST', '/whatsapp/send-test', payload),
   whatsappLogs: (params) => request('GET', `/whatsapp/logs${query(params)}`),
+
+  // Member self-service portal. `anonymous` on login: a stale member token
+  // from a previous member on this device must not turn a fresh sign-in
+  // attempt into a 401 redirect loop. Every other call is `member: true`,
+  // which reads memberSession.token instead of the staff session's.
+  portal: {
+    login: (identifier, pin) => request('POST', '/portal/login', { identifier, pin }, { anonymous: true }),
+    setPin: (payload) => request('POST', '/portal/pin', payload, { member: true }),
+    me: () => request('GET', '/portal/me', undefined, { member: true }),
+    seat: () => request('GET', '/portal/seat', undefined, { member: true }),
+    pass: () => request('GET', '/portal/pass', undefined, { member: true }),
+    classes: (params) => request('GET', `/portal/classes${query(params)}`, undefined, { member: true }),
+    bookClass: (id, payload) => request('POST', `/portal/classes/${id}/book`, payload, { member: true }),
+    cancelBooking: (id) => request('DELETE', `/portal/classes/bookings/${id}`, undefined, { member: true }),
+    payments: (params) => request('GET', `/portal/payments${query(params)}`, undefined, { member: true }),
+    attendance: (params) => request('GET', `/portal/attendance${query(params)}`, undefined, { member: true }),
+    plans: () => request('GET', '/portal/plans', undefined, { member: true }),
+    downloadReceipt: async (id) => {
+      const res = await fetch(`${pathPrefix}/api/portal/payments/${id}/receipt`, {
+        headers: { Authorization: `Bearer ${memberSession.token}` },
+      });
+      if (!res.ok) throw new ApiError(res.status, 'Could not download the receipt');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Receipt_PAY-${String(id).padStart(5, '0')}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  },
 };
