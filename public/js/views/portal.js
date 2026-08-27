@@ -19,6 +19,7 @@ import {
   today,
 } from '../ui.js';
 import { onInstallChange, promptInstall } from '../pwa.js';
+import * as sound from '../sound.js';
 import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
 
 /**
@@ -90,6 +91,44 @@ function miniStat(icon, value, label) {
 function profileRow(label, value) {
   if (!value) return null;
   return h('div', { class: 'portal-profile-row' }, h('span', { class: 'muted' }, label), h('span', {}, value));
+}
+
+function settingsSwitch(icon, label, checked, onToggle) {
+  return h(
+    'div',
+    { class: 'portal-audio-row' },
+    h('div', { class: 'portal-audio-row-label' }, renderIcon(icon, { size: 15 }), h('span', {}, label)),
+    h(
+      'button',
+      {
+        class: `portal-switch${checked ? ' on' : ''}`,
+        type: 'button',
+        role: 'switch',
+        'aria-checked': String(checked),
+        'aria-label': label,
+        onclick: onToggle,
+      },
+      h('span', { class: 'portal-switch-thumb' }),
+    ),
+  );
+}
+
+function volumeSegmented(current, onPick) {
+  return h(
+    'div',
+    { class: 'portal-segmented' },
+    ...Object.entries(sound.VOLUME_PRESETS).map(([key, value]) =>
+      h(
+        'button',
+        {
+          class: `portal-segment${Math.abs(current - value) < 0.001 ? ' active' : ''}`,
+          type: 'button',
+          onclick: () => onPick(value),
+        },
+        key[0].toUpperCase() + key.slice(1),
+      ),
+    ),
+  );
 }
 
 function seatCard(s) {
@@ -471,40 +510,31 @@ function restTimer() {
   let interval = null;
   let endsAt = 0;
   let total = 0;
-
-  function beep() {
-    // WebAudio rather than an audio file: the app is offline-first and a bundled
-    // sound file is one more asset the service worker has to carry for one beep.
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = new Ctx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.5);
-      setTimeout(() => ctx.close(), 700);
-    } catch {
-      // Muted device, autoplay policy, no WebAudio — the pulse still fires.
-    }
-  }
+  // Runs every 250ms, so a plain "remaining === 3" check would fire the tick
+  // sound up to four times for the same second — this remembers the last
+  // second it already sounded for.
+  let lastTickSecond = null;
 
   function tick() {
     const remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
     label.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
     bar.style.width = `${total ? (remaining / total) * 100 : 0}%`;
     node.classList.toggle('urgent', remaining <= 10 && remaining > 0);
+
+    if (remaining !== lastTickSecond) {
+      lastTickSecond = remaining;
+      if (remaining === 3 || remaining === 2 || remaining === 1) {
+        sound.playRestTick();
+        node.classList.add('tick');
+        setTimeout(() => node.classList.remove('tick'), 220);
+      }
+    }
+
     if (remaining <= 0) {
       clearInterval(interval);
       interval = null;
       node.classList.add('done');
-      beep();
-      if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+      sound.playRestEnd();
       setTimeout(() => stop(), 2500);
     }
   }
@@ -514,7 +544,9 @@ function restTimer() {
     clearInterval(interval);
     total = seconds;
     endsAt = Date.now() + seconds * 1000;
+    lastTickSecond = null;
     node.classList.remove('hidden', 'done');
+    sound.playRestStart();
     tick();
     // Wall-clock driven, not a decrementing counter: a phone that sleeps
     // mid-rest must come back showing the real remaining time.
@@ -578,9 +610,7 @@ const activeSession = {
 
 /** The hero calorie ring: eaten against target, with what is left in the
  * middle — the one number a member opens the Diet tab to read. */
-function calorieRing(eaten, target) {
-  const size = 168;
-  const stroke = 13;
+function calorieRing(eaten, target, { size = 168, stroke = 13, compact = false } = {}) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const pct = target > 0 ? Math.min(eaten / target, 1) : 0;
@@ -589,7 +619,7 @@ function calorieRing(eaten, target) {
 
   return h(
     'div',
-    { class: 'portal-cal-ring' },
+    { class: `portal-cal-ring${compact ? ' sm' : ''}` },
     svg(
       'svg',
       { viewBox: `0 0 ${size} ${size}`, width: size, height: size },
@@ -688,7 +718,8 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
         });
         closeModal();
         toast(`${selected.name} added`);
-        await onAdded();
+        sound.playFoodLogged();
+        await onAdded({ calories: scaled.calories, protein_g: scaled.protein_g });
       } catch (err) {
         toast(err.message || 'Could not log that', 'error');
         addBtn.disabled = false;
@@ -775,7 +806,8 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
                   });
                   closeModal();
                   toast(`${item.food_name} added`);
-                  await onAdded();
+                  sound.playFoodLogged();
+                  await onAdded({ calories: item.calories, protein_g: item.protein_g });
                 } catch (err) {
                   toast(err.message || 'Could not log that', 'error');
                   event.currentTarget.disabled = false;
@@ -823,18 +855,21 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
     {
       submitLabel: `Add to ${mealLabel}`,
       onSubmit: async (values) => {
+        const calories = Number(values.calories || 0);
+        const protein_g = Number(values.protein_g || 0);
         await api.portal.addFoodEntry({
           meal_type: mealType,
           food_name: values.food_name,
-          calories: Number(values.calories || 0),
-          protein_g: Number(values.protein_g || 0),
+          calories,
+          protein_g,
           carbs_g: Number(values.carbs_g || 0),
           fats_g: Number(values.fats_g || 0),
           log_date: logDate,
         });
         closeModal();
         toast('Logged');
-        await onAdded();
+        sound.playFoodLogged();
+        await onAdded({ calories, protein_g });
       },
     },
   );
@@ -891,21 +926,29 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
  * hall's portal, and would decide the Workout/Diet tabs against the wrong
  * product too. Those two only exist for a gym: the fitness module is not part
  * of SeatBook, and their API 404s there.
+ *
+ * Capped at 5 tabs (4 for a library) on purpose. Pass and Pay stay real
+ * screens — TAB_RENDERERS below still has both — but they are reached from
+ * the topbar QR button and Home's quick actions / Profile hub rather than
+ * from a bottom slot, so a gym with Workout and Diet on top of the base set
+ * never has to squeeze seven labels into a thumb-width strip.
  */
 function buildTabs() {
-  const tabs = [
-    { key: 'home', label: 'Home', icon: 'dashboard' },
-    { key: 'pass', label: 'Pass', icon: 'idCard' },
-    { key: 'schedule', label: isLibrary() ? 'Shift' : 'Schedule', icon: isLibrary() ? 'seats' : 'classes' },
-  ];
-  if (!isLibrary()) {
-    tabs.push(
-      { key: 'workout', label: 'Workout', icon: 'weight' },
-      { key: 'diet', label: 'Diet', icon: 'apple' },
-    );
+  if (isLibrary()) {
+    return [
+      { key: 'home', label: 'Home', icon: 'dashboard' },
+      { key: 'pass', label: 'Pass', icon: 'idCard' },
+      { key: 'schedule', label: 'Shift', icon: 'seats' },
+      { key: 'profile', label: 'Profile', icon: 'member' },
+    ];
   }
-  tabs.push({ key: 'pay', label: 'Pay', icon: 'billing' }, { key: 'profile', label: 'Profile', icon: 'member' });
-  return tabs;
+  return [
+    { key: 'home', label: 'Home', icon: 'dashboard' },
+    { key: 'workout', label: 'Workout', icon: 'weight' },
+    { key: 'diet', label: 'Diet', icon: 'apple' },
+    { key: 'schedule', label: 'Schedule', icon: 'classes' },
+    { key: 'profile', label: 'Profile', icon: 'member' },
+  ];
 }
 
 function renderPortalApp(ctx, initialMe) {
@@ -945,7 +988,7 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'button',
           { class: `portal-tab${active === tabDef.key ? ' active' : ''}`, type: 'button', onclick: () => switchTab(tabDef.key) },
-          renderIcon(tabDef.icon, { size: 21 }),
+          renderIcon(tabDef.icon, { size: 22 }),
           h('span', {}, tabDef.label),
         ),
       ),
@@ -973,7 +1016,126 @@ function renderPortalApp(ctx, initialMe) {
     }
   }
 
+  /**
+   * Starts a workout session and jumps to the Workout tab, already logging.
+   * Lives here — not nested inside renderWorkoutTab — so Home's "Start
+   * workout" button can fire the exact same 1-tap flow the Workout tab uses
+   * instead of routing the member through an extra tap into that tab first.
+   */
+  function startWorkoutSession({ name, day, planId, previous }) {
+    const state = {
+      workout_name: name,
+      plan_id: planId ?? null,
+      day_id: day?.id ?? null,
+      started_at: Date.now(),
+      exercises: (day?.exercises ?? []).map((exercise) => ({
+        exercise_name: exercise.exercise_name,
+        muscle_group: exercise.muscle_group,
+        target_sets: exercise.target_sets,
+        target_reps: exercise.target_reps,
+        rest_seconds: exercise.rest_seconds,
+        previous: previous?.[exercise.exercise_name] ?? null,
+        sets: Array.from({ length: exercise.target_sets }, () => ({
+          set_type: 'normal',
+          weight_display: '',
+          weight_kg: 0,
+          reps: '',
+          completed: false,
+        })),
+      })),
+    };
+    activeSession.write(state);
+    switchTab('workout');
+  }
+
   /* -------------------------------------------------------------- Home tab */
+
+  /**
+   * Home's "today" snippet for the fitness add-on: a 1-tap Start Workout card
+   * and a compact calorie ring, so a member with the add-on sees today's plan
+   * without leaving Home. Resolves to null — never a paywall — for a library,
+   * a member without the add-on, or on any fetch hiccup: Home is a dashboard,
+   * not the place to chase someone into an upsell.
+   */
+  async function renderTodaysFocus() {
+    if (isLibrary()) return null;
+    let status;
+    try {
+      status = await api.portal.fitnessStatus();
+    } catch {
+      return null;
+    }
+    if (!status.has_access) return null;
+
+    const [current, dietPlan, dietDayRes] = await Promise.all([
+      api.portal.currentWorkout().catch(() => null),
+      api.portal.currentDiet().catch(() => null),
+      api.portal.dietDay(today()).catch(() => null),
+    ]);
+
+    const cards = [];
+
+    if (current?.today_day) {
+      const groups = [...new Set(current.today_day.exercises.map((e) => e.muscle_group))];
+      cards.push(
+        h(
+          'div',
+          { class: 'portal-focus-card portal-focus-workout' },
+          h('div', { class: 'portal-focus-kicker' }, current.plan.name),
+          h('div', { class: 'portal-focus-title' }, current.today_day.day_name),
+          h(
+            'div',
+            { class: 'portal-focus-chips' },
+            ...groups.slice(0, 4).map((g) => h('span', { class: 'portal-muscle-badge' }, g.replace('_', ' '))),
+            h('span', { class: 'muted' }, `${current.today_day.exercises.length} exercises`),
+          ),
+          h(
+            'button',
+            {
+              class: 'btn primary sm',
+              type: 'button',
+              onclick: () =>
+                startWorkoutSession({
+                  name: current.today_day.day_name,
+                  day: current.today_day,
+                  planId: current.plan.id,
+                  previous: current.previous,
+                }),
+            },
+            renderIcon('play', { size: 14 }),
+            ' Start workout',
+          ),
+        ),
+      );
+    }
+
+    if (dietPlan && dietDayRes) {
+      const targets = dietPlan.targets;
+      const totals = dietDayRes.totals;
+      cards.push(
+        h(
+          'button',
+          { class: 'portal-focus-card portal-focus-diet', type: 'button', onclick: () => switchTab('diet') },
+          calorieRing(totals.calories, targets.target_calories, { size: 84, stroke: 8, compact: true }),
+          h(
+            'div',
+            { class: 'portal-macro-stack' },
+            macroBar('Protein', totals.protein_g, targets.target_protein_g, 'protein'),
+            macroBar('Carbs', totals.carbs_g, targets.target_carbs_g, 'carbs'),
+            macroBar('Fats', totals.fats_g, targets.target_fats_g, 'fats'),
+          ),
+        ),
+      );
+    }
+
+    if (!cards.length) return null;
+    return h(
+      'div',
+      { class: 'portal-section' },
+      h('h3', {}, "Today's focus"),
+      h('div', { class: 'portal-focus-grid' }, ...cards),
+    );
+  }
 
   async function renderTodaySection() {
     if (isLibrary()) {
@@ -1069,7 +1231,7 @@ function renderPortalApp(ctx, initialMe) {
       miniStat('trendUp', me.stats.total_visits, 'Total visits'),
     );
 
-    const todaySection = await renderTodaySection();
+    const [todaysFocus, todaySection] = await Promise.all([renderTodaysFocus(), renderTodaySection()]);
 
     return h(
       'div',
@@ -1082,6 +1244,7 @@ function renderPortalApp(ctx, initialMe) {
       ),
       heroCard,
       quickActions,
+      todaysFocus,
       statsRow,
       todaySection,
     );
@@ -1390,9 +1553,14 @@ function renderPortalApp(ctx, initialMe) {
           onclick: () => {
             set.completed = !set.completed;
             persist();
-            // Ticking a set is what starts the rest clock — that is the moment
-            // the member actually stops lifting.
-            if (set.completed) rest.start(exercise.rest_seconds || 90);
+            if (set.completed) {
+              sound.playSetComplete();
+              // Ticking a set is what starts the rest clock — that is the
+              // moment the member actually stops lifting.
+              rest.start(exercise.rest_seconds || 90);
+            } else {
+              sound.playSetUncheck();
+            }
             paint();
           },
         },
@@ -1685,6 +1853,7 @@ function renderPortalApp(ctx, initialMe) {
 
       teardown();
       activeSession.clear();
+      sound.playWorkoutComplete(res.prs && res.prs.length > 0);
       openSummary(res);
       await onFinish();
     }
@@ -1770,6 +1939,20 @@ function renderPortalApp(ctx, initialMe) {
             h(
               'button',
               {
+                class: 'portal-sound-toggle',
+                type: 'button',
+                'aria-label': sound.getSoundEnabled() ? 'Mute sounds' : 'Unmute sounds',
+                title: sound.getSoundEnabled() ? 'Mute sounds' : 'Unmute sounds',
+                onclick: () => {
+                  sound.setSoundEnabled(!sound.getSoundEnabled());
+                  paint();
+                },
+              },
+              renderIcon(sound.getSoundEnabled() ? 'volume' : 'volumeX', { size: 15 }),
+            ),
+            h(
+              'button',
+              {
                 class: 'btn sm ghost',
                 type: 'button',
                 onclick: () =>
@@ -1835,31 +2018,8 @@ function renderPortalApp(ctx, initialMe) {
 
     const body = h('div', { class: 'portal-tab-body' });
 
-    const startSession = (name, day) => {
-      const state = {
-        workout_name: name,
-        plan_id: current.plan?.id ?? null,
-        day_id: day?.id ?? null,
-        started_at: Date.now(),
-        exercises: (day?.exercises ?? []).map((exercise) => ({
-          exercise_name: exercise.exercise_name,
-          muscle_group: exercise.muscle_group,
-          target_sets: exercise.target_sets,
-          target_reps: exercise.target_reps,
-          rest_seconds: exercise.rest_seconds,
-          previous: current.previous?.[exercise.exercise_name] ?? null,
-          sets: Array.from({ length: exercise.target_sets }, () => ({
-            set_type: 'normal',
-            weight_display: '',
-            weight_kg: 0,
-            reps: '',
-            completed: false,
-          })),
-        })),
-      };
-      activeSession.write(state);
-      switchTab('workout');
-    };
+    const startSession = (name, day) =>
+      startWorkoutSession({ name, day, planId: current.plan?.id, previous: current.previous });
 
     /* Today's routine */
     if (current.today_day) {
@@ -2109,7 +2269,18 @@ function renderPortalApp(ctx, initialMe) {
     const [plan, day] = await Promise.all([api.portal.currentDiet(), api.portal.dietDay(logDate)]);
     const targets = plan.targets;
 
-    const reload = async () => {
+    // `added` is the macros of a food entry that just went in — undefined for a
+    // deletion or a water bump, which can only move totals away from target.
+    // Comparing the pre-add snapshot still held in `day` against the delta
+    // catches the exact moment a target is crossed without a second fetch.
+    const reload = async (added) => {
+      if (added) {
+        const crossedCalories = day.totals.calories < targets.target_calories
+          && day.totals.calories + (added.calories || 0) >= targets.target_calories;
+        const crossedProtein = day.totals.protein_g < targets.target_protein_g
+          && day.totals.protein_g + (added.protein_g || 0) >= targets.target_protein_g;
+        if (crossedCalories || crossedProtein) sound.playTargetReached();
+      }
       dietDate = logDate;
       await switchTab('diet');
     };
@@ -2188,6 +2359,7 @@ function renderPortalApp(ctx, initialMe) {
     const bump = async (ml) => {
       try {
         await api.portal.logWater({ add_ml: ml, log_date: logDate });
+        if (ml > 0) sound.playWaterLogged();
         await reload();
       } catch (err) {
         toast(err.message || 'Could not update your water', 'error');
@@ -2304,6 +2476,7 @@ function renderPortalApp(ctx, initialMe) {
                           event.currentTarget.disabled = true;
                           try {
                             await api.portal.deleteFoodEntry(entry.id);
+                            sound.playFoodRemoved();
                             await reload();
                           } catch (err) {
                             toast(err.message || 'Could not remove that', 'error');
@@ -2359,6 +2532,7 @@ function renderPortalApp(ctx, initialMe) {
 
   async function renderProfileTab() {
     const m = me.member;
+    const sub = me.subscription;
     const body = h('div', { class: 'portal-tab-body' }, h('h2', { class: 'portal-tab-title' }, 'Profile'));
 
     if (pendingPinPrompt) {
@@ -2389,6 +2563,33 @@ function renderPortalApp(ctx, initialMe) {
       profileRow('Joined', m.joined_on ? date(m.joined_on) : null),
     ]);
 
+    // Pass and Pay are not bottom tabs (see buildTabs) — this is where they
+    // live for a member who came straight to Profile instead of tapping the
+    // topbar QR button or a Home quick action. A library keeps its own Pass
+    // tab, so only Pay folds in here for it; a gym folds in both.
+    if (sub && sub.due > 0) {
+      body.append(
+        h('div', { class: 'portal-due-banner' }, renderIcon('outgoing', { size: 16 }), ` ${money(sub.due)} due — pay at the front desk`),
+      );
+    }
+    append(body, [
+      h('h3', { class: 'portal-section-title' }, 'Membership'),
+      isLibrary()
+        ? null
+        : h(
+            'button',
+            { class: 'btn ghost block portal-settings-btn', type: 'button', onclick: () => switchTab('pass') },
+            renderIcon('qrCode', { size: 16 }),
+            ' View & scan digital pass',
+          ),
+      h(
+        'button',
+        { class: 'btn ghost block portal-settings-btn', type: 'button', onclick: () => switchTab('pay') },
+        renderIcon('billing', { size: 16 }),
+        ' Invoices & payment history',
+      ),
+    ]);
+
     const installBtn = h(
       'button',
       { class: 'btn ghost block portal-settings-btn install-hidden', type: 'button' },
@@ -2398,6 +2599,48 @@ function renderPortalApp(ctx, initialMe) {
     installBtn.addEventListener('click', () => promptInstall());
     unsubscribeInstall?.();
     unsubscribeInstall = onInstallChange((available) => installBtn.classList.toggle('install-hidden', !available));
+
+    let previewIndex = 0;
+    body.append(
+      h('h3', { class: 'portal-section-title' }, 'Audio & Feedback'),
+      h(
+        'div',
+        { class: 'portal-audio-settings' },
+        settingsSwitch('volume', 'Sound effects', sound.getSoundEnabled(), () => {
+          sound.setSoundEnabled(!sound.getSoundEnabled());
+          switchTab('profile');
+        }),
+        h(
+          'div',
+          { class: 'portal-audio-row' },
+          h('div', { class: 'portal-audio-row-label' }, renderIcon('volume', { size: 15 }), h('span', {}, 'Volume')),
+          volumeSegmented(sound.getSoundVolume(), (value) => {
+            sound.setSoundVolume(value);
+            switchTab('profile');
+          }),
+        ),
+        settingsSwitch('smartphone', 'Vibration', sound.getHapticsEnabled(), () => {
+          sound.setHapticsEnabled(!sound.getHapticsEnabled());
+          switchTab('profile');
+        }),
+      ),
+      h(
+        'button',
+        {
+          class: 'btn ghost block portal-settings-btn portal-sound-preview-btn',
+          type: 'button',
+          disabled: !sound.getSoundEnabled(),
+          onclick: () => {
+            const key = sound.SOUND_PREVIEW_ORDER[previewIndex % sound.SOUND_PREVIEW_ORDER.length];
+            previewIndex += 1;
+            const label = sound.previewSound(key);
+            if (label) toast(`🔊 ${label}`);
+          },
+        },
+        renderIcon('bell', { size: 16 }),
+        ' Test sound',
+      ),
+    );
 
     body.append(
       h('h3', { class: 'portal-section-title' }, 'Settings'),
@@ -2453,7 +2696,19 @@ function renderPortalApp(ctx, initialMe) {
       : h('div', { class: 'portal-topbar-logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 16 })),
     h('div', { class: 'portal-topbar-name' }, gymDisplayName(ctx)),
     h('div', { class: 'spacer' }),
-    statusBadge(me.member.status),
+    h(
+      'div',
+      { class: 'portal-topbar-actions' },
+      statusBadge(me.member.status),
+      // Pass is not always a bottom tab (see buildTabs) so this is the one
+      // spot on every screen that gets a member to their scannable code in a
+      // single tap, matching the quick action on Home.
+      h(
+        'button',
+        { class: 'portal-qr-btn', type: 'button', title: 'Show digital pass', 'aria-label': 'Show digital pass', onclick: () => switchTab('pass') },
+        renderIcon('qrCode', { size: 17 }),
+      ),
+    ),
   );
 
   switchTab('home');

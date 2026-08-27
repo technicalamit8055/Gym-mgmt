@@ -90,11 +90,12 @@ paymentRoutes.post('/', requireRole(...MANAGES_BILLING), (req, res) => {
   res.status(201).json(paymentRecord);
 });
 
-export async function sendAutoReceiptIfEnabled(paymentId, req) {
+export async function sendAutoReceiptIfEnabled(paymentId, req, overrides = null) {
   if (!paymentId) return;
   try {
-    const paymentRecord = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [paymentId]);
-    if (!paymentRecord || !paymentRecord.phone) return;
+    const row = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [paymentId]);
+    if (!row || !row.phone) return;
+    const paymentRecord = overrides ? { ...row, ...overrides } : row;
 
     const settings = get('SELECT auto_receipt, send_pdf_receipt, receipt_template FROM whatsapp_settings WHERE id = 1');
     if (settings?.auto_receipt && getWhatsAppStatus().connected) {

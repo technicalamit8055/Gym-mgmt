@@ -488,22 +488,25 @@ function fitnessSection(member, { reload }) {
               : null,
           )
         : h('span', { class: 'muted', style: 'font-size:12px' }, 'Only an owner or manager can bill this.'),
-      access.history.length
-        ? h(
-            'div',
-            { style: 'margin-top:14px' },
-            h('div', { class: 'muted', style: 'font-size:12px;margin-bottom:6px' }, 'Billing history'),
-            ...access.history.slice(0, 4).map((row) =>
-              h(
-                'div',
-                { class: 'row', style: 'justify-content:space-between;font-size:13px;padding:3px 0' },
-                h('span', { class: 'muted' }, `${date(row.start_date)} → ${date(row.end_date)}`),
-                h('span', {}, money(row.price)),
-                statusBadge(row.status),
+      (() => {
+        const activeHistory = access.history.filter((row) => row.status === 'active');
+        return activeHistory.length
+          ? h(
+              'div',
+              { style: 'margin-top:14px' },
+              h('div', { class: 'muted', style: 'font-size:12px;margin-bottom:6px' }, 'Billing history'),
+              ...activeHistory.slice(0, 4).map((row) =>
+                h(
+                  'div',
+                  { class: 'row', style: 'justify-content:space-between;font-size:13px;padding:3px 0' },
+                  h('span', { class: 'muted' }, `${date(row.start_date)} → ${date(row.end_date)}`),
+                  h('span', {}, money(row.price)),
+                  statusBadge(row.status),
+                ),
               ),
-            ),
-          )
-        : null,
+            )
+          : null;
+      })(),
     );
 
     /* Workout */

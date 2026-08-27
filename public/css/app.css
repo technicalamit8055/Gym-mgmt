@@ -2093,6 +2093,27 @@ body[data-mode='light'] .login {
 .portal-topbar-logo-img { object-fit: cover; border: 1px solid var(--border); }
 .portal-topbar-name { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
 
+.portal-topbar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+/* The one QR affordance that is on every screen, not just the Pass tab —
+   Pass isn't always a bottom tab (see buildTabs in portal.js), so this is
+   what keeps "show my code" a single tap from anywhere in the app. */
+.portal-qr-btn {
+  display: grid; place-items: center; flex: none;
+  width: 32px; height: 32px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.portal-qr-btn:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); color: var(--brand); }
+.portal-qr-btn:active { transform: scale(0.9); }
+
+/* A quiet pulse on the status dot, only when it means "active" — a throbbing
+   badge on frozen/expired would read as an alarm, not a status light. */
+@keyframes portal-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 24%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 14%, transparent); }
+}
+.portal-topbar-actions .badge.dot.green::before { animation: portal-dot-pulse 2.2s ease-in-out infinite; }
+
 .portal-content {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 18px 18px calc(100px + var(--safe-bottom));
@@ -2111,9 +2132,9 @@ body[data-mode='light'] .login {
 
 .portal-tabbar {
   position: sticky; bottom: 0; z-index: 20; flex: none;
-  display: flex; gap: 2px;
+  display: flex; gap: 4px;
   margin: 0 12px calc(12px + var(--safe-bottom));
-  padding: 6px;
+  padding: 7px;
   border-radius: 22px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 72%, transparent);
@@ -2122,12 +2143,13 @@ body[data-mode='light'] .login {
   box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
 }
 .portal-tab {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 8px 2px 6px; border: none; background: none; color: var(--muted);
-  border-radius: 16px; font-size: 10.5px; font-weight: 600; cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 9px 2px 7px; border: none; background: none; color: var(--muted);
+  border-radius: 16px; font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 .portal-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-tab:active { transform: scale(0.92); }
 .portal-tab.active { color: var(--brand); background: var(--brand-soft); box-shadow: 0 2px 12px -4px var(--brand-glow); }
 
 /* --------------------------------------------------------------- greeting */
@@ -2204,6 +2226,30 @@ body[data-mode='light'] .login {
 .portal-mini-stat-icon { color: var(--brand); }
 .portal-mini-stat-value { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .portal-mini-stat-label { font-size: 10.5px; color: var(--muted); }
+
+/* ------------------------------------------------------------ today's focus */
+/* Home's 1-tap Start Workout card and calorie-ring snippet — stacked full
+   width like every other Home card rather than a side-by-side grid, since
+   the macro stack needs more room than half a 360px phone gives it. */
+.portal-focus-grid { display: flex; flex-direction: column; gap: 10px; }
+.portal-focus-card {
+  position: relative; overflow: hidden; text-align: left; width: 100%;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(150deg, var(--surface) 0%, var(--bg-alt) 100%);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+  font: inherit; color: inherit;
+}
+button.portal-focus-card { cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; }
+button.portal-focus-card:hover { border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); }
+button.portal-focus-card:active { transform: scale(0.98); }
+.portal-focus-kicker { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--brand); }
+.portal-focus-title { font-size: 16.5px; font-weight: 700; letter-spacing: -0.01em; }
+.portal-focus-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.portal-focus-chips .muted { font-size: 11.5px; }
+.portal-focus-diet { flex-direction: row; align-items: center; gap: 16px; }
+.portal-focus-diet .portal-macro-stack { min-width: 0; gap: 8px; }
 
 /* ---------------------------------------------------------------- sections */
 
@@ -2357,6 +2403,48 @@ body[data-mode='light'] .login {
 .portal-pin-banner > div:first-child { display: flex; align-items: center; gap: 6px; }
 .portal-settings-btn { justify-content: flex-start; gap: 10px; padding: 12px 14px; }
 .portal-support-body p { margin: 0 0 10px; }
+
+/* -------------------------------------------------------- audio & haptics */
+
+.portal-audio-settings {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px 14px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+.portal-audio-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 0; font-size: 13px;
+}
+.portal-audio-row + .portal-audio-row { border-top: 1px solid var(--border); }
+.portal-audio-row-label { display: flex; align-items: center; gap: 9px; color: var(--text); }
+.portal-audio-row-label .svg-icon { color: var(--muted); flex: none; }
+
+.portal-switch {
+  flex: none; width: 42px; height: 25px; padding: 2px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2); cursor: pointer;
+  display: flex; align-items: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.portal-switch-thumb {
+  width: 19px; height: 19px; border-radius: 50%; background: var(--muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.portal-switch.on { background: var(--brand); border-color: var(--brand); }
+.portal-switch.on .portal-switch-thumb { transform: translateX(17px); background: #fff; }
+.portal-switch:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.portal-segmented {
+  display: inline-flex; padding: 3px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); gap: 2px;
+}
+.portal-segment {
+  border: none; background: none; color: var(--muted); cursor: pointer;
+  padding: 5px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700;
+}
+.portal-segment.active { background: var(--brand); color: #fff; }
+
+.portal-sound-preview-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ------------------------------------------------------------------ login */
 
@@ -2713,6 +2801,13 @@ body[data-mode='light'] .login {
   font-variant-numeric: tabular-nums; color: var(--brand);
 }
 
+.portal-sound-toggle {
+  flex: none; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.portal-sound-toggle:hover { color: var(--brand); border-color: var(--brand); }
+
 .portal-session-totals {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
   padding: 10px; border-radius: var(--radius);
@@ -2844,8 +2939,16 @@ body[data-mode='light'] .login {
   0%, 100% { box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline), 0 0 0 0 rgba(251, 191, 36, 0.4); }
   50% { box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline), 0 0 0 8px rgba(251, 191, 36, 0); }
 }
+/* A single sharp flash on each of the 3-2-1 tick sounds, layered on top of
+   the steadier rest-pulse loop so the countdown's last beats read louder. */
+.portal-rest-timer.tick .portal-rest-time { animation: rest-tick-flash 0.22s ease-out; }
+@keyframes rest-tick-flash {
+  0% { transform: scale(1.35); color: var(--amber); }
+  100% { transform: scale(1); }
+}
 @media (prefers-reduced-motion: reduce) {
   .portal-rest-timer.urgent { animation: none; }
+  .portal-rest-timer.tick .portal-rest-time { animation: none; }
 }
 
 /* ------------------------------------------------- finish summary and PRs */
@@ -2939,6 +3042,12 @@ body[data-mode='light'] .login {
 .portal-cal-center strong { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .portal-cal-center span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
 .portal-cal-center small { font-size: 10.5px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+/* The Home "Today's focus" snippet borrows this ring at a smaller size —
+   the number and label need to shrink with it or they overrun a ring a
+   third the diameter of the Diet tab's hero. */
+.portal-cal-ring.sm .portal-cal-center strong { font-size: 16px; }
+.portal-cal-ring.sm .portal-cal-center span { font-size: 7.5px; letter-spacing: 0.03em; }
+.portal-cal-ring.sm .portal-cal-center small { display: none; }
 
 .portal-macro-stack { flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 12px; }
 .portal-macro { min-width: 0; }

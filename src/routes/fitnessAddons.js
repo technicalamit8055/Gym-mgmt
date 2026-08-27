@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../errors.js';
 import { activateFitnessAddon, expireLapsedFitnessAddons, fitnessAccessFor, fitnessSettings } from '../fitness.js';
 import { parse, today, toInt } from '../validate.js';
 import { requireModule } from '../verticals.js';
+import { sendAutoReceiptIfEnabled } from './payments.js';
 
 /**
  * Selling the Diet & Workout tracker as a monthly add-on.
@@ -143,6 +144,13 @@ fitnessAddonRoutes.post('/subscribe', requireRole(...MANAGES_BILLING), (req, res
 
     return { addon, paymentId };
   });
+
+  if (result.paymentId) {
+    sendAutoReceiptIfEnabled(result.paymentId, req, {
+      plan_name: 'Diet & Workout add-on',
+      end_date: result.addon.end_date,
+    }).catch((err) => console.error('[whatsapp] auto-receipt for fitness add-on failed:', err.message));
+  }
 
   res.status(201).json({
     addon: result.addon,
