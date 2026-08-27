@@ -34,6 +34,7 @@ import { renderWhatsApp } from './views/whatsapp.js';
 import { renderSeats } from './views/seats.js';
 import { renderLockers } from './views/lockers.js';
 import { renderExpenses } from './views/expenses.js';
+import { renderFitnessPlans } from './views/fitnessPlans.js';
 import { renderPortal } from './views/portal.js';
 
 /**
@@ -85,6 +86,9 @@ function buildNav() {
     { path: '/whatsapp', label: 'WhatsApp', icon: 'whatsapp', roles: ['admin', 'manager'] },
     { section: 'Operations' },
     { path: '/classes', label: 'Classes', icon: 'classes' },
+    // Under Operations rather than Business: it is what trainers set up, and
+    // the money side of it (what the add-on costs) is one tab inside it.
+    { path: '/fitness-plans', label: 'Workout & Diet plans', icon: 'weight' },
     { path: '/equipment', label: 'Equipment', icon: 'equipment' },
     { path: '/devices', label: 'Biometric devices', icon: 'devices' },
     { path: '/sessions', label: 'Gym sessions', icon: 'sessions' },
@@ -119,6 +123,7 @@ function buildRoutes() {
   return [
     ...shared,
     { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
+    { pattern: /^\/fitness-plans$/, title: 'Workout & Diet plans', view: renderFitnessPlans },
     { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
   ];
 }

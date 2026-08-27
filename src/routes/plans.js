@@ -13,6 +13,10 @@ const PLAN_FIELDS = {
   price: { type: 'number', required: true, min: 0 },
   duration_days: { type: 'int', required: true, min: 1, max: 3650 },
   sessions: { type: 'int', min: 1, max: 1000 },
+  // Bundles the Diet & Workout tracker into this plan, so a premium
+  // membership carries it without a separate monthly add-on — see
+  // fitnessAccessFor() in src/fitness.js.
+  includes_fitness_addon: { type: 'boolean', default: 0 },
   active: { type: 'boolean', default: 1 },
 };
 

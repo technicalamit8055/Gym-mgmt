@@ -1,5 +1,6 @@
 import { hashPassword } from './auth.js';
 import { get, getDb, run } from './db.js';
+import { DEFAULT_ADDON_PRICE, addonPriceFor } from './fitnessSeed.js';
 import { currentVertical, starterPricesFor } from './verticals.js';
 
 /**
@@ -95,11 +96,36 @@ function seedWhatsAppTemplates(vertical) {
   );
 }
 
+/**
+ * Prices the monthly Diet & Workout add-on in the gym's own currency.
+ *
+ * The migration in db.js writes the rupee figure as a column default, which
+ * is the wrong number for a gym billing in dollars — 499 USD a month is not a
+ * gym membership, it is a personal trainer. Guarded on the row still holding
+ * that default, so an owner who has already set their own price keeps it.
+ *
+ * The catalogue itself (exercises, foods, starter templates) is seeded from a
+ * migration rather than from here: a gym that signed up last year needs those
+ * rows just as much as one signing up today. See src/fitnessSeed.js.
+ */
+function seedFitnessAddonPrice(currency) {
+  const current = get('SELECT monthly_price FROM fitness_addon_settings WHERE id = 1');
+  if (!current || current.monthly_price !== DEFAULT_ADDON_PRICE) return;
+
+  const price = addonPriceFor(currency);
+  if (price === current.monthly_price) return;
+  run(
+    "UPDATE fitness_addon_settings SET monthly_price = ?, updated_at = datetime('now') WHERE id = 1",
+    [price],
+  );
+}
+
 export function seedStarterPlans(currency = 'INR') {
   getDb();
   const vertical = currentVertical();
   seedShifts(vertical);
   seedWhatsAppTemplates(vertical);
+  seedFitnessAddonPrice(currency);
 
   if (get('SELECT COUNT(*) AS n FROM plans').n > 0) return 0;
 

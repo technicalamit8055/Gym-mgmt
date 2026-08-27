@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
+import { seedFitnessLibraries } from './fitnessSeed.js';
 
 /**
  * Two kinds of time live in here and they are not interchangeable:
@@ -630,6 +631,339 @@ const MIGRATIONS = [
   // prompts them to set a real one, which is what actually populates this.
   (db) => ensureColumn(db, 'members', 'portal_pin_hash', 'TEXT'),
   (db) => ensureColumn(db, 'members', 'last_portal_login', 'TEXT'),
+
+  /* ------------------------------------------- Diet & workout tracking --- */
+  // The paid Fitness feature: trainer-authored workout and diet plans, the
+  // member's own set-by-set and meal-by-meal logs against them, and the monthly
+  // add-on that unlocks the whole thing in the member portal. Carried by every
+  // tenant's database regardless of vertical, same as the SeatBook tables
+  // above — a study hall simply never writes to them.
+  //
+  // Weights are stored in kilograms throughout, always. Pounds are a display
+  // unit the client converts at the edge: a member who switches units mid-log
+  // must not silently rewrite their own history, and a PR has to be comparable
+  // across a unit change.
+
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workout_plans (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT NOT NULL,
+        description   TEXT,
+        goal          TEXT NOT NULL DEFAULT 'general_fitness'
+                      CHECK (goal IN ('muscle_gain', 'fat_loss', 'strength', 'endurance', 'general_fitness')),
+        level         TEXT NOT NULL DEFAULT 'intermediate'
+                      CHECK (level IN ('beginner', 'intermediate', 'advanced')),
+        days_per_week INTEGER NOT NULL DEFAULT 4 CHECK (days_per_week BETWEEN 1 AND 7),
+        is_template   INTEGER NOT NULL DEFAULT 1,
+        member_id     INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // Customised copies are read by member, templates by "is it a template" —
+    // one partial index serves the first without bloating on the second.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_plans_member ON workout_plans(member_id) WHERE member_id IS NOT NULL');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workout_plan_days (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id    INTEGER NOT NULL REFERENCES workout_plans(id) ON DELETE CASCADE,
+        day_number INTEGER NOT NULL CHECK (day_number BETWEEN 1 AND 7),
+        day_name   TEXT NOT NULL,
+        notes      TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_days_plan ON workout_plan_days(plan_id)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workout_plan_exercises (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        day_id        INTEGER NOT NULL REFERENCES workout_plan_days(id) ON DELETE CASCADE,
+        exercise_name TEXT NOT NULL,
+        muscle_group  TEXT NOT NULL
+                      CHECK (muscle_group IN ('chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body')),
+        target_sets   INTEGER NOT NULL DEFAULT 3 CHECK (target_sets > 0),
+        target_reps   TEXT NOT NULL DEFAULT '8-12',
+        target_rpe    REAL,
+        rest_seconds  INTEGER NOT NULL DEFAULT 90 CHECK (rest_seconds >= 0),
+        notes         TEXT,
+        sort_order    INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_exercises_day ON workout_plan_exercises(day_id)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_workout_assignments (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        plan_id     INTEGER NOT NULL REFERENCES workout_plans(id) ON DELETE CASCADE,
+        assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        start_date  TEXT NOT NULL DEFAULT (date('now')),
+        end_date    TEXT,
+        status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'archived')),
+        notes       TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // One live routine per member, enforced by the database rather than merely
+    // checked: the portal reads "the" current plan, and two would make that
+    // read arbitrary. Re-assigning archives the incumbent first — see
+    // assignPlan in routes/workouts.js.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_member_workout_live ON member_workout_assignments(member_id) WHERE status = 'active'",
+    );
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS exercise_library (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL UNIQUE,
+        muscle_group TEXT NOT NULL
+                     CHECK (muscle_group IN ('chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body')),
+        equipment    TEXT NOT NULL DEFAULT 'barbell',
+        instructions TEXT,
+        is_custom    INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_exercise_library_group ON exercise_library(muscle_group)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workout_logs (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id        INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        plan_id          INTEGER REFERENCES workout_plans(id) ON DELETE SET NULL,
+        day_id           INTEGER REFERENCES workout_plan_days(id) ON DELETE SET NULL,
+        workout_name     TEXT NOT NULL,
+        log_date         TEXT NOT NULL DEFAULT (date('now')),
+        started_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        ended_at         TEXT,
+        duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
+        total_volume_kg  REAL NOT NULL DEFAULT 0,
+        total_sets       INTEGER NOT NULL DEFAULT 0,
+        total_reps       INTEGER NOT NULL DEFAULT 0,
+        notes            TEXT,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // log_date is the gym's local calendar date the session belongs to, unlike
+    // started_at, which is a UTC instant — see the header of this file. The
+    // portal's history calendar and streaks read the date; the timer reads the
+    // instant.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_logs_member ON workout_logs(member_id, log_date)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workout_log_sets (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_id        INTEGER NOT NULL REFERENCES workout_logs(id) ON DELETE CASCADE,
+        exercise_name TEXT NOT NULL,
+        muscle_group  TEXT NOT NULL DEFAULT 'full_body',
+        set_number    INTEGER NOT NULL,
+        set_type      TEXT NOT NULL DEFAULT 'normal'
+                      CHECK (set_type IN ('normal', 'warmup', 'drop', 'failure')),
+        weight_kg     REAL NOT NULL DEFAULT 0 CHECK (weight_kg >= 0),
+        reps          INTEGER NOT NULL DEFAULT 0 CHECK (reps >= 0),
+        rpe           REAL,
+        est_1rm_kg    REAL NOT NULL DEFAULT 0,
+        is_pr         INTEGER NOT NULL DEFAULT 0,
+        completed     INTEGER NOT NULL DEFAULT 1,
+        notes         TEXT,
+        sort_order    INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_sets_log ON workout_log_sets(log_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_sets_exercise ON workout_log_sets(exercise_name)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS exercise_prs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        exercise_name TEXT NOT NULL,
+        max_weight_kg REAL NOT NULL DEFAULT 0,
+        max_reps      INTEGER NOT NULL DEFAULT 0,
+        est_1rm_kg    REAL NOT NULL DEFAULT 0,
+        achieved_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        log_set_id    INTEGER REFERENCES workout_log_sets(id) ON DELETE SET NULL,
+        UNIQUE (member_id, exercise_name)
+      )
+    `);
+  },
+
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS diet_plans (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        name             TEXT NOT NULL,
+        description      TEXT,
+        goal             TEXT NOT NULL DEFAULT 'maintenance'
+                         CHECK (goal IN ('fat_loss', 'muscle_gain', 'maintenance', 'keto', 'high_protein')),
+        target_calories  INTEGER NOT NULL CHECK (target_calories > 0),
+        target_protein_g INTEGER NOT NULL DEFAULT 0,
+        target_carbs_g   INTEGER NOT NULL DEFAULT 0,
+        target_fats_g    INTEGER NOT NULL DEFAULT 0,
+        target_water_ml  INTEGER NOT NULL DEFAULT 3000,
+        is_template      INTEGER NOT NULL DEFAULT 1,
+        member_id        INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_diet_plans_member ON diet_plans(member_id) WHERE member_id IS NOT NULL');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS diet_plan_meals (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id         INTEGER NOT NULL REFERENCES diet_plans(id) ON DELETE CASCADE,
+        meal_name       TEXT NOT NULL,
+        meal_time       TEXT,
+        target_calories INTEGER NOT NULL DEFAULT 0,
+        notes           TEXT,
+        sort_order      INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_diet_meals_plan ON diet_plan_meals(plan_id)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS diet_plan_items (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        meal_id      INTEGER NOT NULL REFERENCES diet_plan_meals(id) ON DELETE CASCADE,
+        food_name    TEXT NOT NULL,
+        portion_size TEXT NOT NULL DEFAULT '100g',
+        calories     INTEGER NOT NULL DEFAULT 0,
+        protein_g    REAL NOT NULL DEFAULT 0,
+        carbs_g      REAL NOT NULL DEFAULT 0,
+        fats_g       REAL NOT NULL DEFAULT 0,
+        notes        TEXT,
+        sort_order   INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_diet_items_meal ON diet_plan_items(meal_id)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_diet_assignments (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        plan_id     INTEGER NOT NULL REFERENCES diet_plans(id) ON DELETE CASCADE,
+        assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        start_date  TEXT NOT NULL DEFAULT (date('now')),
+        end_date    TEXT,
+        status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'archived')),
+        notes       TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // One live diet per member, for the same reason as the workout index above.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_member_diet_live ON member_diet_assignments(member_id) WHERE status = 'active'",
+    );
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS food_library (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL UNIQUE,
+        category     TEXT NOT NULL DEFAULT 'general',
+        serving_unit TEXT NOT NULL DEFAULT '100g',
+        calories     INTEGER NOT NULL DEFAULT 0,
+        protein_g    REAL NOT NULL DEFAULT 0,
+        carbs_g      REAL NOT NULL DEFAULT 0,
+        fats_g       REAL NOT NULL DEFAULT 0,
+        is_custom    INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_food_library_category ON food_library(category)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS diet_logs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        log_date   TEXT NOT NULL,
+        water_ml   INTEGER NOT NULL DEFAULT 0 CHECK (water_ml >= 0),
+        notes      TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (member_id, log_date)
+      )
+    `);
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS diet_log_entries (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        diet_log_id  INTEGER NOT NULL REFERENCES diet_logs(id) ON DELETE CASCADE,
+        meal_type    TEXT NOT NULL
+                     CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack', 'pre_workout', 'post_workout')),
+        food_name    TEXT NOT NULL,
+        quantity     REAL NOT NULL DEFAULT 1 CHECK (quantity > 0),
+        serving_unit TEXT NOT NULL DEFAULT '100g',
+        calories     INTEGER NOT NULL DEFAULT 0,
+        protein_g    REAL NOT NULL DEFAULT 0,
+        carbs_g      REAL NOT NULL DEFAULT 0,
+        fats_g       REAL NOT NULL DEFAULT 0,
+        logged_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_diet_entries_log ON diet_log_entries(diet_log_id)');
+  },
+
+  (db) => {
+    // `enabled` is "charge for this", not "does the feature exist": with it off
+    // every member gets the tracker for free, which is the switch a gym that
+    // bundles coaching into its membership actually wants. Turning it on is
+    // what raises the paywall — see fitnessAccessFor() in routes/portal.js.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fitness_addon_settings (
+        id            INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled       INTEGER NOT NULL DEFAULT 1,
+        monthly_price REAL NOT NULL DEFAULT 499 CHECK (monthly_price >= 0),
+        trial_days    INTEGER NOT NULL DEFAULT 0 CHECK (trial_days >= 0),
+        description   TEXT NOT NULL DEFAULT 'Unlock personalised Diet & Workout tracking with trainer guidance.',
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.prepare('INSERT OR IGNORE INTO fitness_addon_settings (id) VALUES (1)').run();
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_fitness_addons (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        start_date  TEXT NOT NULL,
+        end_date    TEXT NOT NULL,
+        price       REAL NOT NULL DEFAULT 0 CHECK (price >= 0),
+        status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired', 'cancelled')),
+        payment_id  INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+        assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        notes       TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // One live add-on per member: a renewal extends the row it finds rather
+    // than stacking a second one, so "is this member entitled" stays a
+    // single-row read (the same shape as seat_allocations).
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_fitness_addon_live ON member_fitness_addons(member_id) WHERE status = 'active'",
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_fitness_addon_end ON member_fitness_addons(end_date)');
+  },
+  // Lets a gym bundle the tracker into a premium membership ("VIP / Personal
+  // Training") instead of billing it as a separate line — a member on such a
+  // plan is entitled for as long as that membership is active, with no add-on
+  // row of their own.
+  (db) => ensureColumn(db, 'plans', 'includes_fitness_addon', 'INTEGER NOT NULL DEFAULT 0'),
+  (db) => seedFitnessLibraries(db),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

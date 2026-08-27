@@ -229,6 +229,60 @@ const ICONS = {
     'M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z',
     'M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z',
   ],
+
+  /* --- diet and workout tracking --- */
+  // A dumbbell proper, not the crossed-wrenches drawing `equipment` aliases:
+  // the Workout tab and the fitness nav item are about lifting, and reusing
+  // the maintenance icon for it read as a spanner in a gym.
+  weight: [
+    'M6.5 6.5v11',
+    'M17.5 6.5v11',
+    'M3.5 9v6',
+    'M20.5 9v6',
+    'M6.5 12h11',
+  ],
+  apple: [
+    'M12 8c0-3.5 2.5-5.5 6-5.5 0 3-1.8 5.2-4.5 5.5',
+    'M12 8c-4.4 0-7 3-7 6.8C5 18.7 8.2 22 12 22s7-3.3 7-7.2C19 11 16.4 8 12 8z',
+  ],
+  flame: [
+    'M12 22c4 0 6.5-2.6 6.5-6 0-4.3-3.7-6.6-4.6-10.7-.2-.9-1.3-1.2-1.9-.5C10 7.2 9 9.4 9 11c-1.2-.6-1.6-2-1.6-2C6.2 10.5 5.5 12.4 5.5 16c0 3.4 2.5 6 6.5 6z',
+    'M12 22c1.9 0 3-1.3 3-3 0-2-1.7-3-2.2-4.9-.4.9-1.3 1.8-1.9 2.6-.5.7-.9 1.4-.9 2.3 0 1.7 1.1 3 2 3z',
+  ],
+  droplet: ['M12 2.7 6.9 8a7.2 7.2 0 1 0 10.2 0z'],
+  trophy: [
+    'M8 21h8',
+    'M12 17v4',
+    'M7 4h10v5a5 5 0 0 1-10 0z',
+    'M7 5H5a2 2 0 0 0 0 4h2',
+    'M17 5h2a2 2 0 0 1 0 4h-2',
+  ],
+  timer: [
+    'M10 2h4',
+    'M12 6v0',
+    { tag: 'circle', cx: 12, cy: 14, r: 8 },
+    'M12 10v4l2.5 2',
+    'M12 6V4',
+  ],
+  play: ['M6 4.5 19 12 6 19.5z'],
+  target: [
+    { tag: 'circle', cx: 12, cy: 12, r: 9 },
+    { tag: 'circle', cx: 12, cy: 12, r: 5 },
+    { tag: 'circle', cx: 12, cy: 12, r: 1.25, fill: 'currentColor', stroke: 'none' },
+  ],
+  trash: [
+    'M3 6h18',
+    'M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2',
+    'M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6',
+    'M10 11v6',
+    'M14 11v6',
+  ],
+  chevronLeft: ['m15 18-6-6 6-6'],
+  chevronRight: ['m9 18 6-6-6-6'],
+  sparkle: [
+    'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z',
+    'M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z',
+  ],
 };
 
 /** Same drawing under a second name, where a view reads better naming the
@@ -245,6 +299,16 @@ Object.assign(ICONS, {
   ticket: ICONS.checkin,
   calendar: ICONS.classes,
   fingerprint: ICONS.devices,
+  // `dumbbell` above still aliases `equipment`, which every existing screen
+  // uses — the new fitness views ask for `weight` instead, so adding a real
+  // dumbbell drawing does not silently restyle the portal's brand mark.
+  nutrition: ICONS.apple,
+  calories: ICONS.flame,
+  water: ICONS.droplet,
+  pr: ICONS.trophy,
+  rest: ICONS.timer,
+  macros: ICONS.target,
+  delete: ICONS.trash,
 });
 
 /**

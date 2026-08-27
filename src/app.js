@@ -6,8 +6,10 @@ import { attendanceRoutes } from './routes/attendance.js';
 import { authRoutes, staffRoutes } from './routes/auth.js';
 import { bookingRoutes, classRoutes } from './routes/classes.js';
 import { dashboardRoutes } from './routes/dashboard.js';
+import { dietRoutes } from './routes/diets.js';
 import { equipmentRoutes } from './routes/equipment.js';
 import { expenseRoutes } from './routes/expenses.js';
+import { fitnessAddonRoutes } from './routes/fitnessAddons.js';
 import { lockerRoutes } from './routes/lockers.js';
 import { memberRoutes } from './routes/members.js';
 import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocuments.js';
@@ -23,6 +25,7 @@ import { seatRoutes } from './routes/seats.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
+import { workoutRoutes } from './routes/workouts.js';
 import { biometricRoutes } from './routes/biometric.js';
 import { handleRazorpayWebhook } from './routes/billing.js';
 import { deviceAttendanceRoutes } from './routes/deviceAttendance.js';
@@ -117,6 +120,9 @@ export function createApp() {
   app.use('/api/lockers', lockerRoutes);
   app.use('/api/expenses', expenseRoutes);
   app.use('/api/member-documents', memberDocumentRoutes);
+  app.use('/api/workouts', workoutRoutes);
+  app.use('/api/diets', dietRoutes);
+  app.use('/api/fitness-addons', fitnessAddonRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

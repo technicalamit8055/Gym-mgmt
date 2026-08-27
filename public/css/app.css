@@ -2425,4 +2425,692 @@ body[data-mode='light'] .login {
   .portal-content { padding: 14px 14px calc(100px + var(--safe-bottom)); }
 }
 
+/* ══════════════════════════════════════════ Diet & workout tracking ══════ */
 
+/*
+ * Everything here is built from the palette tokens rather than literal colours,
+ * so it follows the vertical, the colour preset and light/dark mode without a
+ * per-theme override — see the theme block above.
+ *
+ * The three macro colours are fixed roles, not brand accents: protein reads
+ * blue, carbs amber, fats coral, in the staff builder and the member's rings
+ * alike. A member who learns "the blue bar is protein" must not have that
+ * meaning move when the gym picks a different accent.
+ */
+:root {
+  --macro-protein: var(--blue);
+  --macro-carbs: var(--amber);
+  --macro-fats: var(--red);
+  --macro-kcal: var(--brand);
+}
+
+.hidden { display: none !important; }
+
+/* ------------------------------------------------------- staff: tab shell */
+
+.fit-tabs {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: 10px;
+}
+.fit-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.fit-tab:hover { color: var(--text); }
+.fit-tab.active { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+.fit-tab:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* The tab panel itself owns no layout — each tab renders its own — but it is
+   the node paintBody() replaces, so it needs to exist as a stable box. */
+.fit-tab-body { min-height: 200px; }
+
+.fit-tab-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; margin-bottom: 16px;
+}
+.fit-tab-head p { margin: 0; font-size: 13px; max-width: 62ch; }
+
+/* renderIcon draws a block-level <svg> (see .svg-icon above), so any heading
+   that carries one has to be its own flex line — otherwise the icon takes a
+   whole row above the text. Every card title in this feature has an icon. */
+.fit-card-title { display: flex; align-items: center; gap: 7px; }
+
+/* -------------------------------------------------------- staff: plan cards */
+
+.fit-card-grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.fit-plan-card { display: flex; flex-direction: column; gap: 12px; }
+.fit-plan-head { display: flex; gap: 12px; align-items: flex-start; }
+.fit-plan-icon {
+  flex: none; width: 40px; height: 40px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+.fit-plan-icon.diet { background: rgba(52, 211, 153, 0.14); color: var(--green); }
+.fit-plan-name { font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
+.fit-plan-desc { margin: 0; font-size: 13px; line-height: 1.5; }
+
+.fit-plan-stats {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px;
+  padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.fit-plan-stats > div { display: flex; flex-direction: column; gap: 1px; text-align: center; }
+.fit-plan-stats strong { font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.fit-plan-stats span { font-size: 10.5px; color: var(--muted); }
+
+.fit-macro-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.fit-pill {
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+  border: 1px solid transparent; font-variant-numeric: tabular-nums;
+}
+.fit-pill.kcal { background: var(--brand-soft); color: var(--macro-kcal); border-color: var(--brand); }
+.fit-pill.protein { background: rgba(56, 189, 248, 0.14); color: var(--macro-protein); border-color: rgba(56, 189, 248, 0.3); }
+.fit-pill.carbs { background: rgba(251, 191, 36, 0.14); color: var(--macro-carbs); border-color: rgba(251, 191, 36, 0.3); }
+.fit-pill.fats { background: rgba(248, 113, 113, 0.14); color: var(--macro-fats); border-color: rgba(248, 113, 113, 0.3); }
+
+.fit-member-card { display: flex; flex-direction: column; }
+
+/* ---------------------------------------------------- staff: plan builders */
+
+.fit-builder-wrap { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.fit-builder-title { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.fit-builder { display: flex; flex-direction: column; gap: 12px; }
+
+.fit-day-card {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-alt);
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+.fit-day-head { display: flex; align-items: center; gap: 8px; }
+.fit-day-name, .fit-day-notes, .fit-meal-time {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13.5px; font-family: inherit;
+}
+.fit-day-name { flex: 1; font-weight: 600; min-width: 0; }
+.fit-day-notes { width: 100%; font-size: 12.5px; }
+.fit-meal-time { flex: none; width: 110px; }
+.fit-day-name:focus, .fit-day-notes:focus, .fit-meal-time:focus {
+  outline: none; border-color: var(--brand); box-shadow: var(--ring);
+}
+
+/*
+ * The set/food grids. Explicit columns rather than a table because every cell
+ * is an input and a <table> would fight the wrapping below; the header row
+ * shares the same grid so the labels stay over their columns.
+ */
+.fit-ex-list { display: flex; flex-direction: column; gap: 6px; }
+.fit-ex-row, .fit-item-row {
+  display: grid; align-items: center; gap: 6px;
+}
+.fit-ex-row { grid-template-columns: 24px minmax(120px, 1fr) 110px 58px 76px 66px 30px 30px 30px; }
+.fit-item-row { grid-template-columns: 24px minmax(120px, 1fr) 90px 66px 62px 62px 62px 30px; }
+.fit-ex-header {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); font-weight: 700; padding-bottom: 2px;
+}
+.fit-ex-handle {
+  display: grid; place-items: center; font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fit-cell-name, .fit-cell-group, .fit-cell-num, .fit-cell-reps {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  border-radius: var(--radius-sm); padding: 7px 8px; font-size: 13px; font-family: inherit;
+  min-width: 0; width: 100%;
+}
+.fit-cell-num, .fit-cell-reps { text-align: center; font-variant-numeric: tabular-nums; }
+.fit-cell-name:focus, .fit-cell-group:focus, .fit-cell-num:focus, .fit-cell-reps:focus {
+  outline: none; border-color: var(--brand); box-shadow: var(--ring);
+}
+
+.fit-meal-total {
+  display: flex; gap: 14px; justify-content: flex-end; align-items: baseline;
+  padding-top: 8px; margin-top: 2px; border-top: 1px dashed var(--border);
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.fit-meal-total strong { font-size: 14px; color: var(--macro-kcal); }
+
+.fit-empty-inline {
+  padding: 14px; text-align: center; font-size: 12.5px; color: var(--muted);
+  border: 1px dashed var(--border); border-radius: var(--radius-sm);
+}
+
+.icon-btn.sm { padding: 5px; font-size: 13px; line-height: 1; }
+.icon-btn.danger { color: var(--red); }
+.icon-btn.danger:hover { background: rgba(248, 113, 113, 0.1); border-color: rgba(248, 113, 113, 0.35); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+.icon-btn:disabled:hover { background: none; border-color: transparent; }
+
+/* ------------------------------------------------------- staff: previews */
+
+.fit-preview { display: flex; flex-direction: column; gap: 18px; }
+.fit-preview-day h4 { margin: 0 0 8px; font-size: 14px; }
+.fit-preview-day p { margin: 0 0 8px; font-size: 12.5px; }
+
+.fit-library-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.fit-library-controls input[type='search'] {
+  width: 100%; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  border-radius: var(--radius-sm); padding: 9px 12px; font-size: 13.5px; font-family: inherit;
+}
+.fit-library-controls input[type='search']:focus { outline: none; border-color: var(--brand); box-shadow: var(--ring); }
+.fit-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.fit-chip {
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  cursor: pointer; text-transform: capitalize;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.fit-chip:hover { color: var(--text); }
+.fit-chip.active { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+.fit-count { font-size: 12px; margin-bottom: 8px; }
+
+/* ═══════════════════════════════════════════════ member portal: paywall ══ */
+
+.portal-paywall {
+  position: relative; overflow: hidden;
+  padding: 26px 20px 20px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(160deg, var(--surface) 0%, var(--bg-alt) 100%);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+  text-align: center;
+}
+.portal-paywall-glow {
+  position: absolute; inset: -60% 20% auto; height: 220px; pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, var(--brand-glow) 0%, transparent 70%);
+}
+.portal-paywall-badge {
+  position: relative; display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border-radius: 999px; margin-bottom: 12px;
+  background: var(--brand-soft); color: var(--brand);
+  border: 1px solid var(--brand);
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.portal-paywall-title { position: relative; margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
+.portal-paywall-sub { position: relative; margin: 0 0 20px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+
+.portal-paywall-features { position: relative; display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.portal-paywall-feature { display: flex; gap: 12px; align-items: flex-start; }
+.portal-paywall-feature-icon {
+  flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--surface-2); color: var(--brand); border: 1px solid var(--border);
+}
+.portal-paywall-feature strong { font-size: 13.5px; }
+.portal-paywall-feature p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+.portal-paywall-price {
+  position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px;
+  margin: 22px 0 4px;
+}
+.portal-paywall-price strong { font-size: 32px; letter-spacing: -0.03em; color: var(--brand); }
+.portal-paywall-price span { font-size: 13px; color: var(--muted); }
+.portal-paywall-cta-note { position: relative; margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+
+/* ═══════════════════════════════════════ member portal: workout logger ══ */
+
+.portal-routine-card {
+  position: relative; overflow: hidden;
+  padding: 18px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(150deg, var(--surface) 0%, var(--bg-alt) 100%);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+}
+.portal-routine-glow {
+  position: absolute; inset: -70% 30% auto -10%; height: 200px; pointer-events: none;
+  background: radial-gradient(circle at 40% 50%, var(--brand-glow) 0%, transparent 68%);
+}
+.portal-routine-kicker {
+  position: relative; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--brand);
+}
+.portal-routine-day { position: relative; margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; line-height: 1.25; }
+.portal-routine-note { position: relative; margin: 8px 0 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+.portal-routine-exercises {
+  position: relative; display: flex; flex-direction: column; gap: 2px;
+  margin: 16px 0; padding: 4px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.portal-routine-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 0; font-size: 13px;
+}
+.portal-routine-ex-name { flex: 1; min-width: 100px; font-weight: 600; }
+.portal-routine-row .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
+.portal-routine-prev {
+  font-size: 11px; padding: 2px 7px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+.portal-muscle-badge {
+  flex: none; font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 5px;
+  background: var(--brand-soft); color: var(--brand);
+}
+
+/* -------------------------------------------------------- active session */
+
+.portal-session { position: relative; }
+
+.portal-session-bar {
+  position: sticky; top: 0; z-index: 12;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: -4px 0 4px; padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--brand);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-session-name { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
+.portal-session-clock {
+  font-size: 19px; font-weight: 700; letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums; color: var(--brand);
+}
+
+.portal-session-totals {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  padding: 10px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-alt);
+}
+.portal-session-totals > div { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.portal-session-totals strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.portal-session-totals span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.portal-ex-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-ex-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.portal-ex-name { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.portal-ex-meta { display: flex; align-items: center; gap: 7px; margin-top: 4px; flex-wrap: wrap; }
+.portal-ex-meta .muted { font-size: 11.5px; }
+.portal-ex-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.portal-ex-foot { display: flex; gap: 8px; }
+
+.portal-rest-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.portal-rest-chip:hover { color: var(--brand); border-color: var(--brand); }
+
+/*
+ * The set table. A 5-column grid sized for a phone: the two number inputs are
+ * the widest things on the row because they are the two the member actually
+ * touches mid-set, with a thumb, while out of breath.
+ */
+.portal-set-row {
+  display: grid; grid-template-columns: 52px minmax(58px, 1fr) 1fr 1fr 42px;
+  gap: 6px; align-items: center;
+}
+.portal-set-header {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 800; padding: 2px 0;
+}
+.portal-set-header span { text-align: center; }
+.portal-set-header span:first-child, .portal-set-header span:nth-child(2) { text-align: left; }
+.portal-set-row.completed { background: rgba(52, 211, 153, 0.07); border-radius: var(--radius-sm); }
+
+.portal-set-n { display: flex; align-items: center; gap: 4px; }
+.portal-set-n > span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.portal-set-type {
+  flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--muted); cursor: pointer;
+  font-size: 10px; font-weight: 800; display: grid; place-items: center; padding: 0;
+}
+.portal-set-type.t-warmup { color: var(--amber); border-color: rgba(251, 191, 36, 0.45); background: rgba(251, 191, 36, 0.12); }
+.portal-set-type.t-drop { color: var(--blue); border-color: rgba(56, 189, 248, 0.45); background: rgba(56, 189, 248, 0.12); }
+.portal-set-type.t-failure { color: var(--red); border-color: rgba(248, 113, 113, 0.45); background: rgba(248, 113, 113, 0.12); }
+
+.portal-set-prev { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.portal-set-input {
+  width: 100%; min-width: 0; text-align: center;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  border-radius: var(--radius-sm); padding: 9px 4px;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: inherit;
+}
+.portal-set-input:focus { outline: none; border-color: var(--brand); box-shadow: var(--ring); }
+/* The spinners are unusable at this size and steal the tap target. */
+.portal-set-input::-webkit-outer-spin-button,
+.portal-set-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.portal-set-input { -moz-appearance: textfield; appearance: textfield; }
+
+.portal-set-check {
+  width: 38px; height: 38px; border-radius: 10px; cursor: pointer;
+  display: grid; place-items: center;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.portal-set-check:active { transform: scale(0.93); }
+.portal-set-check.done { background: var(--green); border-color: var(--green); color: #05231a; }
+
+.portal-set-1rm {
+  grid-column: 1 / -1; justify-self: end;
+  font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 3px; padding-bottom: 2px;
+}
+.portal-set-1rm.beats { color: var(--amber); font-weight: 700; }
+
+.portal-add-ex { border-style: dashed; }
+
+/* ------------------------------------------------------------ rest timer */
+
+.portal-rest-timer {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(96px + var(--safe-bottom)); z-index: 40;
+  width: min(340px, calc(100vw - 32px));
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 16px;
+  border: 1px solid var(--brand);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
+}
+.portal-rest-timer.hidden { display: none; }
+.portal-rest-icon { flex: none; color: var(--brand); display: grid; place-items: center; }
+.portal-rest-body { flex: 1; min-width: 0; }
+.portal-rest-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 800; color: var(--muted);
+}
+.portal-rest-time { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.portal-rest-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
+.portal-rest-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 2px; }
+.portal-rest-actions { display: flex; gap: 4px; flex: none; }
+.portal-rest-btn {
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  border-radius: 9px; padding: 6px 8px; cursor: pointer;
+  font-size: 11px; font-weight: 700; display: grid; place-items: center;
+}
+.portal-rest-btn:hover { color: var(--text); border-color: var(--brand); }
+
+.portal-rest-timer.urgent { border-color: var(--amber); animation: rest-pulse 1s ease-in-out infinite; }
+.portal-rest-timer.urgent .portal-rest-time, .portal-rest-timer.urgent .portal-rest-icon { color: var(--amber); }
+.portal-rest-timer.urgent .portal-rest-bar > i { background: var(--amber); }
+.portal-rest-timer.done { border-color: var(--green); }
+.portal-rest-timer.done .portal-rest-time, .portal-rest-timer.done .portal-rest-icon { color: var(--green); }
+
+@keyframes rest-pulse {
+  0%, 100% { box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline), 0 0 0 0 rgba(251, 191, 36, 0.4); }
+  50% { box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline), 0 0 0 8px rgba(251, 191, 36, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .portal-rest-timer.urgent { animation: none; }
+}
+
+/* ------------------------------------------------- finish summary and PRs */
+
+.portal-summary { text-align: center; display: flex; flex-direction: column; gap: 16px; }
+.portal-summary-burst { font-size: 46px; line-height: 1; animation: summary-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1); }
+.portal-summary h3 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+@keyframes summary-pop {
+  from { transform: scale(0.4) rotate(-12deg); opacity: 0; }
+  to { transform: scale(1) rotate(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .portal-summary-burst { animation: none; }
+}
+
+.portal-summary-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.portal-summary-grid > div { display: flex; flex-direction: column; gap: 2px; }
+.portal-summary-grid strong { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.portal-summary-grid span { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.portal-summary-prs { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.portal-pr-line {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 9px 11px; border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3);
+  color: var(--amber); font-size: 12.5px;
+}
+.portal-pr-line strong { color: var(--text); }
+.portal-pr-line > span:not(.portal-pr-delta) { color: var(--text); font-variant-numeric: tabular-nums; }
+.portal-pr-delta { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.portal-pr-wall { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.portal-pr-card {
+  position: relative; padding: 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-pr-trophy { color: var(--amber); margin-bottom: 6px; }
+.portal-pr-name { font-size: 12px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; }
+.portal-pr-value { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.portal-pr-1rm { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------- workout history */
+
+.portal-log-row {
+  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  padding: 11px 13px; border-radius: var(--radius); cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+.portal-log-row:hover { border-color: var(--brand); }
+.portal-log-icon {
+  flex: none; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.portal-log-meta { flex: 1; min-width: 0; }
+.portal-log-name { font-size: 13.5px; font-weight: 600; }
+.portal-log-meta .muted { font-size: 11.5px; }
+.portal-log-right { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.portal-log-volume { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.portal-log-detail { display: flex; flex-direction: column; gap: 16px; }
+.portal-log-ex h4 { margin: 0 0 6px; font-size: 13.5px; }
+.portal-log-set {
+  display: flex; align-items: center; gap: 9px; padding: 4px 0;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.portal-log-set .portal-set-type { cursor: default; }
+
+/* ══════════════════════════════════════════ member portal: diet tracker ══ */
+
+.portal-diet-hero {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 18px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(150deg, var(--surface) 0%, var(--bg-alt) 100%);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+}
+
+.portal-cal-ring { position: relative; flex: none; display: grid; place-items: center; }
+.portal-cal-track { stroke: var(--border); }
+.portal-cal-fill { stroke: var(--macro-kcal); transition: stroke-dashoffset 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+.portal-cal-fill.over { stroke: var(--red); }
+.portal-cal-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 1px; pointer-events: none;
+}
+.portal-cal-center strong { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.portal-cal-center span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.portal-cal-center small { font-size: 10.5px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+.portal-macro-stack { flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 12px; }
+.portal-macro { min-width: 0; }
+.portal-macro-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.portal-macro-label { font-size: 12px; font-weight: 700; }
+.portal-macro-value { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.portal-macro-bar { height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.portal-macro-bar > i {
+  display: block; height: 100%; border-radius: 999px;
+  transition: width 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.portal-macro-bar.protein > i { background: var(--macro-protein); }
+.portal-macro-bar.carbs > i { background: var(--macro-carbs); }
+.portal-macro-bar.fats > i { background: var(--macro-fats); }
+
+.portal-diet-hint {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--muted);
+  padding: 8px 11px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------- water */
+
+.portal-water-card {
+  display: flex; flex-direction: column; gap: 11px;
+  padding: 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-water-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.portal-water-head > div { display: flex; align-items: center; gap: 6px; color: var(--blue); }
+.portal-water-head strong { font-size: 13.5px; color: var(--text); }
+.portal-water-head .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
+.portal-water-glasses { display: flex; flex-wrap: wrap; gap: 5px; }
+.portal-glass {
+  width: 26px; height: 30px; border-radius: 6px 6px 9px 9px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.portal-glass.filled {
+  background: rgba(56, 189, 248, 0.16); border-color: rgba(56, 189, 248, 0.45); color: var(--blue);
+}
+
+/* ---------------------------------------------------------------- meals */
+
+.portal-meal-card {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-meal-head { display: flex; align-items: center; gap: 10px; }
+.portal-meal-icon {
+  flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.portal-meal-title { flex: 1; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+.portal-meal-kcal { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--macro-kcal); }
+
+.portal-meal-planned {
+  padding: 9px 11px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px dashed var(--border);
+}
+.portal-meal-planned-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 800; color: var(--muted); margin-bottom: 5px;
+}
+.portal-planned-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  font-size: 12px; padding: 2px 0;
+}
+.portal-planned-row .muted { font-variant-numeric: tabular-nums; flex: none; }
+
+.portal-meal-entries { display: flex; flex-direction: column; }
+.portal-entry-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.portal-entry-row:last-child { border-bottom: none; }
+.portal-entry-row > div:first-child { flex: 1; min-width: 0; }
+.portal-entry-name { font-size: 13px; font-weight: 600; }
+.portal-entry-row .muted { font-size: 11px; }
+.portal-entry-kcal { flex: none; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.portal-add-food {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px dashed var(--border); background: none; color: var(--brand);
+  font-size: 12.5px; font-weight: 700; font-family: inherit;
+}
+.portal-add-food:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+/* ------------------------------------------------------- search sheets */
+
+.portal-food-sheet { display: flex; flex-direction: column; gap: 12px; }
+.portal-sheet-switch { display: flex; gap: 6px; }
+.portal-sheet-tab {
+  flex: 1; padding: 8px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+  font-size: 12.5px; font-weight: 700; font-family: inherit;
+}
+.portal-sheet-tab.active { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+
+.portal-food-results {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.portal-food-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 11px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid transparent; background: var(--surface-2); color: var(--text);
+}
+.portal-food-row:hover { border-color: var(--brand); }
+.portal-food-row.active { border-color: var(--brand); background: var(--brand-soft); }
+.portal-food-row > div:first-child { flex: 1; min-width: 0; }
+.portal-food-name { font-size: 13px; font-weight: 600; }
+.portal-food-row .muted { font-size: 11px; }
+.portal-food-kcal { flex: none; font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--macro-kcal); }
+.portal-food-section {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 800; color: var(--muted); padding: 8px 0 2px;
+}
+
+.portal-food-detail {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 13px; border-radius: var(--radius);
+  border: 1px solid var(--brand); background: var(--bg-alt);
+}
+.portal-food-detail-name { font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; }
+.portal-food-qty-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.portal-food-qty-row .muted { font-size: 12px; }
+.portal-qty { flex: none; width: 92px; text-align: center; font-variant-numeric: tabular-nums; }
+.portal-food-macros {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.portal-food-macros > div { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.portal-food-macros strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.portal-food-macros span { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.portal-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ----------------------------------------------------------- responsive */
+
+/*
+ * A gym's portal carries seven tabs (Home, Pass, Schedule, Workout, Diet, Pay,
+ * Profile), which is two more than the bar was built for — tighten it rather
+ * than let the labels clip.
+ */
+@media (max-width: 420px) {
+  .portal-tabbar { gap: 0; padding: 5px; margin-left: 8px; margin-right: 8px; }
+  .portal-tab { padding: 7px 1px 5px; font-size: 9px; gap: 1px; }
+}
+
+@media (max-width: 480px) {
+  .portal-pr-wall { grid-template-columns: 1fr; }
+  .portal-diet-hero { justify-content: center; }
+  .portal-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  /*
+   * The builders' fixed grids stop being grids on a phone: an eight-column row
+   * of inputs at 360px gives every cell 30px. Each field goes full width with
+   * its own label instead (the header row is hidden, since it no longer sits
+   * above anything).
+   */
+  .fit-ex-header { display: none; }
+  .fit-ex-row, .fit-item-row {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+  .fit-cell-name { grid-column: 1 / -1; }
+  .fit-ex-handle { justify-self: start; }
+}

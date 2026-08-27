@@ -49,7 +49,7 @@ export const VERTICALS = {
       shifts: 'Gym sessions',
       emergencyContact: 'Emergency contact',
     },
-    modules: new Set(['classes', 'bookings', 'equipment']),
+    modules: new Set(['classes', 'bookings', 'equipment', 'fitness']),
     starterPrices: {
       INR: [1500, 4000, 14000],
       USD: [40, 105, 360],

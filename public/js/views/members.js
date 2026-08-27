@@ -1,5 +1,6 @@
 import { api, session } from '../api.js';
 import {
+  append,
   buildForm,
   clear,
   closeModal,
@@ -12,6 +13,7 @@ import {
   money,
   openModal,
   personCell,
+  renderIcon,
   sourceBadge,
   statusBadge,
   table,
@@ -273,6 +275,552 @@ function supportsWebAuthn() {
 }
 
 /* ------------------------------------------------------------ member detail */
+
+/* ── Fitness & diet (gym only) ────────────────────────────────────────── */
+
+/**
+ * Everything about one member's Diet & Workout programme, in one card: the
+ * routine they are on, the diet they are on, whether they are actually paying
+ * for the tracker, and what they have logged.
+ *
+ * Loaded lazily into `mount` rather than fetched alongside the member: three
+ * more requests on every member page open, for a feature a gym may not have
+ * sold, is a bill the roster should not pay.
+ */
+function fitnessSection(member, { reload }) {
+  const mount = h('div', {}, h('div', { class: 'empty', style: 'padding:20px' }, 'Loading fitness…'));
+
+  const SET_TYPE_SHORT = { normal: '—', warmup: 'W', drop: 'D', failure: 'F' };
+  const minutes = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
+
+  function openAssignForm({ kind, templates, current }) {
+    const isWorkout = kind === 'workout';
+    openModal({
+      title: `${current ? 'Change' : 'Assign'} ${isWorkout ? 'workout plan' : 'diet plan'} · ${fullName(member)}`,
+      body: buildForm(
+        [
+          {
+            name: 'plan_id',
+            label: isWorkout ? 'Routine' : 'Diet',
+            type: 'select',
+            required: true,
+            full: true,
+            options: templates.map((t) => ({
+              value: t.id,
+              label: isWorkout
+                ? `${t.name} · ${t.day_count} days · ${t.level}`
+                : `${t.name} · ${t.target_calories} kcal`,
+            })),
+          },
+          {
+            name: 'customise',
+            label: 'Personalise it?',
+            type: 'select',
+            full: true,
+            value: '1',
+            options: [
+              { value: '1', label: `Yes — take a private copy for ${member.first_name}` },
+              { value: '0', label: 'No — train off the shared template' },
+            ],
+            hint: 'A private copy can be tuned for this member without changing anyone else’s.',
+          },
+          { name: 'start_date', label: 'Starting', type: 'date', value: today() },
+          { name: 'notes', label: 'Note for the member', type: 'textarea', full: true },
+        ],
+        {
+          submitLabel: current ? 'Change plan' : 'Assign plan',
+          onSubmit: async (values) => {
+            const payload = {
+              member_id: member.id,
+              plan_id: Number(values.plan_id),
+              customise: values.customise === '1',
+              start_date: values.start_date || undefined,
+              notes: values.notes || undefined,
+            };
+            if (isWorkout) await api.assignWorkoutPlan(payload);
+            else await api.assignDietPlan(payload);
+            closeModal();
+            toast(isWorkout ? 'Workout plan assigned' : 'Diet plan assigned');
+            await load();
+          },
+        },
+      ),
+    });
+  }
+
+  function openSellAddonForm(settings, access) {
+    openModal({
+      title: `Fitness add-on · ${fullName(member)}`,
+      body: buildForm(
+        [
+          {
+            name: 'months',
+            label: 'Months',
+            type: 'select',
+            value: '1',
+            options: [1, 2, 3, 6, 12].map((n) => ({ value: n, label: `${n} month${n === 1 ? '' : 's'}` })),
+          },
+          { name: 'price', label: 'Price per month', type: 'number', min: 0, step: '0.01', value: settings.monthly_price },
+          {
+            name: 'method',
+            label: 'Paid by',
+            type: 'select',
+            options: [
+              { value: 'cash', label: 'Cash' },
+              { value: 'upi', label: 'UPI' },
+              { value: 'card', label: 'Card' },
+              { value: 'bank', label: 'Bank transfer' },
+              { value: 'online', label: 'Online' },
+            ],
+          },
+          {
+            name: 'record_payment',
+            label: 'Record a payment?',
+            type: 'select',
+            value: '1',
+            options: [
+              { value: '1', label: 'Yes — add it to today’s takings' },
+              { value: '0', label: 'No — activate without charging' },
+            ],
+          },
+          { name: 'reference', label: 'Reference (optional)', full: true },
+          { name: 'note', label: 'Note (optional)', type: 'textarea', full: true },
+        ],
+        {
+          submitLabel: access.addon ? 'Extend add-on' : 'Activate add-on',
+          onSubmit: async (values) => {
+            const res = await api.sellFitnessAddon({
+              member_id: member.id,
+              months: Number(values.months),
+              price: Number(values.price),
+              method: values.method,
+              record_payment: values.record_payment === '1',
+              reference: values.reference || undefined,
+              note: values.note || undefined,
+            });
+            closeModal();
+            toast(`Add-on active until ${date(res.addon.end_date)}`);
+            await load();
+            // A payment lands on the member's ledger, so the page around this
+            // card is now stale too.
+            if (res.payment) await reload();
+          },
+        },
+      ),
+    });
+  }
+
+  function addonBadge(access) {
+    if (!access.has_access) return h('span', { class: 'badge red' }, 'Not subscribed');
+    if (access.source === 'free') return h('span', { class: 'badge green' }, 'Free for all members');
+    if (access.source === 'plan') return h('span', { class: 'badge blue' }, `Included with ${access.bundled_plan}`);
+    if (access.source === 'trial') return h('span', { class: 'badge amber' }, `Trial until ${date(access.trial_ends_on)}`);
+    return h('span', { class: 'badge green' }, `Active until ${date(access.addon.end_date)}`);
+  }
+
+  async function load() {
+    let data;
+    try {
+      data = await Promise.all([
+        api.memberWorkouts(member.id),
+        api.memberDiet(member.id),
+        api.memberFitnessAddon(member.id),
+        api.workoutTemplates(),
+        api.dietTemplates(),
+        api.fitnessAddonSettings(),
+      ]);
+    } catch (err) {
+      clear(mount).append(
+        h('div', { class: 'muted', style: 'padding:16px;font-size:13px' }, err.message || 'Could not load fitness details'),
+      );
+      return;
+    }
+
+    const [workouts, diet, access, workoutTemplates, dietTemplates, { settings }] = data;
+
+    /* Add-on / entitlement */
+    const addonCard = h(
+      'div',
+      { class: 'card fit-member-card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        h('h3', { class: 'fit-card-title' }, renderIcon('sparkle', { size: 15 }), ' Tracking add-on'),
+        h('div', { class: 'spacer' }),
+        addonBadge(access),
+      ),
+      h(
+        'p',
+        { class: 'muted', style: 'font-size:13px;margin:0 0 12px' },
+        access.has_access
+          ? `${member.first_name} can log workouts and meals in the member app.`
+          : `${member.first_name} sees an upgrade screen in the member app instead of the tracker.`,
+      ),
+      session.managesBilling
+        ? h(
+            'div',
+            { class: 'row wrap', style: 'gap:8px' },
+            h(
+              'button',
+              { class: 'btn sm primary', onclick: () => openSellAddonForm(settings, access) },
+              access.addon ? `Extend · ${money(settings.monthly_price)}/mo` : `Activate · ${money(settings.monthly_price)}/mo`,
+            ),
+            access.addon
+              ? h(
+                  'button',
+                  {
+                    class: 'btn sm danger',
+                    onclick: () =>
+                      confirmDialog({
+                        title: 'Cancel the add-on?',
+                        message: 'Access stops immediately. Payments already recorded stay on the books — refund separately if you owe one.',
+                        confirmLabel: 'Cancel add-on',
+                        danger: true,
+                        onConfirm: async () => {
+                          await api.cancelFitnessAddon(access.addon.id);
+                          toast('Add-on cancelled');
+                          await load();
+                        },
+                      }),
+                  },
+                  'Cancel',
+                )
+              : null,
+          )
+        : h('span', { class: 'muted', style: 'font-size:12px' }, 'Only an owner or manager can bill this.'),
+      access.history.length
+        ? h(
+            'div',
+            { style: 'margin-top:14px' },
+            h('div', { class: 'muted', style: 'font-size:12px;margin-bottom:6px' }, 'Billing history'),
+            ...access.history.slice(0, 4).map((row) =>
+              h(
+                'div',
+                { class: 'row', style: 'justify-content:space-between;font-size:13px;padding:3px 0' },
+                h('span', { class: 'muted' }, `${date(row.start_date)} → ${date(row.end_date)}`),
+                h('span', {}, money(row.price)),
+                statusBadge(row.status),
+              ),
+            ),
+          )
+        : null,
+    );
+
+    /* Workout */
+    const assignment = workouts.assignment;
+    const workoutCard = h(
+      'div',
+      { class: 'card fit-member-card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        h('h3', { class: 'fit-card-title' }, renderIcon('weight', { size: 15 }), ' Workout plan'),
+        h('div', { class: 'spacer' }),
+        assignment ? h('span', { class: 'badge blue' }, `${assignment.plan.days.length}-day split`) : null,
+      ),
+      assignment
+        ? h(
+            'div',
+            {},
+            h('div', { style: 'font-size:16px;font-weight:700' }, assignment.plan.name),
+            h(
+              'div',
+              { class: 'muted', style: 'font-size:13px' },
+              `${assignment.plan.goal.replace('_', ' ')} · ${assignment.plan.level} · since ${date(assignment.start_date)}`
+                + (assignment.assigned_by_name ? ` · by ${assignment.assigned_by_name}` : ''),
+            ),
+            assignment.notes ? h('p', { class: 'muted', style: 'font-size:13px' }, assignment.notes) : null,
+            h(
+              'div',
+              { class: 'fit-plan-stats', style: 'margin-top:12px' },
+              h('div', {}, h('strong', {}, workouts.stats.total_workouts), h('span', {}, 'sessions')),
+              h(
+                'div',
+                {},
+                h('strong', {}, `${Math.round(workouts.stats.lifetime_volume_kg / 1000)}t`),
+                h('span', {}, 'lifted'),
+              ),
+              h('div', {}, h('strong', {}, workouts.prs.length), h('span', {}, 'records')),
+            ),
+            h(
+              'div',
+              { class: 'muted', style: 'font-size:12px;margin-top:8px' },
+              workouts.stats.last_workout_on ? `Last trained ${date(workouts.stats.last_workout_on)}` : 'Not trained yet',
+            ),
+          )
+        : h('div', { class: 'empty', style: 'padding:16px' }, 'No routine assigned'),
+      h(
+        'div',
+        { class: 'row wrap', style: 'gap:8px;margin-top:14px' },
+        h(
+          'button',
+          {
+            class: 'btn sm primary',
+            onclick: () => openAssignForm({ kind: 'workout', templates: workoutTemplates.items, current: assignment }),
+          },
+          assignment ? 'Change routine' : '＋ Assign routine',
+        ),
+        assignment
+          ? h(
+              'button',
+              {
+                class: 'btn sm ghost',
+                onclick: () =>
+                  openModal({
+                    title: assignment.plan.name,
+                    wide: true,
+                    body: h(
+                      'div',
+                      { class: 'fit-preview' },
+                      ...assignment.plan.days.map((day) =>
+                        h(
+                          'div',
+                          { class: 'fit-preview-day' },
+                          h('h4', {}, day.day_name),
+                          table(
+                            [
+                              { label: 'Exercise', render: (r) => r.exercise_name },
+                              { label: 'Sets × reps', render: (r) => `${r.target_sets} × ${r.target_reps}` },
+                              { label: 'Rest', align: 'right', render: (r) => `${r.rest_seconds}s` },
+                            ],
+                            day.exercises,
+                            { empty: 'No exercises' },
+                          ),
+                        ),
+                      ),
+                    ),
+                  }),
+              },
+              'View routine',
+            )
+          : null,
+        assignment
+          ? h(
+              'button',
+              {
+                class: 'btn sm danger',
+                onclick: () =>
+                  confirmDialog({
+                    title: 'Remove this routine?',
+                    message: `${member.first_name} will have no assigned workout until you give them another. Their logged history is kept.`,
+                    confirmLabel: 'Remove',
+                    danger: true,
+                    onConfirm: async () => {
+                      await api.unassignWorkoutPlan(member.id);
+                      toast('Routine removed');
+                      await load();
+                    },
+                  }),
+              },
+              'Remove',
+            )
+          : null,
+      ),
+    );
+
+    /* Diet */
+    const dietAssignment = diet.assignment;
+    const dietCard = h(
+      'div',
+      { class: 'card fit-member-card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        h('h3', { class: 'fit-card-title' }, renderIcon('apple', { size: 15 }), ' Diet plan'),
+        h('div', { class: 'spacer' }),
+        diet.adherence_pct !== null
+          ? h(
+              'span',
+              { class: `badge ${diet.adherence_pct >= 60 ? 'green' : diet.adherence_pct >= 30 ? 'amber' : 'red'}` },
+              `${diet.adherence_pct}% on target`,
+            )
+          : null,
+      ),
+      dietAssignment
+        ? h(
+            'div',
+            {},
+            h('div', { style: 'font-size:16px;font-weight:700' }, dietAssignment.plan.name),
+            h(
+              'div',
+              { class: 'muted', style: 'font-size:13px' },
+              `${dietAssignment.plan.goal.replace('_', ' ')} · since ${date(dietAssignment.start_date)}`
+                + (dietAssignment.assigned_by_name ? ` · by ${dietAssignment.assigned_by_name}` : ''),
+            ),
+            h(
+              'div',
+              { class: 'fit-macro-pills', style: 'margin-top:10px' },
+              h('span', { class: 'fit-pill kcal' }, `${dietAssignment.plan.target_calories} kcal`),
+              h('span', { class: 'fit-pill protein' }, `P ${dietAssignment.plan.target_protein_g}g`),
+              h('span', { class: 'fit-pill carbs' }, `C ${dietAssignment.plan.target_carbs_g}g`),
+              h('span', { class: 'fit-pill fats' }, `F ${dietAssignment.plan.target_fats_g}g`),
+            ),
+          )
+        : h('div', { class: 'empty', style: 'padding:16px' }, 'No diet assigned'),
+      h(
+        'div',
+        { class: 'row wrap', style: 'gap:8px;margin-top:14px' },
+        h(
+          'button',
+          {
+            class: 'btn sm primary',
+            onclick: () => openAssignForm({ kind: 'diet', templates: dietTemplates.items, current: dietAssignment }),
+          },
+          dietAssignment ? 'Change diet' : '＋ Assign diet',
+        ),
+        dietAssignment
+          ? h(
+              'button',
+              {
+                class: 'btn sm danger',
+                onclick: () =>
+                  confirmDialog({
+                    title: 'Remove this diet?',
+                    message: `${member.first_name} keeps their food log but loses the targets until you assign another plan.`,
+                    confirmLabel: 'Remove',
+                    danger: true,
+                    onConfirm: async () => {
+                      await api.unassignDietPlan(member.id);
+                      toast('Diet removed');
+                      await load();
+                    },
+                  }),
+              },
+              'Remove',
+            )
+          : null,
+      ),
+    );
+
+    /* Logs */
+    async function openSessionDetail(log) {
+      try {
+        const full = await api.workoutLog(log.id);
+        const byExercise = new Map();
+        for (const set of full.sets) {
+          if (!byExercise.has(set.exercise_name)) byExercise.set(set.exercise_name, []);
+          byExercise.get(set.exercise_name).push(set);
+        }
+        openModal({
+          title: `${full.workout_name} · ${date(full.log_date)}`,
+          body: h(
+            'div',
+            { class: 'fit-preview' },
+            h(
+              'div',
+              { class: 'fit-plan-stats' },
+              h('div', {}, h('strong', {}, `${Math.round(full.total_volume_kg)} kg`), h('span', {}, 'volume')),
+              h('div', {}, h('strong', {}, full.total_sets), h('span', {}, 'sets')),
+              h('div', {}, h('strong', {}, full.total_reps), h('span', {}, 'reps')),
+              h('div', {}, h('strong', {}, minutes(full.duration_seconds)), h('span', {}, 'duration')),
+            ),
+            ...[...byExercise].map(([name, sets]) =>
+              h(
+                'div',
+                { class: 'fit-preview-day' },
+                h('h4', {}, name),
+                ...sets.map((set) =>
+                  h(
+                    'div',
+                    { class: 'row', style: 'gap:10px;font-size:13px;padding:3px 0' },
+                    h('span', { class: 'badge grey' }, SET_TYPE_SHORT[set.set_type] ?? set.set_type),
+                    h('span', {}, `${set.weight_kg} kg × ${set.reps}`),
+                    set.is_pr ? h('span', { class: 'badge amber' }, 'PR') : null,
+                    h('span', { class: 'muted' }, set.est_1rm_kg ? `~${set.est_1rm_kg} kg 1RM` : ''),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        });
+      } catch (err) {
+        toast(err.message || 'Could not open that session', 'error');
+      }
+    }
+
+    const logsCard = h(
+      'div',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon('activity', { size: 15 }), ' Logged sessions')),
+      table(
+        [
+          { label: 'Date', render: (r) => date(r.log_date) },
+          { label: 'Workout', render: (r) => r.workout_name },
+          { label: 'Sets', align: 'right', render: (r) => r.total_sets },
+          { label: 'Volume', align: 'right', render: (r) => `${Math.round(r.total_volume_kg)} kg` },
+          { label: 'Time', align: 'right', render: (r) => minutes(r.duration_seconds) },
+        ],
+        workouts.logs,
+        { empty: 'Nothing logged yet', onRowClick: openSessionDetail },
+      ),
+    );
+
+    const foodCard = h(
+      'div',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon('flame', { size: 15 }), ' Food log')),
+      table(
+        [
+          { label: 'Date', render: (r) => date(r.log_date) },
+          {
+            label: 'Calories',
+            align: 'right',
+            render: (r) => {
+              const target = dietAssignment?.plan.target_calories;
+              if (!target) return Math.round(r.calories);
+              const within = Math.abs(r.calories - target) <= target * 0.15;
+              return h('span', { style: `color:var(--${within ? 'green' : 'amber'})` }, `${Math.round(r.calories)} / ${target}`);
+            },
+          },
+          { label: 'Protein', align: 'right', render: (r) => `${Math.round(r.protein_g)}g` },
+          { label: 'Carbs', align: 'right', render: (r) => `${Math.round(r.carbs_g)}g` },
+          { label: 'Fats', align: 'right', render: (r) => `${Math.round(r.fats_g)}g` },
+          { label: 'Water', align: 'right', render: (r) => `${r.water_ml} ml` },
+          { label: 'Items', align: 'right', render: (r) => r.entry_count },
+        ],
+        diet.days,
+        { empty: 'No meals logged yet' },
+      ),
+    );
+
+    const prCard = workouts.prs.length
+      ? h(
+          'div',
+          { class: 'card' },
+          h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon('trophy', { size: 15 }), ' Personal records')),
+          table(
+            [
+              { label: 'Exercise', render: (r) => r.exercise_name },
+              { label: 'Best set', render: (r) => `${r.max_weight_kg} kg × ${r.max_reps}` },
+              { label: 'Est. 1RM', align: 'right', render: (r) => `${r.est_1rm_kg} kg` },
+              { label: 'Set on', render: (r) => date(r.achieved_at) },
+            ],
+            workouts.prs,
+            { empty: 'No records yet' },
+          ),
+        )
+      : null;
+
+    append(clear(mount), [
+      h('div', { class: 'grid cols-3' }, addonCard, workoutCard, dietCard),
+      h('div', { class: 'grid cols-2 top', style: 'margin-top:16px' }, logsCard, foodCard),
+      prCard ? h('div', { style: 'margin-top:16px' }, prCard) : null,
+    ]);
+  }
+
+  load();
+  return h(
+    'div',
+    { class: 'grid', style: 'gap:16px' },
+    h(
+      'div',
+      { class: 'row', style: 'gap:10px;align-items:baseline' },
+      h('h3', { class: 'fit-card-title', style: 'margin:0;font-size:16px' }, renderIcon('weight', { size: 16 }), ' Fitness & diet'),
+      h('a', { href: '#/fitness-plans', class: 'muted', style: 'font-size:12px' }, 'Manage plans →'),
+    ),
+    mount,
+  );
+}
 
 export async function renderMemberDetail({ params, setTitle, setActions, reload, navigate }) {
   const member = await api.member(params[0]);
@@ -1106,6 +1654,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     { class: 'grid', style: 'gap:16px' },
     h('a', { href: '#/members', class: 'muted', style: 'font-size:13px' }, '← Back to members'),
     h('div', { class: 'grid cols-3' }, profileCard, membershipCard, accountCard),
+    // Gym only: the fitness module is not part of SeatBook, and its API 404s
+    // there — see requireModule in src/verticals.js.
+    isLibrary() ? null : fitnessSection(member, { reload }),
     qrCardSection,
     biometricCard,
     documentsCard,

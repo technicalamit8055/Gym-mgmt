@@ -110,6 +110,21 @@ export function addDays(isoDate, days) {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * `isoDate` plus `months` calendar months, clamped to the shorter month.
+ *
+ * "Monthly" is a calendar notion, not 30 days: a member who buys the fitness
+ * add-on on the 31st of January is paid up to the 28th of February, not to a
+ * date that does not exist. Pure UTC arithmetic on the parts, so no timezone
+ * can leak in — the same discipline as addDays above.
+ */
+export function addMonths(isoDate, months) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const lastDayOfTarget = new Date(Date.UTC(year, month - 1 + months + 1, 0)).getUTCDate();
+  const d = new Date(Date.UTC(year, month - 1 + months, Math.min(day, lastDayOfTarget)));
+  return d.toISOString().slice(0, 10);
+}
+
 /** The first of `isoDate`'s month, optionally `monthsBack` months earlier. */
 export function startOfMonth(isoDate, monthsBack = 0) {
   const [year, month] = isoDate.split('-').map(Number);

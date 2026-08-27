@@ -374,6 +374,42 @@ export const api = {
   sendWhatsAppTest: (payload) => request('POST', '/whatsapp/send-test', payload),
   whatsappLogs: (params) => request('GET', `/whatsapp/logs${query(params)}`),
 
+  // Diet & workout programming, from the staff side. Templates use PUT rather
+  // than PATCH because a routine is edited as a whole document — the day tree
+  // that comes back replaces the one that was there.
+  workoutTemplates: () => request('GET', '/workouts/templates'),
+  workoutTemplate: (id) => request('GET', `/workouts/templates/${id}`),
+  createWorkoutTemplate: (payload) => request('POST', '/workouts/templates', payload),
+  updateWorkoutTemplate: (id, payload) => request('PUT', `/workouts/templates/${id}`, payload),
+  deleteWorkoutTemplate: (id) => request('DELETE', `/workouts/templates/${id}`),
+  assignWorkoutPlan: (payload) => request('POST', '/workouts/assign', payload),
+  unassignWorkoutPlan: (memberId) => request('POST', `/workouts/unassign/${memberId}`),
+  memberWorkouts: (memberId, params) => request('GET', `/workouts/members/${memberId}${query(params)}`),
+  workoutLog: (id) => request('GET', `/workouts/logs/${id}`),
+  exercises: (params) => request('GET', `/workouts/exercises${query(params)}`),
+  createExercise: (payload) => request('POST', '/workouts/exercises', payload),
+  deleteExercise: (id) => request('DELETE', `/workouts/exercises/${id}`),
+
+  dietTemplates: () => request('GET', '/diets/templates'),
+  dietTemplate: (id) => request('GET', `/diets/templates/${id}`),
+  createDietTemplate: (payload) => request('POST', '/diets/templates', payload),
+  updateDietTemplate: (id, payload) => request('PUT', `/diets/templates/${id}`, payload),
+  deleteDietTemplate: (id) => request('DELETE', `/diets/templates/${id}`),
+  assignDietPlan: (payload) => request('POST', '/diets/assign', payload),
+  unassignDietPlan: (memberId) => request('POST', `/diets/unassign/${memberId}`),
+  memberDiet: (memberId, params) => request('GET', `/diets/members/${memberId}${query(params)}`),
+  memberDietDay: (memberId, date) => request('GET', `/diets/members/${memberId}/day${query({ date })}`),
+  foods: (params) => request('GET', `/diets/foods${query(params)}`),
+  createFood: (payload) => request('POST', '/diets/foods', payload),
+  deleteFood: (id) => request('DELETE', `/diets/foods/${id}`),
+
+  fitnessAddonSettings: () => request('GET', '/fitness-addons/settings'),
+  updateFitnessAddonSettings: (payload) => request('PUT', '/fitness-addons/settings', payload),
+  fitnessAddons: (params) => request('GET', `/fitness-addons${query(params)}`),
+  memberFitnessAddon: (memberId) => request('GET', `/fitness-addons/members/${memberId}`),
+  sellFitnessAddon: (payload) => request('POST', '/fitness-addons/subscribe', payload),
+  cancelFitnessAddon: (id) => request('POST', `/fitness-addons/cancel/${id}`),
+
   // Member self-service portal. `anonymous` on login: a stale member token
   // from a previous member on this device must not turn a fresh sign-in
   // attempt into a 401 redirect loop. Every other call is `member: true`,
@@ -390,6 +426,24 @@ export const api = {
     payments: (params) => request('GET', `/portal/payments${query(params)}`, undefined, { member: true }),
     attendance: (params) => request('GET', `/portal/attendance${query(params)}`, undefined, { member: true }),
     plans: () => request('GET', '/portal/plans', undefined, { member: true }),
+
+    // Diet & workout tracking. fitnessStatus() is the only one of these that
+    // answers for a member without the add-on — every other call 402s, which
+    // is what the Workout and Diet tabs check before painting anything.
+    fitnessStatus: () => request('GET', '/portal/fitness/status', undefined, { member: true }),
+    currentWorkout: () => request('GET', '/portal/workouts/current', undefined, { member: true }),
+    saveWorkoutLog: (payload) => request('POST', '/portal/workouts/logs', payload, { member: true }),
+    workoutLogs: (params) => request('GET', `/portal/workouts/logs${query(params)}`, undefined, { member: true }),
+    workoutLog: (id) => request('GET', `/portal/workouts/logs/${id}`, undefined, { member: true }),
+    deleteWorkoutLog: (id) => request('DELETE', `/portal/workouts/logs/${id}`, undefined, { member: true }),
+    personalRecords: () => request('GET', '/portal/workouts/prs', undefined, { member: true }),
+    exercises: (params) => request('GET', `/portal/workouts/exercises${query(params)}`, undefined, { member: true }),
+    currentDiet: () => request('GET', '/portal/diets/current', undefined, { member: true }),
+    dietDay: (date) => request('GET', `/portal/diets/daily${query({ date })}`, undefined, { member: true }),
+    addFoodEntry: (payload) => request('POST', '/portal/diets/entries', payload, { member: true }),
+    deleteFoodEntry: (id) => request('DELETE', `/portal/diets/entries/${id}`, undefined, { member: true }),
+    logWater: (payload) => request('POST', '/portal/diets/water', payload, { member: true }),
+    foods: (params) => request('GET', `/portal/diets/foods${query(params)}`, undefined, { member: true }),
     downloadReceipt: async (id) => {
       const res = await fetch(`${pathPrefix}/api/portal/payments/${id}/receipt`, {
         headers: { Authorization: `Bearer ${memberSession.token}` },
