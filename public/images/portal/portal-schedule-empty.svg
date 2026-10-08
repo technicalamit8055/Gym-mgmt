@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100" width="160" height="100" fill="none">
+  <defs>
+    <linearGradient id="cloudBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#eff6ff" />
+      <stop offset="100%" stop-color="#dbeafe" />
+    </linearGradient>
+    <linearGradient id="clockGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#ea580c" />
+    </linearGradient>
+  </defs>
+
+  <!-- Soft Ambient Clouds / Backdrop -->
+  <path d="M25 75 C10 65, 15 45, 35 48 C42 35, 65 32, 75 45 C90 35, 115 38, 125 50 C145 48, 155 65, 140 78 C120 85, 45 85, 25 75 Z" fill="url(#cloudBg)" opacity="0.6" />
+
+  <!-- Soft Decorative Leaves -->
+  <path d="M42 65 C32 50, 38 35, 52 42 C48 52, 45 60, 42 65 Z" fill="#93c5fd" opacity="0.7" />
+  <path d="M125 68 C135 55, 130 40, 116 45 C119 55, 122 62, 125 68 Z" fill="#93c5fd" opacity="0.7" />
+
+  <!-- Desk Calendar Body -->
+  <g id="calendar">
+    <rect x="52" y="28" width="56" height="48" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" />
+    <!-- Header Band (Orange) -->
+    <path d="M52 36 C52 31.57, 55.57 28, 60 28 L100 28 C104.43 28, 108 31.57, 108 36 L108 40 L52 40 Z" fill="#f97316" />
+    <!-- Binder Rings -->
+    <rect x="62" y="23" width="4" height="9" rx="2" fill="#cbd5e1" />
+    <rect x="94" y="23" width="4" height="9" rx="2" fill="#cbd5e1" />
+    
+    <!-- Grid Squares / Days -->
+    <rect x="60" y="47" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+    <rect x="71" y="47" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+    <rect x="82" y="47" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+    <rect x="93" y="47" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+
+    <rect x="60" y="57" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+    <rect x="71" y="57" width="7" height="6" rx="1.5" fill="#e0e7ff" />
+    <rect x="82" y="57" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+    <rect x="93" y="57" width="7" height="6" rx="1.5" fill="#f1f5f9" />
+
+    <rect x="60" y="66" width="7" height="5" rx="1.5" fill="#f1f5f9" />
+    <rect x="71" y="66" width="7" height="5" rx="1.5" fill="#f1f5f9" />
+  </g>
+
+  <!-- Circular Clock Badge (Foreground Right) -->
+  <g id="clock-badge">
+    <circle cx="98" cy="68" r="14" fill="url(#clockGrad)" stroke="#ffffff" stroke-width="2.5" />
+    <!-- Clock Hands (L-shape) -->
+    <path d="M98 60 L98 68 L104 68" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

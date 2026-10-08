@@ -69,22 +69,41 @@ function progressRing(pct, { size = 76, stroke = 7 } = {}) {
   );
 }
 
-function quickAction(icon, label, onclick) {
+/** The coloured illustration icons in /images/portal — flame, bicep, leaf,
+ * water, crown. Decorative only, so alt is empty. */
+const portalIcon = (name, className = 'portal-art-icon') =>
+  h('img', { class: className, src: `/images/portal/icon-${name}.svg`, alt: '', width: 24, height: 24 });
+
+/** `tone` (orange | purple | green | blue) tints the icon tile. */
+function quickAction(icon, label, onclick, tone = 'orange') {
   return h(
     'button',
     { class: 'portal-quick-btn', type: 'button', onclick },
-    h('div', { class: 'portal-quick-icon' }, renderIcon(icon, { size: 20 })),
+    h('div', { class: `portal-quick-icon tone-${tone}` }, renderIcon(icon, { size: 22 })),
     h('span', {}, label),
   );
 }
 
-function miniStat(icon, value, label) {
+/** `tone` also switches on the little rising-bars flourish behind the number —
+ * the Workout tab's stats call this without one and stay plain. */
+function miniStat(icon, value, label, tone) {
   return h(
     'div',
-    { class: 'portal-mini-stat' },
-    h('div', { class: 'portal-mini-stat-icon' }, renderIcon(icon, { size: 16 })),
+    { class: `portal-mini-stat${tone ? ` tone-${tone}` : ''}` },
+    h('div', { class: 'portal-mini-stat-icon' }, renderIcon(icon, { size: tone ? 18 : 16 })),
     h('div', { class: 'portal-mini-stat-value' }, String(value ?? 0)),
     h('div', { class: 'portal-mini-stat-label' }, label),
+    tone ? h('div', { class: 'portal-mini-stat-bars', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i')) : null,
+  );
+}
+
+/** A Home section title with its "View all →" link on the right. */
+function sectionHead(title, linkLabel, onLink) {
+  return h(
+    'div',
+    { class: 'portal-section-head' },
+    h('h3', {}, title),
+    h('button', { class: 'portal-section-link', type: 'button', onclick: onLink }, linkLabel, renderIcon('arrowRight', { size: 14 })),
   );
 }
 
@@ -610,7 +629,7 @@ const activeSession = {
 
 /** The hero calorie ring: eaten against target, with what is left in the
  * middle — the one number a member opens the Diet tab to read. */
-function calorieRing(eaten, target, { size = 168, stroke = 13, compact = false } = {}) {
+function calorieRing(eaten, target, { size = 168, stroke = 13, compact = false, icon = null } = {}) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const pct = target > 0 ? Math.min(eaten / target, 1) : 0;
@@ -640,6 +659,7 @@ function calorieRing(eaten, target, { size = 168, stroke = 13, compact = false }
     h(
       'div',
       { class: 'portal-cal-center' },
+      icon ? portalIcon(icon, 'portal-cal-icon') : null,
       h('strong', {}, String(over ? Math.round(eaten - target) : remaining)),
       h('span', {}, over ? 'kcal over' : 'kcal left'),
       h('small', {}, `${Math.round(eaten)} of ${target}`),
@@ -647,11 +667,11 @@ function calorieRing(eaten, target, { size = 168, stroke = 13, compact = false }
   );
 }
 
-function macroBar(label, eaten, target, tone) {
+function macroBar(label, eaten, target, tone, icon = null) {
   const pct = target > 0 ? Math.min((eaten / target) * 100, 100) : 0;
-  return h(
+  const body = h(
     'div',
-    { class: 'portal-macro' },
+    { class: 'portal-macro-body' },
     h(
       'div',
       { class: 'portal-macro-top' },
@@ -660,6 +680,7 @@ function macroBar(label, eaten, target, tone) {
     ),
     h('div', { class: `portal-macro-bar ${tone}` }, h('i', { style: `width:${pct}%` })),
   );
+  return h('div', { class: `portal-macro${icon ? ' has-icon' : ''}` }, icon ? portalIcon(icon, 'portal-macro-icon') : null, body);
 }
 
 /* ── Food search sheet ─────────────────────────────────────────────────── */
@@ -943,7 +964,7 @@ function buildTabs() {
     ];
   }
   return [
-    { key: 'home', label: 'Home', icon: 'dashboard' },
+    { key: 'home', label: 'Home', icon: 'home' },
     { key: 'workout', label: 'Workout', icon: 'weight' },
     { key: 'diet', label: 'Diet', icon: 'apple' },
     { key: 'schedule', label: 'Schedule', icon: 'classes' },
@@ -1081,7 +1102,8 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'div',
           { class: 'portal-focus-card portal-focus-workout' },
-          h('div', { class: 'portal-focus-kicker' }, current.plan.name),
+          h('img', { class: 'portal-focus-art', src: '/images/portal/portal-workout-pull.png', alt: '' }),
+          h('div', { class: 'portal-focus-kicker' }, renderIcon('weight', { size: 16 }), h('span', {}, current.plan.name)),
           h('div', { class: 'portal-focus-title' }, current.today_day.day_name),
           h(
             'div',
@@ -1092,7 +1114,7 @@ function renderPortalApp(ctx, initialMe) {
           h(
             'button',
             {
-              class: 'btn primary sm',
+              class: 'btn primary portal-start-btn',
               type: 'button',
               onclick: () =>
                 startWorkoutSession({
@@ -1116,13 +1138,13 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'button',
           { class: 'portal-focus-card portal-focus-diet', type: 'button', onclick: () => switchTab('diet') },
-          calorieRing(totals.calories, targets.target_calories, { size: 84, stroke: 8, compact: true }),
+          calorieRing(totals.calories, targets.target_calories, { size: 104, stroke: 9, compact: true, icon: 'flame' }),
           h(
             'div',
             { class: 'portal-macro-stack' },
-            macroBar('Protein', totals.protein_g, targets.target_protein_g, 'protein'),
-            macroBar('Carbs', totals.carbs_g, targets.target_carbs_g, 'carbs'),
-            macroBar('Fats', totals.fats_g, targets.target_fats_g, 'fats'),
+            macroBar('Protein', totals.protein_g, targets.target_protein_g, 'protein', 'bicep'),
+            macroBar('Carbs', totals.carbs_g, targets.target_carbs_g, 'carbs', 'leaf'),
+            macroBar('Fats', totals.fats_g, targets.target_fats_g, 'fats', 'water'),
           ),
         ),
       );
@@ -1132,7 +1154,7 @@ function renderPortalApp(ctx, initialMe) {
     return h(
       'div',
       { class: 'portal-section' },
-      h('h3', {}, "Today's focus"),
+      sectionHead("Today's focus", 'View plan', () => switchTab('workout')),
       h('div', { class: 'portal-focus-grid' }, ...cards),
     );
   }
@@ -1154,16 +1176,28 @@ function renderPortalApp(ctx, initialMe) {
     const todayIso = today();
     const schedule = await api.portal.classes({ week_start: todayIso }).catch(() => ({ items: [] }));
     const mine = schedule.items.filter((c) => c.class_date === todayIso && c.my_booking_id);
+    const head = sectionHead("Today's schedule", 'View all', () => switchTab('schedule'));
     if (!mine.length) {
       return h(
         'div',
         { class: 'portal-section' },
-        h('h3', {}, "Today's schedule"),
-        h('div', { class: 'portal-empty' }, 'No classes booked for today.'),
-        h('button', { class: 'btn sm ghost', type: 'button', onclick: () => switchTab('schedule') }, 'Browse classes'),
+        head,
+        h(
+          'div',
+          { class: 'portal-schedule-empty' },
+          h('img', { class: 'portal-schedule-empty-art', src: '/images/portal/portal-schedule-empty.svg', alt: '' }),
+          h('div', { class: 'portal-schedule-empty-title' }, 'No classes booked for today.'),
+          h('div', { class: 'portal-schedule-empty-sub' }, 'Take the next step towards a healthier you!'),
+          h(
+            'button',
+            { class: 'btn primary portal-browse-btn', type: 'button', onclick: () => switchTab('schedule') },
+            renderIcon('classes', { size: 16 }),
+            ' Browse classes',
+          ),
+        ),
       );
     }
-    return h('div', { class: 'portal-section' }, h('h3', {}, "Today's schedule"), ...mine.map((c) => classCard(c)));
+    return h('div', { class: 'portal-section' }, head, ...mine.map((c) => classCard(c)));
   }
 
   async function renderHomeTab() {
@@ -1181,54 +1215,68 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'div',
           { class: 'portal-hero-info' },
-          h('div', { class: 'portal-hero-label' }, sub ? t('membership') : 'No active plan'),
+          h(
+            'div',
+            { class: 'portal-hero-label' },
+            portalIcon('crown', 'portal-hero-crown'),
+            h('span', {}, sub ? t('membership') : 'No active plan'),
+          ),
           h('div', { class: 'portal-hero-plan' }, sub ? sub.plan_name : `Visit the desk to ${isLibrary() ? 'buy a pass' : 'join a plan'}`),
+          sub
+            ? h(
+                'div',
+                { class: 'portal-hero-bottom' },
+                h('span', {}, `Valid until ${date(sub.end_date)}`),
+                me.sessions_left !== null && me.sessions_left !== undefined
+                  ? h('span', { class: 'portal-hero-pill' }, `${me.sessions_left} sessions left`)
+                  : null,
+              )
+            : h(
+                'div',
+                { class: 'portal-hero-bottom' },
+                h('button', { class: 'btn sm ghost', type: 'button', onclick: () => switchTab('pay') }, 'See renewal plans'),
+              ),
         ),
         sub
           ? h(
               'div',
-              { style: 'position:relative' },
-              progressRing(pct),
+              { class: 'portal-hero-ring' },
               h(
                 'div',
-                { class: 'portal-hero-ring-text' },
-                h('strong', {}, String(Math.max(daysLeft, 0))),
-                h('span', {}, 'days'),
+                { style: 'position:relative' },
+                progressRing(pct, { size: 88, stroke: 8 }),
+                h(
+                  'div',
+                  { class: 'portal-hero-ring-text' },
+                  h('strong', {}, String(Math.max(daysLeft, 0))),
+                  h('span', {}, 'Days left'),
+                ),
+              ),
+              h(
+                'button',
+                { class: 'portal-hero-go', type: 'button', 'aria-label': 'Invoices & renewal', onclick: () => switchTab('pay') },
+                renderIcon('chevronRight', { size: 16, stroke: 2.5 }),
               ),
             )
           : null,
       ),
-      sub
-        ? h(
-            'div',
-            { class: 'portal-hero-bottom' },
-            h('span', {}, `Valid until ${date(sub.end_date)}`),
-            me.sessions_left !== null && me.sessions_left !== undefined
-              ? h('span', { class: 'portal-hero-pill' }, `${me.sessions_left} sessions left`)
-              : null,
-          )
-        : h(
-            'div',
-            { class: 'portal-hero-bottom' },
-            h('button', { class: 'btn sm ghost', type: 'button', onclick: () => switchTab('pay') }, 'See renewal plans'),
-          ),
     );
 
     const quickActions = h(
       'div',
       { class: 'portal-quick-grid' },
-      quickAction('idCard', 'Digital Pass', () => switchTab('pass')),
-      quickAction(isLibrary() ? 'seats' : 'classes', isLibrary() ? 'My Shift' : 'Book Class', () => switchTab('schedule')),
-      quickAction('billing', 'Invoices', () => switchTab('pay')),
-      quickAction('member', 'Support', openSupportModal),
+      quickAction('idCard', 'Digital Pass', () => switchTab('pass'), 'orange'),
+      quickAction(isLibrary() ? 'seats' : 'classes', isLibrary() ? 'My Shift' : 'Book Class', () => switchTab('schedule'), 'purple'),
+      quickAction('billing', 'Invoices', () => switchTab('pay'), 'green'),
+      quickAction('member', 'Support', openSupportModal, 'blue'),
     );
 
     const statsRow = h(
       'div',
       { class: 'portal-stat-row' },
-      miniStat('activity', me.stats.streak_days, `Day${me.stats.streak_days === 1 ? '' : 's'} streak`),
-      miniStat(isLibrary() ? 'seats' : 'checkin', me.stats.visits_this_month, `${isLibrary() ? 'Sittings' : 'Workouts'} this month`),
-      miniStat('trendUp', me.stats.total_visits, 'Total visits'),
+      miniStat(isLibrary() ? 'activity' : 'flame', me.stats.streak_days, `Day${me.stats.streak_days === 1 ? '' : 's'} streak`, 'green'),
+      miniStat(isLibrary() ? 'seats' : 'weight', me.stats.visits_this_month, `${isLibrary() ? 'Sittings' : 'Workouts'} this month`, 'purple'),
+      miniStat('trendUp', me.stats.total_visits, 'Total visits', 'orange'),
     );
 
     const [todaysFocus, todaySection] = await Promise.all([renderTodaysFocus(), renderTodaySection()]);
@@ -1238,8 +1286,11 @@ function renderPortalApp(ctx, initialMe) {
       { class: 'portal-tab-body' },
       h(
         'div',
-        { class: 'portal-greeting' },
-        h('h2', {}, `Hi, ${me.member.first_name} 👋`),
+        { class: `portal-greeting${isLibrary() ? '' : ' has-art'}` },
+        isLibrary()
+          ? null
+          : h('div', { class: 'portal-greeting-art' }, h('img', { src: '/images/portal/portal-hero-athlete.png', alt: '' })),
+        h('h2', {}, `Hi, ${`${me.member.first_name} ${me.member.last_name || ''}`.trim()} 👋`),
         h('p', {}, isLibrary() ? 'Have a productive day.' : 'Ready for today’s workout?'),
       ),
       heroCard,
@@ -2693,20 +2744,31 @@ function renderPortalApp(ctx, initialMe) {
     { class: 'portal-topbar' },
     ctx.context?.tenant?.logo_url
       ? h('img', { class: 'portal-topbar-logo-img', src: ctx.context.tenant.logo_url, alt: gymDisplayName(ctx) })
-      : h('div', { class: 'portal-topbar-logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 16 })),
+      : isLibrary()
+        ? h('div', { class: 'portal-topbar-logo' }, renderIcon('book', { size: 16 }))
+        : h('img', { class: 'portal-topbar-logo-img', src: '/icons/gym-logo.svg', alt: gymDisplayName(ctx) }),
     h('div', { class: 'portal-topbar-name' }, gymDisplayName(ctx)),
-    h('div', { class: 'spacer' }),
     h(
       'div',
       { class: 'portal-topbar-actions' },
-      statusBadge(me.member.status),
       // Pass is not always a bottom tab (see buildTabs) so this is the one
       // spot on every screen that gets a member to their scannable code in a
       // single tap, matching the quick action on Home.
       h(
         'button',
         { class: 'portal-qr-btn', type: 'button', title: 'Show digital pass', 'aria-label': 'Show digital pass', onclick: () => switchTab('pass') },
-        renderIcon('qrCode', { size: 17 }),
+        renderIcon('qrCode', { size: 20 }),
+      ),
+      h(
+        'button',
+        {
+          class: 'portal-qr-btn',
+          type: 'button',
+          title: 'Notifications',
+          'aria-label': 'Notifications',
+          onclick: () => toast('You’re all caught up'),
+        },
+        renderIcon('bell', { size: 20 }),
       ),
     ),
   );

@@ -15,6 +15,7 @@ import {
   money,
   renderIcon,
   stat,
+  svg,
   table,
   time,
   toast,
@@ -30,6 +31,11 @@ const monthLabel = (period) => {
 /** Icon-set names (see ui.js), not glyphs — the method badge has to line up
  * with the rest of the app's iconography, not with the desk's emoji font. */
 const METHOD_ICON = { cash: 'cash', card: 'card', upi: 'smartphone', bank: 'bank', online: 'globe' };
+const METHOD_TONE = { cash: 'green', card: 'blue', upi: 'grey', bank: 'violet', online: 'blue' };
+
+/** Plan-mix slices, in order, drawn from the app's own status palette so the
+ * donut follows the active theme and light/dark mode. */
+const PLAN_COLORS = ['var(--brand)', 'var(--blue)', 'var(--green)', 'var(--violet)', 'var(--amber)', 'var(--red)'];
 
 function greetingFor(hour) {
   if (hour < 5) return 'Good night';
@@ -44,6 +50,71 @@ function formatDuration(checkIn) {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(checkIn).getTime()) / 60000));
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+const sinceLine = (checkIn) => `since ${time(checkIn.slice(11))} · ${formatDuration(checkIn)} ago`;
+
+/** A coloured chip for a stat card's footer: direction arrow or status tick + text. */
+const pill = (kind, icon, text) =>
+  h('span', { class: `trend-pill ${kind}` }, icon ? renderIcon(icon, { size: 14, stroke: 2.2 }) : null, text);
+
+/**
+ * A metric card in the dashboard's tinted treatment: gradient icon tile on the
+ * left, a ghost watermark on the right, and a footer of chip + caption. It is
+ * the shared stat() with the layout and extras layered on, so the click-through,
+ * pulse and keyboard behaviour stay in one place.
+ */
+function toneStat(label, value, { tone, watermark, chip, note, ...options }) {
+  const card = stat(label, value, null, options);
+  card.classList.add('toned', `tone-${tone}`);
+  if (watermark) {
+    card.prepend(h('img', { class: 'stat-wm', src: `/images/watermarks/watermark-${watermark}.svg`, alt: '', 'aria-hidden': 'true' }));
+  }
+  if (chip || note) card.append(h('div', { class: 'stat-foot' }, chip, note ? h('span', { class: 'stat-note' }, note) : null));
+  return card;
+}
+
+/** Tinted square that fronts a card's title. `icon` is a renderIcon name or a node. */
+const headIcon = (icon, tone) =>
+  h('span', { class: `head-icon tone-${tone}` }, typeof icon === 'string' ? renderIcon(icon, { size: 18 }) : icon);
+
+/** Read-only caption for the period a chart shows — styled like a picker, but
+ * the dashboard API only returns these fixed windows. */
+const rangeChip = (text) =>
+  h('span', { class: 'range-chip' }, renderIcon('calendar', { size: 14 }), text, renderIcon('chevronRight', { size: 13, class: 'range-caret' }));
+
+/** Card-header link with a trailing arrow ("All payments →"). */
+const headLink = (href, text) => h('a', { class: 'head-link', href }, text, renderIcon('arrowRight', { size: 15 }));
+
+/** Ring of plan shares with the member total in the middle. */
+function planDonut(rows, total) {
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius;
+  const gap = rows.length > 1 ? 2.5 : 0;
+  let offset = 0;
+  const slices = rows.map((row, i) => {
+    const length = (row.members / total) * circumference;
+    const visible = Math.max(length - gap, 0);
+    const slice = svg('circle', {
+      class: 'donut-slice',
+      cx: 50,
+      cy: 50,
+      r: radius,
+      style: `stroke:${PLAN_COLORS[i % PLAN_COLORS.length]}`,
+      'stroke-dasharray': `${visible} ${circumference - visible}`,
+      'stroke-dashoffset': -offset,
+    });
+    offset += length;
+    return slice;
+  });
+  return svg(
+    'svg',
+    { class: 'donut', viewBox: '0 0 100 100', role: 'img', 'aria-label': `${total} total across ${rows.length} ${rows.length === 1 ? 'plan' : 'plans'}` },
+    svg('circle', { class: 'donut-track', cx: 50, cy: 50, r: radius }),
+    ...slices,
+    svg('text', { class: 'donut-total', x: 50, y: 52, 'text-anchor': 'middle' }, total),
+    svg('text', { class: 'donut-caption', x: 50, y: 66, 'text-anchor': 'middle' }, 'Total'),
+  );
 }
 
 export async function renderDashboard({ setActions, navigate, reload }) {
@@ -90,27 +161,42 @@ export async function renderDashboard({ setActions, navigate, reload }) {
     { class: 'card dash-header' },
     h(
       'div',
-      {},
+      { class: 'dash-copy' },
       h(
         'h2',
         { class: 'dash-greeting' },
-        `${greetingFor(new Date().getHours())}, ${(session.user?.name || '').split(' ')[0] || (isLibrary() ? 'SeatBook Admin' : 'there')}`,
+        `${greetingFor(new Date().getHours())}, ${(session.user?.name || '').split(' ')[0] || (isLibrary() ? 'SeatBook Admin' : 'there')} `,
+        h('span', { class: 'dash-wave', 'aria-hidden': 'true' }, '👋'),
       ),
       h(
         'div',
         { class: 'dash-sub' },
-        `${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · here's what's happening at ${data.gym?.name || (isLibrary() ? 'your library' : 'your gym')}`,
+        `Here's what's happening at ${data.gym?.name || (isLibrary() ? 'your library' : 'your gym')} right now.`,
+      ),
+      h(
+        'div',
+        { class: 'live-badge' },
+        h('span', { class: 'live-pulse' }, h('span', { class: 'live-pulse-core' })),
+        isLibrary()
+          ? `LIVE · ${data.attendance.currently_in} seated`
+          : `LIVE · ${data.attendance.currently_in} in the gym`,
       ),
     ),
-    h('div', { class: 'spacer' }),
-    h(
-      'div',
-      { class: 'live-badge' },
-      h('span', { class: 'live-pulse' }, h('span', { class: 'live-pulse-core' })),
-      isLibrary()
-        ? `LIVE · ${data.attendance.currently_in} seated`
-        : `LIVE · ${data.attendance.currently_in} in the gym`,
-    ),
+    // The illustration is gym equipment, so a library keeps the plain banner.
+    isLibrary()
+      ? null
+      : h(
+          'div',
+          { class: 'dash-hero', 'aria-hidden': 'true' },
+          h('img', { class: 'dash-hero-art', src: '/images/dashboard-hero.svg', alt: '' }),
+          h(
+            'figure',
+            { class: 'dash-quote' },
+            h('span', { class: 'dash-quote-mark' }, '“'),
+            h('p', {}, 'Stronger Members Brighter Tomorrows'),
+            h('span', { class: 'dash-quote-mark close' }, '”'),
+          ),
+        ),
   );
 
   /* -------------------------------------------------------------- stat row */
@@ -118,60 +204,48 @@ export async function renderDashboard({ setActions, navigate, reload }) {
   const statRow = h(
     'div',
     { class: 'grid cols-4' },
-    stat(
-      isLibrary() ? `Active ${tl('members')}` : 'Active members',
-      data.members.active,
-      null,
-      {
-        accent: true,
-        icon: 'members',
-        trend: {
-          positive: growth > 0 ? true : null,
-          text: `${data.members.total} total · ${data.members.frozen || 0} frozen${growth > 0 ? ` · +${growth} this month` : ''}`,
-        },
-        onClick: () => navigate('/members'),
-      },
-    ),
-    stat(
-      isLibrary() ? 'Fee collection this month' : 'Revenue this month',
-      money(data.revenue.this_month, { compact: true }),
-      null,
-      {
-        icon: 'revenue',
-        trend:
-          revenueChange === null
-            ? { positive: null, text: `${money(data.revenue.today)} collected today` }
-            : { positive: revenueChange >= 0, text: `${revenueChange >= 0 ? '▲' : '▼'} ${Math.abs(revenueChange)}% vs last month` },
-        onClick: () => navigate('/billing'),
-      },
-    ),
-    stat(
-      t('inNow'),
-      data.attendance.currently_in,
-      `${data.attendance.today} ${isLibrary() ? 'sittings' : 'check-ins'} today`,
-      {
-        icon: isLibrary() ? 'seats' : 'activity',
-        pulse: data.attendance.currently_in > 0,
-        // With seats on, "who is in" is a question about the hall, so this
-        // opens the live map rather than the check-in desk. Without seats
-        // there is no map to show and the desk is still the right answer.
-        onClick: data.seats
-          ? () => openLiveSeatMap({ navigate })
-          : () => navigate('/check-in'),
-      },
-    ),
-    stat(
-      isLibrary() ? `Expiring ${tl('plans')} (7 days)` : 'Expiring in 7 days',
-      data.memberships.expiring_soon,
-      null,
-      {
-        icon: 'hourglass',
-        trend: data.revenue.outstanding
-          ? { positive: 'warn', text: `${money(data.revenue.outstanding, { compact: true })} in unpaid dues` }
-          : { positive: true, text: 'No outstanding dues' },
-        onClick: () => navigate('/billing'),
-      },
-    ),
+    toneStat(isLibrary() ? `Active ${tl('members')}` : 'Active members', data.members.active, {
+      tone: 'blue',
+      watermark: 'members',
+      icon: 'members',
+      chip: pill(growth > 0 ? 'pos' : '', growth > 0 ? 'trendUp' : null, growth > 0 ? `+${growth} this month` : `${data.members.total} total`),
+      note: `${data.members.total} on the books · ${data.members.frozen || 0} frozen`,
+      onClick: () => navigate('/members'),
+    }),
+    toneStat(isLibrary() ? 'Fee collection this month' : 'Revenue this month', money(data.revenue.this_month, { compact: true }), {
+      tone: 'green',
+      watermark: 'revenue',
+      icon: 'revenue',
+      chip:
+        revenueChange === null
+          ? null
+          : pill(revenueChange >= 0 ? 'pos' : 'neg', revenueChange >= 0 ? 'trendUp' : 'trendDown', `${revenueChange >= 0 ? '+' : '−'}${Math.abs(revenueChange)}%`),
+      note: `${money(data.revenue.today)} collected today`,
+      onClick: () => navigate('/billing'),
+    }),
+    toneStat(t('inNow'), data.attendance.currently_in, {
+      tone: 'purple',
+      // The dumbbell is a gym; a library gets the tint without the picture.
+      watermark: isLibrary() ? null : 'gym',
+      icon: isLibrary() ? 'seats' : 'activity',
+      pulse: data.attendance.currently_in > 0,
+      note: `${data.attendance.today} ${isLibrary() ? 'sittings' : 'check-ins'} today`,
+      // With seats on, "who is in" is a question about the hall, so this
+      // opens the live map rather than the check-in desk. Without seats
+      // there is no map to show and the desk is still the right answer.
+      onClick: data.seats
+        ? () => openLiveSeatMap({ navigate })
+        : () => navigate('/check-in'),
+    }),
+    toneStat(isLibrary() ? `Expiring ${tl('plans')} (7 days)` : 'Expiring in 7 days', data.memberships.expiring_soon, {
+      tone: 'amber',
+      watermark: 'calendar',
+      icon: 'hourglass',
+      chip: data.revenue.outstanding
+        ? pill('warn', 'alert', `${money(data.revenue.outstanding, { compact: true })} in unpaid dues`)
+        : pill('pos', 'checkCircle', 'No outstanding dues'),
+      onClick: () => navigate('/billing'),
+    }),
   );
 
   const expenseRow = data.expenses
@@ -198,8 +272,10 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       h(
         'div',
         { class: 'card-head' },
+        headIcon('reports', 'blue'),
         h('h3', {}, isLibrary() ? 'Fee collection, last 6 months' : 'Revenue, last 6 months'),
         h('div', { class: 'spacer' }),
+        rangeChip('Last 6 months'),
       ),
       barChart(
         data.revenueTrend.map((row) => ({ label: monthLabel(row.month), value: row.amount })),
@@ -212,7 +288,10 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       h(
         'div',
         { class: 'card-head' },
+        headIcon('activity', 'purple'),
         h('h3', {}, isLibrary() ? 'Daily study visits, last 14 days' : 'Daily check-ins, last 14 days'),
+        h('div', { class: 'spacer' }),
+        rangeChip('Last 14 days'),
       ),
       lineChart(
         data.attendanceTrend.map((row) => ({ label: row.day.slice(8), value: row.visits })),
@@ -234,6 +313,23 @@ export async function renderDashboard({ setActions, navigate, reload }) {
     const rows = q
       ? data.expiringSoon.filter((row) => `${fullName(row)} ${row.plan_name} ${row.code}`.toLowerCase().includes(q))
       : data.expiringSoon;
+
+    if (!rows.length && !q) {
+      clear(renewalsBody).append(
+        h(
+          'div',
+          { class: 'empty empty-art' },
+          h('img', { class: 'empty-art-img', src: '/images/empty-calendar.svg', alt: '', width: 64, height: 64 }),
+          h(
+            'div',
+            { class: 'empty-title' },
+            isLibrary() ? `No ${tl('plans')} due for renewal in the next 10 days` : 'No renewals due in the next 10 days',
+          ),
+          h('p', {}, isLibrary() ? `All ${tl('plans')} are up to date! 🎉` : 'All memberships are up to date! 🎉'),
+        ),
+      );
+      return;
+    }
 
     clear(renewalsBody).append(
       table(
@@ -305,11 +401,25 @@ export async function renderDashboard({ setActions, navigate, reload }) {
 
   const paymentsBody = table(
     [
-      { label: 'Member', render: (row) => fullName(row) },
+      {
+        label: 'Member',
+        render: (row) =>
+          h(
+            'div',
+            { class: 'person' },
+            h('div', { class: 'avatar sm' }, initials(row.first_name, row.last_name)),
+            h('span', { class: 'name' }, fullName(row)),
+          ),
+      },
       {
         label: 'Method',
         render: (row) =>
-          h('span', { class: 'badge grey' }, renderIcon(METHOD_ICON[row.method] || 'card', { size: 13 }), row.method),
+          h(
+            'span',
+            { class: `badge ${METHOD_TONE[row.method] || 'grey'}` },
+            renderIcon(METHOD_ICON[row.method] || 'card', { size: 13 }),
+            row.method,
+          ),
       },
       { label: 'Date', render: (row) => date(row.paid_on) },
       { label: 'Amount', align: 'right', render: (row) => money(row.amount) },
@@ -322,7 +432,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
             h(
               'button',
               {
-                class: 'btn sm ghost icon-only',
+                class: 'btn sm icon-only',
                 title: 'Print receipt',
                 'aria-label': 'Print receipt',
                 onclick: async (event) => {
@@ -340,7 +450,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
             h(
               'button',
               {
-                class: 'btn sm ghost icon-only',
+                class: 'btn sm icon-only',
                 title: 'Download receipt',
                 'aria-label': 'Download receipt',
                 onclick: async (event) => {
@@ -371,9 +481,10 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       h(
         'div',
         { class: 'card-head' },
+        headIcon('bell', 'amber'),
         h('h3', {}, isLibrary() ? 'Pass renewals due' : 'Renewals due'),
         h('div', { class: 'spacer' }),
-        h('a', { href: '#/billing' }, t('memberships')),
+        headLink('#/billing', t('memberships')),
       ),
       h('div', { class: 'toolbar', style: 'margin-bottom:10px' }, renewalsSearch),
       renewalsBody,
@@ -384,9 +495,10 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       h(
         'div',
         { class: 'card-head' },
+        headIcon('billing', 'blue'),
         h('h3', {}, isLibrary() ? 'Recent fee payments' : 'Latest payments'),
         h('div', { class: 'spacer' }),
-        h('a', { href: '#/billing' }, 'All payments'),
+        headLink('#/billing', 'All payments'),
       ),
       paymentsBody,
     ),
@@ -403,18 +515,19 @@ export async function renderDashboard({ setActions, navigate, reload }) {
             'div',
             { class: 'list' },
             ...data.checkedInNow.map((visit) => {
-              const durationEl = h('div', { class: 'muted', style: 'font-size:12px' }, `since ${time(visit.check_in.slice(11))} · ${formatDuration(visit.check_in)}`);
+              const durationEl = h('div', { class: 'muted', style: 'font-size:12px' }, sinceLine(visit.check_in));
               const row = h(
                 'div',
                 { class: 'list-item' },
                 h('div', { class: 'avatar' }, initials(visit.first_name, visit.last_name)),
-                h('div', {}, h('div', { style: 'font-weight:600' }, fullName(visit)), durationEl),
+                h('div', { class: 'checkin-who' }, h('div', { style: 'font-weight:600' }, fullName(visit)), durationEl),
                 h('div', { class: 'spacer' }),
-                h('a', { class: 'btn sm ghost', href: `#/members/${visit.member_id}` }, 'Open'),
+                h('span', { class: 'badge green' }, isLibrary() ? 'Seated' : 'In gym'),
+                h('a', { class: 'btn sm', href: `#/members/${visit.member_id}` }, 'Open'),
                 h(
                   'button',
                   {
-                    class: 'btn sm',
+                    class: 'btn sm danger',
                     onclick: async (event) => {
                       const button = event.currentTarget;
                       button.disabled = true;
@@ -452,11 +565,13 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       return;
     }
     for (const row of checkedInBody.querySelectorAll('.list-item')) {
-      if (row._duration) row._duration.el.textContent = `since ${time(row._duration.checkIn.slice(11))} · ${formatDuration(row._duration.checkIn)}`;
+      if (row._duration) row._duration.el.textContent = sinceLine(row._duration.checkIn);
     }
   }, 30_000);
 
   /* -------------------------------------------------- plan mix / occupancy */
+
+  const planMixTotal = data.planMix.reduce((sum, row) => sum + (row.members || 0), 0);
 
   const mixOrOccupancy = data.seats
     ? h(
@@ -465,6 +580,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
         h(
           'div',
           { class: 'card-head' },
+          headIcon('seats', 'blue'),
           h('h3', {}, 'Occupancy by shift'),
           h('div', { class: 'spacer' }),
           h('a', { href: '#/seats' }, 'Seat map'),
@@ -493,26 +609,37 @@ export async function renderDashboard({ setActions, navigate, reload }) {
     : h(
         'div',
         { class: 'card' },
-        h('div', { class: 'card-head' }, h('h3', {}, 'Plan mix')),
-        data.planMix.length
+        h('div', { class: 'card-head' }, headIcon('plans', 'blue'), h('h3', {}, 'Plan mix')),
+        planMixTotal
           ? h(
               'div',
-              { class: 'list' },
-              ...data.planMix.map((row) => {
-                const top = data.planMix[0].members || 1;
-                const pct = (row.members / top) * 100;
-                return h(
-                  'div',
-                  { style: 'padding:8px 0' },
-                  h(
+              { class: 'plan-mix' },
+              planDonut(data.planMix, planMixTotal),
+              h(
+                'div',
+                { class: 'plan-mix-list' },
+                ...data.planMix.map((row, i) => {
+                  const color = PLAN_COLORS[i % PLAN_COLORS.length];
+                  const pct = Math.round((row.members / planMixTotal) * 100);
+                  return h(
                     'div',
-                    { class: 'row', style: 'justify-content:space-between;margin-bottom:6px' },
-                    h('span', {}, row.name),
-                    h('strong', {}, row.members),
-                  ),
-                  h('div', { class: 'meter gradient' }, h('span', { style: `width:${pct}%` }), h('i', { class: 'meter-pct' }, `${Math.round(pct)}%`)),
-                );
-              }),
+                    { class: 'plan-mix-row' },
+                    h(
+                      'div',
+                      { class: 'plan-mix-label' },
+                      h('i', { class: 'plan-dot', style: `background:${color}` }),
+                      h('span', { class: 'plan-name' }, row.name),
+                      h('strong', {}, row.members),
+                      h('span', { class: 'muted plan-share' }, `${pct}%`),
+                    ),
+                    h(
+                      'div',
+                      { class: 'meter gradient' },
+                      h('span', { style: `width:${pct}%;background:${color}` }),
+                    ),
+                  );
+                }),
+              ),
             )
           : h('div', { class: 'empty' }, 'No active memberships'),
       );
@@ -553,7 +680,8 @@ export async function renderDashboard({ setActions, navigate, reload }) {
           h(
             'div',
             { class: 'list-item' },
-            h('span', {}, item.name),
+            h('div', { class: 'avatar' }, renderIcon('wrench', { size: 16 })),
+            h('span', { style: 'font-weight:600' }, item.name),
             h('div', { class: 'spacer' }),
             item.status === 'maintenance'
               ? h('span', { class: 'badge amber' }, 'In maintenance')
@@ -566,14 +694,15 @@ export async function renderDashboard({ setActions, navigate, reload }) {
           h(
             'div',
             { class: 'list-item' },
+            h('div', { class: 'avatar' }, initials(member.first_name, member.last_name)),
             h('a', { href: `#/members/${member.id}` }, fullName(member)),
             h('div', { class: 'spacer' }),
-            h('span', { class: 'badge violet' }, renderIcon('cake', { size: 13 }), dayMonth(member.date_of_birth)),
+            h('span', { class: 'badge violet' }, renderIcon('bell', { size: 13 }), dayMonth(member.date_of_birth)),
             member.phone
               ? h(
                   'button',
                   {
-                    class: 'btn sm ghost',
+                    class: 'btn sm',
                     title: 'Send a birthday wish on WhatsApp',
                     onclick: async (event) => {
                       const button = event.currentTarget;
@@ -610,6 +739,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
     h(
       'div',
       { class: 'card-head' },
+      headIcon('alert', 'red'),
       h('h3', {}, isLibrary() ? 'Library needs attention' : 'Needs attention'),
       h('div', { class: 'spacer' }),
       attentionTabs,
@@ -619,11 +749,18 @@ export async function renderDashboard({ setActions, navigate, reload }) {
 
   const bottomRow = h(
     'div',
-    { class: 'grid cols-3 top' },
+    { class: 'grid cols-3 top dash-bottom' },
     h(
       'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, isLibrary() ? 'Currently seated' : 'Currently checked in')),
+      { class: 'card checkin-card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        headIcon(h('span', { class: 'head-dot' }), 'green'),
+        h('h3', {}, isLibrary() ? 'Currently seated' : 'Currently checked in'),
+        h('div', { class: 'spacer' }),
+        data.checkedInNow.length ? h('a', { class: 'head-link', href: '#/check-in' }, 'View all', renderIcon('arrowRight', { size: 15 })) : null,
+      ),
       checkedInBody,
     ),
     mixOrOccupancy,

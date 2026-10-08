@@ -349,7 +349,12 @@ function renderBrandLogoNode() {
   if (logoUrl) {
     return h('div', { class: 'logo' }, h('img', { class: 'logo-img', src: logoUrl, alt: gymName() }));
   }
-  return h('div', { class: 'logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 19 }));
+  // No uploaded logo: a gym falls back to the stock badge, a library keeps its
+  // book glyph (the badge is a dumbbell, which means nothing in a reading room).
+  if (!isLibrary()) {
+    return h('div', { class: 'logo logo-default' }, h('img', { class: 'logo-img', src: '/icons/gym-logo.svg', alt: gymName() }));
+  }
+  return h('div', { class: 'logo' }, renderIcon('book', { size: 19 }));
 }
 
 /** Paints the sidebar brand (mark + name) into `brand`; shared by the first

@@ -481,6 +481,17 @@ a:has(> .svg-icon) { display: inline-flex; align-items: center; gap: 6px; }
 .brand .logo .logo-img {
   width: 100%; height: 100%; object-fit: cover; border-radius: 10px;
 }
+/* The stock gym badge is already a finished round mark: no tinted tile behind
+   it, and the name beside it may wrap to three lines rather than truncate. */
+.brand .logo.logo-default {
+  width: 48px; height: 48px; border-radius: 50%; border: 0; background: none;
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.45);
+}
+.brand .logo.logo-default .logo-img { object-fit: contain; border-radius: 50%; }
+.brand:has(.logo-default) .brand-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  white-space: normal; line-height: 1.2; font-size: 15px;
+}
 .settings-logo-container {
   display: flex; align-items: center; gap: 16px;
   margin-bottom: 20px; padding-bottom: 16px;
@@ -1036,6 +1047,153 @@ input.search, input[type='search'] {
   font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
   white-space: nowrap;
 }
+
+/*
+ * Dashboard layout. The header is a banner: greeting copy on the left, the
+ * gym illustration and quote on the right. It is a size container so the art
+ * drops away by the width of the card rather than the window — the sidebar
+ * makes those two numbers differ by 220px.
+ */
+.dash-header {
+  container-type: inline-size;
+  flex-wrap: wrap;
+  min-height: 150px;
+  padding: 24px 28px;
+}
+.dash-copy {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  min-width: 0; flex: 1 1 auto;
+}
+.dash-header .live-badge { margin-top: 10px; }
+.dash-wave { display: inline-block; }
+.dash-hero { position: absolute; inset: 0 0 0 auto; width: 70%; pointer-events: none; z-index: 1; }
+.dash-hero-art {
+  position: absolute; bottom: 0; right: 210px;
+  height: calc(100% - 6px); width: auto; max-width: calc(100% - 210px);
+  object-fit: contain; object-position: right bottom;
+}
+.dash-quote {
+  position: absolute; right: 30px; top: 50%; transform: translateY(-50%);
+  width: 176px; margin: 0; padding: 0 18px 0 0;
+}
+.dash-quote p { margin: 0; width: 7.4em; font-size: 20px; font-weight: 500; line-height: 1.22; letter-spacing: -0.01em; color: var(--text); }
+.dash-quote-mark { position: absolute; left: -22px; top: -12px; font: 700 34px/1 Georgia, 'Times New Roman', serif; color: var(--text); }
+.dash-quote-mark.close { left: auto; right: 0; top: auto; bottom: -20px; color: var(--muted); opacity: 0.6; font-size: 28px; }
+@container (max-width: 1020px) { .dash-quote { display: none; } .dash-hero-art { right: 0; max-width: 100%; } .dash-hero { width: 60%; } }
+/* Narrow card (phones): the art stops being a backdrop and drops under the
+   greeting as its own full-width strip, with the quote as a line above it. */
+@container (max-width: 760px) {
+  .dash-hero { position: static; inset: auto; flex: 0 0 100%; width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .dash-quote { display: block; order: -1; position: static; transform: none; width: auto; padding: 0; text-align: center; }
+  .dash-quote p { display: inline; width: auto; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--muted); }
+  .dash-quote-mark, .dash-quote-mark.close { position: static; display: inline; font-size: 18px; opacity: 1; color: var(--brand); }
+  /* Cropped rather than shrunk: at phone width the whole 4:1 scene is a thin
+     strip, so a fixed-height window on its middle (the bench) reads far better,
+     with the cut edges faded out. */
+  .dash-hero-art {
+    position: static; display: block; width: 100%; max-width: none; height: 112px; margin: 0;
+    object-fit: cover; object-position: 52% 100%;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+  }
+}
+
+/* Metric cards in colour: a gradient tile, a ghost picture, a chip footer. */
+.tone-blue { --tone-a: #60a5fa; --tone-b: #2563eb; }
+.tone-green { --tone-a: #34d399; --tone-b: #059669; }
+.tone-purple { --tone-a: #a78bfa; --tone-b: #7c3aed; }
+.tone-amber { --tone-a: #fbbf24; --tone-b: #ea580c; }
+.tone-red { --tone-a: #f87171; --tone-b: #dc2626; }
+
+.stat.toned {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center;
+  column-gap: 14px; row-gap: 2px;
+  padding: 18px 20px; overflow: hidden; isolation: isolate;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tone-a) 9%, var(--surface)) 0%, var(--surface) 78%);
+  border-color: color-mix(in srgb, var(--tone-a) 22%, var(--border));
+}
+.stat.toned:hover { border-color: color-mix(in srgb, var(--tone-a) 45%, var(--border)); box-shadow: var(--shadow), 0 0 28px -16px var(--tone-b), inset 0 1px 0 var(--hairline); }
+.stat.toned .stat-top, .stat.toned .stat-aside { display: contents; }
+.stat.toned .stat-icon,
+.stat.toned:hover .stat-icon {
+  grid-column: 1; grid-row: 1 / span 2;
+  width: 52px; height: 52px; border-radius: 15px; border: 0; color: #fff;
+  background: linear-gradient(145deg, var(--tone-a), var(--tone-b));
+  box-shadow: 0 10px 20px -10px var(--tone-b), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.stat.toned .stat-icon .svg-icon { width: 24px; height: 24px; }
+.stat.toned .label { grid-column: 2; grid-row: 1; align-self: end; padding: 0; color: var(--text); font-weight: 600; }
+.stat.toned .value { grid-column: 2; grid-row: 2; align-self: start; margin: 0; }
+.stat.toned .live-pulse { position: absolute; top: 16px; right: 16px; }
+.stat-wm { position: absolute; z-index: -1; right: 12px; top: 50%; width: 84px; height: 84px; transform: translateY(-50%); pointer-events: none; }
+.stat-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 12px; }
+.stat-foot .trend-pill { margin-top: 0; }
+.stat-note { font-size: 12.5px; color: var(--muted); }
+
+/* Two-up on a phone leaves ~75px beside the tile, too little for "₹19,750":
+   the tile moves above the text instead of beside it. */
+@media (max-width: 480px) {
+  .stat.toned { grid-template-columns: auto minmax(0, 1fr); align-content: start; align-items: center; column-gap: 9px; row-gap: 6px; }
+  .grid .stat.toned .stat-icon, .grid .stat.toned:hover .stat-icon { grid-column: 1; grid-row: 1; width: 34px; height: 34px; border-radius: 10px; }
+  .grid .stat.toned .stat-icon .svg-icon { width: 18px; height: 18px; }
+  .stat.toned .label { grid-column: 2; grid-row: 1; align-self: center; font-size: 12.5px; line-height: 1.25; }
+  .stat.toned .value { grid-column: 1 / -1; grid-row: 2; font-size: 24px; }
+  .stat-foot { grid-row: 3; margin-top: 2px; }
+  .stat.toned .live-pulse { top: 12px; right: 12px; }
+  .stat-foot { margin-top: 8px; }
+}
+
+/* Under ~340px there is no room for a word beside the tile at all. */
+@media (max-width: 340px) {
+  .stat.toned { grid-template-columns: minmax(0, 1fr); }
+  .stat.toned .label { grid-column: 1; grid-row: 2; }
+  .stat.toned .value { grid-column: 1; grid-row: 3; }
+  .stat-foot { grid-row: 4; }
+}
+
+/* Card headers: a tinted tile in front of the title, a quiet link behind it. */
+.card-head { flex-wrap: wrap; row-gap: 8px; }
+.head-icon {
+  width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--tone-a) 16%, var(--surface));
+  color: color-mix(in srgb, var(--tone-b) 85%, var(--text));
+}
+.head-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--tone-b); box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone-a) 30%, transparent); }
+.card-head a.head-link { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.range-chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+  font-size: 12px; color: var(--muted); white-space: nowrap;
+}
+.range-caret { transform: rotate(90deg); }
+
+/* Empty state with an illustration instead of an icon tile. */
+.empty-art { padding: 20px 24px 28px; gap: 6px; }
+.empty-art-img { width: 64px; height: 64px; margin-bottom: 4px; }
+
+/* Plan mix: ring on the left, per-plan share bars on the right. */
+.plan-mix { display: flex; gap: 20px; align-items: flex-start; }
+.donut { width: 104px; height: 104px; flex: none; }
+.donut-track, .donut-slice { fill: none; stroke-width: 11; }
+.donut-track { stroke: var(--surface-2); }
+.donut-slice { transform: rotate(-90deg); transform-box: fill-box; transform-origin: center; }
+.donut-total { font-size: 26px; font-weight: 700; fill: var(--text); letter-spacing: -0.03em; }
+.donut-caption { font-size: 10px; font-weight: 550; fill: var(--muted); }
+.plan-mix-list { flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.plan-mix-label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13.5px; }
+.plan-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.plan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-share { min-width: 40px; text-align: right; font-size: 12.5px; }
+
+/* Bottom row: the check-in list carries the most per row, so it gets the room. */
+.dash-bottom { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr); }
+.checkin-card { container-type: inline-size; }
+.checkin-who { min-width: 0; }
+.checkin-who > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.checkin-card .list-item { gap: 10px; }
+@container (max-width: 420px) { .checkin-card .badge { display: none; } }
+@media (max-width: 1100px) { .dash-bottom { grid-template-columns: minmax(0, 1fr); } }
 
 /* Glassmorphic cards for SeatBook (library) — translucent panels over the
    abyssal background instead of the gym's flat opaque surfaces. */
@@ -2039,7 +2197,16 @@ body[data-vertical='library'] .stat.accent,
 
   .dash-header { padding: 18px; }
   .dash-greeting { font-size: 20px; }
-  .live-badge { flex: 1 1 100%; justify-content: center; }
+
+  /* Toned metric cards: the tile and the watermark are the first things to go
+     on a narrow card, so the figure keeps its room. */
+  .stat.toned { column-gap: 10px; }
+  .stat.toned .stat-icon { width: 40px; height: 40px; border-radius: 12px; }
+  .stat.toned .stat-icon .svg-icon { width: 20px; height: 20px; }
+  .stat-wm { display: none; }
+  .stat.toned .value { white-space: nowrap; }
+  .plan-mix { flex-direction: column; align-items: center; }
+  .plan-mix-list { width: 100%; }
 
   /* The address row is prefix + input + button. Below this width the prefix
      ("gymbook.fly.dev/g/") plus a usable input no longer fit on one line, so
@@ -2480,7 +2647,7 @@ body[data-mode='light'] .login {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: radial-gradient(420px 280px at 90% 0%, color-mix(in srgb, var(--brand) 12%, transparent), transparent 70%), var(--bg);
   position: relative;
 }
 
@@ -2507,22 +2674,21 @@ body[data-mode='light'] .login {
 }
 
 .portal-topbar {
-  display: flex; align-items: center; gap: 10px;
-  padding: calc(14px + var(--safe-top)) 18px 14px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  display: flex; align-items: center; gap: 12px;
+  padding: calc(14px + var(--safe-top)) 18px 10px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
   backdrop-filter: blur(14px) saturate(180%);
   -webkit-backdrop-filter: blur(14px) saturate(180%);
   position: sticky; top: 0; z-index: 20; flex: none;
 }
-.portal-topbar-logo, .portal-topbar-logo-img { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; }
+.portal-topbar-logo, .portal-topbar-logo-img { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; }
 .portal-topbar-logo {
   display: grid; place-items: center;
   background: var(--brand-soft); color: var(--brand);
   border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
 }
-.portal-topbar-logo-img { object-fit: cover; border: 1px solid var(--border); }
-.portal-topbar-name { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+.portal-topbar-logo-img { object-fit: cover; }
+.portal-topbar-name { font-weight: 700; font-size: 15px; line-height: 1.25; letter-spacing: -0.01em; flex: 1; min-width: 0; padding-right: 4px; }
 
 .portal-topbar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 /* The one QR affordance that is on every screen, not just the Pass tab —
@@ -2530,8 +2696,8 @@ body[data-mode='light'] .login {
    what keeps "show my code" a single tap from anywhere in the app. */
 .portal-qr-btn {
   display: grid; place-items: center; flex: none;
-  width: 32px; height: 32px; border-radius: 10px;
-  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  width: 40px; height: 40px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm);
   cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 .portal-qr-btn:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); color: var(--brand); }
@@ -2585,44 +2751,74 @@ body[data-mode='light'] .login {
 
 /* --------------------------------------------------------------- greeting */
 
-.portal-greeting h2 { margin: 0 0 2px; font-size: 21px; }
-.portal-greeting p { margin: 0; color: var(--muted); font-size: 13.5px; }
+/* Tone swatches shared by the quick-action tiles and the mini stats. */
+.tone-orange { --tone: var(--brand); }
+.tone-purple { --tone: #8b5cf6; }
+.tone-green { --tone: #10b981; }
+.tone-blue { --tone: #3b82f6; }
+
+.portal-greeting { position: relative; }
+.portal-greeting h2 { margin: 0 0 4px; font-size: 23px; font-weight: 800; letter-spacing: -0.02em; position: relative; }
+.portal-greeting p { margin: 0; color: var(--muted); font-size: 14px; position: relative; }
+/* The athlete bleeds to the phone edge and is cut off by the membership card
+   (which sits above it), so the greeting's bottom edge overlaps the flex gap. */
+.portal-greeting.has-art { margin: -4px -18px -18px; padding: 34px 18px 38px; min-height: 140px; }
+.portal-greeting-art {
+  position: absolute; right: 0; bottom: 0; width: 58%; aspect-ratio: 1667 / 830; overflow: hidden; pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18%), linear-gradient(180deg, transparent 0, #000 18%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent 0, #000 18%), linear-gradient(180deg, transparent 0, #000 18%);
+  mask-composite: intersect;
+}
+.portal-greeting-art img { display: block; width: 100%; height: auto; }
+body[data-mode='light'] .portal-greeting-art img { mix-blend-mode: multiply; }
 
 /* ---------------------------------------------------------------- hero card */
 
 .portal-hero-card {
-  position: relative; overflow: hidden;
-  border-radius: 22px; padding: 20px;
-  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
-  background: linear-gradient(150deg, color-mix(in srgb, var(--brand) 20%, var(--surface)) 0%, var(--surface-2) 65%, var(--surface) 100%);
-  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
-  display: flex; flex-direction: column; gap: 16px;
+  position: relative; overflow: hidden; z-index: 1;
+  border-radius: 24px; padding: 20px 18px 20px 20px;
+  border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 20%, var(--surface)) 0%, color-mix(in srgb, var(--brand) 9%, var(--surface)) 100%);
+  box-shadow: 0 14px 30px -14px var(--brand-glow), inset 0 1px 0 var(--hairline);
 }
-/* The holographic sheen: a soft rotating light, mixed from the brand colour so
-   it reads as foil on every theme instead of one hardcoded gradient. */
+/* Soft decorative waves, mixed from the brand colour so they follow the theme. */
 .portal-hero-glow {
-  position: absolute; inset: -40%; z-index: 0; pointer-events: none;
-  background: conic-gradient(from 0deg, transparent 0deg, color-mix(in srgb, var(--brand) 35%, transparent) 90deg, transparent 180deg, color-mix(in srgb, #fff 18%, transparent) 260deg, transparent 360deg);
-  opacity: 0.5; mix-blend-mode: screen;
-  animation: portal-hero-spin 14s linear infinite;
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(180px 110px at 100% 100%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 70%),
+    radial-gradient(220px 90px at 30% 120%, color-mix(in srgb, var(--brand) 16%, transparent), transparent 70%);
 }
-@keyframes portal-hero-spin { to { transform: rotate(360deg); } }
 .portal-hero-top { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.portal-hero-info { flex: 1; min-width: 0; }
-.portal-hero-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.portal-hero-plan { font-size: 19px; font-weight: 700; margin-top: 2px; letter-spacing: -0.01em; }
+.portal-hero-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.portal-hero-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.portal-hero-crown { width: 22px; height: 22px; flex: none; }
+.portal-hero-plan { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+.portal-hero-bottom {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-top: 6px;
+  font-size: 15px; color: var(--muted);
+}
+.portal-hero-ring { flex: none; display: flex; align-items: center; gap: 12px; }
+.portal-hero-ring > div:first-child {
+  border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 5px color-mix(in srgb, var(--surface) 60%, transparent), 0 8px 18px -8px var(--brand-glow);
+}
 .portal-hero-ring-wrap { position: relative; flex-shrink: 0; display: grid; place-items: center; }
-.portal-ring-track { stroke: color-mix(in srgb, var(--text) 12%, transparent); }
+.portal-ring-track { stroke: color-mix(in srgb, var(--brand) 16%, transparent); }
 .portal-ring-fill { stroke: var(--brand); stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
 .portal-hero-ring-text {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
 }
-.portal-hero-ring-text strong { font-size: 17px; }
-.portal-hero-ring-text span { font-size: 9.5px; color: var(--muted); text-transform: uppercase; }
-.portal-hero-bottom {
-  position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  font-size: 13px; color: var(--muted);
+.portal-hero-ring-text strong { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.portal-hero-ring-text span { margin-top: 3px; font-size: 8.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.portal-hero-go {
+  display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
+  box-shadow: var(--shadow-sm); transition: transform 0.15s ease;
 }
+.portal-hero-go:active { transform: scale(0.9); }
 .portal-hero-pill {
   background: color-mix(in srgb, var(--brand) 16%, transparent); color: var(--brand);
   border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);
@@ -2631,61 +2827,127 @@ body[data-mode='light'] .login {
 
 /* ------------------------------------------------------------ quick actions */
 
-.portal-quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.portal-quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .portal-quick-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 12px 4px; border-radius: 16px; border: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 14px 4px 12px; border-radius: 18px; border: 1px solid var(--border);
   background: var(--surface); color: var(--text); cursor: pointer;
-  font-size: 11px; font-weight: 600; text-align: center;
-  box-shadow: inset 0 1px 0 var(--hairline);
+  font-size: 12.5px; font-weight: 600; text-align: center; white-space: nowrap;
+  box-shadow: var(--shadow-sm);
   transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
 }
 .portal-quick-btn:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); }
 .portal-quick-btn:active { transform: translateY(1px) scale(0.98); }
 .portal-quick-icon {
-  width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
-  background: var(--brand-soft); color: var(--brand);
+  width: 50px; height: 50px; border-radius: 14px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--tone, var(--brand)) 14%, transparent); color: var(--tone, var(--brand));
 }
 
 /* -------------------------------------------------------------- mini stats */
 
-.portal-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.portal-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .portal-mini-stat {
-  padding: 12px 10px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface);
-  display: flex; flex-direction: column; gap: 4px; box-shadow: inset 0 1px 0 var(--hairline);
+  position: relative; overflow: hidden;
+  padding: 14px 12px; border-radius: 18px; border: 1px solid var(--border); background: var(--surface);
+  display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow-sm);
+}
+.portal-mini-stat.tone-green, .portal-mini-stat.tone-purple, .portal-mini-stat.tone-orange {
+  border-color: color-mix(in srgb, var(--tone) 18%, var(--border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tone) 7%, var(--surface)) 0%, var(--surface) 70%);
 }
 .portal-mini-stat-icon { color: var(--brand); }
-.portal-mini-stat-value { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
-.portal-mini-stat-label { font-size: 10.5px; color: var(--muted); }
+.portal-mini-stat[class*='tone-'] .portal-mini-stat-icon {
+  width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+.portal-mini-stat-value { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.portal-mini-stat[class*='tone-'] .portal-mini-stat-value { margin-top: 6px; font-size: 26px; line-height: 1; }
+.portal-mini-stat-label { font-size: 12.5px; color: var(--muted); }
+.portal-mini-stat-bars { position: absolute; right: 12px; top: 20px; display: flex; align-items: flex-end; gap: 4px; }
+.portal-mini-stat-bars i { display: block; width: 8px; border-radius: 3px; background: var(--tone); }
+.portal-mini-stat-bars i:nth-child(1) { height: 10px; opacity: 0.35; }
+.portal-mini-stat-bars i:nth-child(2) { height: 16px; opacity: 0.5; }
+.portal-mini-stat-bars i:nth-child(3) { height: 24px; opacity: 0.7; }
+.portal-mini-stat-bars i:nth-child(4) { height: 34px; opacity: 0.9; }
 
 /* ------------------------------------------------------------ today's focus */
 /* Home's 1-tap Start Workout card and calorie-ring snippet — stacked full
    width like every other Home card rather than a side-by-side grid, since
    the macro stack needs more room than half a 360px phone gives it. */
-.portal-focus-grid { display: flex; flex-direction: column; gap: 10px; }
+.portal-focus-grid { display: flex; flex-direction: column; gap: 12px; }
 .portal-focus-card {
   position: relative; overflow: hidden; text-align: left; width: 100%;
-  display: flex; flex-direction: column; gap: 10px;
-  padding: 16px; border-radius: var(--radius-lg);
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 18px 16px; border-radius: 20px;
   border: 1px solid var(--border);
-  background: linear-gradient(150deg, var(--surface) 0%, var(--bg-alt) 100%);
-  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
   font: inherit; color: inherit;
 }
 button.portal-focus-card { cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; }
 button.portal-focus-card:hover { border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); }
 button.portal-focus-card:active { transform: scale(0.98); }
-.portal-focus-kicker { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--brand); }
-.portal-focus-title { font-size: 16.5px; font-weight: 700; letter-spacing: -0.01em; }
-.portal-focus-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.portal-focus-chips .muted { font-size: 11.5px; }
-.portal-focus-diet { flex-direction: row; align-items: center; gap: 16px; }
-.portal-focus-diet .portal-macro-stack { min-width: 0; gap: 8px; }
+.portal-focus-kicker { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--brand); }
+.portal-focus-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+.portal-focus-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.portal-focus-chips .muted { font-size: 13px; }
+.portal-focus-chips .portal-muscle-badge { font-size: 11.5px; padding: 6px 10px; border-radius: 8px; }
+
+/* Workout card: the athlete sits behind the right half under an orange wash,
+   fading into the card on the left. The PNG carries a thin frame on its top and
+   right edges, so it is scaled from the bottom-left corner to push them off. */
+.portal-focus-workout {
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 6%, var(--surface)), var(--surface));
+  box-shadow: 0 12px 28px -16px var(--brand-glow);
+}
+.portal-focus-art {
+  position: absolute; right: 0; top: 0; width: 40%; height: 100%; max-width: none; object-fit: cover; object-position: 60% 40%;
+  transform: scale(1.14); transform-origin: left bottom; pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 40%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 40%);
+}
+body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
+.portal-focus-workout::after {
+  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(110deg, transparent 45%, color-mix(in srgb, var(--brand) 22%, transparent) 100%);
+}
+.portal-focus-workout > :not(.portal-focus-art) { position: relative; z-index: 1; }
+.portal-start-btn {
+  width: 100%; justify-content: center; gap: 8px; margin-top: 6px; padding: 14px 18px;
+  border-radius: 14px; font-size: 16px; font-weight: 700;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 82%, #fff), var(--brand));
+  box-shadow: 0 12px 22px -10px var(--brand-glow);
+}
+
+.portal-focus-diet { flex-direction: row; align-items: center; gap: 18px; }
+.portal-focus-diet .portal-macro-stack { min-width: 0; gap: 14px; }
 
 /* ---------------------------------------------------------------- sections */
 
-.portal-section { display: flex; flex-direction: column; gap: 10px; }
+.portal-section { display: flex; flex-direction: column; gap: 12px; }
 .portal-section h3 { margin: 0; font-size: 15px; }
+.portal-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.portal-section-head h3 { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+.portal-section-link {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 0; border: none; background: none;
+  color: var(--brand); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+
+/* Schedule empty state */
+.portal-schedule-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 26px 16px 24px; border-radius: 20px; border: 1px solid var(--border);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+}
+.portal-schedule-empty-art { width: 170px; height: auto; margin-bottom: 14px; }
+.portal-schedule-empty-title { font-size: 16.5px; font-weight: 700; }
+.portal-schedule-empty-sub { margin-top: 4px; font-size: 14px; color: var(--muted); }
+.portal-browse-btn {
+  margin-top: 18px; padding: 13px 28px; border-radius: 999px; font-size: 15px; font-weight: 700; gap: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 82%, #fff), var(--brand));
+  box-shadow: 0 12px 22px -10px var(--brand-glow);
+}
 
 /* -------------------------------------------------------------- seat/class */
 
@@ -3476,15 +3738,21 @@ button.portal-focus-card:active { transform: scale(0.98); }
 /* The Home "Today's focus" snippet borrows this ring at a smaller size —
    the number and label need to shrink with it or they overrun a ring a
    third the diameter of the Diet tab's hero. */
-.portal-cal-ring.sm .portal-cal-center strong { font-size: 16px; }
-.portal-cal-ring.sm .portal-cal-center span { font-size: 7.5px; letter-spacing: 0.03em; }
+.portal-cal-ring.sm .portal-cal-center strong { font-size: 26px; font-weight: 800; line-height: 1.1; }
+.portal-cal-ring.sm .portal-cal-center span { font-size: 9px; letter-spacing: 0.04em; }
 .portal-cal-ring.sm .portal-cal-center small { display: none; }
+.portal-cal-icon { width: 22px; height: 22px; margin-bottom: 2px; }
 
 .portal-macro-stack { flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 12px; }
 .portal-macro { min-width: 0; }
+.portal-macro.has-icon { display: flex; align-items: center; gap: 12px; }
+.portal-macro-icon { width: 26px; height: 26px; flex: none; }
+.portal-macro-body { flex: 1; min-width: 0; }
 .portal-macro-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
 .portal-macro-label { font-size: 12px; font-weight: 700; }
 .portal-macro-value { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.portal-macro.has-icon .portal-macro-label { font-size: 14px; }
+.portal-macro.has-icon .portal-macro-value { font-size: 13px; }
 .portal-macro-bar { height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .portal-macro-bar > i {
   display: block; height: 100%; border-radius: 999px;
