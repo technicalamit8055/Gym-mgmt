@@ -14,7 +14,8 @@
     "test": "node --no-warnings=ExperimentalWarning --test \"tests/**/*.test.js\"",
     "vendor:jsqr": "node scripts/vendor-jsqr.js",
     "icons:gen": "node scripts/gen-icons.js",
-    "icons:gen:library": "node scripts/gen-icons-library.js"
+    "icons:gen:library": "node scripts/gen-icons-library.js",
+    "emulator": "powershell -ExecutionPolicy Bypass -File scripts/open-emulator.ps1"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",

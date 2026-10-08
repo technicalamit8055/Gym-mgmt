@@ -260,6 +260,10 @@ const ICONS = {
     'M12 22c1.9 0 3-1.3 3-3 0-2-1.7-3-2.2-4.9-.4.9-1.3 1.8-1.9 2.6-.5.7-.9 1.4-.9 2.3 0 1.7 1.1 3 2 3z',
   ],
   droplet: ['M12 2.7 6.9 8a7.2 7.2 0 1 0 10.2 0z'],
+  // Fork and knife — the Lunch tile on the Diet tab.
+  utensils: ['M7 3v7', 'M4 3v4.5A3 3 0 0 0 7 10.5a3 3 0 0 0 3-3V3', 'M7 10.5V21', 'M17 21V3c-2.6 1.6-4 4.6-4 8.5h4'],
+  // Sports bottle — the quick-add button on the Diet tab's water card.
+  bottle: ['M10 2h4', 'M10 2v3', 'M14 2v3', 'M9 5h6l1.2 3.2V20a2 2 0 0 1-2 2H9.8a2 2 0 0 1-2-2V8.2z', 'M7.8 12.5h8.4'],
   trophy: [
     'M8 21h8',
     'M12 17v4',
@@ -275,6 +279,14 @@ const ICONS = {
     'M12 6V4',
   ],
   play: ['M6 4.5 19 12 6 19.5z'],
+  crown: ['m2.5 7.5 4.5 4.5L12 4l5 8 4.5-4.5L19.5 19h-15z', 'M5 22h14'],
+  barChart: [
+    { tag: 'rect', x: 3.5, y: 12, width: 4.5, height: 8.5, rx: 1 },
+    { tag: 'rect', x: 9.75, y: 7, width: 4.5, height: 13.5, rx: 1 },
+    { tag: 'rect', x: 16, y: 3, width: 4.5, height: 17.5, rx: 1 },
+  ],
+  // Two hands on an overhead bar — the pull-day tile on the Workout tab.
+  pullBar: ['M3 4h18', 'M8 4v5', 'M16 4v5', 'M8 9a4 4 0 0 0 8 0', 'M12 13v3', 'M8 21l4-5 4 5'],
   target: [
     { tag: 'circle', cx: 12, cy: 12, r: 9 },
     { tag: 'circle', cx: 12, cy: 12, r: 5 },

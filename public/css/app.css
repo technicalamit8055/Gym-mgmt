@@ -3434,44 +3434,167 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
 
 /* ═══════════════════════════════════════ member portal: workout logger ══ */
 
+/*
+ * Today's routine: a peach hero (title, muscle chips, the athlete fading in
+ * from the right) with a white sheet riding up over its bottom edge that holds
+ * the exercise rows and the Start button.
+ */
 .portal-routine-card {
   position: relative; overflow: hidden;
-  padding: 18px; border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: linear-gradient(150deg, var(--surface) 0%, var(--bg-alt) 100%);
-  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--border));
+  background: var(--surface);
+  box-shadow: 0 18px 34px -22px var(--brand-glow), var(--shadow-sm), inset 0 1px 0 var(--hairline);
 }
-.portal-routine-glow {
-  position: absolute; inset: -70% 30% auto -10%; height: 200px; pointer-events: none;
-  background: radial-gradient(circle at 40% 50%, var(--brand-glow) 0%, transparent 68%);
+.portal-routine-hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  min-height: 168px; padding: 20px 18px 38px;
+  background: linear-gradient(105deg, color-mix(in srgb, var(--brand) 15%, var(--surface)) 0%, color-mix(in srgb, var(--brand) 7%, var(--surface)) 62%, var(--surface) 100%);
+}
+.portal-routine-hero.is-plain { min-height: 0; padding-bottom: 30px; }
+/* The PNG carries a hairline frame on its top edge, so it is scaled from the
+   bottom-left corner to push that off the card. */
+.portal-routine-art {
+  position: absolute; z-index: -1; right: 0; top: 0; width: 50%; height: 100%; max-width: none;
+  object-fit: cover; object-position: 60% 30%;
+  transform: scale(1.06); transform-origin: left bottom; pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 62%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 62%);
+}
+/* Warm light spilling from the right, over the photo. */
+.portal-routine-hero::after {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(110deg, transparent 45%, color-mix(in srgb, var(--brand) 20%, transparent) 100%);
 }
 .portal-routine-kicker {
-  position: relative; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
-  text-transform: uppercase; color: var(--brand);
+  position: relative; max-width: 78%; display: flex; align-items: center; gap: 8px;
+  color: var(--brand); font-size: 12.5px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
 }
-.portal-routine-day { position: relative; margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; line-height: 1.25; }
-.portal-routine-note { position: relative; margin: 8px 0 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.portal-routine-kicker svg { flex: none; }
+.portal-routine-day {
+  position: relative; max-width: 66%; margin: 8px 0 0;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2;
+}
+.portal-routine-note { position: relative; max-width: 66%; margin: 6px 0 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+.portal-routine-chips { position: relative; max-width: 80%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.portal-routine-count { font-size: 13px; color: var(--muted); }
 
-.portal-routine-exercises {
-  position: relative; display: flex; flex-direction: column; gap: 2px;
-  margin: 16px 0; padding: 4px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+.portal-routine-sheet {
+  position: relative; z-index: 1; margin-top: -22px;
+  padding: 6px 14px 14px;
+  border-radius: 24px 24px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -8px 18px -14px rgba(0, 0, 0, 0.35);
 }
-.portal-routine-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 7px 0; font-size: 13px;
+.portal-routine-exercises { display: flex; flex-direction: column; margin-bottom: 14px; }
+.portal-routine-row { display: flex; align-items: center; gap: 10px; }
+.portal-routine-thumb {
+  flex: none; display: block; width: clamp(52px, 14vw, 62px); aspect-ratio: 2 / 1; height: auto;
+  border-radius: 9px; object-fit: cover; background: var(--surface-2);
 }
-.portal-routine-ex-name { flex: 1; min-width: 100px; font-weight: 600; }
-.portal-routine-row .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
-.portal-routine-prev {
-  font-size: 11px; padding: 2px 7px; border-radius: 999px;
-  background: var(--surface-2); color: var(--muted); font-variant-numeric: tabular-nums;
+.portal-routine-thumb.is-empty { display: grid; place-items: center; color: var(--muted); }
+.portal-routine-body {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  padding: 11px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
 }
+.portal-routine-row:last-child .portal-routine-body { border-bottom: none; }
+.portal-routine-main { flex: 1; min-width: 0; }
+.portal-routine-ex-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
+.portal-routine-ex-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.portal-routine-pill {
+  flex: none; padding: 6px 8px; border-radius: 9px;
+  background: var(--surface-2); color: var(--muted);
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.portal-routine-go {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm);
+}
+.portal-routine-start { margin-top: 0; border-radius: 999px; padding: 16px 20px; font-size: 17px; }
+.portal-routine-start svg:first-child { fill: currentColor; }
 
 .portal-muscle-badge {
   flex: none; font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
   padding: 3px 7px; border-radius: 5px;
   background: var(--brand-soft); color: var(--brand);
 }
+/* Each muscle group has its own colour inside the routine card. */
+.portal-routine-card [data-m] { --m: var(--brand); background: color-mix(in srgb, var(--m) 14%, transparent); color: var(--m); }
+.portal-routine-card [data-m='back'] { --m: #f97316; }
+.portal-routine-card [data-m='shoulders'] { --m: #f59e0b; }
+.portal-routine-card [data-m='arms'] { --m: #ef4444; }
+.portal-routine-card [data-m='chest'] { --m: #3b82f6; }
+.portal-routine-card [data-m='legs'] { --m: #10b981; }
+.portal-routine-card [data-m='core'] { --m: #8b5cf6; }
+.portal-routine-card [data-m='cardio'] { --m: #14b8a6; }
+.portal-routine-row .portal-muscle-badge { padding: 5px 7px; border-radius: 7px; font-size: 9.5px; }
+.portal-routine-chips .portal-muscle-badge { padding: 7px 14px; border-radius: 9px; font-size: 12px; }
+/* The first chip is the day's main muscle: solid, like the selected tab. */
+.portal-routine-chips .portal-muscle-badge:first-child { background: var(--m); color: #fff; box-shadow: 0 8px 14px -8px var(--m); }
+
+/* "Or train another day": rows of up to three tiles, each row filling the width. */
+.portal-day-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.portal-day-card {
+  grid-column: span var(--span, 2); min-width: 0;
+  display: flex; align-items: center; gap: 8px; padding: 9px;
+  border-radius: 16px; border: 1px solid var(--border); text-align: left; cursor: pointer;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tone) 6%, var(--surface)) 0%, var(--surface) 75%);
+  color: var(--text); box-shadow: var(--shadow-sm);
+  transition: transform 0.12s ease, border-color 0.15s ease;
+}
+.portal-day-card:hover { border-color: color-mix(in srgb, var(--tone) 40%, var(--border)); }
+.portal-day-card:active { transform: scale(0.98); }
+.portal-day-icon {
+  flex: none; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--tone) 15%, transparent); color: var(--tone);
+}
+.portal-day-icon img { display: block; width: 22px; height: 22px; }
+.portal-day-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.portal-day-title { font-size: 13px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+.portal-day-sub { font-size: 11px; color: var(--muted); line-height: 1.3; }
+.portal-days-modal .portal-day-grid { grid-template-columns: 1fr; }
+.portal-days-modal .portal-day-card { grid-column: auto; padding: 12px; }
+@media (max-width: 400px) {
+  .portal-day-grid { grid-template-columns: repeat(2, 1fr); }
+  .portal-day-card { grid-column: auto; }
+}
+
+/* Section titles on the Workout tab are small caps labels, not Home's headlines. */
+.portal-section-head.is-label { margin: 2px 0 -6px; }
+.portal-section-head.is-label h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.portal-section-head.is-label .portal-section-link { font-size: 13.5px; }
+
+/* The best lift, with the barbell fading in from the right. The PNG is a crop of
+   the whole card, so the art is scaled up to push the strip above the card off
+   the top and the badge it already carries is covered by a live one. */
+.portal-pr-feature {
+  position: relative; overflow: hidden; height: 74px;
+  display: flex; align-items: center; gap: 12px; padding: 0 14px;
+  border-radius: 18px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm);
+}
+.portal-pr-feature-art { position: absolute; right: 0; bottom: 0; height: 100%; width: 66%; pointer-events: none; }
+.portal-pr-feature-art > img {
+  position: absolute; right: 0; bottom: 0; height: 145%; width: auto; max-width: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 48%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 48%);
+}
+body[data-mode='light'] .portal-pr-feature-art > img { mix-blend-mode: multiply; }
+.portal-pr-feature-badge {
+  position: absolute; right: 9px; top: 8px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  width: 72px; height: 28px; border-radius: 9px;
+  background: linear-gradient(180deg, #fb923c, var(--brand)); color: #fff;
+  font-size: 14px; font-weight: 800; letter-spacing: 0.02em;
+  box-shadow: 0 6px 12px -6px var(--brand-glow);
+}
+.portal-pr-feature-icon {
+  position: relative; flex: none; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand);
+}
+.portal-pr-feature-info { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.portal-pr-feature-name { font-size: 13px; font-weight: 600; line-height: 1.25; }
+.portal-pr-feature-value { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.portal-pr-feature-1rm { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* -------------------------------------------------------- active session */
 
@@ -3716,14 +3839,6 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
 
 /* ══════════════════════════════════════════ member portal: diet tracker ══ */
 
-.portal-diet-hero {
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  padding: 18px; border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: linear-gradient(150deg, var(--surface) 0%, var(--bg-alt) 100%);
-  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
-}
-
 .portal-cal-ring { position: relative; flex: none; display: grid; place-items: center; }
 .portal-cal-track { stroke: var(--border); }
 .portal-cal-fill { stroke: var(--macro-kcal); transition: stroke-dashoffset 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -3762,84 +3877,231 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
 .portal-macro-bar.carbs > i { background: var(--macro-carbs); }
 .portal-macro-bar.fats > i { background: var(--macro-fats); }
 
-.portal-diet-hint {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 12px; color: var(--muted);
-  padding: 8px 11px; border-radius: var(--radius-sm);
-  background: var(--surface-2); border: 1px solid var(--border);
+/* The whole tab is scoped under .portal-diet: the ring and macro-bar rules above
+   are shared with Home's "Today's focus" card, so nothing here may leak into them. */
+
+.portal-diet {
+  gap: 14px;
+  --d-protein: #3b82f6;
+  --d-carbs: #f59e0b;
+  --d-fats: #f43f5e;
+  --d-water: #3b82f6;
+  --d-card: var(--surface);
+  --d-card-border: var(--border);
+  --d-card-shadow: var(--shadow-sm);
+  --d-inset: var(--surface-2);
 }
+body[data-mode='light'] .portal-diet {
+  --d-card-border: color-mix(in srgb, var(--border) 70%, transparent);
+  --d-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -10px rgba(15, 23, 42, 0.1);
+  --d-inset: color-mix(in srgb, var(--text) 4.5%, var(--surface));
+}
+body:not([data-mode='light']) .portal-diet {
+  --d-card: color-mix(in srgb, var(--surface) 82%, var(--bg));
+  --d-inset: color-mix(in srgb, var(--bg) 55%, var(--surface));
+  --d-card-shadow: 0 10px 30px -14px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--hairline);
+}
+
+/* ---------------------------------------------------------------- days */
+
+.portal-diet .portal-day-strip { gap: 6px; padding: 2px 0 6px; scrollbar-width: none; }
+.portal-diet .portal-day-strip::-webkit-scrollbar { display: none; }
+.portal-diet .portal-day-pill {
+  flex: 1 1 0; min-width: 40px; width: auto; padding: 9px 0 8px; gap: 3px; border-radius: 14px;
+  background: var(--d-card); border-color: var(--d-card-border); box-shadow: var(--d-card-shadow);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+.portal-diet .portal-day-pill.is-today { flex-grow: 1.5; min-width: 54px; }
+.portal-diet .portal-day-pill:active { transform: scale(0.94); }
+.portal-diet .portal-day-pill span { text-transform: none; font-size: 11px; font-weight: 500; }
+.portal-diet .portal-day-pill strong { font-size: 17px; font-weight: 700; line-height: 1.15; }
+.portal-diet .portal-day-pill.active {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 82%, #fff), var(--brand));
+  border-color: var(--brand);
+  box-shadow: 0 8px 20px -6px color-mix(in srgb, var(--brand) 70%, transparent);
+}
+
+/* ---------------------------------------------------------------- hero */
+
+.portal-diet-hero {
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 16px; border-radius: 24px;
+  border: 1px solid var(--d-card-border); background: var(--d-card); box-shadow: var(--d-card-shadow);
+}
+.portal-diet-hero .portal-cal-ring { flex: 0 0 min(45%, 170px); container-type: inline-size; }
+.portal-diet-hero .portal-cal-ring svg { display: block; width: 100%; height: auto; }
+.portal-diet .portal-cal-track { stroke: color-mix(in srgb, var(--brand) 13%, transparent); }
+.portal-diet .portal-cal-fill { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--brand) 55%, transparent)); }
+.portal-diet .portal-cal-center { gap: 0; }
+.portal-diet .portal-cal-icon { width: 26px; height: 26px; margin-bottom: 1px; }
+.portal-diet .portal-cal-center strong { font-size: clamp(26px, 22cqw, 38px); font-weight: 800; line-height: 1.05; letter-spacing: -0.04em; }
+.portal-diet .portal-cal-center span { font-size: clamp(8.5px, 6.2cqw, 10.5px); letter-spacing: 0.08em; font-weight: 600; }
+.portal-diet .portal-cal-center small { font-size: clamp(10px, 7.4cqw, 12.5px); margin-top: 4px; color: var(--text); opacity: 0.8; }
+
+.portal-dmacro-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.portal-dmacro { --c: var(--d-protein); display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.portal-dmacro.protein { --c: var(--d-protein); }
+.portal-dmacro.carbs { --c: var(--d-carbs); }
+.portal-dmacro.fats { --c: var(--d-fats); }
+.portal-dmacro-badge {
+  flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 45%, transparent);
+}
+.portal-dmacro-badge i { width: 11px; height: 11px; border-radius: 50%; border: 2.5px solid var(--c); }
+.portal-dmacro-body { flex: 1; min-width: 0; }
+.portal-dmacro-top { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; line-height: 24px; height: 24px; }
+.portal-dmacro-label { font-size: 12.5px; font-weight: 700; }
+.portal-dmacro-value { font-size: 11.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.portal-dmacro-bar { height: 6px; margin-top: 2px; border-radius: 999px; background: color-mix(in srgb, var(--text) 9%, transparent); overflow: hidden; }
+.portal-dmacro-bar > i {
+  display: block; height: 100%; min-width: 6px; border-radius: 999px; background: var(--c);
+  transition: width 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---------------------------------------------------------------- plan */
+
+.portal-plan-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: -4px;
+  padding: 12px 14px; border-radius: 18px; text-align: left; font: inherit; color: var(--muted);
+  border: 1px solid var(--d-card-border); background: var(--d-card); box-shadow: var(--d-card-shadow);
+}
+button.portal-plan-row { cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; }
+button.portal-plan-row:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+button.portal-plan-row:active { transform: scale(0.99); }
+.portal-plan-ico { flex: none; display: grid; place-items: center; color: var(--brand); }
+.portal-plan-text { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.portal-plan-row.static .portal-plan-text { font-weight: 500; color: var(--muted); font-size: 12.5px; }
 
 /* ---------------------------------------------------------------- water */
 
 .portal-water-card {
-  display: flex; flex-direction: column; gap: 11px;
-  padding: 14px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--surface);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+  display: flex; flex-direction: column; gap: 14px; padding: 16px; border-radius: 24px;
+  border: 1px solid var(--d-card-border); background: var(--d-card); box-shadow: var(--d-card-shadow);
 }
 .portal-water-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.portal-water-head > div { display: flex; align-items: center; gap: 6px; color: var(--blue); }
-.portal-water-head strong { font-size: 13.5px; color: var(--text); }
-.portal-water-head .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
-.portal-water-glasses { display: flex; flex-wrap: wrap; gap: 5px; }
+.portal-water-head > div { display: flex; align-items: center; gap: 10px; color: var(--d-water); }
+.portal-water-head strong { font-size: 16px; font-weight: 700; color: var(--text); }
+.portal-water-head > span { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.portal-water-glasses { display: grid; grid-template-columns: repeat(var(--cells, 12), minmax(0, 1fr)); gap: 5px; }
 .portal-glass {
-  width: 26px; height: 30px; border-radius: 6px 6px 9px 9px;
-  display: grid; place-items: center;
-  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  aspect-ratio: 1; border-radius: 9px; display: grid; place-items: center;
+  border: 1px solid var(--d-card-border); background: var(--d-inset); color: color-mix(in srgb, var(--text) 55%, transparent);
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
+.portal-glass .svg-icon { width: 58%; height: 58%; }
 .portal-glass.filled {
-  background: rgba(56, 189, 248, 0.16); border-color: rgba(56, 189, 248, 0.45); color: var(--blue);
+  background: var(--d-water); border-color: var(--d-water); color: #fff;
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--d-water) 70%, transparent);
+}
+
+.portal-water-actions { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; }
+.portal-water-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px; height: 48px; padding: 0 6px;
+  border-radius: 14px; font: inherit; font-size: 14.5px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  color: var(--text); background: var(--d-inset); border: 1px solid var(--d-card-border);
+  transition: transform 0.12s ease, filter 0.15s ease;
+}
+.portal-water-btn:active:not(:disabled) { transform: scale(0.96); }
+.portal-water-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.portal-water-btn.primary {
+  color: #fff; border-color: transparent; background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 85%, #fff), var(--brand));
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--brand) 80%, transparent);
+}
+.portal-water-btn.blue {
+  background: color-mix(in srgb, var(--d-water) 10%, transparent); border-color: color-mix(in srgb, var(--d-water) 22%, transparent);
 }
 
 /* ---------------------------------------------------------------- meals */
 
+.portal-meals-head { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.portal-meals-head .portal-section-title { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; }
+.portal-link-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 0; border: none; background: none;
+  font: inherit; font-size: 13.5px; font-weight: 600; color: var(--brand); cursor: pointer;
+}
+.portal-link-btn:active { opacity: 0.7; }
+
 .portal-meal-card {
-  display: flex; flex-direction: column; gap: 10px;
-  padding: 14px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--surface);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+  display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 24px;
+  border: 1px solid var(--d-card-border); background: var(--d-card); box-shadow: var(--d-card-shadow);
 }
-.portal-meal-head { display: flex; align-items: center; gap: 10px; }
+.portal-meal-head { display: flex; align-items: center; gap: 12px; }
 .portal-meal-icon {
-  flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
-  background: var(--brand-soft); color: var(--brand);
+  flex: none; width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center;
+  color: var(--brand); background: color-mix(in srgb, var(--brand) 13%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 18%, transparent);
 }
-.portal-meal-title { flex: 1; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
-.portal-meal-kcal { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--macro-kcal); }
+.portal-meal-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.015em; }
+.portal-meal-kcal { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--brand); }
 
-.portal-meal-planned {
-  padding: 9px 11px; border-radius: var(--radius-sm);
-  background: var(--surface-2); border: 1px dashed var(--border);
+.portal-meal-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 10px; align-items: start; }
+.portal-meal-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.portal-meal-art {
+  position: relative; aspect-ratio: 1.12; border-radius: 18px; overflow: hidden;
+  background: #fff; box-shadow: inset 0 0 0 1px var(--d-card-border);
 }
-.portal-meal-planned-label {
-  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em;
-  font-weight: 800; color: var(--muted); margin-bottom: 5px;
+.portal-meal-art img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  /* The pack's crops carry a hairline of their neighbour on the edge — a short
+     fade on all four sides hides it and lets the art melt into the tile. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%), linear-gradient(180deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%), linear-gradient(180deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+  mask-composite: intersect;
 }
+.portal-meal-art .art-dark { display: none; }
+body:not([data-mode='light']) .portal-meal-art { background: #14171c; }
+body:not([data-mode='light']) .portal-meal-art .art-light { display: none; }
+body:not([data-mode='light']) .portal-meal-art .art-dark { display: block; }
+
+.portal-trainer-box { padding: 10px 12px; border-radius: 14px; background: var(--d-inset); min-width: 0; }
+.portal-trainer-box.empty { font-size: 12px; line-height: 1.5; color: var(--muted); display: flex; align-items: center; min-height: 64px; }
+.portal-trainer-label {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brand);
+}
+body[data-mode='light'] .portal-trainer-label { color: var(--text); }
 .portal-planned-row {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-  font-size: 12px; padding: 2px 0;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 12px; line-height: 1.35; padding: 3px 0;
 }
-.portal-planned-row .muted { font-variant-numeric: tabular-nums; flex: none; }
+.portal-planned-row > span:first-child { min-width: 0; }
+.portal-planned-row .muted { flex: none; font-variant-numeric: tabular-nums; font-size: 11.5px; }
 
-.portal-meal-entries { display: flex; flex-direction: column; }
+.portal-trainer-box.logged .portal-entry-row { padding: 7px 0; gap: 8px; }
+.portal-meal-card > .portal-trainer-box.logged { padding: 10px 14px; }
 .portal-entry-row {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 0; border-bottom: 1px solid var(--border);
 }
 .portal-entry-row:last-child { border-bottom: none; }
 .portal-entry-row > div:first-child { flex: 1; min-width: 0; }
-.portal-entry-name { font-size: 13px; font-weight: 600; }
-.portal-entry-row .muted { font-size: 11px; }
-.portal-entry-kcal { flex: none; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.portal-entry-name { font-size: 12.5px; font-weight: 600; }
+.portal-entry-row .muted { font-size: 10.5px; }
+.portal-entry-kcal { flex: none; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 .portal-add-food {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 9px; border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px dashed var(--border); background: none; color: var(--brand);
-  font-size: 12.5px; font-weight: 700; font-family: inherit;
+  display: flex; align-items: center; justify-content: center; gap: 9px; height: 46px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--d-card-border); background: var(--d-card); color: var(--brand);
+  font: inherit; font-size: 15px; font-weight: 700; transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
 }
+body:not([data-mode='light']) .portal-add-food { border-color: color-mix(in srgb, var(--brand) 26%, var(--border)); background: var(--d-inset); }
 .portal-add-food:hover { border-color: var(--brand); background: var(--brand-soft); }
+.portal-add-food:active { transform: scale(0.985); }
+.portal-add-ico { width: 21px; height: 21px; border-radius: 50%; display: grid; place-items: center; border: 1.75px solid currentColor; }
+
+/* ----------------------------------------------------------- plan sheet */
+
+.portal-plan-sheet { display: flex; flex-direction: column; gap: 10px; }
+.portal-plan-targets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding-bottom: 4px; }
+.portal-plan-targets > div { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 10px 4px; border-radius: 12px; background: var(--surface-2); }
+.portal-plan-targets strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.portal-plan-targets span { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.portal-plan-sheet .portal-trainer-box { background: var(--surface-2); }
+.portal-plan-sheet .portal-trainer-label { color: var(--text); }
+
 
 /* ------------------------------------------------------- search sheets */
 
@@ -3905,7 +4167,6 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
 
 @media (max-width: 480px) {
   .portal-pr-wall { grid-template-columns: 1fr; }
-  .portal-diet-hero { justify-content: center; }
   .portal-summary-grid { grid-template-columns: repeat(2, 1fr); }
   /*
    * The builders' fixed grids stop being grids on a phone: an eight-column row
@@ -3921,4 +4182,20 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
   }
   .fit-cell-name { grid-column: 1 / -1; }
   .fit-ex-handle { justify-self: start; }
+}
+
+/* Workout tab on the narrowest phones: give the exercise names the room the
+   chevron and a slice of the thumbnail were taking, and shrink the PR art. */
+@media (max-width: 400px) {
+  .portal-routine-go { display: none; }
+  .portal-routine-thumb { width: 48px; }
+  .portal-routine-hero { padding-left: 16px; padding-right: 16px; }
+  .portal-pr-feature-art { transform: scale(0.82); transform-origin: right bottom; }
+}
+
+/* Diet tab on the narrowest phones: a slimmer art column leaves the trainer's
+   suggestions room to keep a food name on one or two lines. */
+@media (max-width: 380px) {
+  .portal-meal-body { grid-template-columns: minmax(0, 1.5fr) minmax(0, 3fr); }
+  .portal-planned-row { font-size: 11.5px; }
 }

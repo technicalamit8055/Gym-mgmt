@@ -97,13 +97,131 @@ function miniStat(icon, value, label, tone) {
   );
 }
 
-/** A Home section title with its "View all →" link on the right. */
-function sectionHead(title, linkLabel, onLink) {
+/** A section title with its "View all →" link on the right. `className` lets a
+ * tab restyle the title (the Workout tab uses the small muted `is-label`);
+ * leave `linkLabel` out for a title with no link. */
+function sectionHead(title, linkLabel, onLink, className = '') {
   return h(
     'div',
-    { class: 'portal-section-head' },
+    { class: `portal-section-head${className ? ` ${className}` : ''}` },
     h('h3', {}, title),
-    h('button', { class: 'portal-section-link', type: 'button', onclick: onLink }, linkLabel, renderIcon('arrowRight', { size: 14 })),
+    linkLabel
+      ? h('button', { class: 'portal-section-link', type: 'button', onclick: onLink }, linkLabel, renderIcon('arrowRight', { size: 14 }))
+      : null,
+  );
+}
+
+/* ------------------------------------------------- Workout tab artwork --- */
+
+/** Exercises that have a thumbnail in /images/workout, keyed by lower-cased
+ * name. Anything else gets a dumbbell tile rather than a broken image. */
+const EXERCISE_THUMBS = {
+  deadlift: 'deadlift',
+  'pull-up': 'pullup',
+  'seated cable row': 'cable-row',
+  'face pull': 'face-pull',
+  'barbell curl': 'barbell-curl',
+  'hammer curl': 'hammer-curl',
+};
+
+const EXERCISE_BLURBS = {
+  deadlift: 'Build overall back strength',
+  'pull-up': 'Great for lats and upper back',
+  'seated cable row': 'Focus on controlled movement',
+  'face pull': 'Build rear delts & posture',
+  'barbell curl': 'Focus on full range of motion',
+  'hammer curl': 'Build thicker biceps',
+};
+
+const MUSCLE_BLURBS = {
+  chest: 'Build chest size and strength',
+  back: 'Build a stronger back',
+  legs: 'Build leg strength and size',
+  shoulders: 'Build strong, rounded shoulders',
+  arms: 'Build bigger arms',
+  core: 'Build a strong, stable core',
+  cardio: 'Boost conditioning and endurance',
+  full_body: 'Train your whole body',
+};
+
+/** What a routine day is about, for the "Or train another day" tiles. Days
+ * whose name carries no muscle list get one from this table, then from the
+ * muscle groups their exercises actually hit. */
+const DAY_BLURBS = {
+  'push (volume)': 'Higher volume workout',
+  'pull (volume)': 'Back & Biceps (Volume)',
+  'legs & core': 'Quads, Hamstrings & Core',
+  'legs & conditioning': 'Strength & Cardio Mix',
+};
+
+const muscleLabel = (group) => String(group ?? '').replace('_', ' ');
+const joinList = (items) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} & ${items.at(-1)}` : (items[0] ?? ''));
+const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+function dayCardMeta(day) {
+  const stripped = day.day_name.replace(/^Day \d+:\s*/, '');
+  const parens = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(stripped);
+  const listy = parens && (parens[2].length > 12 || /[,&]/.test(parens[2]));
+  const title = listy ? parens[1] : stripped;
+  const groups = [...new Set(day.exercises.map((e) => muscleLabel(e.muscle_group)))].map(capitalise);
+  const sub = listy ? parens[2] : (DAY_BLURBS[title.toLowerCase()] ?? joinList(groups));
+
+  const key = stripped.toLowerCase();
+  let icon = { name: 'weight', tone: 'orange' };
+  if (/conditioning|cardio/.test(key)) icon = { image: '/images/workout/icon-runner.svg', tone: 'green' };
+  else if (/volume/.test(key) && /push|upper|chest/.test(key)) icon = { name: 'barChart', tone: 'orange' };
+  else if (/pull|back/.test(key)) icon = { name: 'pullBar', tone: 'purple' };
+  else if (/leg|lower/.test(key)) icon = { name: 'weight', tone: 'blue' };
+  else if (/push|upper|chest/.test(key)) icon = { image: '/images/workout/icon-push.svg', tone: 'orange' };
+  return { title, sub, icon };
+}
+
+/** One tile of the "Or train another day" grid. */
+function dayCard(day, onStart, span) {
+  const { title, sub, icon } = dayCardMeta(day);
+  return h(
+    'button',
+    { class: `portal-day-card tone-${icon.tone}`, type: 'button', style: `--span:${span}`, onclick: () => onStart(day) },
+    h(
+      'span',
+      { class: 'portal-day-icon' },
+      icon.image ? h('img', { src: icon.image, alt: '', width: 22, height: 22 }) : renderIcon(icon.name, { size: 20 }),
+    ),
+    h('span', { class: 'portal-day-text' }, h('span', { class: 'portal-day-title' }, title), h('span', { class: 'portal-day-sub' }, sub)),
+  );
+}
+
+/** Rows of three, each row stretched to fill the grid: five other days lay out
+ * as 3 + 2, four as 3 + 1, so there is never a gap at the end of a row. */
+function dayCardGrid(days, onStart) {
+  const spans = [];
+  for (let i = 0; i < days.length; i += 3) {
+    const rowLength = Math.min(3, days.length - i);
+    for (let j = 0; j < rowLength; j++) spans.push(6 / rowLength);
+  }
+  return h('div', { class: 'portal-day-grid' }, ...days.map((day, i) => dayCard(day, onStart, spans[i])));
+}
+
+/** One exercise of today's routine: thumbnail, muscle badge, name and what to
+ * aim for, the sets × reps pill and a chevron. */
+function routineExerciseRow(exercise) {
+  const name = exercise.exercise_name;
+  const thumb = EXERCISE_THUMBS[name.trim().toLowerCase()];
+  const blurb = exercise.notes || EXERCISE_BLURBS[name.trim().toLowerCase()] || MUSCLE_BLURBS[exercise.muscle_group] || '';
+  return h(
+    'div',
+    { class: 'portal-routine-row' },
+    thumb
+      ? h('img', { class: 'portal-routine-thumb', src: `/images/workout/ex-${thumb}.png`, alt: '', width: 88, height: 44, loading: 'lazy' })
+      : h('span', { class: 'portal-routine-thumb is-empty' }, renderIcon('weight', { size: 20 })),
+    h(
+      'div',
+      { class: 'portal-routine-body' },
+      h('span', { class: 'portal-muscle-badge', 'data-m': exercise.muscle_group }, muscleLabel(exercise.muscle_group)),
+      h('div', { class: 'portal-routine-main' }, h('div', { class: 'portal-routine-ex-name' }, name), blurb ? h('div', { class: 'portal-routine-ex-sub' }, blurb) : null),
+      h('span', { class: 'portal-routine-pill' }, `${exercise.target_sets} × ${exercise.target_reps}`),
+      h('span', { class: 'portal-routine-go' }, renderIcon('chevronRight', { size: 15 })),
+    ),
   );
 }
 
@@ -385,7 +503,7 @@ function renderPortalLogin(ctx) {
 
 const MEAL_SLOTS = [
   { key: 'breakfast', label: 'Breakfast', icon: 'sun' },
-  { key: 'lunch', label: 'Lunch', icon: 'apple' },
+  { key: 'lunch', label: 'Lunch', icon: 'utensils' },
   { key: 'dinner', label: 'Dinner', icon: 'moon' },
   { key: 'snack', label: 'Snacks', icon: 'flame' },
   { key: 'pre_workout', label: 'Pre-workout', icon: 'weight' },
@@ -2072,65 +2190,62 @@ function renderPortalApp(ctx, initialMe) {
     const startSession = (name, day) =>
       startWorkoutSession({ name, day, planId: current.plan?.id, previous: current.previous });
 
+    const startButton = (label, onclick) =>
+      h(
+        'button',
+        { class: 'btn primary block portal-start-btn portal-routine-start', type: 'button', onclick },
+        renderIcon('play', { size: 18 }),
+        h('span', {}, label),
+        renderIcon('arrowRight', { size: 18 }),
+      );
+
     /* Today's routine */
     if (current.today_day) {
+      const day = current.today_day;
+      const groups = [...new Set(day.exercises.map((e) => e.muscle_group))];
+      const otherDays = current.plan.days.filter((d) => d.id !== day.id);
+
       body.append(
         h(
           'div',
           { class: 'portal-routine-card' },
-          h('div', { class: 'portal-routine-glow' }),
-          h('div', { class: 'portal-routine-kicker' }, current.plan.name),
-          h('h2', { class: 'portal-routine-day' }, current.today_day.day_name),
-          current.today_day.notes ? h('p', { class: 'portal-routine-note' }, current.today_day.notes) : null,
           h(
             'div',
-            { class: 'portal-routine-exercises' },
-            ...current.today_day.exercises.map((exercise) =>
-              h(
-                'div',
-                { class: 'portal-routine-row' },
-                h('span', { class: 'portal-muscle-badge' }, exercise.muscle_group.replace('_', ' ')),
-                h('span', { class: 'portal-routine-ex-name' }, exercise.exercise_name),
-                h('span', { class: 'muted' }, `${exercise.target_sets} × ${exercise.target_reps}`),
-                current.previous?.[exercise.exercise_name]
-                  ? h(
-                      'span',
-                      { class: 'portal-routine-prev' },
-                      `${weightLabel(current.previous[exercise.exercise_name].weight_kg)} × ${current.previous[exercise.exercise_name].reps}`,
-                    )
-                  : null,
-              ),
+            { class: 'portal-routine-hero' },
+            h('img', { class: 'portal-routine-art', src: '/images/workout/hero-pull-down.png', alt: '' }),
+            h('div', { class: 'portal-routine-kicker' }, renderIcon('weight', { size: 20 }), h('span', {}, current.plan.name)),
+            h('h2', { class: 'portal-routine-day' }, day.day_name),
+            day.notes ? h('p', { class: 'portal-routine-note' }, day.notes) : null,
+            h(
+              'div',
+              { class: 'portal-routine-chips' },
+              ...groups.map((group) => h('span', { class: 'portal-muscle-badge', 'data-m': group }, muscleLabel(group))),
+              h('span', { class: 'portal-routine-count' }, `${day.exercises.length} exercise${day.exercises.length === 1 ? '' : 's'}`),
             ),
           ),
           h(
-            'button',
-            {
-              class: 'btn primary block',
-              type: 'button',
-              onclick: () => startSession(current.today_day.day_name, current.today_day),
-            },
-            renderIcon('play', { size: 15 }),
-            ' Start workout',
+            'div',
+            { class: 'portal-routine-sheet' },
+            h('div', { class: 'portal-routine-exercises' }, ...day.exercises.map(routineExerciseRow)),
+            startButton('Start workout', () => startSession(day.day_name, day)),
           ),
         ),
       );
 
-      if (current.plan.days.length > 1) {
+      if (otherDays.length) {
+        const openAllDays = () => {
+          const modal = openModal({
+            title: current.plan.name,
+            body: dayCardGrid(current.plan.days, (d) => {
+              closeModal();
+              startSession(d.day_name, d);
+            }),
+          });
+          modal.classList.add('portal-days-modal');
+        };
         body.append(
-          h('h3', { class: 'portal-section-title' }, 'Or train another day'),
-          h(
-            'div',
-            { class: 'portal-chip-row' },
-            ...current.plan.days
-              .filter((day) => day.id !== current.today_day.id)
-              .map((day) =>
-                h(
-                  'button',
-                  { class: 'fit-chip', type: 'button', onclick: () => startSession(day.day_name, day) },
-                  day.day_name.replace(/^Day \d+:\s*/, ''),
-                ),
-              ),
-          ),
+          sectionHead('Or train another day', 'View all plans', openAllDays, 'is-label'),
+          dayCardGrid(otherDays, (d) => startSession(d.day_name, d)),
         );
       }
     } else {
@@ -2138,50 +2253,73 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'div',
           { class: 'portal-routine-card' },
-          h('div', { class: 'portal-routine-glow' }),
-          h('h2', { class: 'portal-routine-day' }, 'No routine assigned yet'),
           h(
-            'p',
-            { class: 'portal-routine-note' },
-            'Ask a trainer to put you on a plan — or start a freestyle session and log whatever you do today.',
+            'div',
+            { class: 'portal-routine-hero is-plain' },
+            h('h2', { class: 'portal-routine-day' }, 'No routine assigned yet'),
+            h(
+              'p',
+              { class: 'portal-routine-note' },
+              'Ask a trainer to put you on a plan — or start a freestyle session and log whatever you do today.',
+            ),
           ),
-          h(
-            'button',
-            { class: 'btn primary block', type: 'button', onclick: () => startSession('Freestyle workout', null) },
-            renderIcon('play', { size: 15 }),
-            ' Start a freestyle workout',
-          ),
+          h('div', { class: 'portal-routine-sheet' }, startButton('Start a freestyle workout', () => startSession('Freestyle workout', null))),
         ),
       );
     }
 
     /* Lifetime stats */
     body.append(
+      sectionHead("Today's stats", null, null, 'is-label'),
       h(
         'div',
         { class: 'portal-stat-row' },
-        miniStat('weight', history.stats.total_workouts, 'Workouts'),
-        miniStat('trendUp', Math.round(history.stats.lifetime_volume_kg / 1000), 'Tonnes lifted'),
-        miniStat('trophy', prs.items.length, 'Records'),
+        miniStat('weight', history.stats.total_workouts, 'Workouts', 'orange'),
+        miniStat('trendUp', Math.round(history.stats.lifetime_volume_kg / 1000), 'Tonnes lifted', 'green'),
+        miniStat('trophy', prs.items.length, 'Records', 'orange'),
       ),
     );
 
-    /* PR wall */
+    /* PR wall: the best lift, with the rest behind "View all" */
     if (prs.items.length) {
+      const best = prs.items[0];
+      const openAllRecords = () =>
+        openModal({
+          title: 'Personal records',
+          body: h(
+            'div',
+            { class: 'portal-pr-wall' },
+            ...prs.items.map((pr) =>
+              h(
+                'div',
+                { class: 'portal-pr-card' },
+                h('div', { class: 'portal-pr-trophy' }, renderIcon('trophy', { size: 15 })),
+                h('div', { class: 'portal-pr-name' }, pr.exercise_name),
+                h('div', { class: 'portal-pr-value' }, `${weightLabel(pr.max_weight_kg)} × ${pr.max_reps}`),
+                h('div', { class: 'portal-pr-1rm' }, `~${weightLabel(pr.est_1rm_kg)} 1RM`),
+              ),
+            ),
+          ),
+        });
+
       body.append(
-        h('h3', { class: 'portal-section-title' }, 'Personal records'),
+        sectionHead('Personal records', 'View all', openAllRecords, 'is-label'),
         h(
           'div',
-          { class: 'portal-pr-wall' },
-          ...prs.items.slice(0, 8).map((pr) =>
-            h(
-              'div',
-              { class: 'portal-pr-card' },
-              h('div', { class: 'portal-pr-trophy' }, renderIcon('trophy', { size: 15 })),
-              h('div', { class: 'portal-pr-name' }, pr.exercise_name),
-              h('div', { class: 'portal-pr-value' }, `${weightLabel(pr.max_weight_kg)} × ${pr.max_reps}`),
-              h('div', { class: 'portal-pr-1rm' }, `~${weightLabel(pr.est_1rm_kg)} 1RM`),
-            ),
+          { class: 'portal-pr-feature' },
+          h(
+            'div',
+            { class: 'portal-pr-feature-art', 'aria-hidden': 'true' },
+            h('img', { src: '/images/workout/pr-barbell.png', alt: '', width: 205, height: 74 }),
+            h('span', { class: 'portal-pr-feature-badge' }, renderIcon('crown', { size: 15 }), 'PR'),
+          ),
+          h('div', { class: 'portal-pr-feature-icon' }, renderIcon('trophy', { size: 24 })),
+          h(
+            'div',
+            { class: 'portal-pr-feature-info' },
+            h('div', { class: 'portal-pr-feature-name' }, best.exercise_name),
+            h('div', { class: 'portal-pr-feature-value' }, `${weightLabel(best.max_weight_kg)} × ${best.max_reps}`),
+            h('div', { class: 'portal-pr-feature-1rm' }, `~${weightLabel(best.est_1rm_kg)} 1RM`),
           ),
         ),
       );
@@ -2312,6 +2450,83 @@ function renderPortalApp(ctx, initialMe) {
 
   /* -------------------------------------------------------------- Diet tab */
 
+  /** The trainer's full plan in a sheet — the "View plan" link and the plan row
+   * both open it. Read-only: the member logs against it from the meal cards. */
+  function openPlanSheet(plan, targets) {
+    const total = (meal) => meal.items.reduce((sum, item) => sum + (Number(item.calories) || 0), 0);
+    openModal({
+      title: plan.name,
+      body: h(
+        'div',
+        { class: 'portal-plan-sheet' },
+        h(
+          'div',
+          { class: 'portal-plan-targets' },
+          ...[
+            [targets.target_calories, 'kcal'],
+            [`${targets.target_protein_g}g`, 'Protein'],
+            [`${targets.target_carbs_g}g`, 'Carbs'],
+            [`${targets.target_fats_g}g`, 'Fats'],
+          ].map(([value, label]) => h('div', {}, h('strong', {}, String(value)), h('span', {}, label))),
+        ),
+        ...(plan.meals.length
+          ? plan.meals.map((meal) =>
+              h(
+                'div',
+                { class: 'portal-trainer-box' },
+                h(
+                  'div',
+                  { class: 'portal-trainer-label' },
+                  h('span', {}, meal.meal_name),
+                  h('span', {}, `${total(meal)} kcal`),
+                ),
+                ...meal.items.map((item) =>
+                  h(
+                    'div',
+                    { class: 'portal-planned-row' },
+                    h('span', {}, item.food_name),
+                    h('span', { class: 'muted' }, `${item.portion_size} · ${item.calories} kcal`),
+                  ),
+                ),
+              ),
+            )
+          : [h('div', { class: 'portal-empty' }, 'Your trainer has not added meals to this plan yet.')]),
+      ),
+    });
+  }
+
+  /** One meal's art. Both themes are in the DOM and CSS picks one, because the
+   * light/dark switch is a body attribute rather than a media query, and the
+   * member can flip it without leaving the tab. Snacks art stands in for the
+   * pre/post-workout slots, which have none of their own. */
+  const mealArt = (slotKey) => {
+    const base = ['breakfast', 'lunch', 'dinner'].includes(slotKey) ? slotKey : 'snacks';
+    const img = (cls, suffix) =>
+      h('img', { class: cls, src: `/images/diet/meal-${base}${suffix}.png`, alt: '', width: 400, height: 315, loading: 'lazy' });
+    return h('div', { class: 'portal-meal-art', 'aria-hidden': 'true' }, img('art-light', ''), img('art-dark', '-dark'));
+  };
+
+  /** A macro row: coloured badge, label, "eaten / target g", progress bar. */
+  const dietMacro = (label, eaten, target, tone, glyph) => {
+    const pct = target > 0 ? Math.min((eaten / target) * 100, 100) : 0;
+    return h(
+      'div',
+      { class: `portal-dmacro ${tone}` },
+      h('div', { class: 'portal-dmacro-badge' }, glyph ?? h('i')),
+      h(
+        'div',
+        { class: 'portal-dmacro-body' },
+        h(
+          'div',
+          { class: 'portal-dmacro-top' },
+          h('span', { class: 'portal-dmacro-label' }, label),
+          h('span', { class: 'portal-dmacro-value' }, `${Math.round(eaten)} / ${target}g`),
+        ),
+        h('div', { class: 'portal-dmacro-bar' }, h('i', { style: `width:${pct}%` })),
+      ),
+    );
+  };
+
   async function renderDietTab() {
     const status = await api.portal.fitnessStatus();
     if (!status.has_access) return upgradeSheet(status, { onRefresh: () => switchTab('diet') });
@@ -2336,7 +2551,7 @@ function renderPortalApp(ctx, initialMe) {
       await switchTab('diet');
     };
 
-    const body = h('div', { class: 'portal-tab-body' });
+    const body = h('div', { class: 'portal-tab-body portal-diet' });
 
     /* Date carousel: the last week, oldest first, ending today */
     const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6));
@@ -2349,8 +2564,9 @@ function renderPortalApp(ctx, initialMe) {
         const pill = h(
           'button',
           {
-            class: `portal-day-pill${iso === logDate ? ' active' : ''}`,
+            class: `portal-day-pill${iso === logDate ? ' active' : ''}${iso === today() ? ' is-today' : ''}`,
             type: 'button',
+            'aria-pressed': iso === logDate ? 'true' : 'false',
             onclick: () => {
               logDate = iso;
               reload();
@@ -2364,49 +2580,55 @@ function renderPortalApp(ctx, initialMe) {
       }),
     );
     body.append(strip);
-    // Today sits at the far right of a strip that overflows a phone, so without
-    // this the tab opens showing last Friday with the selected day off-screen.
-    // Deferred a frame: the strip has no scrollWidth until it is in the document.
+    // The week fits a normal phone, but a narrow one overflows and would open
+    // on the oldest day. Deferred a frame: no scrollWidth until it is mounted.
     if (activePill) {
       requestAnimationFrame(() => {
         strip.scrollLeft = Math.max(0, activePill.offsetLeft + activePill.offsetWidth - strip.clientWidth);
       });
     }
 
-    /* Hero rings */
+    /* Hero: calorie ring + macro bars, with the plan underneath */
     body.append(
       h(
-        'div',
+        'section',
         { class: 'portal-diet-hero' },
-        calorieRing(day.totals.calories, targets.target_calories),
+        calorieRing(day.totals.calories, targets.target_calories, { size: 168, stroke: 12, icon: 'flame' }),
         h(
           'div',
-          { class: 'portal-macro-stack' },
-          macroBar('Protein', day.totals.protein_g, targets.target_protein_g, 'protein'),
-          macroBar('Carbs', day.totals.carbs_g, targets.target_carbs_g, 'carbs'),
-          macroBar('Fats', day.totals.fats_g, targets.target_fats_g, 'fats'),
+          { class: 'portal-dmacro-stack' },
+          dietMacro('Protein', day.totals.protein_g, targets.target_protein_g, 'protein', renderIcon('droplet', { size: 13, stroke: 2.4 })),
+          dietMacro('Carbs', day.totals.carbs_g, targets.target_carbs_g, 'carbs'),
+          dietMacro('Fats', day.totals.fats_g, targets.target_fats_g, 'fats', renderIcon('droplet', { size: 13, stroke: 2.4 })),
         ),
       ),
     );
 
-    if (plan.using_default_targets) {
-      body.append(
-        h(
-          'div',
-          { class: 'portal-diet-hint' },
-          renderIcon('member', { size: 14 }),
-          ' These are default targets — ask a trainer to set yours.',
-        ),
-      );
-    } else {
-      body.append(
-        h('div', { class: 'portal-diet-hint' }, renderIcon('target', { size: 14 }), ` Plan: ${plan.plan.name}`),
-      );
-    }
+    body.append(
+      plan.plan
+        ? h(
+            'button',
+            { class: 'portal-plan-row', type: 'button', onclick: () => openPlanSheet(plan.plan, targets) },
+            h('span', { class: 'portal-plan-ico' }, renderIcon('target', { size: 22 })),
+            h('span', { class: 'portal-plan-text' }, `Plan: ${plan.plan.name}`),
+            renderIcon('chevronRight', { size: 18 }),
+          )
+        : h(
+            'div',
+            { class: 'portal-plan-row static' },
+            h('span', { class: 'portal-plan-ico' }, renderIcon('target', { size: 22 })),
+            h('span', { class: 'portal-plan-text' }, `Default targets — ${targets.target_calories} kcal. Ask a trainer to set yours.`),
+          ),
+    );
 
     /* Water */
-    const glassTarget = Math.max(1, Math.round(targets.target_water_ml / 250));
-    const glassesDone = Math.round(day.water_ml / 250);
+    // One row of up to twelve cells, each an equal slice of the day's target:
+    // exactly one 250 ml glass for targets up to 3 L, proportional beyond that.
+    const glassTarget = Math.min(Math.max(1, Math.round(targets.target_water_ml / 250)), 12);
+    const glassesDone = Math.min(
+      glassTarget,
+      Math.round((day.water_ml / Math.max(1, targets.target_water_ml)) * glassTarget),
+    );
     const bump = async (ml) => {
       try {
         await api.portal.logWater({ add_ml: ml, log_date: logDate });
@@ -2419,29 +2641,36 @@ function renderPortalApp(ctx, initialMe) {
 
     body.append(
       h(
-        'div',
+        'section',
         { class: 'portal-water-card' },
         h(
           'div',
           { class: 'portal-water-head' },
-          h('div', {}, renderIcon('droplet', { size: 16 }), h('strong', {}, ' Water')),
-          h('span', { class: 'muted' }, `${day.water_ml} / ${targets.target_water_ml} ml`),
+          h('div', {}, renderIcon('droplet', { size: 20, stroke: 2 }), h('strong', {}, 'Water')),
+          h('span', {}, `${day.water_ml} / ${targets.target_water_ml} ml`),
         ),
         h(
           'div',
-          { class: 'portal-water-glasses' },
-          ...Array.from({ length: Math.min(glassTarget, 16) }, (_, i) =>
-            h('span', { class: `portal-glass${i < glassesDone ? ' filled' : ''}` }, renderIcon('droplet', { size: 13 })),
+          {
+            class: 'portal-water-glasses',
+            style: `--cells:${glassTarget}`,
+            role: 'img',
+            'aria-label': `${glassesDone} of ${glassTarget} glasses`,
+          },
+          ...Array.from({ length: glassTarget }, (_, i) =>
+            h('span', { class: `portal-glass${i < glassesDone ? ' filled' : ''}` }, renderIcon('droplet', { size: 13, stroke: 2.2 })),
           ),
         ),
         h(
           'div',
-          { class: 'row', style: 'gap:8px' },
-          h('button', { class: 'btn sm primary', type: 'button', onclick: () => bump(250) }, renderIcon('plus', { size: 15 }), '250 ml'),
-          h('button', { class: 'btn sm', type: 'button', onclick: () => bump(500) }, renderIcon('plus', { size: 15 }), '500 ml'),
-          day.water_ml > 0
-            ? h('button', { class: 'btn sm ghost', type: 'button', onclick: () => bump(-250) }, '− 250 ml')
-            : null,
+          { class: 'portal-water-actions' },
+          h('button', { class: 'portal-water-btn primary', type: 'button', onclick: () => bump(250) }, renderIcon('bottle', { size: 18 }), '+ 250 ml'),
+          h('button', { class: 'portal-water-btn blue', type: 'button', onclick: () => bump(500) }, renderIcon('plus', { size: 17 }), '500 ml'),
+          h(
+            'button',
+            { class: 'portal-water-btn', type: 'button', disabled: day.water_ml <= 0, onclick: () => bump(-250) },
+            '− 250 ml',
+          ),
         ),
       ),
     );
@@ -2464,83 +2693,116 @@ function renderPortalApp(ctx, initialMe) {
         || plannedByMeal.has(slot.key),
     );
 
-    body.append(h('h3', { class: 'portal-section-title' }, 'Meals'));
+    body.append(
+      h(
+        'div',
+        { class: 'portal-meals-head' },
+        h('h3', { class: 'portal-section-title' }, 'Meals'),
+        plan.plan
+          ? h(
+              'button',
+              { class: 'portal-link-btn', type: 'button', onclick: () => openPlanSheet(plan.plan, targets) },
+              'View plan',
+              renderIcon('arrowRight', { size: 15, stroke: 2.2 }),
+            )
+          : null,
+      ),
+    );
+
     for (const slot of visibleSlots) {
       const entries = day.meals[slot.key] ?? [];
       const eaten = entries.reduce((sum, e) => sum + e.calories, 0);
       const planned = plannedByMeal.get(slot.key) ?? [];
 
+      // Beside the art when there is nothing else in the column; full width
+      // underneath when the trainer's suggestions already fill it.
+      const loggedBox = entries.length
+        ? h(
+            'div',
+            { class: 'portal-trainer-box logged' },
+            h('div', { class: 'portal-trainer-label' }, 'Logged'),
+            ...entries.map((entry) =>
+              h(
+                'div',
+                { class: 'portal-entry-row' },
+                h(
+                  'div',
+                  {},
+                  h('div', { class: 'portal-entry-name' }, entry.food_name),
+                  h(
+                    'div',
+                    { class: 'muted' },
+                    `${entry.quantity === 1 ? '' : `${entry.quantity} × `}${entry.serving_unit} · P ${entry.protein_g}g · C ${entry.carbs_g}g · F ${entry.fats_g}g`,
+                  ),
+                ),
+                h('div', { class: 'portal-entry-kcal' }, String(entry.calories)),
+                h(
+                  'button',
+                  {
+                    class: 'icon-btn',
+                    type: 'button',
+                    'aria-label': `Remove ${entry.food_name}`,
+                    onclick: async (event) => {
+                      event.currentTarget.disabled = true;
+                      try {
+                        await api.portal.deleteFoodEntry(entry.id);
+                        sound.playFoodRemoved();
+                        await reload();
+                      } catch (err) {
+                        toast(err.message || 'Could not remove that', 'error');
+                        event.currentTarget.disabled = false;
+                      }
+                    },
+                  },
+                  renderIcon('close', { size: 14 }),
+                ),
+              ),
+            ),
+          )
+        : null;
+
       body.append(
         h(
-          'div',
+          'article',
           { class: 'portal-meal-card' },
           h(
             'div',
             { class: 'portal-meal-head' },
-            h('div', { class: 'portal-meal-icon' }, renderIcon(slot.icon, { size: 15 })),
+            h('div', { class: 'portal-meal-icon' }, renderIcon(slot.icon, { size: 20, stroke: 2 })),
             h('div', { class: 'portal-meal-title' }, slot.label),
-            h('div', { class: 'portal-meal-kcal' }, `${eaten} kcal`),
+            h('div', { class: 'portal-meal-kcal' }, `${Math.round(eaten)} kcal`),
           ),
-          planned.length
-            ? h(
-                'div',
-                { class: 'portal-meal-planned' },
-                h('div', { class: 'portal-meal-planned-label' }, 'Your trainer suggests'),
-                ...planned.flatMap((meal) =>
-                  meal.items.map((item) =>
-                    h(
-                      'div',
-                      { class: 'portal-planned-row' },
-                      h('span', {}, item.food_name),
-                      h('span', { class: 'muted' }, `${item.portion_size} · ${item.calories} kcal`),
-                    ),
-                  ),
-                ),
-              )
-            : null,
-          entries.length
-            ? h(
-                'div',
-                { class: 'portal-meal-entries' },
-                ...entries.map((entry) =>
-                  h(
+          h(
+            'div',
+            { class: 'portal-meal-body' },
+            mealArt(slot.key),
+            h(
+              'div',
+              { class: 'portal-meal-side' },
+              planned.length
+                ? h(
                     'div',
-                    { class: 'portal-entry-row' },
-                    h(
-                      'div',
-                      {},
-                      h('div', { class: 'portal-entry-name' }, entry.food_name),
-                      h(
-                        'div',
-                        { class: 'muted' },
-                        `${entry.quantity === 1 ? '' : `${entry.quantity} × `}${entry.serving_unit} · P ${entry.protein_g}g · C ${entry.carbs_g}g · F ${entry.fats_g}g`,
+                    { class: 'portal-trainer-box' },
+                    h('div', { class: 'portal-trainer-label' }, 'Your trainer suggests'),
+                    ...planned.flatMap((meal) =>
+                      meal.items.map((item) =>
+                        h(
+                          'div',
+                          { class: 'portal-planned-row' },
+                          h('span', {}, item.food_name),
+                          h('span', { class: 'muted' }, `${item.portion_size} · ${item.calories} kcal`),
+                        ),
                       ),
                     ),
-                    h('div', { class: 'portal-entry-kcal' }, String(entry.calories)),
-                    h(
-                      'button',
-                      {
-                        class: 'icon-btn',
-                        type: 'button',
-                        'aria-label': `Remove ${entry.food_name}`,
-                        onclick: async (event) => {
-                          event.currentTarget.disabled = true;
-                          try {
-                            await api.portal.deleteFoodEntry(entry.id);
-                            sound.playFoodRemoved();
-                            await reload();
-                          } catch (err) {
-                            toast(err.message || 'Could not remove that', 'error');
-                            event.currentTarget.disabled = false;
-                          }
-                        },
-                      },
-                      renderIcon('close', { size: 14 }),
-                    ),
-                  ),
-                ),
-              )
-            : null,
+                  )
+                : null,
+              !planned.length ? loggedBox : null,
+              !planned.length && !entries.length
+                ? h('div', { class: 'portal-trainer-box empty' }, 'Nothing logged yet.', h('br'), 'Tap Add food to start.')
+                : null,
+            ),
+          ),
+          planned.length ? loggedBox : null,
           h(
             'button',
             {
@@ -2549,8 +2811,8 @@ function renderPortalApp(ctx, initialMe) {
               onclick: () =>
                 openFoodSearch({ mealType: slot.key, mealLabel: slot.label, logDate, onAdded: reload }),
             },
-            renderIcon('plus', { size: 14 }),
-            ' Add food',
+            h('span', { class: 'portal-add-ico' }, renderIcon('plus', { size: 13, stroke: 2.4 })),
+            'Add food',
           ),
         ),
       );
