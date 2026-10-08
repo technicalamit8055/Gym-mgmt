@@ -325,7 +325,7 @@ function workoutDaysEditor(initialDays = [], exerciseLibrary = []) {
               paint();
             },
           },
-          '＋ Add exercise',
+          renderIcon('plus', { size: 15 }), 'Add exercise',
         ),
       );
       wrap.append(card);
@@ -343,7 +343,7 @@ function workoutDaysEditor(initialDays = [], exerciseLibrary = []) {
             paint();
           },
         },
-        days.length >= 7 ? 'A week only has seven days' : '＋ Add training day',
+        days.length >= 7 ? 'A week only has seven days' : [renderIcon('plus', { size: 16 }), 'Add training day'],
       ),
     );
   }
@@ -620,7 +620,7 @@ function dietMealsEditor(initialMeals = [], foodLibrary = []) {
                 paint();
               },
             },
-            '＋ Add food',
+            renderIcon('plus', { size: 15 }), 'Add food',
           ),
         ),
       );
@@ -638,7 +638,7 @@ function dietMealsEditor(initialMeals = [], foodLibrary = []) {
             paint();
           },
         },
-        '＋ Add meal',
+        renderIcon('plus', { size: 15 }), 'Add meal',
       ),
     );
   }
@@ -853,7 +853,7 @@ async function renderWorkoutTemplates(reload) {
       h(
         'button',
         { class: 'btn primary', onclick: clickAsync(() => openWorkoutTemplateForm({ onSaved: reload })) },
-        '＋ New workout plan',
+        renderIcon('plus', { size: 16 }), 'New workout plan',
       ),
     ),
     grid,
@@ -970,7 +970,7 @@ async function renderDietTemplates(reload) {
       'div',
       { class: 'fit-tab-head' },
       h('p', { class: 'muted' }, 'Calorie and macro targets, with the meals that get a member there.'),
-      h('button', { class: 'btn primary', onclick: clickAsync(() => openDietTemplateForm({ onSaved: reload })) }, '＋ New diet plan'),
+      h('button', { class: 'btn primary', onclick: clickAsync(() => openDietTemplateForm({ onSaved: reload })) }, renderIcon('plus', { size: 16 }), 'New diet plan'),
     ),
     grid,
   );
@@ -1051,7 +1051,7 @@ async function renderExerciseLibrary(reload) {
     intro: 'The vocabulary every routine is written against. Add your own for anything unusual in your gym.',
     searchPlaceholder: 'Search exercises…',
     filters: { key: 'muscle_group', options: MUSCLE_GROUPS },
-    addLabel: '＋ Add exercise',
+    addLabel: [renderIcon('plus', { size: 16 }), 'Add exercise'],
     onAdd: () =>
       openModal({
         title: 'Add an exercise',
@@ -1113,7 +1113,7 @@ async function renderFoodLibrary(reload) {
     intro: 'Calories and macros per serving. Members search this when logging their meals.',
     searchPlaceholder: 'Search foods…',
     filters: { key: 'category', options: FOOD_CATEGORIES },
-    addLabel: '＋ Add food',
+    addLabel: [renderIcon('plus', { size: 16 }), 'Add food'],
     onAdd: () =>
       openModal({
         title: 'Add a food',

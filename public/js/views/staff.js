@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, closeModal, date, h, openModal, table, toast } from '../ui.js';
+import { buildForm, closeModal, date, h, openModal, renderIcon, table, toast } from '../ui.js';
 
 const ROLES = [
   { value: 'admin', label: 'Admin — full access' },
@@ -59,7 +59,7 @@ export async function renderStaff({ setActions, reload }) {
   const isAdmin = session.can('admin');
 
   if (isAdmin) {
-    setActions(h('button', { class: 'btn primary', onclick: () => openStaffForm({ onSaved: reload }) }, '＋ Add staff'));
+    setActions(h('button', { class: 'btn primary', onclick: () => openStaffForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'Add staff'));
   }
 
   const classesByTrainer = classes.reduce((acc, klass) => {

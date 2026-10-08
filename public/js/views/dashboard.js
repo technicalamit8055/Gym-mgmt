@@ -52,7 +52,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
   setActions(
     h(
       'button',
-      { class: 'btn', title: 'Refresh dashboard data', onclick: () => reload() },
+      { class: 'btn ghost', title: 'Refresh dashboard data', onclick: () => reload() },
       renderIcon('refresh', { size: 16 }),
       isLibrary() ? 'Refresh analytics' : 'Refresh',
     ),
@@ -98,8 +98,8 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       ),
       h(
         'div',
-        { class: 'muted', style: 'font-size:13px;margin-top:2px' },
-        `Here's what's happening at ${data.gym?.name || (isLibrary() ? 'your library' : 'your gym')} right now.`,
+        { class: 'dash-sub' },
+        `${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · here's what's happening at ${data.gym?.name || (isLibrary() ? 'your library' : 'your gym')}`,
       ),
     ),
     h('div', { class: 'spacer' }),
@@ -126,8 +126,8 @@ export async function renderDashboard({ setActions, navigate, reload }) {
         accent: true,
         icon: 'members',
         trend: {
-          positive: growth > 0,
-          text: `${data.members.total} on the books · ${data.members.frozen || 0} frozen · +${growth} this month`,
+          positive: growth > 0 ? true : null,
+          text: `${data.members.total} total · ${data.members.frozen || 0} frozen${growth > 0 ? ` · +${growth} this month` : ''}`,
         },
         onClick: () => navigate('/members'),
       },
@@ -167,7 +167,7 @@ export async function renderDashboard({ setActions, navigate, reload }) {
       {
         icon: 'hourglass',
         trend: data.revenue.outstanding
-          ? { positive: false, text: `${money(data.revenue.outstanding, { compact: true })} in unpaid dues` }
+          ? { positive: 'warn', text: `${money(data.revenue.outstanding, { compact: true })} in unpaid dues` }
           : { positive: true, text: 'No outstanding dues' },
         onClick: () => navigate('/billing'),
       },

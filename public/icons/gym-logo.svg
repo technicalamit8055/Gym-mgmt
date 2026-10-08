@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="badgeBg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1f2937" />
+      <stop offset="100%" stop-color="#0b0f17" />
+    </radialGradient>
+    <linearGradient id="goldRing" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="goldBar" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef3c7" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Badge Circle -->
+  <circle cx="50" cy="50" r="47" fill="url(#badgeBg)" stroke="url(#goldRing)" stroke-width="3" />
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#goldRing)" stroke-width="1" stroke-dasharray="2,2" opacity="0.6" />
+
+  <!-- Barbell Plates -->
+  <!-- Outer left plate -->
+  <rect x="20" y="38" width="4" height="24" rx="1.5" fill="url(#goldBar)" />
+  <!-- Inner left plate -->
+  <rect x="25" y="33" width="5" height="34" rx="2" fill="url(#goldBar)" />
+  
+  <!-- Bar -->
+  <rect x="29" y="48" width="42" height="4" rx="1" fill="#e5e7eb" />
+
+  <!-- Inner right plate -->
+  <rect x="70" y="33" width="5" height="34" rx="2" fill="url(#goldBar)" />
+  <!-- Outer right plate -->
+  <rect x="76" y="38" width="4" height="24" rx="1.5" fill="url(#goldBar)" />
+
+  <!-- Central Crest / GYM Text -->
+  <text x="50" y="44" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="12" fill="url(#goldRing)" letter-spacing="1.5">GYM</text>
+  <circle cx="50" cy="50" r="1.5" fill="#f59e0b" />
+
+  <!-- Curved or Straight text -->
+  <text x="50" y="72" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="6" fill="#9ca3af" letter-spacing="0.8">EST. 2026</text>
+</svg>

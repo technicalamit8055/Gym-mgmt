@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { h, toast } from '../ui.js';
+import { h, renderIcon, toast } from '../ui.js';
 
 /**
  * Setting a new password from a reset link.
@@ -26,7 +26,7 @@ export async function renderReset({ context, navigate }) {
   const logoUrl = context?.tenant?.logo_url;
   const logoNode = logoUrl
     ? h('img', { class: 'login-logo-img', src: logoUrl, alt: gymNameStr })
-    : '🏋️';
+    : h('span', { class: 'login-logo-mark' }, renderIcon('dumbbell', { size: 22 }));
   const heading = h('h1', {}, logoNode, gymNameStr);
   const token = tokenFromHash();
 

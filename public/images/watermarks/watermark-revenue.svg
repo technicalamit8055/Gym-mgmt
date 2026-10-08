@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80" fill="none">
+  <!-- Ascending mini bar chart watermark (Soft Emerald Green) -->
+  <g opacity="0.20" fill="#10b981">
+    <rect x="14" y="48" width="10" height="22" rx="3" />
+    <rect x="29" y="38" width="10" height="32" rx="3" />
+    <rect x="44" y="26" width="10" height="44" rx="3" />
+    <rect x="59" y="14" width="10" height="56" rx="3" />
+  </g>
+</svg>

@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, closeModal, confirmDialog, date, h, openModal, table, toast } from '../ui.js';
+import { buildForm, closeModal, confirmDialog, date, h, openModal, renderIcon, table, toast } from '../ui.js';
 
 function openDeviceForm({ onSaved }) {
   openModal({
@@ -31,7 +31,7 @@ export async function renderDevices({ setActions, reload }) {
   const { items } = await api.devices();
 
   if (session.managesBilling) {
-    setActions(h('button', { class: 'btn primary', onclick: () => openDeviceForm({ onSaved: reload }) }, '＋ Add device'));
+    setActions(h('button', { class: 'btn primary', onclick: () => openDeviceForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'Add device'));
   }
 
   return h(

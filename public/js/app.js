@@ -7,6 +7,7 @@ import {
   openModal,
   renderIcon,
   setCurrency,
+  skeletonPage,
   toast,
   toggleFullscreen,
   onFullscreenChange,
@@ -220,6 +221,31 @@ function renderNotice(title, body, actions) {
 
 /* ------------------------------------------------------------------- login */
 
+/** What the sign-in panel says about the product, per vertical — a gym front desk
+ * and a study hall care about different things, so the pitch follows the tenant. */
+function authPitch() {
+  if (isLibrary()) {
+    return {
+      title: 'Every seat, student and fee in one calm place.',
+      body: 'Run the hall from a single screen — who is seated, whose pass is ending, and what is still owed.',
+      points: [
+        ['seats', 'A live seat map of the whole hall'],
+        ['billing', 'Passes, fees and renewals that follow up on their own'],
+        ['lockers', 'Attendance, lockers and expenses in step'],
+      ],
+    };
+  }
+  return {
+    title: 'Your front desk, without the friction.',
+    body: 'Check members in, collect payments and keep every renewal on track — from the desk or from a phone.',
+    points: [
+      ['checkin', 'QR and biometric check-ins in one tap'],
+      ['billing', 'Memberships, dues and renewals tracked for you'],
+      ['classes', 'Classes, trainers and equipment under one roof'],
+    ],
+  };
+}
+
 function renderLogin(message) {
   // The login card replaces the shell wholesale. Leaving `shell` set would
   // leave renderRoute() writing views into nodes that are no longer in the
@@ -242,42 +268,72 @@ function renderLogin(message) {
     },
   );
   form.querySelector('.modal-foot').remove();
-  form.append(h('button', { class: 'btn primary block', type: 'submit' }, 'Sign in'));
+  form.append(
+    h('button', { class: 'btn primary lg block', type: 'submit' }, 'Sign in', renderIcon('arrowRight', { size: 17 })),
+  );
 
   const tenant = platform.tenant;
-  const logoNode = tenant?.logo_url
-    ? h('img', { class: 'login-logo-img', src: tenant.logo_url, alt: gymName() })
-    : h('span', { class: 'login-logo-mark' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 24 }));
+  // Built per call: the same node can't sit in both the brand panel and the
+  // phone-width header at once.
+  const logo = () =>
+    tenant?.logo_url
+      ? h('img', { class: 'login-logo-img', src: tenant.logo_url, alt: gymName() })
+      : h('span', { class: 'login-logo-mark' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 22 }));
+  const pitch = authPitch();
 
   clear(root()).append(
     h(
       'div',
-      { class: 'login' },
+      { class: 'auth' },
       h(
-        'div',
-        { class: 'login-card' },
-        h('h1', {}, logoNode, gymName()),
+        'aside',
+        { class: 'auth-aside', 'aria-hidden': 'true' },
+        h('div', { class: 'auth-brand' }, logo(), h('span', {}, gymName())),
         h(
-          'p',
-          { class: 'sub' },
-          tenant
-            ? `Sign in to your ${t('org')}.`
-            : 'Gym management — members, billing, classes and check-ins.',
+          'div',
+          { class: 'auth-pitch' },
+          h('h2', {}, pitch.title),
+          h('p', {}, pitch.body),
+          h(
+            'ul',
+            { class: 'auth-points' },
+            ...pitch.points.map(([icon, text]) =>
+              h('li', {}, h('span', { class: 'pt-icon' }, renderIcon(icon, { size: 16 })), text),
+            ),
+          ),
         ),
-        tenant?.status === 'suspended'
-          ? h(
-              'p',
-              { class: 'login-notice' },
-              'Access is paused because the trial or last payment lapsed. Sign in as an admin to subscribe — nothing has been deleted.',
-            )
-          : null,
-        message ? h('p', { class: 'field-error' }, message) : null,
-        form,
+        h('div', { class: 'auth-foot' }, `Powered by ${t('brand')}`),
+      ),
+      h(
+        'main',
+        { class: 'auth-main' },
         h(
-          'p',
-          { class: 'muted', style: 'text-align:center;margin-top:14px;font-size:13px' },
-          `${t('member')}? `,
-          h('a', { href: '#/portal' }, `Open the ${t('member')} app →`),
+          'div',
+          { class: 'auth-card' },
+          h('div', { class: 'auth-mobile-brand' }, logo(), h('span', {}, gymName())),
+          h('h1', {}, 'Welcome back'),
+          h(
+            'p',
+            { class: 'sub' },
+            tenant
+              ? `Sign in to your ${t('org')} to continue.`
+              : 'Gym management — members, billing, classes and check-ins.',
+          ),
+          tenant?.status === 'suspended'
+            ? h(
+                'p',
+                { class: 'login-notice' },
+                'Access is paused because the trial or last payment lapsed. Sign in as an admin to subscribe — nothing has been deleted.',
+              )
+            : null,
+          message ? h('p', { class: 'login-notice', role: 'alert' }, message) : null,
+          form,
+          h(
+            'p',
+            { class: 'auth-alt' },
+            `${t('member')}? `,
+            h('a', { href: '#/portal' }, `Open the ${t('member')} app →`),
+          ),
         ),
       ),
     ),
@@ -294,6 +350,13 @@ function renderBrandLogoNode() {
     return h('div', { class: 'logo' }, h('img', { class: 'logo-img', src: logoUrl, alt: gymName() }));
   }
   return h('div', { class: 'logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 19 }));
+}
+
+/** Paints the sidebar brand (mark + name) into `brand`; shared by the first
+ * render and the live rename/logo change in the gymbook:gym-updated handler. */
+function fillBrand(brand) {
+  brand.setAttribute('title', gymName());
+  clear(brand).append(renderBrandLogoNode(), h('span', { class: 'brand-name' }, gymName()));
 }
 
 /** "Amit Singh" -> "AS", for the sidebar's account chip. */
@@ -316,10 +379,26 @@ function setControlIcon(button, name, label) {
   if (label) button.append(label);
 }
 
+/**
+ * The four screens used all day, which the phone tab bar puts under a thumb.
+ * Labels are the short ones: a tab is ~70px wide, so "Memberships & billing"
+ * from the sidebar would be truncated to nothing useful.
+ */
+function buildTabs() {
+  return [
+    { path: '/dashboard', label: 'Home', icon: 'home' },
+    { path: '/check-in', label: isLibrary() ? 'Attendance' : 'Check-in', icon: 'checkin' },
+    { path: '/members', label: t('members'), icon: 'members' },
+    { path: '/billing', label: 'Billing', icon: 'billing' },
+  ];
+}
+
 function renderShell() {
   const user = session.user;
   const nav = h('nav', { class: 'sidebar', 'aria-label': 'Main navigation' });
-  nav.append(h('div', { class: 'brand', title: gymName() }, renderBrandLogoNode(), gymName()));
+  const brand = h('div', { class: 'brand' });
+  fillBrand(brand);
+  nav.append(brand);
 
   for (const item of NAV) {
     if (item.section) {
@@ -350,7 +429,7 @@ function renderShell() {
   // the previous shell's button subscribed.
   const installBtn = h(
     'button',
-    { class: 'btn sm ghost install-hidden', onclick: () => promptInstall() },
+    { class: 'btn sm ghost install-wide install-hidden', onclick: () => promptInstall() },
     renderIcon('download', { size: 15 }),
     'Install app',
   );
@@ -378,20 +457,20 @@ function renderShell() {
         'div',
         { class: 'sidebar-actions' },
         installBtn,
+        h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, renderIcon('key', { size: 15 }), 'Password'),
+        h('button', { class: 'btn sm ghost', onclick: signOut }, renderIcon('logout', { size: 15 }), 'Sign out'),
         h(
           'button',
           { id: 'btn-fullscreen-sidebar', class: 'btn sm ghost', onclick: () => toggleFullscreen() },
           renderIcon(isFullscreen() ? 'minimize' : 'maximize', { size: 15 }),
           'Fullscreen',
         ),
-        h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, renderIcon('key', { size: 15 }), 'Password'),
-        h('button', { class: 'btn sm ghost', onclick: signOut }, renderIcon('logout', { size: 15 }), 'Sign out'),
       ),
     ),
   );
 
   const title = h('h1', {}, 'Dashboard');
-  const content = h('div', { class: 'content' }, h('div', { class: 'empty' }, 'Loading…'));
+  const content = h('div', { class: 'content' }, skeletonPage());
   const actions = h('div', { class: 'row' });
 
   const fullscreenTopbarBtn = h(
@@ -438,6 +517,27 @@ function renderShell() {
   );
   const scrim = h('div', { class: 'nav-scrim', onclick: () => setNavOpen(false) });
 
+  // Phone-only (CSS hides it above 900px). "More" opens the same drawer as the
+  // menu button, for everything that isn't one of the four everyday screens.
+  const tabbar = h(
+    'nav',
+    { class: 'tabbar', 'aria-label': 'Quick navigation' },
+    ...buildTabs().map((tab) =>
+      h(
+        'a',
+        { class: 'tab', href: `#${tab.path}`, dataset: { path: tab.path } },
+        renderIcon(tab.icon, { size: 21 }),
+        h('span', {}, tab.label),
+      ),
+    ),
+    h(
+      'button',
+      { class: 'tab tab-more', type: 'button', 'aria-label': 'More', onclick: () => setNavOpen(true) },
+      renderIcon('layoutGrid', { size: 21 }),
+      h('span', {}, 'More'),
+    ),
+  );
+
   clear(root()).append(
     h(
       'div',
@@ -450,10 +550,11 @@ function renderShell() {
         h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions, modeTopbarBtn, fullscreenTopbarBtn),
         content,
       ),
+      tabbar,
     ),
   );
   root().className = '';
-  return { nav, title, content, actions, navToggle, scrim };
+  return { nav, title, content, actions, navToggle, scrim, tabbar };
 }
 
 /**
@@ -543,6 +644,8 @@ async function renderPublicRoute(publicRoute) {
   }
 }
 
+let lastRenderedPath = null;
+
 async function renderRoute() {
   const path = currentPath() || '/dashboard';
   const match = ROUTES.map((route) => ({ route, params: path.match(route.pattern) })).find((r) => r.params);
@@ -554,11 +657,30 @@ async function renderRoute() {
 
   setNavOpen(false);
   for (const link of shell.nav.querySelectorAll('.nav-link')) {
-    link.classList.toggle('active', path.startsWith(link.dataset.path));
+    const active = path.startsWith(link.dataset.path);
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
   }
+  // The phone tab bar mirrors the nav; "More" lights up on any screen that
+  // isn't one of its four, so the bar always says where you are.
+  let onTab = false;
+  for (const tab of shell.tabbar.querySelectorAll('.tab[data-path]')) {
+    const active = path.startsWith(tab.dataset.path);
+    onTab ||= active;
+    tab.classList.toggle('active', active);
+    if (active) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  }
+  shell.tabbar.querySelector('.tab-more').classList.toggle('active', !onTab);
+
   shell.title.textContent = match.route.title;
   clear(shell.actions);
-  clear(shell.content).append(h('div', { class: 'empty' }, 'Loading…'));
+  clear(shell.content).append(skeletonPage(/^\/(dashboard|reports)/.test(path) ? 'cards' : 'list'));
+  // A new screen starts at the top. reload() re-enters this function for the
+  // same path and must keep the reader's place, so only a changed path resets.
+  if (path !== lastRenderedPath) window.scrollTo(0, 0);
+  lastRenderedPath = path;
 
   const context = {
     params: match.params.slice(1),
@@ -728,6 +850,7 @@ window.addEventListener('online', () => {
 function signOut(message) {
   session.clear();
   shell = undefined;
+  lastRenderedPath = null;
   if (platform.tenant) {
     renderLogin(typeof message === 'string' ? message : undefined);
     return;
@@ -759,10 +882,7 @@ window.addEventListener('gymbook:gym-updated', (event) => {
   document.title = `${gymName()} — Gym Management`;
   applyGymIcons(platform.tenant?.app_icon_url, gymName());
   const brand = shell?.nav.querySelector('.brand');
-  if (brand) {
-    brand.setAttribute('title', gymName());
-    clear(brand).append(renderBrandLogoNode(), gymName());
-  }
+  if (brand) fillBrand(brand);
 });
 
 document.addEventListener('keydown', (event) => {

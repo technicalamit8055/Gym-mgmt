@@ -313,7 +313,7 @@ export async function renderCheckIn({ setActions }) {
       h(
         'div',
         { class: 'checkin-result bad' },
-        h('div', { style: 'font-weight:600;margin-bottom:4px' }, '⛔ Cannot check in'),
+        h('div', { style: 'font-weight:600;margin-bottom:4px' }, renderIcon('ban', { size: 16 }), 'Cannot check in'),
         h('div', { class: 'muted' }, err.message),
       ),
     );
@@ -352,7 +352,7 @@ export async function renderCheckIn({ setActions }) {
     video.srcObject = null;
     scanStage.style.display = 'none';
     scanButton.disabled = false;
-    scanButton.textContent = '📷 Scan a card';
+    clear(scanButton).append(renderIcon('scan', { size: 17 }), 'Scan a card');
     scanButton.classList.remove('scanning');
   }
 
@@ -452,7 +452,7 @@ export async function renderCheckIn({ setActions }) {
       });
     } catch (err) {
       scanButton.disabled = false;
-      scanButton.textContent = '📷 Scan a card';
+      clear(scanButton).append(renderIcon('scan', { size: 17 }), 'Scan a card');
       toast(
         err?.name === 'NotAllowedError'
           ? 'Camera access was blocked — allow it in the browser, or scan into the box above'
@@ -466,7 +466,7 @@ export async function renderCheckIn({ setActions }) {
     video.srcObject = scanStream;
     await video.play().catch(() => {});
     scanStage.style.display = 'block';
-    scanButton.textContent = '■ Stop scanning';
+    clear(scanButton).append(renderIcon('close', { size: 16 }), 'Stop scanning');
     scanButton.classList.add('scanning');
     scanning = true;
 
@@ -498,7 +498,7 @@ export async function renderCheckIn({ setActions }) {
   const scanButton = h(
     'button',
     { class: 'btn primary block', onclick: () => (scanning ? stopScan() : startScan()) },
-    '📷 Scan a card',
+    renderIcon('scan', { size: 16 }), 'Scan a card',
   );
 
   const camera = cameraAvailability();
@@ -506,7 +506,7 @@ export async function renderCheckIn({ setActions }) {
   const qrCard = h(
     'div',
     { class: 'card qr-card' },
-    h('h3', {}, '🎟️ Member QR card'),
+    h('h3', {}, renderIcon('checkin', { size: 16 }), 'Member QR card'),
     h(
       'p',
       { class: 'muted', style: 'font-size:13px;margin:0 0 14px' },
@@ -605,7 +605,7 @@ export async function renderCheckIn({ setActions }) {
     isFullscreen() ? 'Exit Fullscreen' : 'Kiosk Fullscreen',
   );
   const settingsBtn = session.managesBilling
-    ? h('button', { class: 'btn ghost', onclick: () => openCheckInSettingsForm() }, '⚙ Settings')
+    ? h('button', { class: 'btn ghost', onclick: () => openCheckInSettingsForm() }, renderIcon('settings', { size: 16 }), 'Settings')
     : null;
   setActions(settingsBtn, kioskFullscreenBtn, h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
   await refreshLists();
@@ -619,7 +619,7 @@ export async function renderCheckIn({ setActions }) {
       class: 'btn bio-btn primary block',
       onclick: function () { biometricCheckIn(this); },
     },
-    h('span', { class: 'bio-icon' }, '🔒'),
+    h('span', { class: 'bio-icon' }, renderIcon('lock', { size: 16 })),
     'Biometric Check-in',
   );
 
@@ -635,7 +635,7 @@ export async function renderCheckIn({ setActions }) {
         'div',
         { class: 'card bio-card bio-unsupported' },
         h('h3', {}, 'Biometric Check-in'),
-        h('p', { class: 'muted', style: 'font-size:13px;margin:0' }, '⚠ WebAuthn is not supported on this browser. Use a modern browser with HTTPS to enable biometric check-ins.'),
+        h('p', { class: 'muted', style: 'font-size:13px;margin:0' }, renderIcon('alert', { size: 16 }), 'WebAuthn is not supported on this browser. Use a modern browser with HTTPS to enable biometric check-ins.'),
       );
 
   return h(

@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, stat, table, toast, today } from '../ui.js';
+import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, renderIcon, stat, table, toast, today } from '../ui.js';
 import { datalist, memberOptions, resolveMember } from './forms.js';
 
 function openLockerForm({ locker, onSaved }) {
@@ -84,7 +84,7 @@ export async function renderLockers({ reload }) {
         ? h(
             'div',
             { class: 'card', style: 'display:flex;align-items:center;justify-content:center' },
-            h('button', { class: 'btn primary', onclick: () => openLockerForm({ onSaved: reload }) }, '＋ Add locker'),
+            h('button', { class: 'btn primary', onclick: () => openLockerForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'Add locker'),
           )
         : h('div', {}),
     ),

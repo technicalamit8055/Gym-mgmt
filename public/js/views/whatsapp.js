@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, confirmDialog, date, h, table, toast } from '../ui.js';
+import { buildForm, confirmDialog, date, h, renderIcon, table, toast } from '../ui.js';
 
 /**
  * WhatsApp automation: pairing, templates, a test send, and the delivery log.
@@ -74,7 +74,7 @@ export async function renderWhatsApp({ setActions, reload }) {
                 }
               },
             },
-            isConnected ? '↻ Reconnect' : '↻ Get a QR code',
+            renderIcon('refresh', { size: 16 }), isConnected ? 'Reconnect' : 'Get a QR code',
           ),
           isConnected
             ? h(

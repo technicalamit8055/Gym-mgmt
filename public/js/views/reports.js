@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { addDays, barChart, clear, date, dateField, fullName, h, labelledControl, lineChart, money, table, today, toast } from '../ui.js';
+import { addDays, barChart, clear, date, dateField, fullName, h, labelledControl, lineChart, money, renderIcon, table, today, toast } from '../ui.js';
 import { isLibrary } from '../vertical.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -23,7 +23,8 @@ export async function renderReports({ setActions }) {
       h(
         'button',
         { class: 'btn sm', onclick: () => api.download(entity).catch((err) => toast(err.message, 'error')) },
-        `⇩ ${entity}`,
+        renderIcon('download', { size: 15 }),
+        entity.charAt(0).toUpperCase() + entity.slice(1),
       ),
     ),
   );

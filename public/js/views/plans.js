@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, closeModal, confirmDialog, h, money, openModal, table, toast } from '../ui.js';
+import { buildForm, closeModal, confirmDialog, h, money, openModal, renderIcon, table, toast } from '../ui.js';
 
 function openPlanForm({ plan, onSaved }) {
   const editing = Boolean(plan);
@@ -56,7 +56,7 @@ export async function renderPlans({ setActions, reload }) {
   const { items } = await api.plans();
 
   if (session.managesBilling) {
-    setActions(h('button', { class: 'btn primary', onclick: () => openPlanForm({ onSaved: reload }) }, '＋ New plan'));
+    setActions(h('button', { class: 'btn primary', onclick: () => openPlanForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'New plan'));
   }
 
   const cards = h(

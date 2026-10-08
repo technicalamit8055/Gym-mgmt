@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, closeModal, confirmDialog, date, h, money, openModal, statusBadge, table, toast, today } from '../ui.js';
+import { buildForm, closeModal, confirmDialog, date, h, money, openModal, renderIcon, statusBadge, table, toast, today } from '../ui.js';
 
 function openEquipmentForm({ item, onSaved }) {
   const editing = Boolean(item);
@@ -47,7 +47,7 @@ export async function renderEquipment({ setActions, reload }) {
   const { items } = await api.equipment({});
 
   if (session.managesBilling) {
-    setActions(h('button', { class: 'btn primary', onclick: () => openEquipmentForm({ onSaved: reload }) }, '＋ Add equipment'));
+    setActions(h('button', { class: 'btn primary', onclick: () => openEquipmentForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'Add equipment'));
   }
 
   const counts = items.reduce(

@@ -1,4 +1,4 @@
-import { clear, closeModal, h, openModal, toast } from './ui.js';
+import { clear, closeModal, h, openModal, renderIcon, toast } from './ui.js';
 
 /** Decodes a File, Blob or URL string into an <img> the canvas can draw. */
 function loadImage(source) {
@@ -104,8 +104,8 @@ export async function openCameraModal({ onCapture }) {
   let facingMode = 'user';
   
   const video = h('video', { autoplay: true, playsinline: true, muted: true, class: 'photo-camera-video' });
-  const captureBtn = h('button', { class: 'btn primary', type: 'button' }, '📸 Snap photo');
-  const switchBtn = h('button', { class: 'btn ghost', type: 'button', style: 'margin-right:auto' }, '🔄 Switch Camera');
+  const captureBtn = h('button', { class: 'btn primary', type: 'button' }, renderIcon('camera', { size: 16 }), 'Snap photo');
+  const switchBtn = h('button', { class: 'btn ghost', type: 'button', style: 'margin-right:auto' }, renderIcon('refresh', { size: 16 }), 'Switch Camera');
   const statusMsg = h('div', { class: 'muted', style: 'font-size:13px;text-align:center;margin-top:6px' }, 'Starting camera…');
 
   const stopStream = () => {
@@ -142,7 +142,7 @@ export async function openCameraModal({ onCapture }) {
   });
 
   openModal({
-    title: '📷 Click Member Photo',
+    title: 'Take member photo',
     body: h(
       'div',
       { class: 'photo-camera-container' },
@@ -230,7 +230,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
   const placeholder = h(
     'div',
     { class: 'photo-picker-placeholder', style: currentUrl ? 'display:none' : '' },
-    '🧑',
+    renderIcon('user', { size: 32, stroke: 1.5 }),
   );
 
   const fileInput = h('input', {
@@ -277,7 +277,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
       type: 'button',
       onclick: () => fileInput.click(),
     },
-    '📁 Upload file',
+    renderIcon('upload', { size: 15 }), 'Upload file',
   );
 
   const cameraBtn = h(
@@ -291,7 +291,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
         });
       },
     },
-    '📸 Take photo',
+    renderIcon('camera', { size: 15 }), 'Take photo',
   );
 
   const removeBtn = h(
@@ -305,7 +305,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
         toast('Photo removed', 'info');
       },
     },
-    '🗑️ Remove',
+    renderIcon('trash', { size: 15 }), 'Remove',
   );
 
   const container = h(

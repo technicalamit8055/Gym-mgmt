@@ -1,5 +1,6 @@
 import { gymPathUrl } from '../api.js';
 import { h, renderIcon, toast } from '../ui.js';
+import { productPreview } from './landingPreview.js';
 
 /**
  * The root domain's public page: what the product is, a way in for gyms that
@@ -114,7 +115,8 @@ export function renderLanding({ context, navigate }) {
     h(
       'section',
       { class: 'landing-hero' },
-      h('h1', {}, 'Run your gym. All of it.'),
+      h('span', { class: 'landing-eyebrow' }, renderIcon('sparkle', { size: 14 }), 'Built for the front desk'),
+      h('h1', {}, 'Run your gym. ', h('span', { class: 'grad' }, 'All of it.')),
       h(
         'p',
         { class: 'lede' },
@@ -129,6 +131,14 @@ export function renderLanding({ context, navigate }) {
       signInBox(context.url_mode, rootHost),
     ),
 
+    productPreview('gym'),
+
+    h(
+      'div',
+      { class: 'landing-section-head' },
+      h('h2', {}, 'Everything the front desk needs'),
+      h('p', { class: 'muted' }, 'One system for the people, the payments and the place — so nothing lives in a spreadsheet.'),
+    ),
     h(
       'section',
       { class: 'landing-features' },

@@ -261,7 +261,7 @@ function maybeShowBanner() {
           dismiss();
         },
       },
-      '✕',
+      renderIcon('close', { size: 15 }),
     ),
   );
   document.body.append(banner);

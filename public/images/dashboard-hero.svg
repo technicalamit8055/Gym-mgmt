@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 150" width="600" height="150" fill="none">
+  <defs>
+    <linearGradient id="bgGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.05" />
+    </linearGradient>
+    <linearGradient id="cyanArc" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#bae6fd" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.2" />
+    </linearGradient>
+    <linearGradient id="navyBench" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#172554" />
+    </linearGradient>
+    <linearGradient id="humanSkin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbcfe8" />
+      <stop offset="100%" stop-color="#f472b6" />
+    </linearGradient>
+    <linearGradient id="weightBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Soft Ambient Backdrop -->
+  <path d="M40 150 C90 60, 220 30, 320 60 C420 90, 520 40, 580 150 Z" fill="url(#bgGlow)" />
+  <circle cx="120" cy="110" r="70" fill="url(#cyanArc)" />
+  <circle cx="480" cy="95" r="55" fill="url(#cyanArc)" opacity="0.6" />
+
+  <!-- Potted Plant on Left -->
+  <g id="plant">
+    <!-- Leaves -->
+    <path d="M72 110 C62 80, 50 65, 38 75 C42 90, 58 102, 72 110 Z" fill="#0284c7" />
+    <path d="M72 110 C70 70, 78 50, 92 60 C88 78, 80 98, 72 110 Z" fill="#0369a1" />
+    <path d="M72 110 C85 85, 105 75, 112 88 C102 100, 88 108, 72 110 Z" fill="#0ea5e9" />
+    <!-- Pot -->
+    <path d="M60 112 L84 112 L80 138 L64 138 Z" fill="#1e293b" />
+    <rect x="58" y="110" width="28" height="4" rx="2" fill="#334155" />
+  </g>
+
+  <!-- Dumbbell Rack Stand (Left Center) -->
+  <g id="rack" stroke="#1e293b" stroke-linecap="round">
+    <line x1="140" y1="138" x2="140" y2="70" stroke-width="4" />
+    <line x1="165" y1="138" x2="165" y2="70" stroke-width="4" />
+    <line x1="132" y1="138" x2="173" y2="138" stroke-width="4" />
+    <line x1="136" y1="85" x2="169" y2="85" stroke-width="3" />
+    <line x1="136" y1="110" x2="169" y2="110" stroke-width="3" />
+    
+    <!-- Weight plates stacked on pegs -->
+    <circle cx="152" cy="78" r="8" fill="#3b82f6" stroke="#1d4ed8" stroke-width="2" />
+    <circle cx="152" cy="98" r="10" fill="#2563eb" stroke="#1e40af" stroke-width="2" />
+    <circle cx="152" cy="120" r="12" fill="#1d4ed8" stroke="#1e3a8a" stroke-width="2" />
+  </g>
+
+  <!-- Workout Bench Press Machine (Center) -->
+  <g id="bench">
+    <!-- Upright Barbell Supports -->
+    <rect x="235" y="65" width="6" height="73" rx="2" fill="#334155" />
+    <rect x="335" y="65" width="6" height="73" rx="2" fill="#334155" />
+    <line x1="228" y1="138" x2="348" y2="138" stroke="#334155" stroke-width="4" stroke-linecap="round" />
+    <rect x="232" y="65" width="12" height="4" rx="1" fill="#475569" />
+    <rect x="332" y="65" width="12" height="4" rx="1" fill="#475569" />
+
+    <!-- Bench Pad & Legs -->
+    <rect x="250" y="106" width="95" height="10" rx="4" fill="url(#navyBench)" />
+    <rect x="260" y="116" width="6" height="22" rx="1" fill="#475569" />
+    <rect x="330" y="116" width="6" height="22" rx="1" fill="#475569" />
+
+    <!-- Athlete Lying on Bench -->
+    <!-- Head/Hair -->
+    <circle cx="262" cy="100" r="7" fill="#1e293b" />
+    <!-- Torso (Yellow Shirt) -->
+    <rect x="270" y="96" width="34" height="12" rx="4" fill="#facc15" />
+    <!-- Arms pushing up barbell -->
+    <path d="M282 98 L286 78 L290 68" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" />
+    <path d="M298 98 L296 78 L292 68" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" />
+    <!-- Legs (Blue shorts & shoes) -->
+    <path d="M304 102 L322 103 L326 122 L338 122" stroke="#2563eb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <rect x="335" y="120" width="8" height="4" rx="2" fill="#1e293b" />
+
+    <!-- The Barbell Lifted Up High -->
+    <line x1="225" y1="67" x2="355" y2="67" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" />
+    <!-- Left Barbell Plates -->
+    <rect x="238" y="55" width="4" height="24" rx="2" fill="url(#weightBlue)" />
+    <rect x="232" y="58" width="4" height="18" rx="2" fill="#1e40af" />
+    <!-- Right Barbell Plates -->
+    <rect x="342" y="55" width="4" height="24" rx="2" fill="url(#weightBlue)" />
+    <rect x="348" y="58" width="4" height="18" rx="2" fill="#1e40af" />
+  </g>
+
+  <!-- Kettlebell & Dumbbells on Floor (Right of Bench) -->
+  <g id="floor-weights">
+    <!-- Kettlebell -->
+    <circle cx="395" cy="130" r="8" fill="#1e293b" />
+    <path d="M391 123 C391 118, 399 118, 399 123" stroke="#334155" stroke-width="2.5" fill="none" stroke-linecap="round" />
+    <rect x="393" y="129" width="4" height="2" rx="1" fill="#3b82f6" />
+
+    <!-- Small Dumbbell on floor -->
+    <line x1="430" y1="135" x2="450" y2="135" stroke="#94a3b8" stroke-width="2" />
+    <circle cx="430" cy="135" r="4.5" fill="#3b82f6" />
+    <circle cx="450" cy="135" r="4.5" fill="#3b82f6" />
+  </g>
+
+  <!-- Weight Tower / Cable Machine (Far Right) -->
+  <g id="cable-station">
+    <rect x="475" y="65" width="45" height="73" rx="3" fill="#1e293b" />
+    <!-- Stack plates -->
+    <rect x="480" y="75" width="35" height="5" rx="1" fill="#3b82f6" />
+    <rect x="480" y="82" width="35" height="5" rx="1" fill="#2563eb" />
+    <rect x="480" y="89" width="35" height="5" rx="1" fill="#1d4ed8" />
+    <rect x="480" y="96" width="35" height="5" rx="1" fill="#1e40af" />
+    <rect x="480" y="103" width="35" height="5" rx="1" fill="#1e3a8a" />
+    <rect x="480" y="110" width="35" height="5" rx="1" fill="#172554" />
+    <!-- Guide rods -->
+    <line x1="488" y1="70" x2="488" y2="125" stroke="#94a3b8" stroke-width="1.5" />
+    <line x1="507" y1="70" x2="507" y2="125" stroke="#94a3b8" stroke-width="1.5" />
+  </g>
+</svg>

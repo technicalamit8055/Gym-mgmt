@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, closeModal, confirmDialog, h, openModal, table, time, toast } from '../ui.js';
+import { buildForm, closeModal, confirmDialog, h, openModal, renderIcon, table, time, toast } from '../ui.js';
 import { t, tl } from '../vertical.js';
 
 function openSessionForm({ item, onSaved }) {
@@ -30,7 +30,7 @@ export async function renderSessions({ setActions, reload }) {
   const { items } = await api.sessions({});
 
   if (session.managesBilling) {
-    setActions(h('button', { class: 'btn primary', onclick: () => openSessionForm({ onSaved: reload }) }, `＋ Add ${tl('shift')}`));
+    setActions(h('button', { class: 'btn primary', onclick: () => openSessionForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), `Add ${tl('shift')}`));
   }
 
   return h(

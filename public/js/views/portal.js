@@ -245,7 +245,7 @@ function renderPortalLogin(ctx) {
       h('label', { class: 'portal-field' }, input),
       error ? h('p', { class: 'portal-login-error' }, error) : null,
       h('button', { class: 'btn primary block', type: 'button', onclick: goPin }, 'Continue'),
-      h('p', { class: 'portal-login-foot' }, h('a', { href: '#/' }, '← Back to the site')),
+      h('p', { class: 'portal-login-foot' }, h('a', { href: '#/' }, renderIcon('arrowLeft', { size: 16 }), 'Back to the site')),
     ]);
     input.focus();
   }
@@ -1703,7 +1703,7 @@ function renderPortalApp(ctx, initialMe) {
                 paint();
               },
             },
-            '＋ Add set',
+            renderIcon('plus', { size: 16 }), 'Add set',
           ),
           exercise.sets.length > 1
             ? h(
@@ -2386,8 +2386,8 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'div',
           { class: 'row', style: 'gap:8px' },
-          h('button', { class: 'btn sm primary', type: 'button', onclick: () => bump(250) }, '＋ 250 ml'),
-          h('button', { class: 'btn sm', type: 'button', onclick: () => bump(500) }, '＋ 500 ml'),
+          h('button', { class: 'btn sm primary', type: 'button', onclick: () => bump(250) }, renderIcon('plus', { size: 15 }), '250 ml'),
+          h('button', { class: 'btn sm', type: 'button', onclick: () => bump(500) }, renderIcon('plus', { size: 15 }), '500 ml'),
           day.water_ml > 0
             ? h('button', { class: 'btn sm ghost', type: 'button', onclick: () => bump(-250) }, '− 250 ml')
             : null,

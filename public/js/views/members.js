@@ -71,24 +71,27 @@ export async function renderMembers({ setActions, navigate }) {
         }
       },
     },
-    '🖨️ Print cards',
+    renderIcon('print', { size: 16 }), 'Print cards',
   );
 
   function syncPrintButton() {
     printButton.disabled = selected.size === 0;
-    printButton.textContent = selected.size ? `🖨️ Print ${selected.size} card${selected.size === 1 ? '' : 's'}` : '🖨️ Print cards';
+    clear(printButton).append(
+      renderIcon('print', { size: 16 }),
+      selected.size ? `Print ${selected.size} card${selected.size === 1 ? '' : 's'}` : 'Print cards',
+    );
   }
 
   setActions(
     printButton,
-    h('button', { class: 'btn', onclick: () => api.download('members').catch((e) => toast(e.message, 'error')) }, '⇩ Export CSV'),
+    h('button', { class: 'btn', onclick: () => api.download('members').catch((e) => toast(e.message, 'error')) }, renderIcon('download', { size: 16 }), 'Export CSV'),
     h(
       'button',
       {
         class: 'btn primary',
         onclick: () => openMemberForm({ onSaved: (saved) => navigate(`/members/${saved.id}`) }),
       },
-      '＋ New member',
+      renderIcon('plus', { size: 16 }), 'New member',
     ),
   );
 
@@ -561,7 +564,7 @@ function fitnessSection(member, { reload }) {
             class: 'btn sm primary',
             onclick: () => openAssignForm({ kind: 'workout', templates: workoutTemplates.items, current: assignment }),
           },
-          assignment ? 'Change routine' : '＋ Assign routine',
+          assignment ? 'Change routine' : [renderIcon('plus', { size: 15 }), 'Assign routine'],
         ),
         assignment
           ? h(
@@ -669,7 +672,7 @@ function fitnessSection(member, { reload }) {
             class: 'btn sm primary',
             onclick: () => openAssignForm({ kind: 'diet', templates: dietTemplates.items, current: dietAssignment }),
           },
-          dietAssignment ? 'Change diet' : '＋ Assign diet',
+          dietAssignment ? 'Change diet' : [renderIcon('plus', { size: 15 }), 'Assign diet'],
         ),
         dietAssignment
           ? h(
@@ -857,17 +860,17 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           }
         },
       },
-      currentlyIn ? '🎫 Check out' : '🎫 Check in',
+      renderIcon('checkin', { size: 16 }), currentlyIn ? 'Check out' : 'Check in',
     ),
     session.managesBilling
       ? h(
           'button',
           { class: 'btn', onclick: () => openPaymentForm({ member, subscriptions: member.subscriptions, onSaved: reload }) },
-          '💳 Record payment',
+          renderIcon('billing', { size: 16 }), 'Record payment',
         )
       : null,
     session.managesBilling
-      ? h('button', { class: 'btn primary', onclick: () => openMembershipForm({ member, onSaved: reload }) }, '＋ New membership')
+      ? h('button', { class: 'btn primary', onclick: () => openMembershipForm({ member, onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'New membership')
       : null,
   );
 
@@ -936,7 +939,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
         ? h(
             'button',
             { class: 'btn sm', onclick: () => openMemberSeatAssignForm({ member, onSaved: reload }) },
-            '🪑 Assign seat',
+            renderIcon('seats', { size: 15 }), 'Assign seat',
           )
         : null,
       h(
@@ -974,7 +977,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
             });
           },
         },
-        '📷 Photo',
+        renderIcon('camera', { size: 16 }), 'Photo',
       ),
       session.managesBilling
         ? h(
@@ -1068,7 +1071,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                           reload();
                         },
                       },
-                      '⏸ Freeze',
+                      renderIcon('pause', { size: 15 }), 'Freeze',
                     )
                   : h(
                       'button',
@@ -1080,7 +1083,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                           reload();
                         },
                       },
-                      '▶ Resume',
+                      renderIcon('play', { size: 15 }), 'Resume',
                     ),
                 h(
                   'button',
@@ -1162,7 +1165,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       if (items.length === 0) {
         bioList.append(
           h('div', { class: 'empty', style: 'padding:16px' },
-            h('div', { style: 'font-size:28px;margin-bottom:8px' }, '🔓'),
+            h('div', { style: 'margin-bottom:8px;color:var(--muted)' }, renderIcon('unlock', { size: 28, stroke: 1.5 })),
             h('div', {}, 'No biometrics enrolled'),
             h('div', { class: 'muted', style: 'font-size:12px;margin-top:4px' }, 'Enroll a fingerprint or face scan so this member can check in without their code.'),
           ),
@@ -1172,7 +1175,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           h('div', { class: 'list' },
             ...items.map((cred) =>
               h('div', { class: 'list-item' },
-                h('div', { class: 'bio-cred-icon' }, '🔒'),
+                h('div', { class: 'bio-cred-icon' }, renderIcon('lock', { size: 16 })),
                 h('div', {},
                   h('div', { style: 'font-weight:600;font-size:14px' }, cred.device_name || 'Biometric credential'),
                   h('div', { class: 'muted', style: 'font-size:12px' },
@@ -1288,10 +1291,10 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     'div',
     { class: 'card bio-member-card' },
     h('div', { class: 'card-head' },
-      h('h3', {}, '🔒 Biometric credentials'),
+      h('h3', {}, renderIcon('lock', { size: 16 }), 'Biometric credentials'),
       h('div', { class: 'spacer' }),
       supportsWebAuthn()
-        ? h('button', { class: 'btn sm primary', onclick: enrollBiometric }, '＋ Enroll biometric')
+        ? h('button', { class: 'btn sm primary', onclick: enrollBiometric }, renderIcon('plus', { size: 15 }), 'Enroll biometric')
         : null,
     ),
     bioList,
@@ -1313,7 +1316,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
         h(
           'div',
           { class: 'grid', style: 'gap:8px;align-content:start' },
-          h('button', { class: 'btn primary sm', onclick: () => printCards([card]) }, '🖨️ Print card'),
+          h('button', { class: 'btn primary sm', onclick: () => printCards([card]) }, renderIcon('print', { size: 15 }), 'Print card'),
           h(
             'button',
             {
@@ -1329,7 +1332,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                 }
               },
             },
-            '⬇️ Download image',
+            renderIcon('download', { size: 15 }), 'Download image',
           ),
           session.managesBilling
             ? h(
@@ -1356,7 +1359,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                     }
                   },
                 },
-                '💬 Send to WhatsApp',
+                renderIcon('whatsapp', { size: 16 }), 'Send to WhatsApp',
               )
             : null,
           h(
@@ -1404,7 +1407,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     h(
       'div',
       { class: 'card-head' },
-      h('h3', {}, '🎟️ QR ID card'),
+      h('h3', {}, renderIcon('checkin', { size: 16 }), 'QR ID card'),
       h('div', { class: 'spacer' }),
       h('span', { class: 'muted', style: 'font-size:12px' }, 'Print it, or send the image to the member'),
     ),
@@ -1464,7 +1467,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                       }
                     },
                   },
-                  '🖨️ Print',
+                  renderIcon('print', { size: 15 }), 'Print',
                 ),
                 h(
                   'button',
@@ -1481,7 +1484,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                       }
                     },
                   },
-                  '⬇️',
+                  renderIcon('download', { size: 15 }),
                 ),
               ),
           },
@@ -1644,9 +1647,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
         h(
           'div',
           { class: 'card-head' },
-          h('h3', {}, '🪪 ID documents'),
+          h('h3', {}, renderIcon('idCard', { size: 16 }), 'ID documents'),
           h('div', { class: 'spacer' }),
-          session.managesBilling ? h('button', { class: 'btn sm', onclick: openDocumentUploadForm }, '＋ Upload') : null,
+          session.managesBilling ? h('button', { class: 'btn sm', onclick: openDocumentUploadForm }, renderIcon('plus', { size: 15 }), 'Upload') : null,
         ),
         docsBody,
       )
@@ -1655,7 +1658,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
   return h(
     'div',
     { class: 'grid', style: 'gap:16px' },
-    h('a', { href: '#/members', class: 'muted', style: 'font-size:13px' }, '← Back to members'),
+    h('a', { href: '#/members', class: 'muted', style: 'font-size:13px' }, renderIcon('arrowLeft', { size: 16 }), 'Back to members'),
     h('div', { class: 'grid cols-3' }, profileCard, membershipCard, accountCard),
     // Gym only: the fitness module is not part of SeatBook, and its API 404s
     // there — see requireModule in src/verticals.js.

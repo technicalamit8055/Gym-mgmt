@@ -8,6 +8,7 @@ import {
   h,
   openModal,
   relativeDays,
+  renderIcon,
   stat,
   table,
   toast,
@@ -78,13 +79,13 @@ function loginCard(rerender) {
     h(
       'div',
       { class: 'login-card' },
-      h('h1', {}, '🛠️ Operator console'),
+      h('h1', {}, renderIcon('wrench', { size: 22 }), 'Operator console'),
       h('p', { class: 'sub' }, 'Platform-wide access to every gym on this deployment.'),
       form,
       h(
         'div',
         { class: 'row', style: 'margin-top:16px;justify-content:center' },
-        h('a', { class: 'btn sm ghost', href: '#/' }, '← Back to the site'),
+        h('a', { class: 'btn sm ghost', href: '#/' }, renderIcon('arrowLeft', { size: 15 }), 'Back to the site'),
       ),
     ),
   );
@@ -491,7 +492,7 @@ function trialCell(tenant) {
 function backupCard() {
   const listNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
   const meta = h('div', { class: 'muted', style: 'font-size:12px' });
-  const run = h('button', { class: 'btn sm primary' }, '↻ Back up now');
+  const run = h('button', { class: 'btn sm primary' }, renderIcon('refresh', { size: 15 }), 'Back up now');
 
   const load = async () => {
     try {
@@ -532,7 +533,7 @@ function backupCard() {
       toast(err.message || 'Backup failed', 'error');
     } finally {
       run.disabled = false;
-      run.textContent = '↻ Back up now';
+      clear(run).append(renderIcon('refresh', { size: 15 }), 'Back up now');
     }
   };
 
@@ -561,7 +562,7 @@ export async function renderPlatformConsole({ context, rerender }) {
           { class: 'sub' },
           'Set PLATFORM_ADMIN_EMAIL and PLATFORM_ADMIN_PASSWORD and restart the server to enable the operator console.',
         ),
-        h('a', { class: 'btn ghost', href: '#/' }, '← Back to the site'),
+        h('a', { class: 'btn ghost', href: '#/' }, renderIcon('arrowLeft', { size: 16 }), 'Back to the site'),
       ),
     );
   }
@@ -808,7 +809,7 @@ export async function renderPlatformConsole({ context, rerender }) {
     h(
       'header',
       { class: 'landing-top' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo' }, '🛠️'), 'Operator console'),
+      h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('wrench', { size: 18 })), 'Operator console'),
       h('div', { class: 'spacer' }),
       h('a', { class: 'btn sm ghost', href: '#/' }, 'Site'),
       h(

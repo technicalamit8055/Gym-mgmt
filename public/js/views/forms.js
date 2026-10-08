@@ -220,8 +220,8 @@ export async function openMembershipForm({ member, onSaved }) {
         confirmDialog({
           title: 'Membership & Payment Saved',
           message: `${plan.name} activated and ${money(paymentAmount)} recorded for ${sub.first_name} ${sub.last_name}. Would you like to print or download a receipt?`,
-          confirmLabel: '🖨️ Print receipt',
-          secondaryLabel: '⬇️ Download receipt',
+          confirmLabel: 'Print receipt',
+          secondaryLabel: 'Download receipt',
           onSecondary: () => downloadReceipt(receiptData, { gymName: getGymName() }),
           onConfirm: async () => {
             printReceipt(receiptData, { gymName: getGymName() });
@@ -318,8 +318,8 @@ export async function openPaymentForm({ member, subscriptions = [], onSaved }) {
         confirmDialog({
           title: 'Payment Recorded',
           message: `Payment of ${money(values.amount)} recorded for ${payment.first_name} ${payment.last_name}. Would you like to print or download a receipt?`,
-          confirmLabel: '🖨️ Print receipt',
-          secondaryLabel: '⬇️ Download receipt',
+          confirmLabel: 'Print receipt',
+          secondaryLabel: 'Download receipt',
           onSecondary: () => downloadReceipt(payment, { gymName: getGymName() }),
           onConfirm: async () => {
             printReceipt(payment, { gymName: getGymName() });

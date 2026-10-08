@@ -382,7 +382,7 @@ export function renderSignup({ context, navigate, rerender }) {
     h(
       'button',
       { class: 'btn sm ghost onboard-back', type: 'button', onclick: () => navigate('/') },
-      '← Back',
+      renderIcon('arrowLeft', { size: 15 }), 'Back',
     ),
     heading,
     h('p', { class: 'sub' }, `${trialDays} days free. No card needed. About a minute.`),

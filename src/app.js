@@ -137,7 +137,10 @@ export function createApp() {
         if (path.basename(filePath) === 'sw.js') {
           res.set('Cache-Control', 'no-cache');
           res.set('Service-Worker-Allowed', '/');
-        } else if (filePath.includes(`${path.sep}icons${path.sep}`)) {
+        } else if (
+          filePath.includes(`${path.sep}icons${path.sep}`) ||
+          filePath.includes(`${path.sep}fonts${path.sep}`)
+        ) {
           res.set('Cache-Control', 'public, max-age=604800');
         }
       },

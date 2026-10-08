@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <!-- Calendar Body -->
+  <rect x="8" y="14" width="48" height="42" rx="8" stroke="#94a3b8" stroke-width="2.5" />
+  <line x1="8" y1="24" x2="56" y2="24" stroke="#94a3b8" stroke-width="2" />
+  
+  <!-- Binder Rings -->
+  <line x1="18" y1="8" x2="18" y2="16" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="46" y1="8" x2="46" y2="16" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" />
+  
+  <!-- Centered Checkmark -->
+  <path d="M22 39l7 7 14-14" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

@@ -10,6 +10,7 @@ import {
   fullName,
   h,
   openModal,
+  renderIcon,
   statusBadge,
   table,
   time,
@@ -86,8 +87,8 @@ export async function renderClasses({ setActions, reload }) {
   const body = h('div', {});
 
   setActions(
-    h('button', { class: 'btn', onclick: () => openBookingForm({ classes: state.classes || [], onSaved: render }) }, '＋ Book a member'),
-    session.managesBilling ? h('button', { class: 'btn primary', onclick: () => openClassForm({ onSaved: reload }) }, '＋ New class') : null,
+    h('button', { class: 'btn', onclick: () => openBookingForm({ classes: state.classes || [], onSaved: render }) }, renderIcon('plus', { size: 16 }), 'Book a member'),
+    session.managesBilling ? h('button', { class: 'btn primary', onclick: () => openClassForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'New class') : null,
   );
 
   async function renderTimetable() {
@@ -256,7 +257,7 @@ export async function renderClasses({ setActions, reload }) {
                 openBookingForm({ klass: { ...slot, weekday_name: slot.weekday_name }, date: slot.class_date, onSaved: render });
               },
             },
-            '＋ Add member',
+            renderIcon('plus', { size: 15 }), 'Add member',
           ),
         ),
         table(

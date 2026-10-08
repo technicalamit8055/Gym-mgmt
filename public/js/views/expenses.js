@@ -1,5 +1,5 @@
 import { api, session } from '../api.js';
-import { buildForm, closeModal, confirmDialog, date, h, money, openModal, stat, table, toast, today } from '../ui.js';
+import { buildForm, closeModal, confirmDialog, date, h, money, openModal, renderIcon, stat, table, toast, today } from '../ui.js';
 
 const SUGGESTED_CATEGORIES = ['Rent', 'Electricity', 'Wifi/Internet', 'Staff', 'Maintenance', 'Supplies', 'Marketing'];
 
@@ -65,7 +65,7 @@ export async function renderExpenses({ reload }) {
         ? h(
             'div',
             { class: 'card', style: 'display:flex;align-items:center;justify-content:center' },
-            h('button', { class: 'btn primary', onclick: () => openExpenseForm({ categories, onSaved: reload }) }, '＋ Log expense'),
+            h('button', { class: 'btn primary', onclick: () => openExpenseForm({ categories, onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'Log expense'),
           )
         : h('div', {}),
     ),

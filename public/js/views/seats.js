@@ -12,10 +12,11 @@ import {
   initials,
   money,
   openModal,
+  renderIcon,
   stat,
   time,
-  today,
   toast,
+  today,
 } from '../ui.js';
 import { datalist, memberOptions, openPaymentForm, resolveMember } from './forms.js';
 import { t } from '../vertical.js';
@@ -461,7 +462,7 @@ function openSeatDetailModal({ cell, seat, sessionId, shiftName, onSaved, naviga
           }
         },
       },
-      '💬 Remind',
+      renderIcon('whatsapp', { size: 16 }), 'Remind',
     ),
     cell.balance_due > 0
       ? h(
@@ -479,7 +480,7 @@ function openSeatDetailModal({ cell, seat, sessionId, shiftName, onSaved, naviga
               });
             },
           },
-          '💳 Collect',
+          renderIcon('billing', { size: 16 }), 'Collect',
         )
       : null,
     h(
@@ -1034,7 +1035,8 @@ export async function renderSeats({ setActions, navigate, params }) {
         h(
           'div',
           { class: 'empty' },
-          h('p', {}, '🪑 No seats yet.'),
+          renderIcon('seats', { size: 20 }),
+          h('p', {}, 'No seats yet — map your rows and zones to start assigning.'),
           h(
             'button',
             {
@@ -1061,7 +1063,7 @@ export async function renderSeats({ setActions, navigate, params }) {
             render(map);
           },
         },
-        state.editMode ? '✓ Editing layout' : 'Edit layout',
+        state.editMode ? [renderIcon('check', { size: 15 }), 'Editing layout'] : 'Edit layout',
       ),
       state.editMode
         ? h(
@@ -1074,10 +1076,10 @@ export async function renderSeats({ setActions, navigate, params }) {
                 render(map);
               },
             },
-            state.selectMode ? '✓ Selecting seats' : 'Select seats',
+            state.selectMode ? [renderIcon('check', { size: 15 }), 'Selecting seats'] : 'Select seats',
           )
         : null,
-      h('button', { class: 'btn sm ghost', onclick: () => openSeatBulkForm({ zones: map.zones, onSaved: load }) }, '+ Add seats'),
+      h('button', { class: 'btn sm ghost', onclick: () => openSeatBulkForm({ zones: map.zones, onSaved: load }) }, renderIcon('plus', { size: 15 }), 'Add seats'),
     );
 
     const tabs = h(

@@ -10,6 +10,7 @@ import {
   labelledControl,
   money,
   personCell,
+  renderIcon,
   statusBadge,
   table,
   toast,
@@ -22,12 +23,12 @@ export async function renderBilling({ setActions, reload }) {
   const body = h('div', {});
 
   setActions(
-    h('button', { class: 'btn', onclick: () => api.download('payments').catch((e) => toast(e.message, 'error')) }, '⇩ Export payments'),
+    h('button', { class: 'btn', onclick: () => api.download('payments').catch((e) => toast(e.message, 'error')) }, renderIcon('download', { size: 16 }), 'Export payments'),
     session.managesBilling
-      ? h('button', { class: 'btn', onclick: () => openPaymentForm({ onSaved: reload }) }, '💳 Record payment')
+      ? h('button', { class: 'btn', onclick: () => openPaymentForm({ onSaved: reload }) }, renderIcon('billing', { size: 16 }), 'Record payment')
       : null,
     session.managesBilling
-      ? h('button', { class: 'btn primary', onclick: () => openMembershipForm({ onSaved: reload }) }, '＋ Sell membership')
+      ? h('button', { class: 'btn primary', onclick: () => openMembershipForm({ onSaved: reload }) }, renderIcon('plus', { size: 16 }), 'Sell membership')
       : null,
   );
 
@@ -162,7 +163,7 @@ export async function renderBilling({ setActions, reload }) {
                             }
                           },
                         },
-                        '💬 Remind',
+                        renderIcon('whatsapp', { size: 16 }), 'Remind',
                       )
                     : null,
                 ),
@@ -228,7 +229,7 @@ export async function renderBilling({ setActions, reload }) {
                         }
                       },
                     },
-                    '🖨️ Print',
+                    renderIcon('print', { size: 15 }), 'Print',
                   ),
                   session.managesBilling
                     ? h(
@@ -254,7 +255,7 @@ export async function renderBilling({ setActions, reload }) {
                             }
                           },
                         },
-                        '💬 Receipt',
+                        renderIcon('whatsapp', { size: 16 }), 'Receipt',
                       )
                     : null,
                   h(
@@ -272,7 +273,7 @@ export async function renderBilling({ setActions, reload }) {
                         }
                       },
                     },
-                    '⬇️',
+                    renderIcon('download', { size: 15 }),
                   ),
                   session.can('admin')
                     ? h(

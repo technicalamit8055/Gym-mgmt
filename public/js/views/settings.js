@@ -1,5 +1,5 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
-import { buildForm, date, h, isFullscreen, relativeDays, setCurrency, toast, toggleFullscreen } from '../ui.js';
+import { buildForm, date, h, isFullscreen, relativeDays, renderIcon, setCurrency, toast, toggleFullscreen } from '../ui.js';
 import { cropAndResizeImage, makeAppIcon } from '../photo.js';
 import { getAppMode, getAppTheme, isLibrary, setAppMode, setAppTheme, tl } from '../vertical.js';
 
@@ -148,7 +148,7 @@ export async function renderSettings({ reload }) {
   });
   const logoPlaceholder = h('span', {
     style: currentLogoUrl ? 'display:none' : '',
-  }, '🏋️');
+  }, renderIcon('dumbbell', { size: 28 }));
 
   const logoPreviewContainer = h(
     'div',
@@ -315,7 +315,7 @@ export async function renderSettings({ reload }) {
                 await reload();
               },
             },
-            '🌙 Dark',
+            renderIcon('moon', { size: 16 }), 'Dark',
           ),
           h(
             'button',
@@ -327,7 +327,7 @@ export async function renderSettings({ reload }) {
                 await reload();
               },
             },
-            '☀️ Light',
+            renderIcon('sun', { size: 16 }), 'Light',
           ),
         ),
       ),
@@ -424,7 +424,8 @@ export async function renderSettings({ reload }) {
             class: 'btn primary',
             onclick: () => toggleFullscreen(),
           },
-          isFullscreen() ? '🗗 Exit Fullscreen' : '⛶ Enter Fullscreen Mode',
+          renderIcon(isFullscreen() ? 'minimize' : 'maximize', { size: 16 }),
+          isFullscreen() ? 'Exit Fullscreen' : 'Enter Fullscreen Mode',
         ),
       ),
     ),

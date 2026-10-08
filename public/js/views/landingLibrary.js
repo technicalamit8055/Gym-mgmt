@@ -1,5 +1,6 @@
 import { signInBox } from './landing.js';
 import { h, renderIcon } from '../ui.js';
+import { productPreview } from './landingPreview.js';
 
 /**
  * The root domain's SeatBook marketing page, served at /library.
@@ -65,7 +66,8 @@ export function renderLandingLibrary({ context, navigate }) {
     h(
       'section',
       { class: 'landing-hero' },
-      h('h1', {}, 'Every seat. Every shift. Accounted for.'),
+      h('span', { class: 'landing-eyebrow' }, renderIcon('sparkle', { size: 14 }), 'Built for study halls'),
+      h('h1', {}, 'Every seat. Every shift. ', h('span', { class: 'grad' }, 'Accounted for.')),
       h(
         'p',
         { class: 'lede' },
@@ -85,6 +87,14 @@ export function renderLandingLibrary({ context, navigate }) {
       }),
     ),
 
+    productPreview('library'),
+
+    h(
+      'div',
+      { class: 'landing-section-head' },
+      h('h2', {}, 'Everything the front desk needs'),
+      h('p', { class: 'muted' }, 'Seats, passes, lockers and fees in one place — so nothing lives in a notebook.'),
+    ),
     h(
       'section',
       { class: 'landing-features' },
