@@ -17,7 +17,7 @@ import { lockerRoutes } from './routes/lockers.js';
 import { memberRoutes } from './routes/members.js';
 import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocuments.js';
 import { memberPhotoRoutes } from './routes/memberPhotos.js';
-import { notificationRoutes, portalNotificationRoutes } from './routes/notifications.js';
+import { announcementImageRoutes, notificationRoutes, portalNotificationRoutes } from './routes/notifications.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
@@ -109,6 +109,9 @@ export function createApp() {
   // Same reasoning as member photos: an unauthenticated but signed URL, so an
   // <img>/<a> tag can fetch it, and reachable even for a lapsed gym.
   app.use('/api/document-files', documentFileRoutes);
+  // A push notification's picture, fetched by the phone with no session; the
+  // URL carries its own token (see routes/notifications.js).
+  app.use('/api/announcement-images', announcementImageRoutes);
 
   // Scoped to /api, not the whole app: the gate must not reach express.static
   // and the SPA fallback below, or a gym whose trial lapsed would get a JSON

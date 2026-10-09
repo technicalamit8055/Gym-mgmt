@@ -1,4 +1,4 @@
-import { ApiError, api, memberSession } from '../api.js';
+import { ApiError, api, memberSession, pathPrefix } from '../api.js';
 import {
   addDays,
   append,
@@ -2089,7 +2089,7 @@ function renderPortalApp(ctx, initialMe) {
         h('p', {}, isLibrary() ? 'Have a productive day.' : 'Ready for today’s workout?'),
       ),
       heroCard,
-      pushPrimer(),
+      pushPrimerSlot(),
       quickActions,
       todaysFocus,
       statsRow,
@@ -3939,6 +3939,9 @@ function renderPortalApp(ctx, initialMe) {
             { class: 'portal-notif-text' },
             h('strong', {}, item.title),
             h('span', {}, item.body),
+            item.image_url
+              ? h('img', { class: 'portal-notif-img', src: `${pathPrefix}${item.image_url}`, alt: '', loading: 'lazy' })
+              : null,
             h('small', {}, relativeTime(item.created_at)),
           ),
           item.read_at ? null : h('i', { class: 'portal-notif-dot', 'aria-label': 'New' }),
@@ -3962,61 +3965,98 @@ function renderPortalApp(ctx, initialMe) {
     );
   }
 
-  /** Home's one-time "turn on reminders" card. A primer rather than asking on
-   * load: a cold permission prompt is mostly denied, and a denial is final. */
-  function pushPrimer() {
-    const capability = push.pushCapability();
-    if (push.primerDismissed() || push.permissionState() !== 'default') return null;
-    if (capability !== 'ready' && capability !== 'ios-install') return null;
+  /**
+   * Home's "turn on reminders" card, for whichever way this member is missing
+   * out: never asked, switched off from Profile, blocked in the browser, or on
+   * an iPhone that needs the app installed first.
+   *
+   * A card rather than asking on load: a cold permission prompt is mostly
+   * denied, and a denial is final. "Not now" snoozes it for longer each time
+   * (push.snoozePrimer), so it comes back without nagging.
+   *
+   * Returns its slot straight away and fills it once the service worker has
+   * said whether this device is subscribed, so Home never waits on that.
+   */
+  function pushPrimerSlot() {
+    const slot = h('div', { class: 'portal-push-slot' });
+    if (push.primerDue()) {
+      pushPrimerCard()
+        .then((card) => card && slot.append(card))
+        .catch(() => {});
+    }
+    return slot;
+  }
 
-    const needsInstall = capability === 'ios-install';
+  async function pushPrimerCard() {
+    const capability = push.pushCapability();
+    let mode;
+    if (capability === 'ios-install') mode = 'install';
+    else if (capability === 'denied') mode = 'blocked';
+    else if (capability === 'ready') {
+      const granted = push.permissionState() === 'granted';
+      if (granted && (await push.currentSubscription().catch(() => null))) return null;
+      mode = granted ? 'off' : 'ask';
+    } else return null;
+
+    const what = isLibrary()
+      ? 'renewal reminders and announcements from the front desk, like closures and holiday hours'
+      : 'water, meal and workout nudges, plus gym announcements like closures and holiday hours';
+    const COPY = {
+      ask: { title: 'Get reminders on this phone', text: `${what[0].toUpperCase()}${what.slice(1)}.`, action: 'Turn on' },
+      off: {
+        title: 'Notifications are off',
+        text: `You turned them off on this phone, so you are missing ${what}.`,
+        action: 'Turn back on',
+      },
+      blocked: {
+        title: 'Notifications are blocked',
+        text: `You are missing ${what}. ${PUSH_UNAVAILABLE.denied.sub}`,
+        action: null,
+      },
+      install: {
+        title: 'Get reminders on this phone',
+        text: 'On iPhone, notifications work once the app is on your Home Screen. Add it, open it from there, then turn them on.',
+        action: 'Add to Home Screen',
+      },
+    };
+    const copy = COPY[mode];
+
     const card = h(
       'div',
-      { class: 'portal-push-primer' },
-      h('span', { class: 'portal-push-primer-ico' }, renderIcon('bell', { size: 22 })),
-      h(
-        'div',
-        { class: 'portal-push-primer-text' },
-        h('strong', {}, 'Get reminders on this phone'),
-        h(
-          'span',
-          {},
-          needsInstall
-            ? 'On iPhone, notifications work once the app is on your Home Screen. Add it, open it from there, then turn them on.'
-            : isLibrary()
-              ? 'Renewal reminders and announcements from the front desk, like closures and holiday hours.'
-              : 'Water, meal and workout nudges, plus gym announcements like closures and holiday hours.',
-        ),
-      ),
+      { class: `portal-push-primer is-${mode}` },
+      h('span', { class: 'portal-push-primer-ico' }, renderIcon(mode === 'blocked' ? 'alert' : 'bell', { size: 22 })),
+      h('div', { class: 'portal-push-primer-text' }, h('strong', {}, copy.title), h('span', {}, copy.text)),
       h(
         'div',
         { class: 'portal-push-primer-actions' },
-        h(
-          'button',
-          {
-            class: 'btn sm primary',
-            type: 'button',
-            onclick: async () => {
-              if (needsInstall) {
-                promptInstall();
-                return;
-              }
-              if (await turnOnPush()) card.remove();
-            },
-          },
-          needsInstall ? 'Add to Home Screen' : 'Turn on',
-        ),
+        copy.action
+          ? h(
+              'button',
+              {
+                class: 'btn sm primary',
+                type: 'button',
+                onclick: async () => {
+                  if (mode === 'install') {
+                    promptInstall();
+                    return;
+                  }
+                  if (await turnOnPush()) card.remove();
+                },
+              },
+              copy.action,
+            )
+          : null,
         h(
           'button',
           {
             class: 'btn sm ghost',
             type: 'button',
             onclick: () => {
-              push.dismissPrimer();
+              push.snoozePrimer();
               card.remove();
             },
           },
-          'Not now',
+          copy.action ? 'Not now' : 'Got it',
         ),
       ),
     );
@@ -4072,6 +4112,8 @@ function renderPortalApp(ctx, initialMe) {
         control: settingsSwitch(onHere, 'Push notifications', async () => {
           if (onHere) {
             await push.disablePush();
+            // Home will ask again, but not for a couple of days.
+            push.snoozePrimer();
             toast('Notifications turned off for this device', 'info');
           } else {
             await turnOnPush();

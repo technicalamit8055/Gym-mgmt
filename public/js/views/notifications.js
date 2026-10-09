@@ -1,5 +1,6 @@
-import { api } from '../api.js';
-import { buildForm, confirmDialog, date, h, table, toast } from '../ui.js';
+import { api, pathPrefix } from '../api.js';
+import { fitImage } from '../photo.js';
+import { buildForm, clear, confirmDialog, date, h, renderIcon, table, toast } from '../ui.js';
 import { isLibrary } from '../vertical.js';
 
 /**
@@ -30,6 +31,80 @@ const KIND_LABELS = {
 };
 
 const KIND_BADGE = { general: 'grey', closure: 'red', maintenance: 'amber', holiday: 'blue', event: 'green' };
+
+/**
+ * The optional picture on an announcement: pick, preview, remove. Scaled and
+ * compressed in the browser before it is ever sent (fitImage), so a 12 MP
+ * phone photo goes out as a ~200 KB JPEG.
+ *
+ * @returns {{node: HTMLElement, value: () => string|null}}
+ */
+function imagePicker() {
+  let dataUrl = null;
+  const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+  const preview = h('div', { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap' });
+
+  function paint() {
+    clear(preview).append(
+      dataUrl
+        ? h('img', {
+            src: dataUrl,
+            alt: 'Announcement picture',
+            style: 'max-width:260px;max-height:130px;border-radius:10px;border:1px solid var(--line);object-fit:cover',
+          })
+        : null,
+      h(
+        'button',
+        { class: 'btn sm', type: 'button', onclick: () => input.click() },
+        renderIcon('image', { size: 15 }),
+        dataUrl ? 'Change picture' : 'Add a picture',
+      ),
+      dataUrl
+        ? h(
+            'button',
+            {
+              class: 'btn sm ghost',
+              type: 'button',
+              onclick: () => {
+                dataUrl = null;
+                paint();
+              },
+            },
+            'Remove',
+          )
+        : null,
+    );
+  }
+
+  input.addEventListener('change', async () => {
+    const [file] = input.files;
+    input.value = '';
+    if (!file) return;
+    try {
+      dataUrl = await fitImage(file);
+      paint();
+    } catch (err) {
+      toast(err.message || 'Could not read that picture', 'error');
+    }
+  });
+  paint();
+
+  return {
+    node: h(
+      'div',
+      { class: 'field full' },
+      h('span', {}, 'Picture (optional)'),
+      preview,
+      input,
+      h(
+        'div',
+        { class: 'muted', style: 'font-size:12px;margin-top:4px' },
+        'Shown large under the message on Android and in the member app. A wide picture (about 2:1) fits best. iPhones show the text only.',
+      ),
+    ),
+    value: () => dataUrl,
+  };
+}
 
 function reachTile(value, label) {
   return h(
@@ -67,6 +142,7 @@ export async function renderNotifications({ reload }) {
     ),
   );
 
+  const picker = imagePicker();
   const composeForm = inlineForm(
     buildForm(
       [
@@ -119,7 +195,7 @@ export async function renderNotifications({ reload }) {
             confirmLabel: 'Send',
             danger: urgent,
             onConfirm: async () => {
-              const sent = await api.sendAnnouncement({ ...values, urgent });
+              const sent = await api.sendAnnouncement({ ...values, urgent, image: picker.value() || undefined });
               toast(`Sent to ${sent.recipients} ${people} · pushing to ${sent.devices} device${sent.devices === 1 ? '' : 's'}`);
               reload();
             },
@@ -129,6 +205,8 @@ export async function renderNotifications({ reload }) {
     ),
     'Send announcement',
   );
+
+  composeForm.querySelector('.form-grid').append(picker.node);
 
   const scheduleFields = [
     fitness && {
@@ -236,6 +314,14 @@ export async function renderNotifications({ reload }) {
               h(
                 'div',
                 { style: 'max-width:360px' },
+                row.image_url
+                  ? h('img', {
+                      src: `${pathPrefix}${row.image_url}`,
+                      alt: '',
+                      loading: 'lazy',
+                      style: 'display:block;width:120px;height:60px;object-fit:cover;border-radius:8px;margin-bottom:6px',
+                    })
+                  : null,
                 h('strong', {}, row.title),
                 row.urgent ? h('span', { class: 'badge red', style: 'margin-left:6px' }, 'Urgent') : null,
                 h('div', { class: 'muted', style: 'font-size:12px;white-space:pre-wrap;margin-top:2px' }, row.body),

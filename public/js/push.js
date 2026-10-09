@@ -21,7 +21,7 @@ import { isIos, isStandalone } from './pwa.js';
 /** Which member turned notifications on in this browser. Scoped per gym like
  * the member session itself: two gyms on one origin share one subscription. */
 const OWNER_KEY = `gymbook.push.owner${pathPrefix ? `.${pathPrefix.slice(3)}` : ''}`;
-const PRIMER_KEY = `gymbook.push.primerDismissed${pathPrefix ? `.${pathPrefix.slice(3)}` : ''}`;
+const PRIMER_KEY = `gymbook.push.reminder${pathPrefix ? `.${pathPrefix.slice(3)}` : ''}`;
 
 const readStore = (key) => {
   try {
@@ -135,9 +135,10 @@ export async function enablePush(publicKey) {
 
   const reg = await registration();
   if (!reg) throw new PushError('unavailable', 'The app is still installing — try again in a moment');
-  writeStore(PRIMER_KEY, '1');
   try {
-    return await subscribe(reg, publicKey);
+    const subscription = await subscribe(reg, publicKey);
+    resetPrimer();
+    return subscription;
   } catch (err) {
     if (err?.status) throw err; // The server's own answer already says why.
     // The browser's own reason ("Registration failed - …") means nothing to
@@ -195,8 +196,42 @@ export async function syncPushSubscription(publicKey) {
   }
 }
 
-export const primerDismissed = () => Boolean(readStore(PRIMER_KEY));
-export const dismissPrimer = () => writeStore(PRIMER_KEY, '1');
+/* ------------------------------------------------- the Home reminder card */
+
+/**
+ * How long "Not now" on the Home card holds it off, growing each time: back in
+ * 2 days, then 5, 10, 21, and from then on once a month. Asking on every visit
+ * would teach members to ignore it; asking once and never again would leave a
+ * member who switched notifications off, or blocked them by accident, without
+ * a single reminder that they are missing closures and renewals.
+ */
+const SNOOZE_DAYS = [2, 5, 10, 21, 30];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function readPrimer() {
+  try {
+    const value = JSON.parse(readStore(PRIMER_KEY));
+    if (value && typeof value === 'object') return { count: Number(value.count) || 0, until: Number(value.until) || 0 };
+  } catch {
+    // Missing or unreadable: never snoozed.
+  }
+  return { count: 0, until: 0 };
+}
+
+/** Whether the Home card may show now (it still checks it has something to say). */
+export const primerDue = (now = Date.now()) => readPrimer().until <= now;
+
+/** "Not now" — and also turning notifications off from Profile, so the card
+ * does not pop straight back up on Home moments after a deliberate choice. */
+export function snoozePrimer(now = Date.now()) {
+  const { count } = readPrimer();
+  const days = SNOOZE_DAYS[Math.min(count, SNOOZE_DAYS.length - 1)];
+  writeStore(PRIMER_KEY, JSON.stringify({ count: count + 1, until: now + days * DAY_MS }));
+}
+
+/** Notifications are on: the next time they are switched off starts the
+ * schedule over from the short end. */
+const resetPrimer = () => writeStore(PRIMER_KEY, null);
 
 export function setAppBadge(count) {
   try {

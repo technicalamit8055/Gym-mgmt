@@ -47,6 +47,31 @@ export async function cropAndResizeImage(source, size = 250, quality = 0.75) {
 }
 
 /**
+ * Scales a picture down to fit `maxSide` (never up), keeping its shape, and
+ * re-encodes it as JPEG until the data URL is under `maxChars`. For pictures
+ * that are shown whole — an announcement's image, unlike a square avatar,
+ * must not lose its edges to a crop.
+ */
+export async function fitImage(source, { maxSide = 1200, maxChars = 900_000 } = {}) {
+  const img = await loadImage(source);
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  const ctx = canvas.getContext('2d');
+  // JPEG has no transparency; white matches how the app shows a cut-out PNG.
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  for (const quality of [0.85, 0.75, 0.65, 0.5]) {
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    if (dataUrl.length <= maxChars) return dataUrl;
+  }
+  throw new Error('That picture is too detailed to send — try a smaller one');
+}
+
+/**
  * Beyond this the base64 string risks the server's 512 KB image cap. PNG keeps
  * a flat logo crisp; a photographic one blows past this, and JPEG takes over.
  */

@@ -249,10 +249,18 @@ tracker) and go only to members who have turned notifications on. Times are
 the gym's local time and are set in **Push notifications** in the staff app.
 Announcements land in every current member's in-app notification center; the
 push goes to members who have announcements switched on — except **urgent**
-ones (closures, emergencies), which reach every registered device.
+ones (closures, emergencies), which reach every registered device. An
+announcement can carry a **picture**, scaled down in the browser before upload;
+Android shows it expanded under the text and the member app shows it in the
+notification center (iPhones show the text only). The picture is served from a
+URL with a random token rather than behind a login, because the phone fetches
+it with no session.
 
-**For members:** the Home tab offers a one-time "Get reminders on this phone"
-card; **Profile → Notifications** turns them on or off for that device and
+**For members:** the Home tab shows a "Get reminders on this phone" card to
+anyone not receiving notifications — never asked, switched off, blocked in the
+browser, or on an iPhone that has not installed the app. "Not now" snoozes it
+for 2, then 5, 10, 21 and then 30 days, so it comes back without nagging;
+**Profile → Notifications** turns them on or off for that device and
 switches each kind (plus sound and vibration) on or off. The bell in the top
 bar is the notification center. On **iPhone/iPad**, Web Push only works in the
 installed Home Screen app on **iOS 16.4+** — in Safari the app explains that

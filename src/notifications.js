@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { gymOffsetMinutes } from './clock.js';
 import { config, DEFAULT_TENANT_SLUG } from './config.js';
 import { all, get, run, tenantStorage, tx } from './db.js';
@@ -175,13 +176,27 @@ export function deviceCount(memberId) {
 
 /* ---------------------------------------------------------------- inbox */
 
+/**
+ * An announcement's picture, as an origin-relative path without the /g/<slug>
+ * prefix — the browser adds its own (api.js's pathPrefix), and a push payload
+ * adds the subscribing device's. The token in it is the only thing standing
+ * between the bytes and anyone, see getAnnouncementImage().
+ */
+const ANNOUNCEMENT_IMAGE_URL_SQL =
+  "CASE WHEN a.image_bytes IS NOT NULL THEN '/api/announcement-images/' || a.id || '?t=' || a.image_token END";
+
+/** Every column but the image BLOB, which no listing should ever drag along. */
+const ANNOUNCEMENT_COLUMNS = `a.id, a.title, a.body, a.kind, a.urgent, a.created_by, a.recipients, a.devices,
+  a.delivered, a.failed, a.created_at, ${ANNOUNCEMENT_IMAGE_URL_SQL} AS image_url`;
+
 export function unreadCount(memberId) {
   return get('SELECT COUNT(*) AS n FROM member_notifications WHERE member_id = ? AND read_at IS NULL', [memberId]).n;
 }
 
 export function listNotifications(memberId, { limit = 30 } = {}) {
   return all(
-    `SELECT n.id, n.category, n.title, n.body, n.screen, n.created_at, n.read_at, a.kind AS announcement_kind, a.urgent
+    `SELECT n.id, n.category, n.title, n.body, n.screen, n.created_at, n.read_at, a.kind AS announcement_kind, a.urgent,
+            ${ANNOUNCEMENT_IMAGE_URL_SQL} AS image_url
      FROM member_notifications n
      LEFT JOIN push_announcements a ON a.id = n.announcement_id
      WHERE n.member_id = ?
@@ -326,6 +341,8 @@ function payloadFor(notification, prefs, { unread, sub, brand, urgent = false })
     title: notification.title,
     body: notification.body,
     url: portalUrl(sub.path_prefix, notification.screen),
+    // Android shows this expanded beneath the text; iOS ignores it.
+    image: notification.image ? `${sub.path_prefix || ''}${notification.image}` : undefined,
     icon: brand.icon,
     badge: brand.badge,
     tag: notification.tag,
@@ -401,12 +418,25 @@ export function notifyMember(memberId, { category, title, body, screen, dedupeKe
  * The rows are written synchronously; the pushes are not. The returned
  * `delivery` promise resolves once every device has been tried, updating the
  * announcement's delivered/failed counts — the route answers before that.
+ *
+ * @param {{mime: string, bytes: Buffer}} [opts.image] Optional picture,
+ *   already validated (see parseUploadDataUrl in photo.js).
  */
-export function createAnnouncement({ title, body, kind = 'general', urgent = false, userId = null }) {
+export function createAnnouncement({ title, body, kind = 'general', urgent = false, userId = null, image = null }) {
   const announcement = tx(() => {
     const { lastInsertRowid } = run(
-      'INSERT INTO push_announcements (title, body, kind, urgent, created_by) VALUES (?, ?, ?, ?, ?)',
-      [title, body, kind, urgent ? 1 : 0, userId],
+      `INSERT INTO push_announcements (title, body, kind, urgent, created_by, image_mime, image_bytes, image_token)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        title,
+        body,
+        kind,
+        urgent ? 1 : 0,
+        userId,
+        image?.mime ?? null,
+        image?.bytes ?? null,
+        image ? crypto.randomBytes(16).toString('hex') : null,
+      ],
     );
     const id = Number(lastInsertRowid);
     const recipients = run(
@@ -416,7 +446,7 @@ export function createAnnouncement({ title, body, kind = 'general', urgent = fal
       [title, body, id, `announcement:${id}`],
     ).changes;
     run('UPDATE push_announcements SET recipients = ? WHERE id = ?', [recipients, id]);
-    return get('SELECT * FROM push_announcements WHERE id = ?', [id]);
+    return get(`SELECT ${ANNOUNCEMENT_COLUMNS} FROM push_announcements a WHERE a.id = ?`, [id]);
   });
 
   const targets = all(
@@ -446,6 +476,7 @@ export function createAnnouncement({ title, body, kind = 'general', urgent = fal
               body,
               screen: 'notifications',
               tag: `announcement-${announcement.id}`,
+              image: announcement.image_url,
             },
             { sound: sub.pref_sound, vibrate: sub.pref_vibrate },
             { unread: sub.unread, sub, brand, urgent: announcement.urgent },
@@ -477,12 +508,29 @@ export function createAnnouncement({ title, body, kind = 'general', urgent = fal
 
 export function listAnnouncements({ limit = 20 } = {}) {
   return all(
-    `SELECT a.*, u.name AS created_by_name,
+    `SELECT ${ANNOUNCEMENT_COLUMNS}, u.name AS created_by_name,
             (SELECT COUNT(*) FROM member_notifications n WHERE n.announcement_id = a.id AND n.read_at IS NOT NULL) AS read_count
      FROM push_announcements a LEFT JOIN users u ON u.id = a.created_by
      ORDER BY a.created_at DESC, a.id DESC LIMIT ?`,
     [limit],
   );
+}
+
+/**
+ * The bytes behind an announcement's image URL, or null.
+ *
+ * Unauthenticated by necessity — Android's notification system fetches the
+ * picture itself, with no session — so the URL's random token is the
+ * credential, compared in constant time. It only ever unlocks a picture the
+ * gym already broadcast to all its members.
+ */
+export function getAnnouncementImage(id, token) {
+  const row = get('SELECT image_mime, image_bytes, image_token FROM push_announcements WHERE id = ?', [id]);
+  if (!row?.image_bytes || !row.image_token || typeof token !== 'string') return null;
+  const expected = Buffer.from(row.image_token);
+  const given = Buffer.from(token);
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
+  return { mime: row.image_mime, bytes: Buffer.from(row.image_bytes) };
 }
 
 /** Headline numbers for the staff page: how far a broadcast would reach. */

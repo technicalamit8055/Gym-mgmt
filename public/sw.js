@@ -15,7 +15,7 @@
  * Bump VERSION whenever a shell file changes in a way that must not wait for
  * revalidation; installs then re-run and the old caches are dropped.
  */
-const VERSION = 'v6';
+const VERSION = 'v7';
 const SHELL_CACHE = `gymbook-shell-${VERSION}`;
 const RUNTIME_CACHE = `gymbook-runtime-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, RUNTIME_CACHE]);
@@ -223,6 +223,8 @@ self.addEventListener('push', (event) => {
         // without it Android falls back to a generic bell.
         icon: data.icon || '/icons/icon-192.png',
         badge: data.badge || '/icons/badge-96.png',
+        // An announcement's picture, shown expanded on Android.
+        image: data.image || undefined,
         tag: data.tag || undefined,
         // A replaced reminder (same tag) should still announce itself.
         renotify: Boolean(data.tag),

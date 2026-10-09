@@ -23,6 +23,9 @@ const ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
  * request, not a limit real uploads should ever approach. */
 export const MAX_PHOTO_BYTES = 512 * 1024;
 
+/** The raster formats every browser and push notification can display. */
+export const IMAGE_MIMES = ALLOWED_MIMES;
+
 /** ID-proof uploads: the same raster formats plus a scanned PDF. */
 export const DOCUMENT_MIMES = new Set([...ALLOWED_MIMES, 'application/pdf']);
 /** express.json({ limit: '5mb' }) in app.js means 2 MB of bytes is ~2.7 MB

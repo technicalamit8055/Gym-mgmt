@@ -1086,6 +1086,12 @@ const MIGRATIONS = [
     `);
     db.prepare('INSERT OR IGNORE INTO push_settings (id) VALUES (1)').run();
   },
+  // An optional picture on an announcement — Android shows it expanded under
+  // the text. Served from a URL carrying `image_token` rather than behind
+  // auth, because the phone's notification system fetches it with no session.
+  (db) => ensureColumn(db, 'push_announcements', 'image_mime', 'TEXT'),
+  (db) => ensureColumn(db, 'push_announcements', 'image_bytes', 'BLOB'),
+  (db) => ensureColumn(db, 'push_announcements', 'image_token', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

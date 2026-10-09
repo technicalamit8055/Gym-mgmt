@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { MANAGES_BILLING, requireAuth, requireMemberAuth, requireRole } from '../auth.js';
-import { badRequest } from '../errors.js';
+import { badRequest, notFound } from '../errors.js';
 import {
   ANNOUNCEMENT_KINDS,
   PREFERENCE_KEYS,
   clearActiveWorkout,
   createAnnouncement,
   deviceCount,
+  getAnnouncementImage,
   listAnnouncements,
   listNotifications,
   markRead,
@@ -22,6 +23,7 @@ import {
   savePushSettings,
   unreadCount,
 } from '../notifications.js';
+import { IMAGE_MIMES, parseUploadDataUrl } from '../photo.js';
 import { createLimiter } from '../rateLimit.js';
 import { parse, toInt } from '../validate.js';
 import { moduleEnabled } from '../verticals.js';
@@ -183,6 +185,28 @@ portalNotificationRoutes.delete('/active-workout', (req, res) => {
   res.status(204).end();
 });
 
+/* ================================================================= image */
+
+/**
+ * An announcement's picture, for the phone's notification and the in-app
+ * notification center. No requireAuth: the notification system fetches it
+ * without a session, so the URL's token authenticates it instead — see
+ * getAnnouncementImage(). Mounted ahead of the subscription gate in app.js,
+ * like member photos.
+ */
+export const announcementImageRoutes = Router();
+
+announcementImageRoutes.get('/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const image = Number.isInteger(id) ? getAnnouncementImage(id, req.query.t) : null;
+  if (!image) throw notFound('No such image');
+  res.set('Content-Type', image.mime);
+  // An announcement's picture never changes, and every member already got it.
+  res.set('Cache-Control', 'public, max-age=2592000, immutable');
+  res.set('Content-Disposition', 'inline');
+  res.send(image.bytes);
+});
+
 /* ================================================================= staff */
 
 /**
@@ -232,6 +256,10 @@ notificationRoutes.get('/announcements', (req, res) => {
   res.json({ items: listAnnouncements({ limit }) });
 });
 
+/** The browser scales a picture down to about 1200px before sending it (see
+ * fitImage in public/js/photo.js), which lands well under this. */
+const MAX_ANNOUNCEMENT_IMAGE_BYTES = 1024 * 1024;
+
 const broadcastLimiter = createLimiter({ maxAttempts: 10, windowMs: 60 * 60_000, lockoutMs: 60 * 60_000 });
 
 notificationRoutes.post('/announcements', (req, res) => {
@@ -245,9 +273,16 @@ notificationRoutes.post('/announcements', (req, res) => {
   if (broadcastLimiter.check(key).locked) {
     return res.status(429).json({ error: 'That is a lot of announcements in one hour — try again later' });
   }
+  // Validated before the limiter counts the attempt: a rejected picture is a
+  // mistake to fix, not one of the hour's ten broadcasts.
+  const image = parseUploadDataUrl(req.body?.image, {
+    allowed: IMAGE_MIMES,
+    maxBytes: MAX_ANNOUNCEMENT_IMAGE_BYTES,
+    field: 'image',
+  });
   broadcastLimiter.recordAttempt(key);
 
-  const { announcement, delivery } = createAnnouncement({ ...body, userId: req.user.id });
+  const { announcement, delivery } = createAnnouncement({ ...body, image, userId: req.user.id });
   delivery.catch((err) => console.error('[push] announcement delivery failed:', err.message));
   return res.status(201).json(announcement);
 });

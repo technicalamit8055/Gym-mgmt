@@ -393,6 +393,51 @@ describe('member push notifications', () => {
     assert.equal(sent[0].headers.Urgency, 'high');
   });
 
+  it('rejects an announcement picture that is not an image', async () => {
+    const res = await call(
+      'POST',
+      '/api/notifications/announcements',
+      { title: 'Event', body: 'Zumba night', image: `data:text/html;base64,${Buffer.from('<script>').toString('base64')}` },
+      { token: staffToken },
+    );
+    assert.equal(res.status, 400);
+    assert.ok(res.body.details.image);
+  });
+
+  it('attaches a picture to an announcement, served by a tokened URL', async () => {
+    const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
+    sent.length = 0;
+    const res = await call(
+      'POST',
+      '/api/notifications/announcements',
+      { title: 'Zumba night', body: 'Friday 7pm, bring a friend!', kind: 'event', image: `data:image/png;base64,${png.toString('base64')}` },
+      { token: staffToken },
+    );
+    assert.equal(res.status, 201);
+    assert.equal(res.body.image_bytes, undefined, 'the BLOB never rides along in JSON');
+    assert.match(res.body.image_url, /^\/api\/announcement-images\/\d+\?t=[0-9a-f]{32}$/);
+    await inGym(() => settlePushDeliveries());
+
+    // The push points at it under the device's own /g/<slug> address.
+    const payload = readPush(phone, sent.find((s) => s.url === phone.json.endpoint));
+    assert.equal(payload.image, `/g/pushgym${res.body.image_url}`);
+
+    // Fetchable with no session (the phone's notification system has none)…
+    const image = await fetch(`${base}/g/pushgym${res.body.image_url}`);
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
+    // …but only with the right token.
+    const guessed = await fetch(`${base}/g/pushgym${res.body.image_url.replace(/t=.*/, `t=${'0'.repeat(32)}`)}`);
+    assert.equal(guessed.status, 404);
+
+    const inbox = await call('GET', '/api/portal/notifications', undefined, { token: memberToken });
+    assert.equal(inbox.body.items[0].image_url, res.body.image_url);
+    const listed = await call('GET', '/api/notifications/announcements', undefined, { token: staffToken });
+    assert.equal(listed.body.items[0].image_url, res.body.image_url);
+    assert.equal(listed.body.items[0].image_bytes, undefined);
+  });
+
   it('forgets a device the push service reports as gone', async () => {
     nextStatus = (url) => (url === phone.json.endpoint ? 410 : 201);
     await call('POST', '/api/portal/notifications/test', {}, { token: memberToken });
