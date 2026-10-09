@@ -228,6 +228,56 @@ offline; it does not operate offline. Check-ins and edits need the server.
 Requires HTTPS (or `localhost`) — service workers refuse to register on a plain
 `http://` LAN address, and the app degrades to a normal website there.
 
+## Push notifications
+
+Members get notifications on their phone's lock screen from the member app —
+standard Web Push (VAPID + `aes128gcm`), implemented on `node:crypto` in
+`src/webPush.js` with no third-party push dependency.
+
+**What members receive** (`src/notifications.js`):
+
+| Kind | When | Only if |
+| --- | --- | --- |
+| Water reminder | At the gym's set times (default 11:00, 15:00, 19:00) | They are behind pace for their daily water goal |
+| Meal tracking | Around lunch (14:00) and dinner (21:00) | That meal is not logged yet today |
+| Workout keep-alive | A session has run longer than the limit (default 2 h) | It was never finished or discarded |
+| Renewal reminder | `N` days before a membership ends (default 3), and on the day | — |
+| Gym announcement | When an admin or manager sends one from **Push notifications** | — |
+
+Water, meal and workout reminders are gym-only (they ride on the Diet & Workout
+tracker) and go only to members who have turned notifications on. Times are
+the gym's local time and are set in **Push notifications** in the staff app.
+Announcements land in every current member's in-app notification center; the
+push goes to members who have announcements switched on — except **urgent**
+ones (closures, emergencies), which reach every registered device.
+
+**For members:** the Home tab offers a one-time "Get reminders on this phone"
+card; **Profile → Notifications** turns them on or off for that device and
+switches each kind (plus sound and vibration) on or off. The bell in the top
+bar is the notification center. On **iPhone/iPad**, Web Push only works in the
+installed Home Screen app on **iOS 16.4+** — in Safari the app explains that
+and offers the install steps instead of a button that cannot work. On Android,
+Chrome, Edge and Samsung Internet all work, installed or not. Private/incognito
+windows cannot receive pushes in any browser.
+
+**Operational notes.**
+
+- The VAPID key pair is generated on first boot and stored beside the platform
+  database (`vapid-keys.json`, owner-only). **Keep it with your backups**: a new
+  key pair silently invalidates every member's subscription, and they would
+  each have to turn notifications on again. To pin keys explicitly (e.g. several
+  machines on one origin), set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`.
+- Set `VAPID_SUBJECT` to a real `mailto:` or `https:` contact — Apple rejects
+  pushes without one. It defaults to `PLATFORM_ADMIN_EMAIL`.
+- Reminders run from an in-process sweep every 5 minutes, so the server must be
+  running at the scheduled time (the Fly config already keeps one machine up).
+  Each reminder is deduplicated per member, so restarts and overlapping sweeps
+  never send twice; a sweep that runs late still sends within an hour of the
+  slot, and not after.
+- Devices the push service reports as gone (uninstalled app, revoked
+  permission) are deleted automatically, as are devices that fail five times
+  in a row.
+
 ## Configuration
 
 All optional — sensible defaults apply.
@@ -266,6 +316,10 @@ All optional — sensible defaults apply.
 | `WHATSAPP_AUTH_DIR` | `<platform db dir>/whatsapp_auth` | Where each gym's paired WhatsApp session credentials are stored |
 | `WHATSAPP_MESSAGE_GAP_MS` | `2500` | Minimum gap between queued WhatsApp sends, per gym — keeps a reminder sweep from reading as a spam blast |
 | `WHATSAPP_COUNTRY_CODE` | `91` | Default country code used to normalise a member's phone number when none is given |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | generated | Web Push key pair (base64url raw P-256 point / private scalar). When unset, generated once and kept in `VAPID_KEY_FILE` |
+| `VAPID_KEY_FILE` | `<platform db dir>/vapid-keys.json` | Where the generated key pair is kept — back it up with the databases |
+| `VAPID_SUBJECT` | `mailto:$PLATFORM_ADMIN_EMAIL` | Contact the push services (Google, Apple, Mozilla) can reach; must be `mailto:` or `https:` |
+| `PUSH_SWEEP_INTERVAL_MS` | `300000` | How often the reminder sweep runs |
 
 ## Onboarding: how a gym (or hall) joins
 
@@ -462,6 +516,8 @@ src/
   verticals.js     GymBook vs SeatBook: vocabulary, modules, starter data
   seats.js         seat allocation lifecycle (SeatBook)
   whatsapp.js      per-tenant WhatsApp Web sessions (Baileys)
+  webPush.js       Web Push: VAPID signing and payload encryption
+  notifications.js member reminders, announcements, notification center
   receiptPdf.js    PDF payment receipts
   routes/          auth, members, plans, subscriptions, payments,
                    attendance, classes, equipment, seats, lockers,
@@ -480,6 +536,7 @@ public/
   js/vertical.js   client-side copy of the vocabulary swap (t() helper)
   js/photo.js      member photo upload/camera capture, crop and compress
   js/pwa.js        install prompt, worker registration, update and offline UI
+  js/push.js       push permission, subscription and iOS/Android onboarding
   js/app.js        router and layout
   js/views/        one module per screen, including seats.js (live seat
                    map), lockers.js, expenses.js and whatsapp.js

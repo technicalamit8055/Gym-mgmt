@@ -251,6 +251,19 @@ export function playTargetReached() {
   triggerHaptic([60, 40, 60]);
 }
 
+/** A push that arrives while the app is open on screen — sw.js keeps the
+ * system notification silent then, so this is the one sound the member hears.
+ * Urgent gym announcements get a longer, more insistent pattern. */
+export function playNotification({ urgent = false } = {}) {
+  if (urgent) {
+    playChord([880, 1174.66, 880, 1174.66], { duration: 0.22, staggerMs: 140, type: 'square', gain: 0.12 });
+    triggerHaptic([250, 100, 250, 100, 400]);
+    return;
+  }
+  playChord([783.99, 1174.66], { duration: 0.35, staggerMs: 110, type: 'sine', gain: 0.2 });
+  triggerHaptic([120, 60, 120]);
+}
+
 /* ---------------------------------------------------------------- preview */
 
 const SOUND_LIBRARY = {
@@ -265,6 +278,7 @@ const SOUND_LIBRARY = {
   foodRemoved: { label: 'Food removed', play: playFoodRemoved },
   waterLogged: { label: 'Water logged', play: playWaterLogged },
   targetReached: { label: 'Target reached', play: playTargetReached },
+  notification: { label: 'Notification', play: () => playNotification() },
 };
 
 export const SOUND_PREVIEW_ORDER = Object.keys(SOUND_LIBRARY);

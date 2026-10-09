@@ -262,6 +262,7 @@ describe('sound trigger API integrity', () => {
         'foodRemoved',
         'waterLogged',
         'targetReached',
+        'notification',
       ]),
     );
   });

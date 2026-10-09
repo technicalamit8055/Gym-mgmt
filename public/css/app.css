@@ -3468,6 +3468,66 @@ button.portal-prof-row { cursor: pointer; }
 .portal-settings-btn { justify-content: flex-start; gap: 10px; padding: 12px 14px; }
 .portal-support-body p { margin: 0 0 10px; }
 
+/* ---------------------------------------------------------- notifications */
+
+/* Unread count on the topbar bell. */
+.portal-bell-btn { position: relative; }
+.portal-bell-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px;
+  display: grid; place-items: center; border-radius: 999px;
+  font-size: 10.5px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+  background: #ef4444; color: #fff; border: 2px solid var(--bg, var(--surface));
+}
+.portal-bell-badge[hidden] { display: none; }
+
+/* Home's one-time "turn on reminders" card. */
+.portal-push-primer {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 4px 12px; align-items: start;
+  padding: 14px; border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--p-border, var(--border)));
+  background: color-mix(in srgb, var(--brand) 8%, var(--p-card, var(--surface)));
+}
+.portal-push-primer-ico {
+  width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center;
+  color: var(--brand); background: color-mix(in srgb, var(--brand) 15%, transparent);
+}
+.portal-push-primer-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.portal-push-primer-text strong { font-size: 15px; }
+.portal-push-primer-text span { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.portal-push-primer-actions { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+/* The notification center sheet. */
+.portal-notif-modal .modal-body { padding-top: 4px; }
+.portal-notif-list { display: flex; flex-direction: column; gap: 8px; }
+.portal-notif {
+  --t: #8b5cf6;
+  position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: start;
+  width: 100%; padding: 12px; border-radius: 14px; text-align: left; font: inherit; color: var(--text);
+  border: 1px solid var(--p-border, var(--border)); background: var(--p-card, var(--surface));
+}
+button.portal-notif { cursor: pointer; }
+button.portal-notif:active { transform: scale(0.99); }
+.portal-notif.tone-orange { --t: #f97316; }
+.portal-notif.tone-blue { --t: #3b82f6; }
+.portal-notif.tone-green { --t: #22c55e; }
+.portal-notif.tone-purple { --t: #8b5cf6; }
+.portal-notif.unread { background: color-mix(in srgb, var(--t) 7%, var(--p-card, var(--surface))); }
+.portal-notif.urgent { border-color: color-mix(in srgb, #ef4444 55%, transparent); --t: #ef4444; }
+.portal-notif-ico {
+  width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+  color: var(--t); background: color-mix(in srgb, var(--t) 14%, transparent);
+}
+.portal-notif-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.portal-notif-text strong { font-size: 14.5px; }
+.portal-notif-text span { font-size: 13px; line-height: 1.4; color: var(--text); opacity: 0.85; overflow-wrap: anywhere; }
+.portal-notif-text small { font-size: 11.5px; color: var(--muted); }
+.portal-notif-dot { width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--t); }
+.portal-notif-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 12px; text-align: center; color: var(--muted);
+}
+.portal-notif-empty strong { color: var(--text); font-size: 15px; }
+.portal-notif-empty p { margin: 0; font-size: 13px; }
+
 /* ------------------------------------------------------------------ login */
 
 .portal-login {

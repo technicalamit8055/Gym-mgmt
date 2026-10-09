@@ -32,6 +32,7 @@ import { renderDevices } from './views/devices.js';
 import { renderSessions } from './views/sessions.js';
 import { renderReports } from './views/reports.js';
 import { renderWhatsApp } from './views/whatsapp.js';
+import { renderNotifications } from './views/notifications.js';
 import { renderSeats } from './views/seats.js';
 import { renderLockers } from './views/lockers.js';
 import { renderExpenses } from './views/expenses.js';
@@ -63,6 +64,7 @@ function buildNav() {
       // Sends under the library's own WhatsApp number, so the API limits it to
       // the billing roles — hide it rather than let staff click into a 403.
       { path: '/whatsapp', label: 'WhatsApp', icon: 'whatsapp', roles: ['admin', 'manager'] },
+      { path: '/notifications', label: 'Push notifications', icon: 'bell', roles: ['admin', 'manager'] },
       { section: 'Operations' },
       { path: '/seats', label: t('seats'), icon: 'seats' },
       { path: '/lockers', label: t('lockers'), icon: 'lockers' },
@@ -85,6 +87,8 @@ function buildNav() {
     // Sends under the gym's own WhatsApp number, so the API limits it to the
     // billing roles — hide it rather than let a trainer click into a 403.
     { path: '/whatsapp', label: 'WhatsApp', icon: 'whatsapp', roles: ['admin', 'manager'] },
+    // Same reach as WhatsApp — every member's lock screen — so the same roles.
+    { path: '/notifications', label: 'Push notifications', icon: 'bell', roles: ['admin', 'manager'] },
     { section: 'Operations' },
     { path: '/classes', label: 'Classes', icon: 'classes' },
     // Under Operations rather than Business: it is what trainers set up, and
@@ -122,6 +126,13 @@ function buildRoutes() {
     },
     { pattern: /^\/reports$/, title: 'Reports', subtitle: 'Track your business performance and member activity', view: renderReports },
     { pattern: /^\/whatsapp$/, title: 'WhatsApp Automation', view: renderWhatsApp },
+    {
+      pattern: /^\/notifications$/,
+      title: 'Push notifications',
+      icon: 'bell',
+      subtitle: `Announcements and automated reminders on ${t('members').toLowerCase()}’ phones`,
+      view: renderNotifications,
+    },
     { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
     { pattern: /^\/sessions$/, title: t('shifts'), view: renderSessions },
     { pattern: /^\/staff$/, title: t('staff'), view: renderStaff },

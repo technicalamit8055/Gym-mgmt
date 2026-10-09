@@ -20,7 +20,8 @@ import {
   today,
 } from '../ui.js';
 import { cropAndResizeImage } from '../photo.js';
-import { onInstallChange, promptInstall } from '../pwa.js';
+import { isIos, onInstallChange, promptInstall } from '../pwa.js';
+import * as push from '../push.js';
 import * as sound from '../sound.js';
 import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
 
@@ -39,6 +40,40 @@ import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
 let pendingPinPrompt = false;
 
 const gymDisplayName = (ctx) => ctx.context?.tenant?.gym_name || (isLibrary() ? 'SeatBook' : 'GymBook');
+
+/** Detaches the previous portal instance's push listener. A tapped
+ * notification re-renders the portal via a hash change (#/portal/diet), and
+ * the old instance's listener would otherwise keep repainting a detached bell. */
+let detachPushListener = null;
+
+/** The server's view of the active workout is best-effort: a dropped request
+ * only costs the member a keep-alive nudge, never their session. */
+const reportWorkoutStarted = (state) =>
+  api.portal.notifications
+    .workoutStarted({ workout_name: state.workout_name, started_at: state.started_at })
+    .catch(() => {});
+const reportWorkoutEnded = () => api.portal.notifications.workoutEnded().catch(() => {});
+
+/** Category → how a notification looks in the notification center. */
+const NOTIFICATION_STYLE = {
+  water: { icon: 'droplet', tone: 'blue' },
+  nutrition: { icon: 'utensils', tone: 'green' },
+  workout: { icon: 'timer', tone: 'orange' },
+  announcement: { icon: 'bell', tone: 'purple' },
+  membership: { icon: 'crown', tone: 'orange' },
+  test: { icon: 'checkCircle', tone: 'green' },
+};
+
+/** "5 min ago" for the notification center; a date once it is older than a day. */
+function relativeTime(utc) {
+  const then = Date.parse(`${String(utc).replace(' ', 'T')}Z`);
+  const minutes = Math.round((Date.now() - then) / 60_000);
+  if (!Number.isFinite(minutes)) return '';
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`;
+  return date(new Date(then).toISOString().slice(0, 10));
+}
 
 function dayLabel(iso) {
   const d = new Date(`${iso}T00:00:00`);
@@ -1825,6 +1860,7 @@ function renderPortalApp(ctx, initialMe) {
       })),
     };
     activeSession.write(state);
+    reportWorkoutStarted(state);
     switchTab('workout');
   }
 
@@ -2053,6 +2089,7 @@ function renderPortalApp(ctx, initialMe) {
         h('p', {}, isLibrary() ? 'Have a productive day.' : 'Ready for today’s workout?'),
       ),
       heroCard,
+      pushPrimer(),
       quickActions,
       todaysFocus,
       statsRow,
@@ -2909,6 +2946,7 @@ function renderPortalApp(ctx, initialMe) {
 
       teardown();
       activeSession.clear();
+      reportWorkoutEnded();
       sound.playWorkoutComplete(res.prs && res.prs.length > 0);
       openSummary(res);
       await onFinish();
@@ -2994,6 +3032,7 @@ function renderPortalApp(ctx, initialMe) {
         onConfirm: async () => {
           teardown();
           activeSession.clear();
+          reportWorkoutEnded();
           await onDiscard();
         },
       });
@@ -3127,6 +3166,9 @@ function renderPortalApp(ctx, initialMe) {
     // where it was, which is the whole reason it is mirrored to localStorage.
     const resumed = activeSession.read();
     if (resumed) {
+      // Re-reported on resume: the start may never have reached the server
+      // (offline gym floor), and the same started_at does not re-arm a nudge.
+      reportWorkoutStarted(resumed);
       return renderActiveWorkout(resumed, {
         onFinish: () => switchTab('workout'),
         onDiscard: () => switchTab('workout'),
@@ -3775,6 +3817,349 @@ function renderPortalApp(ctx, initialMe) {
     return body;
   }
 
+  /* --------------------------------------------------------- Notifications */
+
+  /** /api/portal/notifications/config, once per portal instance (refreshed by
+   * the Profile tab). Null until it lands — enabling needs its public key. */
+  let pushConfig = null;
+  let unread = 0;
+  const bellBadge = h('span', { class: 'portal-bell-badge', hidden: true });
+
+  function setUnread(count) {
+    unread = Math.max(0, Number(count) || 0);
+    bellBadge.hidden = unread === 0;
+    bellBadge.textContent = unread > 9 ? '9+' : String(unread);
+    push.setAppBadge(unread);
+  }
+
+  async function loadPushConfig({ refresh = false } = {}) {
+    if (pushConfig && !refresh) return pushConfig;
+    pushConfig = await api.portal.notifications.config();
+    setUnread(pushConfig.unread);
+    return pushConfig;
+  }
+
+  // The bell's count, and this device's subscription re-sent so the server
+  // keeps up with anything the browser rotated while the app was closed.
+  loadPushConfig()
+    .then((config) => push.syncPushSubscription(config.public_key))
+    .catch(() => {});
+
+  // Coming back to the app (from the lock screen, another app) is when the
+  // bell is most likely stale — announcements reach the notification center
+  // whether or not this device gets pushes.
+  const refreshUnread = () => {
+    if (document.visibilityState !== 'visible' || !memberSession.token) return;
+    api.portal.notifications
+      .list({ limit: 1 })
+      .then((res) => setUnread(res.unread))
+      .catch(() => {});
+  };
+  document.addEventListener('visibilitychange', refreshUnread);
+
+  detachPushListener?.();
+  detachPushListener = push.onPushMessage((notification, foreground) => {
+    setUnread(Number.isFinite(notification.badge) ? notification.badge : unread + 1);
+    if (!foreground) return;
+    // sw.js left the system notification silent because the app is on
+    // screen; this is the sound and buzz in its place.
+    sound.playNotification({ urgent: Boolean(notification.urgent) });
+    toast(notification.title || 'New notification', notification.urgent ? 'error' : 'info');
+  });
+  const detachMessages = detachPushListener;
+  detachPushListener = () => {
+    detachMessages();
+    document.removeEventListener('visibilitychange', refreshUnread);
+  };
+
+  /**
+   * Asks for permission and registers this device. Must be called straight
+   * from a tap — see enablePush() in push.js for why.
+   * @returns {Promise<boolean>} whether notifications ended up on.
+   */
+  async function turnOnPush() {
+    if (!pushConfig) {
+      loadPushConfig().catch(() => {});
+      toast('Still loading — try again in a moment', 'info');
+      return false;
+    }
+    try {
+      await push.enablePush(pushConfig.public_key);
+      await loadPushConfig({ refresh: true });
+      toast('Notifications are on for this device');
+      return true;
+    } catch (err) {
+      toast(err.message || 'Could not turn on notifications', err.code === 'dismissed' ? 'info' : 'error');
+      return false;
+    }
+  }
+
+  /** Every notification the member has had, newest first. Opening it counts
+   * as having seen them — the badge clears, the unread dots stay for this look. */
+  async function openNotificationCenter() {
+    const list = h('div', { class: 'portal-notif-list' }, h('div', { class: 'portal-loading' }, 'Loading…'));
+    openModal({ title: 'Notifications', icon: 'bell', className: 'portal-notif-modal', body: list });
+
+    let items;
+    try {
+      ({ items } = await api.portal.notifications.list({ limit: 50 }));
+    } catch (err) {
+      clear(list).append(h('p', { class: 'muted' }, err.message || 'Could not load notifications'));
+      return;
+    }
+    if (items.some((item) => !item.read_at)) {
+      api.portal.notifications
+        .markRead()
+        .then((res) => setUnread(res.unread))
+        .catch(() => {});
+    }
+
+    if (!items.length) {
+      clear(list).append(
+        h(
+          'div',
+          { class: 'portal-notif-empty' },
+          renderIcon('bell', { size: 34 }),
+          h('strong', {}, 'You’re all caught up'),
+          h('p', {}, isLibrary() ? 'Renewal reminders and announcements will appear here.' : 'Reminders and gym announcements will appear here.'),
+        ),
+      );
+      return;
+    }
+
+    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay']);
+    clear(list).append(
+      ...items.map((item) => {
+        const style = NOTIFICATION_STYLE[item.category] ?? NOTIFICATION_STYLE.announcement;
+        const target = reachable.has(item.screen) ? item.screen : null;
+        const parts = [
+          h('span', { class: 'portal-notif-ico' }, renderIcon(style.icon, { size: 20 })),
+          h(
+            'span',
+            { class: 'portal-notif-text' },
+            h('strong', {}, item.title),
+            h('span', {}, item.body),
+            h('small', {}, relativeTime(item.created_at)),
+          ),
+          item.read_at ? null : h('i', { class: 'portal-notif-dot', 'aria-label': 'New' }),
+        ];
+        const cls = `portal-notif tone-${style.tone}${item.read_at ? '' : ' unread'}${item.urgent ? ' urgent' : ''}`;
+        return target
+          ? h(
+              'button',
+              {
+                class: cls,
+                type: 'button',
+                onclick: () => {
+                  closeModal();
+                  switchTab(target);
+                },
+              },
+              ...parts,
+            )
+          : h('div', { class: cls }, ...parts);
+      }),
+    );
+  }
+
+  /** Home's one-time "turn on reminders" card. A primer rather than asking on
+   * load: a cold permission prompt is mostly denied, and a denial is final. */
+  function pushPrimer() {
+    const capability = push.pushCapability();
+    if (push.primerDismissed() || push.permissionState() !== 'default') return null;
+    if (capability !== 'ready' && capability !== 'ios-install') return null;
+
+    const needsInstall = capability === 'ios-install';
+    const card = h(
+      'div',
+      { class: 'portal-push-primer' },
+      h('span', { class: 'portal-push-primer-ico' }, renderIcon('bell', { size: 22 })),
+      h(
+        'div',
+        { class: 'portal-push-primer-text' },
+        h('strong', {}, 'Get reminders on this phone'),
+        h(
+          'span',
+          {},
+          needsInstall
+            ? 'On iPhone, notifications work once the app is on your Home Screen. Add it, open it from there, then turn them on.'
+            : isLibrary()
+              ? 'Renewal reminders and announcements from the front desk, like closures and holiday hours.'
+              : 'Water, meal and workout nudges, plus gym announcements like closures and holiday hours.',
+        ),
+      ),
+      h(
+        'div',
+        { class: 'portal-push-primer-actions' },
+        h(
+          'button',
+          {
+            class: 'btn sm primary',
+            type: 'button',
+            onclick: async () => {
+              if (needsInstall) {
+                promptInstall();
+                return;
+              }
+              if (await turnOnPush()) card.remove();
+            },
+          },
+          needsInstall ? 'Add to Home Screen' : 'Turn on',
+        ),
+        h(
+          'button',
+          {
+            class: 'btn sm ghost',
+            type: 'button',
+            onclick: () => {
+              push.dismissPrimer();
+              card.remove();
+            },
+          },
+          'Not now',
+        ),
+      ),
+    );
+    return card;
+  }
+
+  const PUSH_UNAVAILABLE = {
+    denied: {
+      title: 'Notifications are blocked',
+      sub: isIos()
+        ? 'Turn them on in Settings → Notifications → this app, then come back.'
+        : 'Allow notifications for this site in your browser’s site settings, then come back.',
+    },
+    'ios-version': { title: 'Update your iPhone', sub: 'Notifications need iOS 16.4 or later.' },
+    insecure: { title: 'Notifications unavailable', sub: 'They need the secure (https) address of this app.' },
+    unsupported: { title: 'Notifications unavailable', sub: 'This browser cannot receive notifications. Try Chrome, Edge or Safari.' },
+  };
+
+  /** Profile's Notifications card: this device's on/off state, then what to
+   * hear about. The category switches are the member's, not the device's —
+   * they apply to every phone the member has turned notifications on for. */
+  async function notificationSection() {
+    let config;
+    try {
+      config = await loadPushConfig({ refresh: true });
+    } catch {
+      return null;
+    }
+    const capability = push.pushCapability();
+    const subscription = capability === 'ready' ? await push.currentSubscription().catch(() => null) : null;
+    const onHere = Boolean(subscription) && push.permissionState() === 'granted';
+    const prefs = config.preferences;
+
+    const toggle = (key) => async () => {
+      try {
+        config.preferences = await api.portal.notifications.savePreferences({ [key]: !prefs[key] });
+      } catch (err) {
+        toast(err.message || 'Could not save', 'error');
+      }
+      switchTab('profile');
+    };
+
+    let deviceRow;
+    if (capability === 'ready') {
+      const devices = config.devices;
+      deviceRow = profileRow({
+        icon: 'bell',
+        tone: 'orange',
+        title: 'Push notifications',
+        sub: onHere
+          ? `On for this device${devices > 1 ? ` · ${devices} devices in total` : ''}`
+          : 'Off on this device — turn on to get reminders',
+        control: settingsSwitch(onHere, 'Push notifications', async () => {
+          if (onHere) {
+            await push.disablePush();
+            toast('Notifications turned off for this device', 'info');
+          } else {
+            await turnOnPush();
+          }
+          switchTab('profile');
+        }),
+      });
+    } else if (capability === 'ios-install') {
+      deviceRow = profileRow({
+        icon: 'download',
+        tone: 'orange',
+        title: 'Add to Home Screen first',
+        sub: 'iPhone and iPad deliver notifications only to Home Screen apps (iOS 16.4+)',
+        onclick: () => promptInstall(),
+      });
+    } else {
+      const copy = PUSH_UNAVAILABLE[capability] ?? PUSH_UNAVAILABLE.unsupported;
+      deviceRow = profileRow({ icon: 'alert', tone: 'rose', title: copy.title, sub: copy.sub });
+    }
+
+    const CATEGORY_ROWS = {
+      water: { icon: 'droplet', tone: 'blue', title: 'Water reminders', sub: 'At set times, if you are behind your daily goal' },
+      nutrition: { icon: 'utensils', tone: 'green', title: 'Meal tracking', sub: 'Around lunch and dinner, to log calories & macros' },
+      workout: { icon: 'timer', tone: 'orange', title: 'Workout nudges', sub: 'When a session is left running without being finished' },
+      announcements: {
+        icon: 'bell',
+        tone: 'purple',
+        title: `${isLibrary() ? 'Library' : 'Gym'} announcements`,
+        sub: 'Events and holiday hours — urgent closures always come through',
+      },
+      membership: { icon: 'crown', tone: 'orange', title: 'Renewal reminders', sub: 'Before your plan runs out' },
+    };
+
+    const testButton = h(
+      'button',
+      {
+        class: 'portal-prof-test',
+        type: 'button',
+        disabled: !onHere,
+        onclick: async (event) => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          try {
+            const res = await api.portal.notifications.test();
+            if (res.delivered > 0) toast(`Test sent to ${res.delivered} device${res.delivered === 1 ? '' : 's'}`);
+            else toast('The test could not be delivered — try turning notifications off and on again', 'error');
+          } catch (err) {
+            toast(err.message || 'Could not send a test', 'error');
+          } finally {
+            button.disabled = false;
+          }
+        },
+      },
+      h('span', { class: 'portal-prof-ico' }, renderIcon('bell', { size: 20 })),
+      h(
+        'span',
+        { class: 'portal-prof-text' },
+        h('strong', {}, 'Send a test notification'),
+        h('small', {}, onHere ? 'See how reminders look on this device' : 'Turn on notifications to try it'),
+      ),
+      h('span', { class: 'portal-prof-play' }, renderIcon('play', { size: 14 })),
+    );
+
+    return [
+      h('h3', { class: 'portal-prof-label' }, 'Notifications'),
+      h(
+        'div',
+        { class: 'portal-prof-card' },
+        deviceRow,
+        ...config.categories.map((key) => {
+          const row = CATEGORY_ROWS[key];
+          return row
+            ? profileRow({ ...row, control: settingsSwitch(Boolean(prefs[key]), row.title, toggle(key)) })
+            : null;
+        }),
+        profileRow({
+          icon: 'volume', tone: 'purple', title: 'Notification sound', sub: 'Play a sound when one arrives',
+          control: settingsSwitch(Boolean(prefs.sound), 'Notification sound', toggle('sound')),
+        }),
+        profileRow({
+          icon: 'smartphone', tone: 'green', title: 'Notification vibration', sub: 'Buzz when one arrives (Android)',
+          control: settingsSwitch(Boolean(prefs.vibrate), 'Notification vibration', toggle('vibrate')),
+        }),
+        testButton,
+      ),
+    ];
+  }
+
   /* ----------------------------------------------------------- Profile tab */
 
   function openChangePinModal() {
@@ -4025,6 +4410,9 @@ function renderPortalApp(ctx, initialMe) {
       ),
     );
 
+    const notifications = await notificationSection();
+    if (notifications) body.append(...notifications);
+
     /* Settings */
     const installRow = profileRow({
       icon: 'download', tone: 'blue', title: 'Add to Home Screen', sub: 'Install the app on this phone',
@@ -4054,7 +4442,12 @@ function renderPortalApp(ctx, initialMe) {
         {
           class: 'portal-prof-signout',
           type: 'button',
-          onclick: () => {
+          onclick: async () => {
+            // Before the token goes: the next person to sign in on this phone
+            // must not receive this member's reminders.
+            await push.disablePush().catch(() => {});
+            detachPushListener?.();
+            detachPushListener = null;
             memberSession.clear();
             ctx.navigate('/portal/login');
           },
@@ -4101,18 +4494,26 @@ function renderPortalApp(ctx, initialMe) {
       h(
         'button',
         {
-          class: 'portal-qr-btn',
+          class: 'portal-qr-btn portal-bell-btn',
           type: 'button',
           title: 'Notifications',
           'aria-label': 'Notifications',
-          onclick: () => toast('You’re all caught up'),
+          onclick: openNotificationCenter,
         },
         renderIcon('bell', { size: 20 }),
+        bellBadge,
       ),
     ),
   );
 
-  switchTab('home');
+  // A tapped notification lands on #/portal/<screen> (see sw.js). The hash is
+  // put back to plain #/portal straight away — tabs never touch the hash, so a
+  // reload would otherwise reopen the notification's screen forever after.
+  const requested = window.location.hash.replace(/^#\/portal\/?/, '').split(/[/?]/)[0];
+  if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
+  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay']);
+  switchTab(reachable.has(requested) ? requested : 'home');
+  if (requested === 'notifications') openNotificationCenter();
 
   return h('div', { class: 'portal-frame' }, h('div', { class: 'portal-app' }, topbar, content, tabbar));
 }

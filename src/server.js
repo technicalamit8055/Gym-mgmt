@@ -6,6 +6,8 @@ import { assertProductionReady, config, DEFAULT_TENANT_SLUG } from './config.js'
 import { closeDb, tenantStorage } from './db.js';
 import { closeRegistryDb, listTenants, tenantDbPath } from './tenants.js';
 import { sendAutomatedBirthdayWishes, sendAutomatedRenewalReminders } from './maintenance.js';
+import { sweepPushNotifications } from './notifications.js';
+import { vapidKeys } from './webPush.js';
 import { closeAllWhatsAppSessions, connectWhatsApp, hasStoredCredentials } from './whatsapp.js';
 
 assertProductionReady();
@@ -25,6 +27,9 @@ const wantsDefaultAdmin = process.env.NODE_ENV !== 'production'
   || Boolean(process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD);
 
 const created = wantsDefaultAdmin ? ensureAdminAccount() : null;
+// Loaded (or generated and saved) up front, so a read-only or full volume is
+// a loud startup error rather than the first member's "Enable" tap failing.
+vapidKeys();
 const app = createApp();
 
 /**
@@ -91,6 +96,38 @@ function restoreWhatsAppSessions() {
   }
 }
 
+/**
+ * Push reminders (hydration, meals, workout keep-alive, renewals) for every
+ * gym, each inside its own tenant context like the WhatsApp sweep above. More
+ * frequent than that sweep because these are tied to a time of day; each
+ * reminder is deduplicated per member, so overlapping passes are harmless.
+ */
+let pushSweepRunning = false;
+async function sweepPushReminders() {
+  // A slow push service must not let passes pile up on top of each other.
+  if (pushSweepRunning) return;
+  pushSweepRunning = true;
+  try {
+    for (const tenant of everyTenant()) {
+      try {
+        await tenantStorage.run(
+          {
+            slug: tenant.slug,
+            dbFile: tenant.dbFile,
+            timezone: tenant.timezone,
+            businessType: tenant.businessType,
+          },
+          () => sweepPushNotifications(),
+        );
+      } catch (err) {
+        console.error(`[push:${tenant.slug}] reminder sweep failed:`, err.message);
+      }
+    }
+  } finally {
+    pushSweepRunning = false;
+  }
+}
+
 const REMINDER_INTERVAL_MS = 60 * 60 * 1000;
 
 const host = process.env.HOST || '0.0.0.0';
@@ -103,6 +140,8 @@ const server = app.listen(config.port, host, () => {
 // cannot fire reminders/wishes on every restart.
 const firstSweep = setTimeout(sweepAutomatedMessages, 60_000);
 const sweepTimer = setInterval(sweepAutomatedMessages, REMINDER_INTERVAL_MS);
+const firstPushSweep = setTimeout(sweepPushReminders, 30_000);
+const pushSweepTimer = setInterval(sweepPushReminders, config.push.sweepIntervalMs);
 
 const stopBackups = startBackupSchedule();
 
@@ -111,6 +150,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     stopBackups?.();
     clearTimeout(firstSweep);
     clearInterval(sweepTimer);
+    clearTimeout(firstPushSweep);
+    clearInterval(pushSweepTimer);
     closeAllWhatsAppSessions();
     server.close(() => {
       closeDb();

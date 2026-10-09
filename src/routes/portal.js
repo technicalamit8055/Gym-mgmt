@@ -5,6 +5,7 @@ import { ATTENDANCE_SELECT, publicVisit } from '../checkin.js';
 import { all, get, getBusinessType, run, tx } from '../db.js';
 import { badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
 import {
+  DEFAULT_DIET_TARGETS,
   MEAL_TYPES,
   MUSCLE_GROUPS,
   SET_TYPES,
@@ -715,17 +716,6 @@ function ensureDietLog(memberId, logDate) {
   return get('SELECT * FROM diet_logs WHERE member_id = ? AND log_date = ?', [memberId, logDate]);
 }
 
-/** The default targets a member sees before a trainer has assigned them
- * anything: enough to make the rings mean something on day one, deliberately
- * middle-of-the-road rather than a guess dressed up as a prescription. */
-const FALLBACK_DIET_TARGETS = {
-  target_calories: 2000,
-  target_protein_g: 120,
-  target_carbs_g: 220,
-  target_fats_g: 65,
-  target_water_ml: 3000,
-};
-
 portalRoutes.get('/diets/current', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
   const assignment = get(
     `SELECT a.*, u.name AS assigned_by_name
@@ -747,7 +737,7 @@ portalRoutes.get('/diets/current', requireMemberAuth, requireModule('fitness'), 
           target_fats_g: plan.target_fats_g,
           target_water_ml: plan.target_water_ml,
         }
-      : FALLBACK_DIET_TARGETS,
+      : DEFAULT_DIET_TARGETS,
     using_default_targets: !plan,
   });
 });

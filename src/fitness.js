@@ -26,6 +26,19 @@ export const WORKOUT_GOALS = ['muscle_gain', 'fat_loss', 'strength', 'endurance'
 export const WORKOUT_LEVELS = ['beginner', 'intermediate', 'advanced'];
 export const DIET_GOALS = ['fat_loss', 'muscle_gain', 'maintenance', 'keto', 'high_protein'];
 
+/** The default targets a member sees before a trainer has assigned them
+ * anything: enough to make the rings mean something on day one, deliberately
+ * middle-of-the-road rather than a guess dressed up as a prescription. Shared
+ * with the hydration reminders (notifications.js), which have to measure a
+ * member against the same goal their Diet tab shows them. */
+export const DEFAULT_DIET_TARGETS = {
+  target_calories: 2000,
+  target_protein_g: 120,
+  target_carbs_g: 220,
+  target_fats_g: 65,
+  target_water_ml: 3000,
+};
+
 /**
  * Epley's estimate: what a set of `reps` at `weight` projects to for a single.
  *

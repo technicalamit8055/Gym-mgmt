@@ -964,6 +964,128 @@ const MIGRATIONS = [
   // row of their own.
   (db) => ensureColumn(db, 'plans', 'includes_fitness_addon', 'INTEGER NOT NULL DEFAULT 0'),
   (db) => seedFitnessLibraries(db),
+
+  // Web Push (src/notifications.js). A subscription is one browser on one
+  // device; `endpoint` is unique because the same phone signing in as a second
+  // member (a shared family tablet) must move to that member, not notify both.
+  // `path_prefix` is how that device addressed this gym (/g/acme or ''), which
+  // a background sweep has no request to read it from — it is what makes a
+  // tapped notification open the right gym.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id       INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        endpoint        TEXT NOT NULL UNIQUE,
+        p256dh          TEXT NOT NULL,
+        auth            TEXT NOT NULL,
+        platform        TEXT NOT NULL DEFAULT 'other' CHECK (platform IN ('ios', 'android', 'desktop', 'other')),
+        user_agent      TEXT,
+        path_prefix     TEXT NOT NULL DEFAULT '',
+        failure_count   INTEGER NOT NULL DEFAULT 0,
+        last_success_at TEXT,
+        last_error      TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_push_subs_member ON push_subscriptions(member_id)');
+  },
+  // Defaults are "on": a member only gets here by tapping Enable, and asking
+  // them to then switch each category on as well would be a second opt-in.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notification_preferences (
+        member_id     INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        water         INTEGER NOT NULL DEFAULT 1,
+        nutrition     INTEGER NOT NULL DEFAULT 1,
+        workout       INTEGER NOT NULL DEFAULT 1,
+        announcements INTEGER NOT NULL DEFAULT 1,
+        membership    INTEGER NOT NULL DEFAULT 1,
+        sound         INTEGER NOT NULL DEFAULT 1,
+        vibrate       INTEGER NOT NULL DEFAULT 1,
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  // The member's notification center. `dedupe_key` is what makes the sweeps
+  // safe to re-run every few minutes: "water:2026-10-10:11:00" can only be
+  // inserted once per member, the same idea as whatsapp_logs' sent-today join.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_notifications (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id       INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        category        TEXT NOT NULL
+                        CHECK (category IN ('water', 'nutrition', 'workout', 'announcement', 'membership', 'test')),
+        title           TEXT NOT NULL,
+        body            TEXT NOT NULL,
+        screen          TEXT,
+        announcement_id INTEGER REFERENCES push_announcements(id) ON DELETE CASCADE,
+        dedupe_key      TEXT,
+        pushed          INTEGER NOT NULL DEFAULT 0,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        read_at         TEXT
+      )
+    `);
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_notif_dedupe ON member_notifications(member_id, dedupe_key) WHERE dedupe_key IS NOT NULL',
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_member_notif_inbox ON member_notifications(member_id, created_at)');
+  },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS push_announcements (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        title        TEXT NOT NULL,
+        body         TEXT NOT NULL,
+        kind         TEXT NOT NULL DEFAULT 'general'
+                     CHECK (kind IN ('general', 'closure', 'maintenance', 'holiday', 'event')),
+        urgent       INTEGER NOT NULL DEFAULT 0,
+        created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        recipients   INTEGER NOT NULL DEFAULT 0,
+        devices      INTEGER NOT NULL DEFAULT 0,
+        delivered    INTEGER NOT NULL DEFAULT 0,
+        failed       INTEGER NOT NULL DEFAULT 0,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  // A workout in progress lives in the member's browser (see activeSession in
+  // portal.js); this is the server's only view of it, reported by the portal
+  // when a session starts and cleared when it is saved or discarded. It is
+  // what lets the keep-alive nudge reach a phone that is locked in a pocket.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS active_workouts (
+        member_id    INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        workout_name TEXT NOT NULL,
+        started_at   TEXT NOT NULL,
+        nudged_at    TEXT,
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  // Gym-wide schedule for the automated nudges. Times are the gym's own wall
+  // clock ("11:00"), comma-separated where there can be several.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS push_settings (
+        id                     INTEGER PRIMARY KEY CHECK (id = 1),
+        water_enabled          INTEGER NOT NULL DEFAULT 1,
+        water_times            TEXT NOT NULL DEFAULT '11:00,15:00,19:00',
+        nutrition_enabled      INTEGER NOT NULL DEFAULT 1,
+        lunch_time             TEXT NOT NULL DEFAULT '14:00',
+        dinner_time            TEXT NOT NULL DEFAULT '21:00',
+        workout_enabled        INTEGER NOT NULL DEFAULT 1,
+        workout_nudge_minutes  INTEGER NOT NULL DEFAULT 120 CHECK (workout_nudge_minutes BETWEEN 30 AND 600),
+        membership_enabled     INTEGER NOT NULL DEFAULT 1,
+        membership_days_before INTEGER NOT NULL DEFAULT 3 CHECK (membership_days_before BETWEEN 0 AND 60),
+        updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.prepare('INSERT OR IGNORE INTO push_settings (id) VALUES (1)').run();
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

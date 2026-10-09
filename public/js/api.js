@@ -419,6 +419,11 @@ export const api = {
   sendWhatsAppTest: (payload) => request('POST', '/whatsapp/send-test', payload),
   whatsappLogs: (params) => request('GET', `/whatsapp/logs${query(params)}`),
 
+  pushSettings: () => request('GET', '/notifications/settings'),
+  updatePushSettings: (payload) => request('PUT', '/notifications/settings', payload),
+  announcements: (params) => request('GET', `/notifications/announcements${query(params)}`),
+  sendAnnouncement: (payload) => request('POST', '/notifications/announcements', payload),
+
   // Diet & workout programming, from the staff side. Templates use PUT rather
   // than PATCH because a routine is edited as a whole document — the day tree
   // that comes back replaces the one that was there.
@@ -492,6 +497,19 @@ export const api = {
     deleteFoodEntry: (id) => request('DELETE', `/portal/diets/entries/${id}`, undefined, { member: true }),
     logWater: (payload) => request('POST', '/portal/diets/water', payload, { member: true }),
     foods: (params) => request('GET', `/portal/diets/foods${query(params)}`, undefined, { member: true }),
+
+    // Push notifications and the notification center (see public/js/push.js).
+    notifications: {
+      config: () => request('GET', '/portal/notifications/config', undefined, { member: true }),
+      subscribe: (subscription) => request('POST', '/portal/notifications/subscriptions', subscription, { member: true }),
+      unsubscribe: (endpoint) => request('DELETE', '/portal/notifications/subscriptions', { endpoint }, { member: true }),
+      savePreferences: (prefs) => request('PUT', '/portal/notifications/preferences', prefs, { member: true }),
+      list: (params) => request('GET', `/portal/notifications${query(params)}`, undefined, { member: true }),
+      markRead: (ids) => request('POST', '/portal/notifications/read', ids ? { ids } : {}, { member: true }),
+      test: () => request('POST', '/portal/notifications/test', {}, { member: true }),
+      workoutStarted: (payload) => request('PUT', '/portal/notifications/active-workout', payload, { member: true }),
+      workoutEnded: () => request('DELETE', '/portal/notifications/active-workout', undefined, { member: true }),
+    },
     downloadReceipt: async (id) => {
       const res = await fetch(`${pathPrefix}/api/portal/payments/${id}/receipt`, {
         headers: { Authorization: `Bearer ${memberSession.token}` },

@@ -15,7 +15,7 @@
  * Bump VERSION whenever a shell file changes in a way that must not wait for
  * revalidation; installs then re-run and the old caches are dropped.
  */
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = `gymbook-shell-${VERSION}`;
 const RUNTIME_CACHE = `gymbook-runtime-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, RUNTIME_CACHE]);
@@ -171,4 +171,108 @@ self.addEventListener('fetch', (event) => {
 
   const isShell = SHELL_URLS.includes(appPath(url.pathname));
   event.respondWith(staleWhileRevalidate(event, isShell ? SHELL_CACHE : RUNTIME_CACHE));
+});
+
+/* ------------------------------------------------------------ web push */
+
+/**
+ * Member notifications (see src/notifications.js for what is sent and when).
+ *
+ * Every push must end in a visible notification: Chrome shows a generic "site
+ * updated in the background" one in its place, and Safari revokes the
+ * permission of a site that pushes silently. So the payload only ever changes
+ * *how* it is shown, never *whether*.
+ */
+const VIBRATE = { normal: [120, 60, 120], urgent: [250, 100, 250, 100, 400] };
+
+/** Whichever app window, if any, the member is looking at right now. */
+async function windowClients() {
+  return self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(
+    (async () => {
+      let data = {};
+      try {
+        data = event.data ? event.data.json() : {};
+      } catch {
+        data = { body: event.data ? event.data.text() : '' };
+      }
+
+      const windows = await windowClients();
+      // The app open on screen plays its own chime and buzz (see push.js), so
+      // the system one would only be a second, out-of-sync copy of it.
+      const foreground = windows.some((c) => c.focused && c.visibilityState === 'visible');
+      for (const client of windows) client.postMessage({ type: 'gymbook:push', notification: data, foreground });
+
+      // Home-screen icon count (iOS 16.4+ installed apps, Chrome on desktop).
+      if (Number.isFinite(data.badge) && 'setAppBadge' in self.navigator) {
+        try {
+          if (data.badge > 0) await self.navigator.setAppBadge(data.badge);
+          else await self.navigator.clearAppBadge();
+        } catch {
+          // Badging is a nicety; never let it stop the notification itself.
+        }
+      }
+
+      const quiet = foreground || !data.sound;
+      await self.registration.showNotification(data.title || 'GymBook', {
+        body: data.body || '',
+        icon: data.icon || '/icons/icon-192.png',
+        tag: data.tag || undefined,
+        // A replaced reminder (same tag) should still announce itself.
+        renotify: Boolean(data.tag),
+        timestamp: data.ts || Date.now(),
+        silent: quiet,
+        vibrate: !quiet && data.vibrate ? (data.urgent ? VIBRATE.urgent : VIBRATE.normal) : undefined,
+        // A closure notice stays on screen until it is dealt with.
+        requireInteraction: Boolean(data.urgent),
+        data: { url: data.url || '/#/portal', id: data.id, category: data.category },
+      });
+    })(),
+  );
+});
+
+/** `/g/acme/index.html`, `/g/acme/` and `/g/acme` are all the same app. */
+const appBase = (href) => {
+  const url = new URL(href, self.location.origin);
+  return url.origin + url.pathname.replace(/index\.html$/, '').replace(/\/$/, '');
+};
+
+/**
+ * Opens the screen the notification is about. An app window already open on
+ * this gym is reused — focused and told where to go — rather than stacking a
+ * second copy of the app on top of it.
+ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '/#/portal', self.location.origin).href;
+
+  event.waitUntil(
+    (async () => {
+      const windows = await windowClients();
+      const existing = windows.find((c) => appBase(c.url) === appBase(target));
+      if (existing) {
+        await existing.focus();
+        existing.postMessage({ type: 'gymbook:navigate', url: target });
+        return;
+      }
+      await self.clients.openWindow(target);
+    })(),
+  );
+});
+
+/**
+ * The browser rotated this subscription (expiry, or the push service asked).
+ * Resubscribing here keeps the device reachable; telling the server needs the
+ * member's session, which lives in the page, so the portal re-registers the
+ * new subscription the next time it opens (syncPushSubscription in push.js).
+ */
+self.addEventListener('pushsubscriptionchange', (event) => {
+  const key = event.oldSubscription?.options?.applicationServerKey;
+  if (!key) return;
+  event.waitUntil(
+    self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }).catch(() => {}),
+  );
 });

@@ -17,6 +17,7 @@ import { lockerRoutes } from './routes/lockers.js';
 import { memberRoutes } from './routes/members.js';
 import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocuments.js';
 import { memberPhotoRoutes } from './routes/memberPhotos.js';
+import { notificationRoutes, portalNotificationRoutes } from './routes/notifications.js';
 import { paymentRoutes } from './routes/payments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
@@ -117,7 +118,11 @@ export function createApp() {
   app.use('/api/staff', staffRoutes);
   app.use('/api/devices', deviceRoutes);
   app.use('/api/members', memberRoutes);
+  // Member push subscriptions, preferences and the notification center — a
+  // router of its own (see routes/notifications.js) under the portal's path.
+  app.use('/api/portal/notifications', portalNotificationRoutes);
   app.use('/api/portal', portalRoutes);
+  app.use('/api/notifications', notificationRoutes);
   app.use('/api/plans', planRoutes);
   app.use('/api/subscriptions', subscriptionRoutes);
   app.use('/api/payments', paymentRoutes);

@@ -98,6 +98,25 @@ export const config = {
     // DNS servers again.
     checkCooldownMs: Number(process.env.CUSTOM_DOMAIN_CHECK_COOLDOWN_MS ?? 10_000),
   },
+  // Web Push (src/webPush.js). The VAPID key pair is generated on first boot
+  // and kept in keyFile, beside the platform DB so it rides the same volume —
+  // losing it silently unsubscribes every member. Set both keys explicitly to
+  // pin them instead (e.g. when several machines serve one origin).
+  push: {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || '',
+    // Push services contact this address if our sends misbehave. Apple rejects
+    // a VAPID token without a real mailto:/https: subject.
+    subject:
+      process.env.VAPID_SUBJECT ||
+      (process.env.PLATFORM_ADMIN_EMAIL ? `mailto:${process.env.PLATFORM_ADMIN_EMAIL}` : 'mailto:notifications@gymbook.app'),
+    keyFile:
+      process.env.VAPID_KEY_FILE ||
+      path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'vapid-keys.json'),
+    // How often server.js runs the reminder sweep. Short, because a hydration
+    // reminder at 11:00 should not arrive at 11:55.
+    sweepIntervalMs: Number(process.env.PUSH_SWEEP_INTERVAL_MS || 5 * 60_000),
+  },
   // Operator console credentials. Both must be set for the console to exist
   // at all — an unset password must never mean "no password required".
   platformAdminEmail: (process.env.PLATFORM_ADMIN_EMAIL || '').toLowerCase(),
