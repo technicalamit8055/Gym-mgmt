@@ -71,7 +71,7 @@ describe('service worker push handling', () => {
   it('shows the notification with sound, vibration and the deep link', async () => {
     await dispatch(
       'push',
-      pushEvent({ title: 'Time for water', body: 'You are behind', url: '/g/acme/#/portal/diet', tag: 'water-reminder', sound: 1, vibrate: 1, badge: 3 }),
+      pushEvent({ title: 'Time for water', body: 'You are behind', url: '/g/acme/#/portal/diet', tag: 'water-reminder', sound: 1, vibrate: 1, unread: 3, icon: '/api/platform/tenant-icon/acme?v=2', badge: '/icons/badge-96.png' }),
     );
     assert.equal(shown.length, 1);
     assert.equal(shown[0].title, 'Time for water');
@@ -80,6 +80,8 @@ describe('service worker push handling', () => {
     assert.equal(shown[0].options.data.url, '/g/acme/#/portal/diet');
     assert.equal(shown[0].options.renotify, true);
     assert.deepEqual(badges, [3]);
+    assert.equal(shown[0].options.icon, '/api/platform/tenant-icon/acme?v=2');
+    assert.equal(shown[0].options.badge, '/icons/badge-96.png');
   });
 
   it('stays silent when the member turned sound off', async () => {

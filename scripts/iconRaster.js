@@ -174,6 +174,20 @@ export const ICON_SPECS = [
   { file: 'favicon-32.png', size: 32 },
 ];
 
+/**
+ * The small status-bar icon Android shows for a push notification
+ * (`badge` in sw.js). Android paints it from the alpha channel alone, in a
+ * single system colour, so this is the bare mark on transparency — no tile —
+ * drawn larger than on the app icon because it renders at about 24dp.
+ */
+export function renderBadge(outFile, drawMark, { size = 96, scale = 1.25 } = {}) {
+  const c = canvas(size * SS);
+  drawMark(c, scale);
+  const png = encodePng(downsample(c, size), size);
+  fs.writeFileSync(outFile, png);
+  console.log(`${path.basename(outFile).padEnd(22)} ${size}×${size}  ${(png.length / 1024).toFixed(1)} kB`);
+}
+
 export function renderIconSet(outDir, colors, drawMark, specs = ICON_SPECS) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const { file, size, bleed, scale } of specs) {

@@ -20,7 +20,7 @@ import {
   today,
 } from '../ui.js';
 import { cropAndResizeImage } from '../photo.js';
-import { isIos, onInstallChange, promptInstall } from '../pwa.js';
+import { canInstall, isIos, onInstallChange, promptInstall } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
 import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
@@ -3859,7 +3859,7 @@ function renderPortalApp(ctx, initialMe) {
 
   detachPushListener?.();
   detachPushListener = push.onPushMessage((notification, foreground) => {
-    setUnread(Number.isFinite(notification.badge) ? notification.badge : unread + 1);
+    setUnread(Number.isFinite(notification.unread) ? notification.unread : unread + 1);
     if (!foreground) return;
     // sw.js left the system notification silent because the app is on
     // screen; this is the sound and buzz in its place.
@@ -4079,6 +4079,21 @@ function renderPortalApp(ctx, initialMe) {
           switchTab('profile');
         }),
       });
+      // In a plain browser tab Android files every notification under
+      // "Chrome · <domain>" with an Unsubscribe button; installed, they come
+      // from the gym's own app. Only an install can change that.
+      if (onHere && canInstall()) {
+        deviceRow = [
+          deviceRow,
+          profileRow({
+            icon: 'download',
+            tone: 'blue',
+            title: 'Install the app',
+            sub: `So notifications come from ${gymDisplayName(ctx)}, not your browser`,
+            onclick: () => promptInstall(),
+          }),
+        ];
+      }
     } else if (capability === 'ios-install') {
       deviceRow = profileRow({
         icon: 'download',
@@ -4140,7 +4155,7 @@ function renderPortalApp(ctx, initialMe) {
       h(
         'div',
         { class: 'portal-prof-card' },
-        deviceRow,
+        ...[deviceRow].flat(),
         ...config.categories.map((key) => {
           const row = CATEGORY_ROWS[key];
           return row

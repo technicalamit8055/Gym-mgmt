@@ -1,8 +1,10 @@
 import { gymOffsetMinutes } from './clock.js';
-import { all, get, run, tx } from './db.js';
+import { config, DEFAULT_TENANT_SLUG } from './config.js';
+import { all, get, run, tenantStorage, tx } from './db.js';
 import { DEFAULT_DIET_TARGETS, fitnessAccessFor } from './fitness.js';
 import { addDays } from './validate.js';
 import { moduleEnabled, say } from './verticals.js';
+import { tenantBranding } from './tenants.js';
 import { sendPush } from './webPush.js';
 
 /**
@@ -275,9 +277,48 @@ async function pushToSubscriptions(subscriptions, buildPayload, options) {
   return { delivered, failed: outcomes.length - delivered };
 }
 
+/**
+ * How a push should look for *this* gym: its own name, and its own uploaded
+ * logo as the notification's large icon — the same image its installed app
+ * uses (routes/pwa.js) — falling back to the GymBook/SeatBook mark.
+ *
+ * The URLs are origin-relative and prefix-free on purpose: the tenant-icon
+ * routes take the slug from the path, so they answer on the root domain, a
+ * /g/<slug> address, a subdomain or a custom domain alike.
+ */
+function branding() {
+  const library = moduleEnabled('seats');
+  const slug = tenantStorage.getStore()?.slug;
+  let tenant = null;
+  if (slug && slug !== DEFAULT_TENANT_SLUG) {
+    try {
+      tenant = tenantBranding(slug);
+    } catch {
+      // No registry (single-gym install): the defaults below are right.
+    }
+  }
+  const version = tenant?.logo_version || 1;
+  let icon = library ? '/icons/library/icon-192.png' : '/icons/icon-192.png';
+  if (tenant?.has_icon) icon = `/api/platform/tenant-icon/${slug}?v=${version}`;
+  else if (tenant?.has_logo) icon = `/api/platform/tenant-logo/${slug}?v=${version}`;
+  return {
+    name: tenant?.gym_name || tenant?.display_name || config.gymName || (library ? 'SeatBook' : 'GymBook'),
+    icon,
+    // Android's status-bar icon: a single-colour silhouette (npm run icons:gen).
+    badge: library ? '/icons/library/badge-96.png' : '/icons/badge-96.png',
+  };
+}
+
+/**
+ * Who an announcement is from has to be in its title: until a member installs
+ * the app, Android heads every notification "Chrome · <domain>", and a member
+ * with two gyms on their phone needs to know which one is closed today.
+ */
+const announcementTitle = (gymName, title) => `${gymName}: ${title}`;
+
 /** What sw.js's push handler reads. Kept small — push services cap payloads
  * at about 4 KB, and the body is the only field of any length. */
-function payloadFor(notification, prefs, { badge, sub, urgent = false }) {
+function payloadFor(notification, prefs, { unread, sub, brand, urgent = false }) {
   return {
     v: 1,
     id: notification.id,
@@ -285,14 +326,14 @@ function payloadFor(notification, prefs, { badge, sub, urgent = false }) {
     title: notification.title,
     body: notification.body,
     url: portalUrl(sub.path_prefix, notification.screen),
-    // SeatBook's book for a library, GymBook's barbell otherwise — the same
-    // split as the default home-screen icons in routes/pwa.js.
-    icon: moduleEnabled('seats') ? '/icons/library/icon-192.png' : '/icons/icon-192.png',
+    icon: brand.icon,
+    badge: brand.badge,
     tag: notification.tag,
     urgent: urgent ? 1 : 0,
     sound: prefs.sound ? 1 : 0,
     vibrate: prefs.vibrate ? 1 : 0,
-    badge,
+    // The member's unread count, for the home-screen icon badge.
+    unread,
     ts: Date.now(),
   };
 }
@@ -330,13 +371,14 @@ export function notifyMember(memberId, { category, title, body, screen, dedupeKe
   const subs = all('SELECT * FROM push_subscriptions WHERE member_id = ?', [memberId]);
   if (!subs.length) return Promise.resolve({ id, devices: 0, delivered: 0, failed: 0 });
 
-  const badge = unreadCount(memberId);
+  const unread = unreadCount(memberId);
+  const brand = branding();
   const notification = { id, category, title, body, screen, tag: tag || `${category}-${id}` };
   return track(
     (async () => {
       const result = await pushToSubscriptions(
         subs,
-        (sub) => payloadFor(notification, prefs, { badge, sub }),
+        (sub) => payloadFor(notification, prefs, { unread, sub, brand }),
         () => ({ ttl, urgency, topic: tag }),
       );
       if (result.delivered) run('UPDATE member_notifications SET pushed = 1 WHERE id = ?', [id]);
@@ -389,6 +431,8 @@ export function createAnnouncement({ title, body, kind = 'general', urgent = fal
   );
   run('UPDATE push_announcements SET devices = ? WHERE id = ?', [targets.length, announcement.id]);
 
+  const brand = branding();
+  const pushTitle = announcementTitle(brand.name, title);
   const delivery = track(
     (async () => {
       const result = await pushToSubscriptions(
@@ -398,13 +442,13 @@ export function createAnnouncement({ title, body, kind = 'general', urgent = fal
             {
               id: sub.notification_id,
               category: 'announcement',
-              title,
+              title: pushTitle,
               body,
               screen: 'notifications',
               tag: `announcement-${announcement.id}`,
             },
             { sound: sub.pref_sound, vibrate: sub.pref_vibrate },
-            { badge: sub.unread, sub, urgent: announcement.urgent },
+            { unread: sub.unread, sub, brand, urgent: announcement.urgent },
           ),
         () => ({
           // A closure notice is still worth reading a day late; an offline

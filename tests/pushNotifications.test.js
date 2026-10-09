@@ -215,7 +215,10 @@ describe('member push notifications', () => {
     assert.equal(payload.category, 'test');
     assert.equal(payload.url, '/g/pushgym/#/portal/notifications');
     assert.equal(payload.sound, 1);
-    assert.equal(payload.badge, 1);
+    assert.equal(payload.unread, 1);
+    // No uploaded logo: the GymBook mark, plus the status-bar silhouette.
+    assert.equal(payload.icon, '/icons/icon-192.png');
+    assert.equal(payload.badge, '/icons/badge-96.png');
   });
 
   it('lists the notification center and marks it read', async () => {
@@ -225,6 +228,18 @@ describe('member push notifications', () => {
 
     const read = await call('POST', '/api/portal/notifications/read', {}, { token: memberToken });
     assert.equal(read.body.unread, 0);
+  });
+
+  it("uses the gym's own uploaded logo as the notification icon", async () => {
+    const { getRegistryDb } = await import('../src/tenants.js');
+    getRegistryDb()
+      .prepare("UPDATE tenants SET icon_bytes = ?, icon_mime = 'image/png', logo_version = 4 WHERE slug = 'pushgym'")
+      .run(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    sent.length = 0;
+    await call('POST', '/api/portal/notifications/test', {}, { token: memberToken });
+    assert.equal(readPush(phone, sent[0]).icon, '/api/platform/tenant-icon/pushgym?v=4');
+    getRegistryDb().prepare("UPDATE tenants SET icon_bytes = NULL, icon_mime = NULL WHERE slug = 'pushgym'").run();
+    await call('POST', '/api/portal/notifications/read', {}, { token: memberToken });
   });
 
   it('nudges for water at a scheduled time only when the member is behind', async () => {
@@ -373,6 +388,8 @@ describe('member push notifications', () => {
     assert.equal(sent.length, 2);
     const payload = readPush(phone, sent.find((s) => s.url === phone.json.endpoint));
     assert.equal(payload.urgent, 1);
+    // Named for the gym on the lock screen; the notification center keeps the plain title.
+    assert.equal(payload.title, 'Push Gym: Closed today');
     assert.equal(sent[0].headers.Urgency, 'high');
   });
 

@@ -6,7 +6,7 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fill, renderIconSet, roundedRect } from './iconRaster.js';
+import { fill, renderBadge, renderIconSet, roundedRect } from './iconRaster.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -43,3 +43,4 @@ function drawBook(c, k) {
 }
 
 renderIconSet(path.join(ROOT, 'public', 'icons', 'library'), COLORS, drawBook);
+renderBadge(path.join(ROOT, 'public', 'icons', 'library', 'badge-96.png'), drawBook);

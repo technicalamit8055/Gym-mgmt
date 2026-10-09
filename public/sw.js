@@ -15,7 +15,7 @@
  * Bump VERSION whenever a shell file changes in a way that must not wait for
  * revalidation; installs then re-run and the old caches are dropped.
  */
-const VERSION = 'v5';
+const VERSION = 'v6';
 const SHELL_CACHE = `gymbook-shell-${VERSION}`;
 const RUNTIME_CACHE = `gymbook-runtime-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, RUNTIME_CACHE]);
@@ -207,9 +207,9 @@ self.addEventListener('push', (event) => {
       for (const client of windows) client.postMessage({ type: 'gymbook:push', notification: data, foreground });
 
       // Home-screen icon count (iOS 16.4+ installed apps, Chrome on desktop).
-      if (Number.isFinite(data.badge) && 'setAppBadge' in self.navigator) {
+      if (Number.isFinite(data.unread) && 'setAppBadge' in self.navigator) {
         try {
-          if (data.badge > 0) await self.navigator.setAppBadge(data.badge);
+          if (data.unread > 0) await self.navigator.setAppBadge(data.unread);
           else await self.navigator.clearAppBadge();
         } catch {
           // Badging is a nicety; never let it stop the notification itself.
@@ -219,7 +219,10 @@ self.addEventListener('push', (event) => {
       const quiet = foreground || !data.sound;
       await self.registration.showNotification(data.title || 'GymBook', {
         body: data.body || '',
+        // Large icon: the gym's own logo. Badge: the status-bar silhouette —
+        // without it Android falls back to a generic bell.
         icon: data.icon || '/icons/icon-192.png',
+        badge: data.badge || '/icons/badge-96.png',
         tag: data.tag || undefined,
         // A replaced reminder (same tag) should still announce itself.
         renotify: Boolean(data.tag),

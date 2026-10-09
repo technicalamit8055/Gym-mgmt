@@ -131,6 +131,21 @@ export function findTenantBySlug(slug) {
   return plain(getRegistryDb().prepare('SELECT * FROM tenants WHERE slug = ?').get(slug));
 }
 
+/** What a push notification needs to look like it came from this gym — its
+ * name and whether it has an icon/logo — without reading either image BLOB. */
+export function tenantBranding(slug) {
+  return plain(
+    getRegistryDb()
+      .prepare(
+        `SELECT slug, gym_name, display_name, logo_version,
+                (icon_bytes IS NOT NULL AND icon_mime IS NOT NULL) AS has_icon,
+                (logo_bytes IS NOT NULL AND logo_mime IS NOT NULL) AS has_logo
+         FROM tenants WHERE slug = ?`,
+      )
+      .get(slug),
+  );
+}
+
 /**
  * A registry row with its image BLOBs dropped, safe to serialise into JSON.
  *
