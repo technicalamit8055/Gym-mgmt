@@ -18,11 +18,13 @@ import { addDays, parse, today } from '../validate.js';
 import { parsePhotoDataUrl } from '../photo.js';
 import { BUSINESS_TYPES, verticalFor } from '../verticals.js';
 import { billingRoutes } from './billing.js';
+import { tenantDomainRoutes } from './customDomains.js';
 import { platformAdminRoutes, isPlatformAdminConfigured } from './platformAdmin.js';
 
 export const platformRoutes = Router();
 platformRoutes.use('/billing', billingRoutes);
 platformRoutes.use('/admin', platformAdminRoutes);
+platformRoutes.use('/domains', tenantDomainRoutes);
 
 // IP-keyed, not per-slug: each signup provisions a real SQLite file, so this
 // guards against spam-tenant creation, not credential guessing.

@@ -742,6 +742,50 @@ describe('Heavy-style workout logging in the portal', () => {
     assert.equal(detail.body.member_code, memberCode);
     assert.ok(detail.body.sets.length > 0);
   });
+
+  it('charts one exercise across every session it was in', async () => {
+    // Left after the deletion above: Upper (40×10 warmup, 80×5, 80×5) and New best (85×5).
+    const res = await call(
+      'GET',
+      `/api/portal/workouts/exercise-history?name=${encodeURIComponent('barbell bench press')}`,
+      undefined,
+      { token: memberToken },
+    );
+    assert.equal(res.status, 200);
+    const { sessions, records } = res.body;
+    assert.deepEqual(sessions.map((s) => s.workout_name), ['New best', 'Upper (Strength)'], 'newest first, any letter case');
+    assert.ok(sessions.every((s) => s.sets.every((set) => set.weight_kg > 0)));
+
+    const upper = sessions[1];
+    assert.equal(upper.sets.length, 3, 'the warmup is listed, the other exercise is not');
+    assert.equal(upper.volume_kg, 1200, 'warmup volume counts towards the session');
+    assert.equal(upper.heaviest_weight_kg, 80);
+    assert.deepEqual(upper.best_set, { weight_kg: 80, reps: 5 });
+
+    assert.equal(records.heaviest_weight_kg, 85);
+    assert.equal(records.best_1rm_kg, estimate1rm(85, 5));
+    assert.equal(records.best_set.volume_kg, 425);
+    assert.equal(records.best_session_volume_kg, 1200);
+    assert.equal(records.most_reps, 5, 'a 10-rep warmup is not the best rep count');
+    assert.equal(records.total_sessions, 2);
+    assert.equal(records.total_sets, 4);
+    assert.equal(records.total_reps, 25);
+    assert.equal(records.total_volume_kg, 1625);
+  });
+
+  it('keeps exercise history to its owner and needs a name', async () => {
+    const other = await call('POST', '/api/members', { first_name: 'Curious', phone: '9876503333' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
+    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '3333' })).body.token;
+
+    const theirs = await call('GET', '/api/portal/workouts/exercise-history?name=Barbell%20Bench%20Press', undefined, { token: otherToken });
+    assert.equal(theirs.status, 200);
+    assert.deepEqual(theirs.body.sessions, []);
+    assert.equal(theirs.body.records.total_sessions, 0);
+
+    const blank = await call('GET', '/api/portal/workouts/exercise-history?name=', undefined, { token: memberToken });
+    assert.equal(blank.status, 400);
+  });
 });
 
 describe('Lifesum-style diet logging in the portal', () => {

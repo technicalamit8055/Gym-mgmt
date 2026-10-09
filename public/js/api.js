@@ -136,6 +136,20 @@ export class ApiError extends Error {
   }
 }
 
+/** Uploads a file as the raw request body — no JSON/base64 wrapping, so a
+ * multi-megabyte GIF costs what it weighs. */
+async function uploadFile(path, file, { token } = {}) {
+  const res = await fetch(`${pathPrefix}/api${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type || 'application/octet-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: file,
+  });
+  const text = await res.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!res.ok) throw new ApiError(res.status, payload.error || res.statusText, payload.details);
+  return payload;
+}
+
 async function request(method, path, body, { token, anonymous = false, member = false } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -199,6 +213,11 @@ export const api = {
   signup: (payload) => request('POST', '/platform/signup', payload, { anonymous: true }),
   updateGym: (payload) => request('PATCH', '/platform/tenant', payload),
   billingStatus: () => request('GET', '/platform/billing/status'),
+  customDomains: () => request('GET', '/platform/domains'),
+  inspectDomain: (hostname) => request('GET', `/platform/domains/inspect${query({ hostname })}`),
+  addCustomDomain: (hostname) => request('POST', '/platform/domains', { hostname }),
+  checkCustomDomain: (id) => request('POST', `/platform/domains/${id}/check`, {}),
+  removeCustomDomain: (id) => request('DELETE', `/platform/domains/${id}`),
   subscribe: () => request('POST', '/platform/billing/subscribe'),
 
   // Operator console — platform token, never the gym session's.
@@ -220,12 +239,38 @@ export const api = {
     request('POST', `/platform/admin/tenants/${slug}/password-reset`, payload, {
       token: platformSession.token,
     }),
+  platformDomains: () =>
+    request('GET', '/platform/admin/domains', undefined, { token: platformSession.token }),
+  platformAddDomain: (slug, payload) =>
+    request('POST', `/platform/admin/tenants/${slug}/domains`, payload, { token: platformSession.token }),
+  platformCheckDomain: (id) =>
+    request('POST', `/platform/admin/domains/${id}/check`, {}, { token: platformSession.token }),
+  platformUpdateDomain: (id, payload) =>
+    request('PATCH', `/platform/admin/domains/${id}`, payload, { token: platformSession.token }),
+  platformRemoveDomain: (id) =>
+    request('DELETE', `/platform/admin/domains/${id}`, undefined, { token: platformSession.token }),
   platformAnalytics: () =>
     request('GET', '/platform/admin/analytics', undefined, { token: platformSession.token }),
   platformBackups: () =>
     request('GET', '/platform/admin/backups', undefined, { token: platformSession.token }),
   platformRunBackup: () =>
     request('POST', '/platform/admin/backups/run', {}, { token: platformSession.token }),
+
+  // Platform-wide exercise catalogue, with demo images / GIFs / clips.
+  platformCatalog: (params) =>
+    request('GET', `/platform/admin/catalog/exercises${query(params)}`, undefined, { token: platformSession.token }),
+  platformCreateExercise: (payload) =>
+    request('POST', '/platform/admin/catalog/exercises', payload, { token: platformSession.token }),
+  platformUpdateExercise: (id, payload) =>
+    request('PATCH', `/platform/admin/catalog/exercises/${id}`, payload, { token: platformSession.token }),
+  platformDeleteExercise: (id) =>
+    request('DELETE', `/platform/admin/catalog/exercises/${id}`, undefined, { token: platformSession.token }),
+  platformUploadExerciseMedia: (id, file) =>
+    uploadFile(`/platform/admin/catalog/exercises/${id}/media`, file, { token: platformSession.token }),
+  platformClearExerciseMedia: (id) =>
+    request('DELETE', `/platform/admin/catalog/exercises/${id}/media`, undefined, { token: platformSession.token }),
+  platformImportExercises: (rows) =>
+    request('POST', '/platform/admin/catalog/import', { rows }, { token: platformSession.token }),
 
   dashboard: () => request('GET', '/dashboard'),
 
@@ -418,6 +463,8 @@ export const api = {
     login: (identifier, pin) => request('POST', '/portal/login', { identifier, pin }, { anonymous: true }),
     setPin: (payload) => request('POST', '/portal/pin', payload, { member: true }),
     me: () => request('GET', '/portal/me', undefined, { member: true }),
+    updateMe: (payload) => request('PATCH', '/portal/me', payload, { member: true }),
+    setPhoto: (photo) => request('PUT', '/portal/photo', { photo }, { member: true }),
     seat: () => request('GET', '/portal/seat', undefined, { member: true }),
     pass: () => request('GET', '/portal/pass', undefined, { member: true }),
     classes: (params) => request('GET', `/portal/classes${query(params)}`, undefined, { member: true }),
@@ -438,6 +485,7 @@ export const api = {
     deleteWorkoutLog: (id) => request('DELETE', `/portal/workouts/logs/${id}`, undefined, { member: true }),
     personalRecords: () => request('GET', '/portal/workouts/prs', undefined, { member: true }),
     exercises: (params) => request('GET', `/portal/workouts/exercises${query(params)}`, undefined, { member: true }),
+    exerciseHistory: (name) => request('GET', `/portal/workouts/exercise-history${query({ name })}`, undefined, { member: true }),
     currentDiet: () => request('GET', '/portal/diets/current', undefined, { member: true }),
     dietDay: (date) => request('GET', `/portal/diets/daily${query({ date })}`, undefined, { member: true }),
     addFoodEntry: (payload) => request('POST', '/portal/diets/entries', payload, { member: true }),

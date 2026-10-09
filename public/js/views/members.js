@@ -279,6 +279,46 @@ function supportsWebAuthn() {
 
 /* ------------------------------------------------------------ member detail */
 
+const MEMBER_ART = '/images/member';
+
+/** Panel title with its icon in the panel's tone (see .tone-* in app.css). */
+const cardTitle = (icon, label, tone) =>
+  h('h3', { class: `md-title tone-${tone}` }, renderIcon(icon, { size: 18, stroke: 2 }), label);
+
+/** Empty panel body: an illustration or an icon, a headline and one hint line. */
+const mdEmpty = ({ icon, img, title, text, bare, action }) =>
+  h(
+    'div',
+    { class: 'md-empty' },
+    img
+      ? h('img', { class: 'md-empty-img', src: img, alt: '', 'aria-hidden': 'true' })
+      : h('span', { class: `md-empty-icon${bare ? ' bare' : ''}` }, renderIcon(icon, { size: bare ? 34 : 24, stroke: 1.6 })),
+    h('div', { class: 'md-empty-title' }, title),
+    text ? h('p', {}, text) : null,
+    action || null,
+  );
+
+/** table(), but an empty list gets the member page's own empty state. */
+const mdTable = (columns, rows, emptyOptions, options) =>
+  rows.length ? table(columns, rows, options) : mdEmpty(emptyOptions);
+
+/** "View all →" in a card head: the card previews a few rows, this opens the lot. */
+const viewAllLink = (title, columns, rows, options) =>
+  h(
+    'button',
+    {
+      type: 'button',
+      class: 'md-link',
+      onclick: () => openModal({ title, wide: true, body: table(columns, rows, options) }),
+    },
+    'View all', renderIcon('arrowRight', { size: 14, stroke: 2 }),
+  );
+
+const PREVIEW_ROWS = 5;
+
+const dayDiff = (from, to) =>
+  Math.round((new Date(`${to.slice(0, 10)}T00:00:00`) - new Date(`${from.slice(0, 10)}T00:00:00`)) / 86400000);
+
 /* ── Fitness & diet (gym only) ────────────────────────────────────────── */
 
 /**
@@ -291,7 +331,7 @@ function supportsWebAuthn() {
  * sold, is a bill the roster should not pay.
  */
 function fitnessSection(member, { reload }) {
-  const mount = h('div', {}, h('div', { class: 'empty', style: 'padding:20px' }, 'Loading fitness…'));
+  const mount = h('div', { class: 'md-stack' }, h('div', { class: 'empty', style: 'padding:20px' }, 'Loading fitness…'));
 
   const SET_TYPE_SHORT = { normal: '—', warmup: 'W', drop: 'D', failure: 'F' };
   const minutes = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
@@ -444,17 +484,17 @@ function fitnessSection(member, { reload }) {
     /* Add-on / entitlement */
     const addonCard = h(
       'div',
-      { class: 'card fit-member-card' },
+      { class: 'card md-card md-waves tone-orange' },
       h(
         'div',
         { class: 'card-head' },
-        h('h3', { class: 'fit-card-title' }, renderIcon('sparkle', { size: 15 }), ' Tracking add-on'),
+        cardTitle('activity', 'Tracking add-on', 'orange'),
         h('div', { class: 'spacer' }),
         addonBadge(access),
       ),
       h(
         'p',
-        { class: 'muted', style: 'font-size:13px;margin:0 0 12px' },
+        { class: 'md-lede' },
         access.has_access
           ? `${member.first_name} can log workouts and meals in the member app.`
           : `${member.first_name} sees an upgrade screen in the member app instead of the tracker.`,
@@ -462,11 +502,11 @@ function fitnessSection(member, { reload }) {
       session.managesBilling
         ? h(
             'div',
-            { class: 'row wrap', style: 'gap:8px' },
+            { class: 'md-actions' },
             h(
               'button',
               { class: 'btn sm primary', onclick: () => openSellAddonForm(settings, access) },
-              access.addon ? `Extend · ${money(settings.monthly_price)}/mo` : `Activate · ${money(settings.monthly_price)}/mo`,
+              access.addon ? `Extend - ${money(settings.monthly_price)}/mo` : `Activate - ${money(settings.monthly_price)}/mo`,
             ),
             access.addon
               ? h(
@@ -496,15 +536,20 @@ function fitnessSection(member, { reload }) {
         return activeHistory.length
           ? h(
               'div',
-              { style: 'margin-top:14px' },
-              h('div', { class: 'muted', style: 'font-size:12px;margin-bottom:6px' }, 'Billing history'),
-              ...activeHistory.slice(0, 4).map((row) =>
-                h(
-                  'div',
-                  { class: 'row', style: 'justify-content:space-between;font-size:13px;padding:3px 0' },
-                  h('span', { class: 'muted' }, `${date(row.start_date)} → ${date(row.end_date)}`),
-                  h('span', {}, money(row.price)),
-                  statusBadge(row.status),
+              { class: 'md-inset' },
+              h('span', { class: 'md-inset-icon tone-blue' }, renderIcon('calendar', { size: 18, stroke: 2 })),
+              h(
+                'div',
+                { class: 'md-inset-body' },
+                h('div', { class: 'md-inset-title' }, 'Billing history'),
+                ...activeHistory.slice(0, 4).map((row) =>
+                  h(
+                    'div',
+                    { class: 'md-inset-row' },
+                    h('span', { class: 'muted' }, `${date(row.start_date)} – ${date(row.end_date)}`),
+                    h('strong', {}, money(row.price)),
+                    statusBadge(row.status),
+                  ),
                 ),
               ),
             )
@@ -514,13 +559,16 @@ function fitnessSection(member, { reload }) {
 
     /* Workout */
     const assignment = workouts.assignment;
+    const statTile = (icon, tone, value, label) =>
+      h('div', { class: `md-tile tone-${tone}` }, renderIcon(icon, { size: 20, stroke: 2 }), h('strong', {}, value), h('span', {}, label));
+
     const workoutCard = h(
       'div',
-      { class: 'card fit-member-card' },
+      { class: 'card md-card' },
       h(
         'div',
         { class: 'card-head' },
-        h('h3', { class: 'fit-card-title' }, renderIcon('weight', { size: 15 }), ' Workout plan'),
+        cardTitle('weight', 'Workout plan', 'purple'),
         h('div', { class: 'spacer' }),
         assignment ? h('span', { class: 'badge blue' }, `${assignment.plan.days.length}-day split`) : null,
       ),
@@ -528,36 +576,31 @@ function fitnessSection(member, { reload }) {
         ? h(
             'div',
             {},
-            h('div', { style: 'font-size:16px;font-weight:700' }, assignment.plan.name),
+            h('div', { class: 'md-plan-name' }, assignment.plan.name),
             h(
               'div',
-              { class: 'muted', style: 'font-size:13px' },
-              `${assignment.plan.goal.replace('_', ' ')} · ${assignment.plan.level} · since ${date(assignment.start_date)}`
-                + (assignment.assigned_by_name ? ` · by ${assignment.assigned_by_name}` : ''),
+              { class: 'md-meta' },
+              `${assignment.plan.goal.replace('_', ' ')} • ${assignment.plan.level} • since ${date(assignment.start_date)}`
+                + (assignment.assigned_by_name ? ` • by ${assignment.assigned_by_name}` : ''),
             ),
-            assignment.notes ? h('p', { class: 'muted', style: 'font-size:13px' }, assignment.notes) : null,
+            assignment.notes ? h('p', { class: 'md-meta' }, assignment.notes) : null,
             h(
               'div',
-              { class: 'fit-plan-stats', style: 'margin-top:12px' },
-              h('div', {}, h('strong', {}, workouts.stats.total_workouts), h('span', {}, 'sessions')),
-              h(
-                'div',
-                {},
-                h('strong', {}, `${Math.round(workouts.stats.lifetime_volume_kg / 1000)}t`),
-                h('span', {}, 'lifted'),
-              ),
-              h('div', {}, h('strong', {}, workouts.prs.length), h('span', {}, 'records')),
+              { class: 'md-tiles' },
+              statTile('calendar', 'purple', workouts.stats.total_workouts, 'sessions'),
+              statTile('weight', 'green', `${Math.round(workouts.stats.lifetime_volume_kg / 1000)}t`, 'lifted'),
+              statTile('target', 'orange', workouts.prs.length, 'records'),
             ),
             h(
               'div',
-              { class: 'muted', style: 'font-size:12px;margin-top:8px' },
+              { class: 'md-meta', style: 'margin-top:8px' },
               workouts.stats.last_workout_on ? `Last trained ${date(workouts.stats.last_workout_on)}` : 'Not trained yet',
             ),
           )
-        : h('div', { class: 'empty', style: 'padding:16px' }, 'No routine assigned'),
+        : mdEmpty({ icon: 'weight', title: 'No routine assigned', text: `Give ${member.first_name} a routine to track in the member app.` }),
       h(
         'div',
-        { class: 'row wrap', style: 'gap:8px;margin-top:14px' },
+        { class: 'md-actions' },
         h(
           'button',
           {
@@ -570,7 +613,7 @@ function fitnessSection(member, { reload }) {
           ? h(
               'button',
               {
-                class: 'btn sm ghost',
+                class: 'btn sm',
                 onclick: () =>
                   openModal({
                     title: assignment.plan.name,
@@ -628,11 +671,11 @@ function fitnessSection(member, { reload }) {
     const dietAssignment = diet.assignment;
     const dietCard = h(
       'div',
-      { class: 'card fit-member-card' },
+      { class: 'card md-card md-diet' },
       h(
         'div',
         { class: 'card-head' },
-        h('h3', { class: 'fit-card-title' }, renderIcon('apple', { size: 15 }), ' Diet plan'),
+        cardTitle('utensils', 'Diet plan', 'orange'),
         h('div', { class: 'spacer' }),
         diet.adherence_pct !== null
           ? h(
@@ -646,26 +689,27 @@ function fitnessSection(member, { reload }) {
         ? h(
             'div',
             {},
-            h('div', { style: 'font-size:16px;font-weight:700' }, dietAssignment.plan.name),
+            h('div', { class: 'md-plan-name' }, dietAssignment.plan.name),
             h(
               'div',
-              { class: 'muted', style: 'font-size:13px' },
-              `${dietAssignment.plan.goal.replace('_', ' ')} · since ${date(dietAssignment.start_date)}`
-                + (dietAssignment.assigned_by_name ? ` · by ${dietAssignment.assigned_by_name}` : ''),
+              { class: 'md-meta' },
+              `${dietAssignment.plan.goal.replace('_', ' ')} • since ${date(dietAssignment.start_date)}`
+                + (dietAssignment.assigned_by_name ? ` • by ${dietAssignment.assigned_by_name}` : ''),
             ),
             h(
               'div',
-              { class: 'fit-macro-pills', style: 'margin-top:10px' },
-              h('span', { class: 'fit-pill kcal' }, `${dietAssignment.plan.target_calories} kcal`),
-              h('span', { class: 'fit-pill protein' }, `P ${dietAssignment.plan.target_protein_g}g`),
-              h('span', { class: 'fit-pill carbs' }, `C ${dietAssignment.plan.target_carbs_g}g`),
-              h('span', { class: 'fit-pill fats' }, `F ${dietAssignment.plan.target_fats_g}g`),
+              { class: 'md-macros' },
+              h('span', { class: 'md-macro kcal' }, renderIcon('flame', { size: 13, stroke: 2.2 }), `${dietAssignment.plan.target_calories} kcal`),
+              h('span', { class: 'md-macro protein' }, h('b', {}, 'P'), `${dietAssignment.plan.target_protein_g}g`),
+              h('span', { class: 'md-macro carbs' }, h('b', {}, 'C'), `${dietAssignment.plan.target_carbs_g}g`),
+              h('span', { class: 'md-macro fats' }, h('b', {}, 'F'), `${dietAssignment.plan.target_fats_g}g`),
             ),
           )
-        : h('div', { class: 'empty', style: 'padding:16px' }, 'No diet assigned'),
+        : mdEmpty({ icon: 'utensils', title: 'No diet assigned', text: `Assign a diet to give ${member.first_name} daily targets.` }),
+      h('img', { class: 'md-diet-art', src: `${MEMBER_ART}/salad-bowl.svg`, alt: '', 'aria-hidden': 'true' }),
       h(
         'div',
-        { class: 'row wrap', style: 'gap:8px;margin-top:14px' },
+        { class: 'md-actions' },
         h(
           'button',
           {
@@ -744,61 +788,78 @@ function fitnessSection(member, { reload }) {
       }
     }
 
+    const logColumns = [
+      { label: 'Date', render: (r) => date(r.log_date) },
+      { label: 'Workout', render: (r) => r.workout_name },
+      { label: 'Sets', align: 'right', render: (r) => r.total_sets },
+      { label: 'Volume', align: 'right', render: (r) => `${Math.round(r.total_volume_kg)} kg` },
+      { label: 'Time', align: 'right', render: (r) => minutes(r.duration_seconds) },
+    ];
     const logsCard = h(
       'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon('activity', { size: 15 }), ' Logged sessions')),
-      table(
-        [
-          { label: 'Date', render: (r) => date(r.log_date) },
-          { label: 'Workout', render: (r) => r.workout_name },
-          { label: 'Sets', align: 'right', render: (r) => r.total_sets },
-          { label: 'Volume', align: 'right', render: (r) => `${Math.round(r.total_volume_kg)} kg` },
-          { label: 'Time', align: 'right', render: (r) => minutes(r.duration_seconds) },
-        ],
-        workouts.logs,
-        { empty: 'Nothing logged yet', onRowClick: openSessionDetail },
+      { class: 'card md-card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        cardTitle('calendarCheck', 'Logged sessions', 'green'),
+        h('div', { class: 'spacer' }),
+        workouts.logs.length
+          ? viewAllLink(`Logged sessions · ${fullName(member)}`, logColumns, workouts.logs, { onRowClick: openSessionDetail })
+          : null,
+      ),
+      mdTable(
+        logColumns,
+        workouts.logs.slice(0, PREVIEW_ROWS),
+        { icon: 'calendar', title: 'Nothing logged yet', text: 'Sessions appear here once the member logs a workout.' },
+        { onRowClick: openSessionDetail },
       ),
     );
 
+    const foodColumns = [
+      { label: 'Date', render: (r) => date(r.log_date) },
+      {
+        label: 'Calories',
+        align: 'right',
+        render: (r) => {
+          const target = dietAssignment?.plan.target_calories;
+          if (!target) return Math.round(r.calories);
+          const within = Math.abs(r.calories - target) <= target * 0.15;
+          return h('span', { style: `color:var(--${within ? 'green' : 'amber'})` }, `${Math.round(r.calories)} / ${target}`);
+        },
+      },
+      { label: 'Protein', align: 'right', render: (r) => `${Math.round(r.protein_g)}g` },
+      { label: 'Carbs', align: 'right', render: (r) => `${Math.round(r.carbs_g)}g` },
+      { label: 'Fats', align: 'right', render: (r) => `${Math.round(r.fats_g)}g` },
+      { label: 'Water', align: 'right', render: (r) => `${r.water_ml} ml` },
+      { label: 'Items', align: 'right', render: (r) => r.entry_count },
+    ];
     const foodCard = h(
       'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon('flame', { size: 15 }), ' Food log')),
-      table(
-        [
-          { label: 'Date', render: (r) => date(r.log_date) },
-          {
-            label: 'Calories',
-            align: 'right',
-            render: (r) => {
-              const target = dietAssignment?.plan.target_calories;
-              if (!target) return Math.round(r.calories);
-              const within = Math.abs(r.calories - target) <= target * 0.15;
-              return h('span', { style: `color:var(--${within ? 'green' : 'amber'})` }, `${Math.round(r.calories)} / ${target}`);
-            },
-          },
-          { label: 'Protein', align: 'right', render: (r) => `${Math.round(r.protein_g)}g` },
-          { label: 'Carbs', align: 'right', render: (r) => `${Math.round(r.carbs_g)}g` },
-          { label: 'Fats', align: 'right', render: (r) => `${Math.round(r.fats_g)}g` },
-          { label: 'Water', align: 'right', render: (r) => `${r.water_ml} ml` },
-          { label: 'Items', align: 'right', render: (r) => r.entry_count },
-        ],
-        diet.days,
-        { empty: 'No meals logged yet' },
+      { class: 'card md-card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        cardTitle('utensils', 'Food log', 'orange'),
+        h('div', { class: 'spacer' }),
+        diet.days.length ? viewAllLink(`Food log · ${fullName(member)}`, foodColumns, diet.days) : null,
       ),
+      mdTable(foodColumns, diet.days.slice(0, PREVIEW_ROWS), {
+        img: `${MEMBER_ART}/salad-bowl.svg`,
+        title: 'No meals logged yet',
+        text: 'Start logging meals in the member app to track nutrition.',
+      }),
     );
 
     const prCard = workouts.prs.length
       ? h(
           'div',
-          { class: 'card' },
-          h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon('trophy', { size: 15 }), ' Personal records')),
+          { class: 'card md-card md-table-warm' },
+          h('div', { class: 'card-head' }, cardTitle('trophy', 'Personal records', 'amber')),
           table(
             [
               { label: 'Exercise', render: (r) => r.exercise_name },
               { label: 'Best set', render: (r) => `${r.max_weight_kg} kg × ${r.max_reps}` },
-              { label: 'Est. 1RM', align: 'right', render: (r) => `${r.est_1rm_kg} kg` },
+              { label: 'Est. 1RM', render: (r) => `${r.est_1rm_kg} kg` },
               { label: 'Set on', render: (r) => date(r.achieved_at) },
             ],
             workouts.prs,
@@ -808,29 +869,19 @@ function fitnessSection(member, { reload }) {
       : null;
 
     append(clear(mount), [
-      h('div', { class: 'grid cols-3' }, addonCard, workoutCard, dietCard),
-      h('div', { class: 'grid cols-2 top', style: 'margin-top:16px' }, logsCard, foodCard),
-      prCard ? h('div', { style: 'margin-top:16px' }, prCard) : null,
+      h('div', { class: 'md-row-3' }, addonCard, workoutCard, dietCard),
+      h('div', { class: 'md-row-logs' }, logsCard, foodCard),
+      prCard,
     ]);
   }
 
   load();
-  return h(
-    'div',
-    { class: 'grid', style: 'gap:16px' },
-    h(
-      'div',
-      { class: 'row', style: 'gap:10px;align-items:baseline' },
-      h('h3', { class: 'fit-card-title', style: 'margin:0;font-size:16px' }, renderIcon('weight', { size: 16 }), ' Fitness & diet'),
-      h('a', { href: '#/fitness-plans', class: 'muted', style: 'font-size:12px' }, 'Manage plans →'),
-    ),
-    mount,
-  );
+  return mount;
 }
 
 export async function renderMemberDetail({ params, setTitle, setActions, reload, navigate }) {
   const member = await api.member(params[0]);
-  setTitle(`${fullName(member)} · ${member.code}`);
+  setTitle(`${fullName(member)} - ${member.code}`);
 
   // A member can hold a membership covering today plus a renewal queued behind
   // it. The card — and freeze/cancel with it — always follows the one in force.
@@ -874,67 +925,99 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       : null,
   );
 
+  function openPhotoForm() {
+    const photoPicker = createPhotoPicker({ initialUrl: member.photo_url });
+    const saveBtn = h(
+      'button',
+      {
+        class: 'btn primary',
+        onclick: async () => {
+          saveBtn.disabled = true;
+          try {
+            if (photoPicker.changed()) {
+              await api.updateMember(member.id, { photo: photoPicker.getValue() || '' });
+            }
+            closeModal();
+            toast('Member photo updated');
+            await reload();
+          } catch (err) {
+            toast(err.message || 'Could not update photo', 'error');
+            saveBtn.disabled = false;
+          }
+        },
+      },
+      'Save photo',
+    );
+
+    openModal({
+      title: `Member Photo · ${fullName(member)}`,
+      body: h('div', { style: 'padding:8px 0' }, photoPicker),
+      footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), saveBtn],
+    });
+  }
+
+  const muted = (text) => h('span', { class: 'muted' }, text);
+  const detailRow = (icon, label, value) => [
+    h('dt', {}, renderIcon(icon, { size: 15, stroke: 1.9 }), label),
+    h('dd', {}, value),
+  ];
+
   const profileCard = h(
     'div',
-    { class: 'card' },
+    { class: 'card md-card md-profile md-waves tone-blue' },
     h(
       'div',
-      { class: 'row', style: 'gap:14px;margin-bottom:16px' },
+      { class: 'md-profile-head' },
       member.photo_url
-        ? h('img', { class: 'avatar lg', src: member.photo_url, alt: fullName(member), style: 'object-fit:cover' })
-        : h('div', { class: 'avatar lg' }, initials(member.first_name, member.last_name)),
+        ? h('img', { class: 'md-avatar', src: member.photo_url, alt: fullName(member) })
+        : h('div', { class: 'md-avatar' }, initials(member.first_name, member.last_name)),
       h(
         'div',
-        {},
-        h('div', { style: 'font-size:19px;font-weight:700' }, fullName(member)),
-        h('div', { class: 'muted', style: 'font-size:13px' }, `${member.code} · joined ${date(member.joined_on)}`),
-        h('div', { style: 'margin-top:6px' }, statusBadge(member.status)),
+        { class: 'md-profile-id' },
+        h('div', { class: 'md-name-row' }, h('h2', { class: 'md-name' }, fullName(member)), statusBadge(member.status)),
+        h('div', { class: 'md-meta' }, `${member.code} • ${t('member')} since ${date(member.joined_on)}`),
       ),
+    ),
+    h(
+      'div',
+      { class: 'md-contact' },
+      h('div', {}, renderIcon('phone', { size: 16, stroke: 1.9 }), member.phone || muted('No phone')),
+      h('div', {}, renderIcon('mail', { size: 16, stroke: 1.9 }), member.email || muted('No email')),
     ),
     h(
       'dl',
-      { class: 'kv' },
-      h('dt', {}, 'Phone'),
-      h('dd', {}, member.phone || '—'),
-      h('dt', {}, 'Email'),
-      h('dd', {}, member.email || '—'),
-      h('dt', {}, 'Date of birth'),
-      h('dd', {}, member.date_of_birth ? date(member.date_of_birth) : '—'),
-      h('dt', {}, 'Gender'),
-      h('dd', { style: 'text-transform:capitalize' }, member.gender || '—'),
-      h('dt', {}, 'Address'),
-      h('dd', {}, member.address || '—'),
-      h('dt', {}, 'Emergency'),
-      h('dd', {}, member.emergency_contact ? `${member.emergency_contact} · ${member.emergency_phone || ''}` : '—'),
-      h('dt', {}, 'Health notes'),
-      h('dd', {}, member.health_notes || '—'),
-      h('dt', {}, 'Device PIN'),
-      h('dd', {}, member.device_pin ?? h('span', { class: 'muted' }, 'Not enrolled')),
-      h('dt', {}, t('shiftCap')),
-      h(
-        'dd',
-        {},
+      { class: 'md-kv' },
+      ...detailRow('calendar', 'Date of birth', member.date_of_birth ? date(member.date_of_birth) : '—'),
+      ...detailRow('user', 'Gender', h('span', { style: 'text-transform:capitalize' }, member.gender || '—')),
+      ...detailRow('mapPin', 'Address', member.address || '—'),
+      ...detailRow(
+        'users',
+        'Emergency',
+        member.emergency_contact ? `${member.emergency_contact} · ${member.emergency_phone || ''}` : '—',
+      ),
+      ...detailRow('heartPulse', 'Health notes', member.health_notes || '—'),
+      ...detailRow('key', 'Device PIN', member.device_pin ?? muted('Not enrolled')),
+      ...detailRow(
+        isLibrary() ? 'clock' : 'weight',
+        t('shiftCap'),
         member.session_name
           ? `${member.session_name} (${member.session_start}–${member.session_end})`
-          : h('span', { class: 'muted' }, `No assigned ${t('shift')}`),
+          : muted(`No assigned ${t('shift')}`),
       ),
-      isLibrary()
-        ? h('dt', {}, 'Seat')
-        : null,
-      isLibrary()
-        ? h(
-            'dd',
-            {},
+      ...(isLibrary()
+        ? detailRow(
+            'seats',
+            'Seat',
             member.seat_codes
               ? `${member.seat_codes} (${member.shift_names}) · until ${date(member.seat_end_date)}`
-              : h('span', { class: 'muted' }, 'No seat assigned'),
+              : muted('No seat assigned'),
           )
-        : null,
+        : []),
     ),
     h(
       'div',
-      { class: 'row wrap', style: 'margin-top:16px;gap:8px' },
-      h('button', { class: 'btn sm', onclick: () => openMemberForm({ member, onSaved: reload }) }, 'Edit details'),
+      { class: 'md-actions' },
+      h('button', { class: 'btn sm', onclick: () => openMemberForm({ member, onSaved: reload }) }, renderIcon('edit', { size: 15 }), 'Edit details'),
       isLibrary()
         ? h(
             'button',
@@ -942,43 +1025,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
             renderIcon('seats', { size: 15 }), 'Assign seat',
           )
         : null,
-      h(
-        'button',
-        {
-          class: 'btn sm',
-          onclick: () => {
-            const photoPicker = createPhotoPicker({ initialUrl: member.photo_url });
-            const saveBtn = h(
-              'button',
-              {
-                class: 'btn primary',
-                onclick: async () => {
-                  saveBtn.disabled = true;
-                  try {
-                    if (photoPicker.changed()) {
-                      await api.updateMember(member.id, { photo: photoPicker.getValue() || '' });
-                    }
-                    closeModal();
-                    toast('Member photo updated');
-                    await reload();
-                  } catch (err) {
-                    toast(err.message || 'Could not update photo', 'error');
-                    saveBtn.disabled = false;
-                  }
-                },
-              },
-              'Save photo',
-            );
-
-            openModal({
-              title: `Member Photo · ${fullName(member)}`,
-              body: h('div', { style: 'padding:8px 0' }, photoPicker),
-              footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), saveBtn],
-            });
-          },
-        },
-        renderIcon('camera', { size: 16 }), 'Photo',
-      ),
+      h('button', { class: 'btn sm', onclick: openPhotoForm }, renderIcon('camera', { size: 15 }), 'Photo'),
       session.managesBilling
         ? h(
             'button',
@@ -997,39 +1044,48 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                   },
                 }),
             },
-            'Delete',
+            renderIcon('trash', { size: 15 }), 'Delete',
           )
         : null,
     ),
   );
 
+  /* How far through the membership in force we are, as days left of its length. */
+  function daysMeter(sub) {
+    const total = Math.max(1, dayDiff(sub.start_date, sub.end_date) + 1);
+    const left = Math.min(total, Math.max(0, dayDiff(now, sub.end_date)));
+    return h(
+      'div',
+      { class: 'md-days' },
+      h('div', { class: 'md-days-bar' }, h('span', { style: `width:${(left / total) * 100}%` })),
+      h('div', { class: 'md-days-label' }, `${left} of ${total} days left`),
+    );
+  }
+
   const membershipCard = h(
     'div',
-    { class: 'card' },
-    h('div', { class: 'card-head' }, h('h3', {}, 'Current membership')),
+    { class: 'card md-card md-membership tone-purple' },
+    h('div', { class: 'card-head' }, cardTitle('crown', `Current ${tl('membership')}`, 'amber')),
     activeSub || frozenSub
       ? h(
           'div',
           {},
           h(
             'div',
-            { class: 'row', style: 'justify-content:space-between;align-items:flex-start' },
+            { class: 'md-membership-head' },
             h(
               'div',
               {},
-              h('div', { style: 'font-size:17px;font-weight:700' }, shownSub.plan_name),
-              h(
-                'div',
-                { class: 'muted', style: 'font-size:13px' },
-                `${date(shownSub.start_date)} → ${date(shownSub.end_date)}`,
-              ),
+              h('div', { class: 'md-plan-name lg' }, shownSub.plan_name),
+              h('div', { class: 'md-meta' }, `${date(shownSub.start_date)} → ${date(shownSub.end_date)}`),
             ),
             activeSub ? expiryLabel(activeSub.end_date) : statusBadge('frozen'),
           ),
+          daysMeter(shownSub),
           shownSub.sessions_total
             ? h(
                 'div',
-                { style: 'margin-top:14px' },
+                { style: 'margin-top:12px' },
                 h(
                   'div',
                   { class: 'row', style: 'justify-content:space-between;font-size:13px;margin-bottom:6px' },
@@ -1040,10 +1096,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                   'div',
                   { class: 'meter' },
                   h('span', {
-                    style: `width:${Math.min(
-                      (shownSub.sessions_used / shownSub.sessions_total) * 100,
-                      100,
-                    )}%`,
+                    style: `width:${Math.min((shownSub.sessions_used / shownSub.sessions_total) * 100, 100)}%`,
                   }),
                 ),
               )
@@ -1051,7 +1104,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           queuedSub
             ? h(
                 'div',
-                { class: 'row', style: 'margin-top:14px;gap:8px;font-size:13px' },
+                { class: 'row wrap', style: 'margin-top:12px;gap:8px;font-size:13px' },
                 h('span', { class: 'badge blue' }, 'Renewal queued'),
                 h('span', { class: 'muted' }, `${queuedSub.plan_name} from ${date(queuedSub.start_date)}`),
               )
@@ -1059,12 +1112,12 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           session.managesBilling
             ? h(
                 'div',
-                { class: 'row wrap', style: 'margin-top:16px;gap:8px' },
+                { class: 'md-actions' },
                 activeSub
                   ? h(
                       'button',
                       {
-                        class: 'btn sm',
+                        class: 'btn sm md-soft',
                         onclick: async () => {
                           await api.freezeSubscription(activeSub.id);
                           toast('Membership frozen');
@@ -1102,54 +1155,53 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                         },
                       }),
                   },
-                  'Cancel',
+                  renderIcon('trash', { size: 15 }), 'Cancel',
                 ),
               )
             : null,
         )
-      : h(
-          'div',
-          { class: 'empty', style: 'padding:20px' },
-          h('div', {}, 'No active membership'),
-          session.managesBilling
-            ? h(
-                'button',
-                { class: 'btn primary sm', style: 'margin-top:12px', onclick: () => openMembershipForm({ member, onSaved: reload }) },
-                'Sell a membership',
-              )
+      : mdEmpty({
+          icon: 'crown',
+          title: `No active ${tl('membership')}`,
+          text: session.managesBilling ? `Sell a ${tl('membership')} to get ${member.first_name} started.` : null,
+          action: session.managesBilling
+            ? h('button', { class: 'btn primary sm', onclick: () => openMembershipForm({ member, onSaved: reload }) }, 'Sell a membership')
             : null,
-        ),
+        }),
+    h('img', { class: 'md-membership-art', src: `${MEMBER_ART}/membership-calendar.svg`, alt: '', 'aria-hidden': 'true' }),
   );
+
+  const summaryRow = (icon, tone, label, value) =>
+    h(
+      'div',
+      { class: 'md-sum-row' },
+      h('span', { class: `md-sum-icon tone-${tone}` }, renderIcon(icon, { size: 18, stroke: 2 })),
+      h('span', { class: 'md-sum-label' }, label),
+      h('strong', { class: 'md-sum-value' }, value),
+    );
 
   const accountCard = h(
     'div',
-    { class: 'card grid', style: 'gap:12px;align-content:start' },
-    h('div', { class: 'card-head' }, h('h3', {}, 'Account')),
+    { class: 'card md-card md-waves tone-green' },
     h(
       'div',
-      { class: 'row', style: 'justify-content:space-between' },
-      h('span', { class: 'muted' }, 'Outstanding balance'),
-      member.balance_due > 0
-        ? h('strong', { style: 'color:var(--red)' }, money(member.balance_due))
-        : h('span', { class: 'badge green' }, 'Settled'),
+      { class: 'card-head' },
+      cardTitle('wallet', 'Account summary', 'green'),
+      h('div', { class: 'spacer' }),
+      member.balance_due > 0 ? h('span', { class: 'badge red' }, 'Dues pending') : h('span', { class: 'badge green' }, 'Settled'),
     ),
     h(
       'div',
-      { class: 'row', style: 'justify-content:space-between' },
-      h('span', { class: 'muted' }, 'Total visits'),
-      h('strong', {}, member.visit_count),
-    ),
-    h(
-      'div',
-      { class: 'row', style: 'justify-content:space-between' },
-      h('span', { class: 'muted' }, 'Last visit'),
-      h('strong', {}, member.last_visit ? date(member.last_visit, { withTime: true }) : 'Never'),
-    ),
-    h(
-      'div',
-      { class: 'row', style: 'justify-content:space-between' },
-      h('span', { class: 'muted' }, 'Memberships bought'),
-      h('strong', {}, member.subscriptions.length),
+      { class: 'md-sum' },
+      summaryRow(
+        'billing',
+        'green',
+        'Outstanding balance',
+        member.balance_due > 0 ? h('span', { style: 'color:var(--red)' }, money(member.balance_due)) : money(0),
+      ),
+      summaryRow('reports', 'green', 'Total visits', member.visit_count),
+      summaryRow('clock', 'green', 'Last visit', member.last_visit ? date(member.last_visit, { withTime: true }) : 'Never'),
+      summaryRow('crown', 'amber', `${t('membership')}s bought`, member.subscriptions.length),
     ),
   );
 
@@ -1164,11 +1216,12 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
 
       if (items.length === 0) {
         bioList.append(
-          h('div', { class: 'empty', style: 'padding:16px' },
-            h('div', { style: 'margin-bottom:8px;color:var(--muted)' }, renderIcon('unlock', { size: 28, stroke: 1.5 })),
-            h('div', {}, 'No biometrics enrolled'),
-            h('div', { class: 'muted', style: 'font-size:12px;margin-top:4px' }, 'Enroll a fingerprint or face scan so this member can check in without their code.'),
-          ),
+          mdEmpty({
+            icon: 'fingerprint',
+            bare: true,
+            title: 'No biometrics enrolled',
+            text: 'Enroll a fingerprint or face scan so this member can check in without their code.',
+          }),
         );
       } else {
         bioList.append(
@@ -1289,9 +1342,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
 
   const biometricCard = h(
     'div',
-    { class: 'card bio-member-card' },
+    { class: 'card md-card md-waves tone-green' },
     h('div', { class: 'card-head' },
-      h('h3', {}, renderIcon('lock', { size: 16 }), 'Biometric credentials'),
+      cardTitle('fingerprint', 'Biometric credentials', 'green'),
       h('div', { class: 'spacer' }),
       supportsWebAuthn()
         ? h('button', { class: 'btn sm primary', onclick: enrollBiometric }, renderIcon('plus', { size: 15 }), 'Enroll biometric')
@@ -1311,11 +1364,11 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     clear(qrBody).append(
       h(
         'div',
-        { class: 'qr-preview' },
+        { class: 'qr-preview md-qr' },
         idCardNode(card),
         h(
           'div',
-          { class: 'grid', style: 'gap:8px;align-content:start' },
+          { class: 'md-qr-actions' },
           h('button', { class: 'btn primary sm', onclick: () => printCards([card]) }, renderIcon('print', { size: 15 }), 'Print card'),
           h(
             'button',
@@ -1383,7 +1436,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
             'Reissue',
           ),
           card.issued_at
-            ? h('div', { class: 'muted', style: 'font-size:12px' }, `Issued ${date(card.issued_at, { withTime: true })}`)
+            ? h('div', { class: 'md-qr-issued' }, `Issued ${date(card.issued_at, { withTime: true })}`)
             : null,
         ),
       ),
@@ -1403,11 +1456,11 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
 
   const qrCardSection = h(
     'div',
-    { class: 'card qr-card' },
+    { class: 'card md-card md-waves md-qr-card tone-blue' },
     h(
       'div',
       { class: 'card-head' },
-      h('h3', {}, renderIcon('checkin', { size: 16 }), 'QR ID card'),
+      cardTitle('idCard', 'QR ID card', 'orange'),
       h('div', { class: 'spacer' }),
       h('span', { class: 'muted', style: 'font-size:12px' }, 'Print it, or send the image to the member'),
     ),
@@ -1418,111 +1471,131 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
 
   /* ── History section ─────────────────────────────────────────────── */
 
+  const receiptButton = (row, { icon, title, run }) =>
+    h(
+      'button',
+      {
+        class: 'btn sm ghost icon-only',
+        title,
+        'aria-label': title,
+        onclick: async (event) => {
+          event.stopPropagation();
+          try {
+            run(await api.paymentReceipt(row.id));
+          } catch (err) {
+            toast(err.message || 'Could not load receipt details', 'error');
+          }
+        },
+      },
+      renderIcon(icon, { size: 16 }),
+    );
+
+  const paymentColumns = [
+    { label: 'Date', render: (row) => date(row.paid_on) },
+    { label: 'Method', render: (row) => h('span', { class: 'badge blue' }, row.method) },
+    { label: 'Reference', render: (row) => h('span', { class: 'muted' }, row.reference || '—') },
+    { label: 'Amount', align: 'right', render: (row) => money(row.amount) },
+    {
+      label: '',
+      render: (row) =>
+        h(
+          'div',
+          { class: 'row', style: 'gap:2px;justify-content:flex-end' },
+          receiptButton(row, {
+            icon: 'print',
+            title: 'Print receipt',
+            run: (payment) => printReceipt(payment, { gymName: getGymName() }),
+          }),
+          receiptButton(row, {
+            icon: 'download',
+            title: 'Download receipt',
+            run: (payment) => downloadReceipt(payment, { gymName: getGymName() }),
+          }),
+        ),
+    },
+  ];
+
+  const visitColumns = [
+    { label: 'Date', render: (row) => date(row.check_in) },
+    { label: 'In', render: (row) => time(row.check_in.slice(11)) },
+    { label: 'Out', render: (row) => (row.check_out ? time(row.check_out.slice(11)) : h('span', { class: 'badge green' }, 'In gym')) },
+    { label: 'Via', render: (row) => sourceBadge(row.source) },
+  ];
+
+  const membershipHistoryCard = h(
+    'div',
+    { class: 'card md-card' },
+    h('div', { class: 'card-head' }, cardTitle('history', `${t('membership')} history`, 'orange')),
+    mdTable(
+      [
+        { label: 'Plan', render: (row) => row.plan_name },
+        { label: 'Period', render: (row) => h('span', { class: 'md-period' }, `${date(row.start_date)} →`, h('br', {}), date(row.end_date)) },
+        { label: 'Value', align: 'right', render: (row) => money(row.price - row.discount) },
+        { label: 'Status', render: (row) => statusBadge(row.status) },
+      ],
+      member.subscriptions,
+      { icon: 'crown', title: `No ${tl('membership')}s yet`, text: `${member.first_name} hasn't bought one yet.` },
+    ),
+  );
+
+  const classBookingsCard = h(
+    'div',
+    { class: 'card md-card' },
+    h('div', { class: 'card-head' }, cardTitle('calendar', 'Class bookings', 'orange')),
+    mdTable(
+      [
+        { label: 'Class', render: (row) => row.class_name },
+        { label: 'Date', render: (row) => date(row.class_date) },
+        { label: 'Time', render: (row) => time(row.start_time) },
+        { label: 'Status', render: (row) => statusBadge(row.status) },
+      ],
+      member.bookings,
+      { icon: 'calendar', title: 'No class bookings', text: "This member hasn't booked any classes yet." },
+    ),
+  );
+
+  const paymentsCard = h(
+    'div',
+    { class: 'card md-card' },
+    h(
+      'div',
+      { class: 'card-head' },
+      cardTitle('billing', 'Payments', 'green'),
+      h('div', { class: 'spacer' }),
+      member.payments.length ? viewAllLink(`Payments · ${fullName(member)}`, paymentColumns, member.payments) : null,
+    ),
+    mdTable(paymentColumns, member.payments.slice(0, PREVIEW_ROWS), {
+      icon: 'billing',
+      title: 'No payments recorded',
+      text: 'Payments for memberships and add-ons show up here.',
+    }),
+  );
+
+  const visitsCard = h(
+    'div',
+    { class: 'card md-card' },
+    h(
+      'div',
+      { class: 'card-head' },
+      cardTitle('mapPin', 'Recent visits', 'orange'),
+      h('div', { class: 'spacer' }),
+      member.attendance.length > PREVIEW_ROWS
+        ? viewAllLink(`Recent visits · ${fullName(member)}`, visitColumns, member.attendance)
+        : null,
+    ),
+    mdTable(visitColumns, member.attendance.slice(0, PREVIEW_ROWS), {
+      icon: 'calendar',
+      title: 'No visits recorded',
+      text: 'Member has not checked in yet.',
+    }),
+  );
+
   const history = h(
     'div',
-    { class: 'grid cols-2 top' },
-    h(
-      'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, 'Membership history')),
-      table(
-        [
-          { label: 'Plan', render: (row) => row.plan_name },
-          { label: 'Period', render: (row) => `${date(row.start_date)} → ${date(row.end_date)}` },
-          { label: 'Value', align: 'right', render: (row) => money(row.price - row.discount) },
-          { label: 'Status', render: (row) => statusBadge(row.status) },
-        ],
-        member.subscriptions,
-        { empty: 'No memberships yet' },
-      ),
-    ),
-    h(
-      'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, 'Payments')),
-      table(
-        [
-          { label: 'Date', render: (row) => date(row.paid_on) },
-          { label: 'Method', render: (row) => h('span', { class: 'badge grey' }, row.method) },
-          { label: 'Reference', render: (row) => h('span', { class: 'muted' }, row.reference || '—') },
-          { label: 'Amount', align: 'right', render: (row) => money(row.amount) },
-          {
-            label: '',
-            render: (row) =>
-              h(
-                'div',
-                { class: 'row', style: 'gap:6px;justify-content:flex-end' },
-                h(
-                  'button',
-                  {
-                    class: 'btn sm ghost',
-                    title: 'Print receipt',
-                    onclick: async (event) => {
-                      event.stopPropagation();
-                      try {
-                        const fullPayment = await api.paymentReceipt(row.id);
-                        printReceipt(fullPayment, { gymName: getGymName() });
-                      } catch (err) {
-                        toast(err.message || 'Could not load receipt details', 'error');
-                      }
-                    },
-                  },
-                  renderIcon('print', { size: 15 }), 'Print',
-                ),
-                h(
-                  'button',
-                  {
-                    class: 'btn sm ghost',
-                    title: 'Download receipt',
-                    onclick: async (event) => {
-                      event.stopPropagation();
-                      try {
-                        const fullPayment = await api.paymentReceipt(row.id);
-                        await downloadReceipt(fullPayment, { gymName: getGymName() });
-                      } catch (err) {
-                        toast(err.message || 'Could not load receipt details', 'error');
-                      }
-                    },
-                  },
-                  renderIcon('download', { size: 15 }),
-                ),
-              ),
-          },
-        ],
-        member.payments,
-        { empty: 'No payments recorded' },
-      ),
-    ),
-    h(
-      'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, 'Recent visits')),
-      table(
-        [
-          { label: 'Date', render: (row) => date(row.check_in) },
-          { label: 'In', render: (row) => time(row.check_in.slice(11)) },
-          { label: 'Out', render: (row) => (row.check_out ? time(row.check_out.slice(11)) : h('span', { class: 'badge green' }, 'In gym')) },
-          { label: 'Via', render: (row) => sourceBadge(row.source) },
-        ],
-        member.attendance,
-        { empty: 'No visits recorded' },
-      ),
-    ),
-    h(
-      'div',
-      { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, 'Class bookings')),
-      table(
-        [
-          { label: 'Class', render: (row) => row.class_name },
-          { label: 'Date', render: (row) => date(row.class_date) },
-          { label: 'Time', render: (row) => time(row.start_time) },
-          { label: 'Status', render: (row) => statusBadge(row.status) },
-        ],
-        member.bookings,
-        { empty: 'No class bookings' },
-      ),
-    ),
+    { class: 'md-row-history' },
+    h('div', { class: 'md-stack' }, membershipHistoryCard, classBookingsCard),
+    paymentsCard,
+    visitsCard,
   );
 
   /* ── ID documents (library only) ─────────────────────────────────── */
@@ -1638,16 +1711,18 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     openModal({ title: `Upload a document · ${fullName(member)}`, body: form });
   }
 
-  renderDocs();
+  // Library only: the documents API 404s for a gym, which surfaced as an
+  // unhandled rejection on every member page open.
+  if (isLibrary()) renderDocs();
 
   const documentsCard = isLibrary()
     ? h(
         'div',
-        { class: 'card' },
+        { class: 'card md-card' },
         h(
           'div',
           { class: 'card-head' },
-          h('h3', {}, renderIcon('idCard', { size: 16 }), 'ID documents'),
+          cardTitle('idCard', 'ID documents', 'blue'),
           h('div', { class: 'spacer' }),
           session.managesBilling ? h('button', { class: 'btn sm', onclick: openDocumentUploadForm }, renderIcon('plus', { size: 15 }), 'Upload') : null,
         ),
@@ -1657,9 +1732,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
 
   return h(
     'div',
-    { class: 'grid', style: 'gap:16px' },
-    h('a', { href: '#/members', class: 'muted', style: 'font-size:13px' }, renderIcon('arrowLeft', { size: 16 }), 'Back to members'),
-    h('div', { class: 'grid cols-3' }, profileCard, membershipCard, accountCard),
+    { class: 'md-page md-stack' },
+    h('a', { href: '#/members', class: 'md-back' }, renderIcon('arrowLeft', { size: 16 }), `Back to ${tl('members')}`),
+    h('div', { class: 'md-row-3' }, profileCard, membershipCard, accountCard),
     // Gym only: the fitness module is not part of SeatBook, and its API 404s
     // there — see requireModule in src/verticals.js.
     isLibrary() ? null : fitnessSection(member, { reload }),

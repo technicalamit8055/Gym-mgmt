@@ -16,6 +16,13 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 
+function splitList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   dbFile: process.env.DB_FILE || path.join(ROOT, 'data', 'gym.db'),
@@ -30,6 +37,12 @@ export const config = {
   // single-tenant/dev fallback database.
   platformDbFile: process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'),
   tenantsDir: process.env.TENANTS_DIR || path.join(ROOT, 'data', 'tenants'),
+  // Exercise demos (images, GIFs, short clips) uploaded from the operator
+  // console. Defaults to sit beside the platform DB so it rides the same volume
+  // and backup story: /data/exercise-media on Fly, ./data/exercise-media locally.
+  exerciseMediaDir:
+    process.env.EXERCISE_MEDIA_DIR ||
+    path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'exercise-media'),
   trialDays: Number(process.env.TRIAL_DAYS || 7),
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
@@ -61,6 +74,30 @@ export const config = {
   // domain you own). Both are always *accepted* — this only picks which one
   // gets advertised. Defaults to the one that cannot be misconfigured.
   tenantUrlMode: process.env.TENANT_URL_MODE === 'subdomain' ? 'subdomain' : 'path',
+  // Gyms bringing their own domain (app.theirgym.com). Off until `target` is
+  // set: connecting a domain is only useful once this deployment can also
+  // issue it a certificate (see docs/CUSTOM_DOMAINS.md), and a gym handed DNS
+  // instructions for a feature that cannot finish would be stuck.
+  customDomains: {
+    // The hostname a gym's CNAME points at, e.g. "domains.gymbook.app".
+    target: (process.env.CUSTOM_DOMAIN_TARGET || '').trim().toLowerCase().replace(/\.$/, ''),
+    // This server's public IPv4 address(es), for root domains, which cannot
+    // carry a CNAME. Optional: without them a root domain is told to use an
+    // ALIAS/ANAME/flattened CNAME instead, and is checked against whatever
+    // `target` resolves to.
+    ipv4: splitList(process.env.CUSTOM_DOMAIN_IPV4),
+    // Asked directly rather than through the OS resolver, whose cache would
+    // keep reporting a record the owner fixed minutes ago. Empty string to
+    // fall back to the system resolver (e.g. egress-restricted hosts).
+    dnsServers:
+      process.env.CUSTOM_DOMAIN_DNS_SERVERS === undefined
+        ? ['1.1.1.1', '8.8.8.8']
+        : splitList(process.env.CUSTOM_DOMAIN_DNS_SERVERS),
+    maxPerTenant: Number(process.env.CUSTOM_DOMAIN_LIMIT || 3),
+    // How long a "Check DNS" answer is reused before the next click asks the
+    // DNS servers again.
+    checkCooldownMs: Number(process.env.CUSTOM_DOMAIN_CHECK_COOLDOWN_MS ?? 10_000),
+  },
   // Operator console credentials. Both must be set for the console to exist
   // at all — an unset password must never mean "no password required".
   platformAdminEmail: (process.env.PLATFORM_ADMIN_EMAIL || '').toLowerCase(),

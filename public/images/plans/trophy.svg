@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 160" width="180" height="160" fill="none">
+  <defs>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#fdba74" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#fdba74" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cup" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset=".45" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#ea580c"/>
+    </linearGradient>
+    <linearGradient id="star" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff7d6"/>
+      <stop offset="1" stop-color="#fde68a"/>
+    </linearGradient>
+  </defs>
+  <circle cx="92" cy="86" r="74" fill="url(#glow)"/>
+  <!-- sparkles -->
+  <g fill="#fbbf24">
+    <path d="M36 28l3 8 8 3-8 3-3 8-3-8-8-3 8-3z"/>
+    <path d="M150 34l2.5 6.5 6.5 2.5-6.5 2.5-2.5 6.5-2.5-6.5-6.5-2.5 6.5-2.5z"/>
+    <path d="M28 100l2.5 6 6 2.5-6 2.5-2.5 6-2.5-6-6-2.5 6-2.5z"/>
+    <path d="M152 106l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" opacity=".8"/>
+  </g>
+  <!-- handles -->
+  <path d="M60 46H44c0 22 10 34 26 36" stroke="url(#cup)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M124 46h16c0 22-10 34-26 36" stroke="url(#cup)" stroke-width="8" stroke-linecap="round"/>
+  <!-- cup -->
+  <path d="M56 30h72v26c0 24-16 40-36 40S56 80 56 56z" fill="url(#cup)"/>
+  <path d="M64 36v18c0 12 6 22 14 28" stroke="#fff" stroke-opacity=".5" stroke-width="4" stroke-linecap="round"/>
+  <rect x="52" y="26" width="80" height="10" rx="5" fill="#fcd34d"/>
+  <path d="M92 44l5.5 11 12 1.8-8.7 8.4 2 12-10.8-5.7-10.8 5.7 2-12-8.7-8.4 12-1.8z" fill="url(#star)"/>
+  <!-- stem and base -->
+  <path d="M84 94h16l4 18H80z" fill="url(#cup)"/>
+  <rect x="70" y="110" width="44" height="10" rx="4" fill="#f59e0b"/>
+  <rect x="62" y="120" width="60" height="14" rx="5" fill="url(#base)"/>
+  <rect x="68" y="124" width="24" height="3" rx="1.5" fill="#fff" opacity=".4"/>
+</svg>

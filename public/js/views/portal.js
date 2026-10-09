@@ -7,6 +7,7 @@ import {
   closeModal,
   confirmDialog,
   date,
+  exerciseMedia,
   h,
   initials,
   money,
@@ -18,6 +19,7 @@ import {
   toast,
   today,
 } from '../ui.js';
+import { cropAndResizeImage } from '../photo.js';
 import { onInstallChange, promptInstall } from '../pwa.js';
 import * as sound from '../sound.js';
 import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
@@ -202,6 +204,163 @@ function dayCardGrid(days, onStart) {
   return h('div', { class: 'portal-day-grid' }, ...days.map((day, i) => dayCard(day, onStart, spans[i])));
 }
 
+/** The demo fields a session carries for an exercise, so the logger can show
+ * them without another round trip (and still can offline). */
+const demoFields = (exercise) => ({
+  media_url: exercise.media_url ?? null,
+  media_type: exercise.media_type ?? null,
+  instructions: exercise.instructions ?? null,
+  secondary_muscles: exercise.secondary_muscles ?? [],
+  equipment: exercise.equipment ?? null,
+});
+
+/** The sheet a member opens from a routine row or the logger: the demo, what
+ * it works, and how to do it. */
+function openExerciseDemo(exercise) {
+  openModal({ title: exercise.exercise_name ?? exercise.name, body: exerciseDemoBody(exercise) });
+}
+
+/** The demo, what it works and how to do it — the demo sheet's body, and the
+ * "How to" tab of the progress sheet. */
+function exerciseDemoBody(exercise) {
+  const name = exercise.exercise_name ?? exercise.name;
+  const thumb = EXERCISE_THUMBS[String(name).trim().toLowerCase()];
+  const demo =
+    exerciseMedia(exercise, { className: 'portal-demo-media' }) ??
+    (thumb ? h('img', { class: 'portal-demo-media', src: `/images/workout/ex-${thumb}.png`, alt: '' }) : null);
+  const blurb = exercise.instructions || EXERCISE_BLURBS[String(name).trim().toLowerCase()] || MUSCLE_BLURBS[exercise.muscle_group] || '';
+
+  return h(
+    'div',
+    { class: 'portal-demo' },
+    demo,
+    h(
+      'div',
+      { class: 'portal-demo-badges' },
+      h('span', { class: 'portal-muscle-badge', 'data-m': exercise.muscle_group }, muscleLabel(exercise.muscle_group)),
+      ...(exercise.secondary_muscles ?? []).map((m) => h('span', { class: 'portal-muscle-badge is-secondary' }, muscleLabel(m))),
+      exercise.equipment ? h('span', { class: 'muted' }, muscleLabel(exercise.equipment)) : null,
+    ),
+    exercise.target_sets ? h('div', { class: 'portal-demo-target' }, `Target ${exercise.target_sets} × ${exercise.target_reps || '—'}`) : null,
+    blurb ? h('p', { class: 'portal-demo-text' }, blurb) : null,
+  );
+}
+
+/** The small demo on a logger card; opens the full sheet. The operator's
+ * upload wins, then the bundled picture; with neither, a dumbbell tile keeps
+ * every card's header the same shape. */
+function exerciseThumbButton(exercise) {
+  const bundled = EXERCISE_THUMBS[exercise.exercise_name.trim().toLowerCase()];
+  const media =
+    exerciseMedia(exercise, { className: 'portal-ex-thumb-media' }) ??
+    (bundled ? h('img', { class: 'portal-ex-thumb-media', src: `/images/workout/ex-${bundled}.png`, alt: '' }) : null);
+  return h(
+    'button',
+    {
+      class: `portal-ex-thumb${media ? '' : ' is-empty'}`,
+      type: 'button',
+      'aria-label': `${exercise.exercise_name} progress and how-to`,
+      onclick: () => openExerciseDetail(exercise),
+    },
+    media ?? renderIcon('weight', { size: 22 }),
+  );
+}
+
+/** The Add Exercise filter chips. Olympic is not a muscle group: it is the
+ * operator's "olympic" tag, plus anything filed as full body. */
+const PICKER_GROUPS = [
+  { key: '', label: 'All' },
+  ...[
+    ['chest', 'Chest', 'weight'],
+    ['back', 'Back', 'muscleBack'],
+    ['legs', 'Legs', 'muscleLeg'],
+    ['shoulders', 'Shoulders', 'muscleShoulders'],
+    ['arms', 'Arms', 'muscleArm'],
+    ['core', 'Core', 'muscleCore'],
+    ['cardio', 'Cardio', 'heartPulse'],
+  ].map(([key, label, icon]) => ({ key, label, icon, match: (e) => e.muscle_group === key })),
+  {
+    key: 'olympic',
+    label: 'Olympic',
+    icon: 'barbell',
+    match: (e) => e.muscle_group === 'full_body' || (e.tags ?? []).some((tag) => String(tag).toLowerCase() === 'olympic'),
+  },
+];
+
+/** The exercises this member last added from the picker, newest first, kept
+ * on the device like the weight unit. */
+const RECENT_EXERCISES_KEY = 'gymbook.portal.recentExercises';
+const recentExercises = {
+  read() {
+    try {
+      const list = JSON.parse(localStorage.getItem(RECENT_EXERCISES_KEY) || '[]');
+      return Array.isArray(list) ? list.filter((name) => typeof name === 'string') : [];
+    } catch {
+      return [];
+    }
+  },
+  add(name) {
+    const next = [name, ...this.read().filter((n) => n.toLowerCase() !== name.toLowerCase())].slice(0, 5);
+    try {
+      localStorage.setItem(RECENT_EXERCISES_KEY, JSON.stringify(next));
+    } catch {
+      // Storage blocked: the picker simply shows no recents.
+    }
+  },
+  clear() {
+    try {
+      localStorage.removeItem(RECENT_EXERCISES_KEY);
+    } catch {
+      // Nothing stored to clear.
+    }
+  },
+};
+
+/** "Arms · Barbell" — muscle and equipment, the way the picker labels a row. */
+const exerciseSubtitle = (item) =>
+  [item.muscle_group, item.equipment].filter(Boolean).map((part) => capitalise(muscleLabel(part))).join(' · ');
+
+/** A picker row's picture: the operator's demo, then the bundled one, then a
+ * dumbbell tile so the list stays aligned. */
+function pickerThumb(item) {
+  const bundled = EXERCISE_THUMBS[item.name.trim().toLowerCase()];
+  return (
+    exerciseMedia(item, { className: 'portal-pick-thumb' }) ??
+    (bundled
+      ? h('img', { class: 'portal-pick-thumb', src: `/images/workout/ex-${bundled}.png`, alt: '', loading: 'lazy' })
+      : h('span', { class: 'portal-pick-thumb is-empty' }, renderIcon('weight', { size: 22 })))
+  );
+}
+
+/** A Hevy-style action sheet: a column of full-width rows, each closing the
+ * sheet before it runs so a follow-up dialog opens on a clean stack. */
+function actionSheet(title, actions) {
+  openModal({
+    title,
+    className: 'portal-action-modal',
+    body: h(
+      'div',
+      { class: 'portal-action-sheet' },
+      ...actions.filter(Boolean).map((action) =>
+        h(
+          'button',
+          {
+            class: `portal-action-row${action.danger ? ' danger' : ''}`,
+            type: 'button',
+            disabled: action.disabled,
+            onclick: () => {
+              closeModal();
+              action.onClick();
+            },
+          },
+          renderIcon(action.icon, { size: 18 }),
+          h('span', {}, action.label),
+        ),
+      ),
+    ),
+  });
+}
+
 /** One exercise of today's routine: thumbnail, muscle badge, name and what to
  * aim for, the sets × reps pill and a chevron. */
 function routineExerciseRow(exercise) {
@@ -209,11 +368,13 @@ function routineExerciseRow(exercise) {
   const thumb = EXERCISE_THUMBS[name.trim().toLowerCase()];
   const blurb = exercise.notes || EXERCISE_BLURBS[name.trim().toLowerCase()] || MUSCLE_BLURBS[exercise.muscle_group] || '';
   return h(
-    'div',
-    { class: 'portal-routine-row' },
-    thumb
-      ? h('img', { class: 'portal-routine-thumb', src: `/images/workout/ex-${thumb}.png`, alt: '', width: 88, height: 44, loading: 'lazy' })
-      : h('span', { class: 'portal-routine-thumb is-empty' }, renderIcon('weight', { size: 20 })),
+    'button',
+    { class: 'portal-routine-row', type: 'button', onclick: () => openExerciseDemo(exercise) },
+    // The operator's demo wins; the bundled picture covers an exercise that has none yet.
+    exerciseMedia(exercise, { className: 'portal-routine-thumb' }) ??
+      (thumb
+        ? h('img', { class: 'portal-routine-thumb', src: `/images/workout/ex-${thumb}.png`, alt: '', width: 88, height: 44, loading: 'lazy' })
+        : h('span', { class: 'portal-routine-thumb is-empty' }, renderIcon('weight', { size: 20 }))),
     h(
       'div',
       { class: 'portal-routine-body' },
@@ -225,28 +386,36 @@ function routineExerciseRow(exercise) {
   );
 }
 
-function profileRow(label, value) {
-  if (!value) return null;
-  return h('div', { class: 'portal-profile-row' }, h('span', { class: 'muted' }, label), h('span', {}, value));
+/**
+ * One row of a Profile card: a tinted icon tile, a title over a muted line,
+ * then whatever sits on the right — a value, a switch, a segmented control.
+ * `onclick` turns the whole row into a button with a chevron; `tone` is one of
+ * the .tone-* classes (orange | purple | blue | green | rose).
+ */
+function profileRow({ icon, tone, title, sub, value, control, onclick, className = '' }) {
+  const parts = [
+    h('span', { class: 'portal-prof-ico' }, renderIcon(icon, { size: 22 })),
+    h('span', { class: 'portal-prof-text' }, h('strong', {}, title), sub ? h('small', {}, sub) : null),
+    value != null ? h('span', { class: 'portal-prof-value' }, value) : null,
+    control || null,
+    onclick ? h('span', { class: 'portal-prof-chev' }, renderIcon('chevronRight', { size: 18 })) : null,
+  ];
+  const cls = `portal-prof-row tone-${tone}${className ? ` ${className}` : ''}`;
+  return onclick ? h('button', { class: cls, type: 'button', onclick }, ...parts) : h('div', { class: cls }, ...parts);
 }
 
-function settingsSwitch(icon, label, checked, onToggle) {
+function settingsSwitch(checked, label, onToggle) {
   return h(
-    'div',
-    { class: 'portal-audio-row' },
-    h('div', { class: 'portal-audio-row-label' }, renderIcon(icon, { size: 15 }), h('span', {}, label)),
-    h(
-      'button',
-      {
-        class: `portal-switch${checked ? ' on' : ''}`,
-        type: 'button',
-        role: 'switch',
-        'aria-checked': String(checked),
-        'aria-label': label,
-        onclick: onToggle,
-      },
-      h('span', { class: 'portal-switch-thumb' }),
-    ),
+    'button',
+    {
+      class: `portal-switch${checked ? ' on' : ''}`,
+      type: 'button',
+      role: 'switch',
+      'aria-checked': String(checked),
+      'aria-label': label,
+      onclick: onToggle,
+    },
+    h('span', { class: 'portal-switch-thumb' }),
   );
 }
 
@@ -303,6 +472,97 @@ function classCard(c, { onBook, onCancel } = {}) {
       : c.my_booking_id
         ? h('span', { class: 'badge green' }, 'Booked')
         : null,
+  );
+}
+
+/** A class's look on the Schedule tab, picked from its name — the first
+ * matching keyword wins. Anything unmatched cycles the tones by position so a
+ * day of unknown classes still reads as a coloured list, not five of the same. */
+const CLASS_KINDS = [
+  { match: /yoga|stretch|meditat|mobility/i, icon: 'yoga', tone: 'orange' },
+  { match: /strength|weight|lift|power|muscle|pump/i, icon: 'barbell', tone: 'blue' },
+  { match: /hiit|blast|boot ?camp|circuit|tabata|crossfit|cardio|spin|cycl/i, icon: 'zap', tone: 'red' },
+  { match: /zumba|dance|aerobic|bhangra/i, icon: 'music', tone: 'purple' },
+  { match: /abs|core|pilates|posture/i, icon: 'bicep', tone: 'green' },
+];
+const FALLBACK_KINDS = [
+  { icon: 'weight', tone: 'orange' },
+  { icon: 'barbell', tone: 'blue' },
+  { icon: 'zap', tone: 'red' },
+  { icon: 'music', tone: 'purple' },
+  { icon: 'bicep', tone: 'green' },
+];
+const classKind = (name, index) => CLASS_KINDS.find((k) => k.match.test(name || '')) || FALLBACK_KINDS[index % FALLBACK_KINDS.length];
+
+/** A seat count is "running low" at five or under, or a quarter of the room. */
+const spotsLow = (c) => c.seats_left <= Math.max(5, Math.floor(c.capacity / 4));
+
+/** The Schedule tab's card: a tinted time block on the left, then the class
+ * and its trainer, with the spots pill and the Book button down the right. */
+function scheduleCard(c, index, { onBook, onCancel }) {
+  const kind = classKind(c.name, index);
+  const [hh = '0', mm = '00'] = String(c.start_time || '').split(':');
+  const hour = Number(hh);
+  const clock = `${String(hour % 12 || 12).padStart(2, '0')}:${mm.padStart(2, '0')}`;
+  const booked = Boolean(c.my_booking_id);
+  const full = c.seats_left <= 0 && !booked;
+  const ended = c.class_date < today();
+  const trainer = String(c.trainer_name || '').trim() || 'Gym staff';
+
+  let action;
+  if (booked) {
+    action = h(
+      'button',
+      { class: 'portal-sched-btn is-booked', type: 'button', disabled: ended, onclick: () => onCancel(c) },
+      renderIcon('check', { size: 15, stroke: 2.6 }),
+      'Booked',
+    );
+  } else if (ended || full) {
+    action = h('button', { class: 'portal-sched-btn', type: 'button', disabled: true }, ended ? 'Ended' : 'Full');
+  } else {
+    action = h(
+      'button',
+      { class: 'portal-sched-btn', type: 'button', onclick: () => onBook(c) },
+      'Book',
+      renderIcon('arrowRight', { size: 16, stroke: 2.4 }),
+    );
+  }
+
+  return h(
+    'article',
+    { class: `portal-sched-card tone-${kind.tone}` },
+    h(
+      'div',
+      { class: 'portal-sched-time' },
+      h('strong', {}, clock),
+      h('strong', {}, hour < 12 ? 'AM' : 'PM'),
+      h('span', {}, `${c.duration_min} min`),
+    ),
+    h(
+      'div',
+      { class: 'portal-sched-body' },
+      h('div', { class: 'portal-sched-icon' }, renderIcon(kind.icon, { size: 22 })),
+      h(
+        'div',
+        { class: 'portal-sched-info' },
+        h('div', { class: 'portal-sched-name' }, c.name),
+        c.description ? h('div', { class: 'portal-sched-desc' }, c.description) : null,
+      ),
+      h(
+        'div',
+        { class: `portal-sched-spots${full || spotsLow(c) ? ' is-low' : ''}` },
+        renderIcon('users', { size: 14 }),
+        full ? 'Full' : `${Math.max(0, c.seats_left)} spot${c.seats_left === 1 ? '' : 's'} left`,
+      ),
+      h('div', { class: 'portal-sched-avatar' }, initials(...trainer.split(/\s+/))),
+      h(
+        'div',
+        { class: 'portal-sched-trainer' },
+        h('div', {}, trainer),
+        h('span', {}, c.room || 'Trainer'),
+      ),
+      action,
+    ),
   );
 }
 
@@ -610,6 +870,381 @@ function upgradeSheet(status, { onRefresh } = {}) {
       ),
     ),
   );
+}
+
+/* ── Exercise progress ─────────────────────────────────────────────────── */
+
+/** What the progress chart can plot, each read off one session of
+ * api.portal.exerciseHistory. Weights stay in kilograms until they are drawn. */
+const PROGRESS_METRICS = [
+  { key: 'heaviest', label: 'Heaviest Weight', weight: true, read: (s) => s.heaviest_weight_kg },
+  { key: '1rm', label: 'One Rep Max', weight: true, read: (s) => s.best_1rm_kg },
+  { key: 'set_volume', label: 'Best Set Volume', weight: true, read: (s) => s.best_set_volume_kg },
+  { key: 'volume', label: 'Session Volume', weight: true, read: (s) => s.volume_kg },
+  { key: 'reps', label: 'Total Reps', weight: false, read: (s) => s.total_reps },
+];
+
+const PROGRESS_RANGES = [
+  { key: '3m', label: '3 months', days: 92 },
+  { key: '1y', label: 'Year', days: 366 },
+  { key: 'all', label: 'All time', days: null },
+];
+
+const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+const longDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+/**
+ * A line chart for one metric over time, drawn for a thumb: the axis zooms to
+ * the data (a bench going 80 → 85 kg must look like progress, not a flat line
+ * on a 0-based axis) and dragging anywhere picks the nearest session.
+ */
+function progressChart(points, { format, onSelect }) {
+  const W = 340;
+  const H = 172;
+  const left = 40;
+  const right = 12;
+  const top = 12;
+  const bottom = H - 24;
+  const values = points.map((p) => p.value);
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  const pad = (hi - lo) * 0.15 || Math.max(1, hi * 0.1);
+  lo = Math.max(0, lo - pad);
+  hi += pad;
+
+  const x = (i) => (points.length === 1 ? (left + W - right) / 2 : left + (i * (W - left - right)) / (points.length - 1));
+  const y = (v) => bottom - ((v - lo) / (hi - lo)) * (bottom - top);
+  const coords = points.map((p, i) => [x(i), y(p.value)]);
+
+  const ticks = [hi, (hi + lo) / 2, lo];
+  const marker = svg('circle', { class: 'portal-prog-marker', r: 5.5 });
+  const guide = svg('line', { class: 'portal-prog-guide', y1: top, y2: bottom });
+
+  const select = (index) => {
+    const [cx, cy] = coords[index];
+    marker.setAttribute('cx', cx);
+    marker.setAttribute('cy', cy);
+    guide.setAttribute('x1', cx);
+    guide.setAttribute('x2', cx);
+    onSelect(index);
+  };
+
+  const labelIdx = points.length <= 2 ? points.map((_, i) => i) : [0, Math.floor((points.length - 1) / 2), points.length - 1];
+  const chart = svg(
+    'svg',
+    { class: 'portal-prog-chart', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Progress chart' },
+    ...ticks.map((v) =>
+      svg(
+        'g',
+        {},
+        svg('line', { class: 'portal-prog-grid', x1: left, x2: W - right, y1: y(v), y2: y(v) }),
+        svg('text', { class: 'portal-prog-axis', x: left - 6, y: y(v) + 3.5, 'text-anchor': 'end' }, format(v, true)),
+      ),
+    ),
+    points.length > 1
+      ? svg('path', {
+          class: 'portal-prog-area',
+          d: `M${coords.map(([cx, cy]) => `${cx.toFixed(1)},${cy.toFixed(1)}`).join(' L')} L${coords.at(-1)[0]},${bottom} L${coords[0][0]},${bottom} Z`,
+        })
+      : null,
+    points.length > 1 ? svg('path', { class: 'portal-prog-line', d: `M${coords.map(([cx, cy]) => `${cx.toFixed(1)},${cy.toFixed(1)}`).join(' L')}` }) : null,
+    ...coords.map(([cx, cy]) => svg('circle', { class: 'portal-prog-dot', cx, cy, r: 3 })),
+    ...labelIdx.map((i) =>
+      svg(
+        'text',
+        { class: 'portal-prog-axis', x: x(i), y: H - 6, 'text-anchor': points.length === 1 ? 'middle' : i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle' },
+        shortDate(points[i].date),
+      ),
+    ),
+    guide,
+    marker,
+  );
+
+  // Pointer events cover mouse, pen and touch alike; the chart is the only
+  // thing on the sheet that wants a horizontal drag.
+  const pick = (event) => {
+    const rect = chart.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / rect.width) * W;
+    let best = 0;
+    for (let i = 1; i < coords.length; i++) if (Math.abs(coords[i][0] - px) < Math.abs(coords[best][0] - px)) best = i;
+    select(best);
+  };
+  chart.addEventListener('pointerdown', (event) => {
+    chart.setPointerCapture?.(event.pointerId);
+    pick(event);
+  });
+  chart.addEventListener('pointermove', (event) => {
+    if (event.buttons || event.pointerType === 'mouse') pick(event);
+  });
+
+  select(points.length - 1);
+  return chart;
+}
+
+/**
+ * Hevy's exercise screen: Summary (a chart of any metric, the records and the
+ * lifetime totals), History (every session's sets) and How to (the demo).
+ * Opens from the logger card, the Add Exercise sheet and the records wall.
+ */
+function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
+  const name = exercise.exercise_name ?? exercise.name;
+  const item = { ...exercise, name, exercise_name: name };
+  let active = tab;
+  let history = null;
+  let failed = null;
+  let metric = PROGRESS_METRICS[0].key;
+  let range = 'all';
+
+  const body = h('div', { class: 'portal-exd' });
+  const panel = h('div', { class: 'portal-exd-panel' });
+  const tabs = h('div', { class: 'portal-exd-tabs', role: 'tablist' });
+
+  const weightOf = (kg, axis) => (axis ? `${Math.round(toDisplayWeight(kg))}` : weightLabel(Math.round(kg * 10) / 10));
+  const setText = (set) => `${weightLabel(set.weight_kg)} × ${set.reps}`;
+
+  function paintTabs() {
+    clear(tabs).append(
+      ...[
+        ['summary', 'Summary'],
+        ['history', 'History'],
+        ['howto', 'How to'],
+      ].map(([key, label]) =>
+        h(
+          'button',
+          {
+            class: `portal-exd-tab${active === key ? ' active' : ''}`,
+            type: 'button',
+            role: 'tab',
+            'aria-selected': String(active === key),
+            onclick: () => {
+              active = key;
+              paint();
+            },
+          },
+          label,
+        ),
+      ),
+    );
+  }
+
+  function emptyHistory() {
+    return h(
+      'div',
+      { class: 'portal-exd-empty' },
+      h('span', { class: 'portal-exd-empty-icon' }, renderIcon('trendUp', { size: 24 })),
+      h('strong', {}, 'No history yet'),
+      h('span', {}, `Log ${name} in a workout and your progress shows up here.`),
+    );
+  }
+
+  function summaryPanel() {
+    const records = history.records;
+    const def = PROGRESS_METRICS.find((m) => m.key === metric);
+    const cutoff = PROGRESS_RANGES.find((r) => r.key === range).days;
+    const since = cutoff ? addDays(today(), -cutoff) : null;
+    const points = [...history.sessions]
+      .reverse()
+      .filter((s) => !since || s.log_date >= since)
+      .map((s) => ({ date: s.log_date, value: def.read(s) }))
+      .filter((p) => p.value > 0);
+
+    const format = (v, axis) => (def.weight ? weightOf(v, axis) : String(Math.round(v)));
+    const valueNode = h('div', { class: 'portal-exd-value' });
+    const dateNode = h('div', { class: 'portal-exd-date' });
+    const changeNode = h('div', { class: 'portal-exd-change' });
+
+    const chartCard = h(
+      'div',
+      { class: 'portal-exd-card' },
+      h('div', { class: 'portal-exd-readout' }, h('div', {}, valueNode, dateNode), changeNode),
+    );
+    if (points.length) {
+      const first = points[0].value;
+      chartCard.append(
+        progressChart(points, {
+          format,
+          onSelect: (index) => {
+            const point = points[index];
+            valueNode.textContent = format(point.value);
+            dateNode.textContent = longDate(point.date);
+            const delta = point.value - first;
+            clear(changeNode);
+            if (index > 0 && Math.abs(delta) >= 0.05) {
+              changeNode.className = `portal-exd-change ${delta > 0 ? 'up' : 'down'}`;
+              changeNode.append(
+                renderIcon(delta > 0 ? 'trendUp' : 'trendDown', { size: 14 }),
+                `${delta > 0 ? '+' : '−'}${format(Math.abs(delta))}`,
+              );
+            }
+          },
+        }),
+      );
+    } else {
+      valueNode.textContent = '—';
+      dateNode.textContent = 'Nothing logged in this period';
+    }
+    chartCard.append(
+      h(
+        'div',
+        { class: 'portal-exd-ranges' },
+        ...PROGRESS_RANGES.map((r) =>
+          h(
+            'button',
+            {
+              class: `portal-exd-range${r.key === range ? ' active' : ''}`,
+              type: 'button',
+              onclick: () => {
+                range = r.key;
+                paint();
+              },
+            },
+            r.label,
+          ),
+        ),
+      ),
+    );
+
+    const metricChips = h(
+      'div',
+      { class: 'portal-exd-metrics' },
+      ...PROGRESS_METRICS.map((m) =>
+        h(
+          'button',
+          {
+            class: `portal-pick-chip${m.key === metric ? ' active' : ''}`,
+            type: 'button',
+            onclick: () => {
+              metric = m.key;
+              paint();
+            },
+          },
+          m.label,
+        ),
+      ),
+    );
+
+    const recordRow = (icon, label, value, sub) =>
+      h(
+        'div',
+        { class: 'portal-exd-record' },
+        h('span', { class: 'portal-exd-record-icon' }, renderIcon(icon, { size: 17 })),
+        h('span', { class: 'portal-exd-record-label' }, label),
+        h('span', { class: 'portal-exd-record-value' }, value, sub ? h('small', {}, sub) : null),
+      );
+
+    return h(
+      'div',
+      { class: 'portal-exd-summary' },
+      metricChips,
+      chartCard,
+      h('h3', { class: 'portal-exd-heading' }, renderIcon('trophy', { size: 17 }), 'Personal Records'),
+      h(
+        'div',
+        { class: 'portal-exd-card is-list' },
+        recordRow('weight', 'Heaviest Weight', weightLabel(records.heaviest_weight_kg)),
+        recordRow('target', 'Best 1RM (est.)', weightLabel(records.best_1rm_kg)),
+        records.best_set
+          ? recordRow('crown', 'Best Set', setText(records.best_set), `${weightLabel(records.best_set.volume_kg)} · ${shortDate(records.best_set.log_date)}`)
+          : null,
+        recordRow('barChart', 'Best Session Volume', weightLabel(records.best_session_volume_kg)),
+        recordRow('refresh', 'Most Reps', String(records.most_reps)),
+      ),
+      h('h3', { class: 'portal-exd-heading' }, renderIcon('activity', { size: 17 }), 'Lifetime'),
+      h(
+        'div',
+        { class: 'portal-exd-totals' },
+        ...[
+          [String(records.total_sessions), records.total_sessions === 1 ? 'Workout' : 'Workouts'],
+          [String(records.total_sets), 'Sets'],
+          [String(records.total_reps), 'Reps'],
+          [weightLabel(records.total_volume_kg), 'Volume'],
+        ].map(([value, label]) => h('div', {}, h('strong', {}, value), h('span', {}, label))),
+      ),
+      records.first_logged_on
+        ? h('p', { class: 'portal-exd-foot' }, `First logged ${longDate(records.first_logged_on)} · last ${longDate(records.last_logged_on)}`)
+        : null,
+    );
+  }
+
+  function historyPanel() {
+    return h(
+      'div',
+      { class: 'portal-exd-history' },
+      ...history.sessions.map((session) => {
+        let working = 0;
+        return h(
+          'div',
+          { class: 'portal-exd-card portal-exd-session' },
+          h(
+            'div',
+            { class: 'portal-exd-session-head' },
+            h('div', {}, h('strong', {}, session.workout_name), h('span', {}, longDate(session.log_date))),
+            session.has_pr ? h('span', { class: 'portal-exd-pr' }, renderIcon('trophy', { size: 13 }), 'PR') : null,
+          ),
+          h('div', { class: 'portal-exd-set is-head' }, h('span', {}, 'Set'), h('span', {}, 'Weight & reps'), h('span', {}, '1RM')),
+          ...session.sets.map((set) => {
+            if (set.set_type !== 'warmup') working += 1;
+            const type = SET_TYPES.find((t) => t.key === set.set_type);
+            return h(
+              'div',
+              { class: `portal-exd-set${set.is_pr ? ' is-pr' : ''}` },
+              h('span', { class: `portal-set-type t-${set.set_type}` }, set.set_type === 'normal' ? String(working) : (type?.short ?? '')),
+              h('span', {}, setText(set), set.is_pr ? renderIcon('trophy', { size: 13 }) : null),
+              h('span', { class: 'muted' }, set.set_type === 'warmup' ? '—' : weightLabel(set.est_1rm_kg)),
+            );
+          }),
+          h('div', { class: 'portal-exd-session-foot' }, `Volume ${weightLabel(session.volume_kg)} · ${session.total_reps} reps`),
+        );
+      }),
+    );
+  }
+
+  function paint() {
+    paintTabs();
+    clear(panel);
+    if (active === 'howto') {
+      panel.append(exerciseDemoBody(item));
+      return;
+    }
+    if (failed) {
+      panel.append(h('div', { class: 'portal-empty' }, failed));
+      return;
+    }
+    if (!history) {
+      panel.append(h('div', { class: 'portal-loading' }, 'Loading…'));
+      return;
+    }
+    if (!history.sessions.length) {
+      panel.append(emptyHistory());
+      return;
+    }
+    panel.append(active === 'summary' ? summaryPanel() : historyPanel());
+  }
+
+  const subtitle = [item.muscle_group, item.equipment].filter(Boolean).map((part) => capitalise(muscleLabel(part))).join(' · ');
+  body.append(
+    h(
+      'div',
+      { class: 'portal-exd-hero' },
+      pickerThumb(item),
+      h('div', { class: 'portal-pick-text' }, h('span', { class: 'portal-pick-sub' }, subtitle), h('span', { class: 'portal-exd-hint' }, 'Tap the chart to see any session')),
+    ),
+    tabs,
+    panel,
+  );
+  paint();
+  openModal({ title: name, className: 'portal-pick-modal portal-exd-modal', body });
+
+  api.portal
+    .exerciseHistory(name)
+    .then((res) => {
+      history = res;
+      paint();
+    })
+    .catch((err) => {
+      failed = err.message || 'Could not load this exercise’s history';
+      paint();
+    });
 }
 
 /* ── Rest timer ────────────────────────────────────────────────────────── */
@@ -1120,6 +1755,10 @@ function renderPortalApp(ctx, initialMe) {
 
   const content = h('div', { class: 'portal-content' });
   const tabbar = h('nav', { class: 'portal-tabbar' });
+  // The tracking tabs say what they are under the gym's name; the rest keep
+  // the header to the name alone.
+  const TOPBAR_SUBTITLES = { workout: 'Workout tracking', diet: 'Diet tracking' };
+  const topbarSub = h('div', { class: 'portal-topbar-sub' });
 
   function paintTabbar() {
     clear(tabbar).append(
@@ -1138,6 +1777,7 @@ function renderPortalApp(ctx, initialMe) {
     stopTicking();
     active = key;
     paintTabbar();
+    topbarSub.textContent = TOPBAR_SUBTITLES[key] ?? '';
     clear(content).append(h('div', { class: 'portal-loading' }, 'Loading…'));
     try {
       const node = await TAB_RENDERERS[key]();
@@ -1170,6 +1810,7 @@ function renderPortalApp(ctx, initialMe) {
       exercises: (day?.exercises ?? []).map((exercise) => ({
         exercise_name: exercise.exercise_name,
         muscle_group: exercise.muscle_group,
+        ...demoFields(exercise),
         target_sets: exercise.target_sets,
         target_reps: exercise.target_reps,
         rest_seconds: exercise.rest_seconds,
@@ -1469,69 +2110,151 @@ function renderPortalApp(ctx, initialMe) {
   /* ---------------------------------------------------------- Schedule tab */
 
   async function renderGymSchedule() {
-    const start = today();
-    const res = await api.portal.classes({ week_start: start });
-    const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-    let selectedDay = days.includes(today()) ? today() : days[0];
+    // The strip shows seven days from `weekStart`; the arrows page it a week
+    // at a time, but never back past today, since a past class can't be booked.
+    let weekStart = today();
+    let selectedDay = weekStart;
+    let weekView = false;
+    let res = await api.portal.classes({ week_start: weekStart });
 
-    const listWrap = h('div', { class: 'portal-class-list' });
-    const strip = h('div', { class: 'portal-day-strip' });
+    const prevBtn = h('button', { class: 'portal-sched-nav', type: 'button', 'aria-label': 'Previous week' }, renderIcon('chevronLeft', { size: 20 }));
+    const nextBtn = h('button', { class: 'portal-sched-nav', type: 'button', 'aria-label': 'Next week' }, renderIcon('chevronRight', { size: 20 }));
+    const strip = h('div', { class: 'portal-sched-days' });
+    const dayTitle = h('h3', {});
+    const viewBtn = h('button', { class: 'portal-sched-view', type: 'button' });
+    const listWrap = h('div', { class: 'portal-sched-list' });
+
+    // Built from parts: ICU versions disagree on the comma after the weekday.
+    const fmt = (iso, opts) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', opts);
+    const dayMonth = (iso) => fmt(iso, { day: 'numeric', month: 'short' });
+    const longDate = (iso) => `${fmt(iso, { weekday: 'long' })}, ${fmt(iso, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    const shortDate = (iso) => `${fmt(iso, { weekday: 'short' })}, ${dayMonth(iso)}`;
+
+    async function reload() {
+      res = await api.portal.classes({ week_start: weekStart });
+      paint();
+    }
 
     async function bookClass(c) {
       try {
         await api.portal.bookClass(c.id, { class_date: c.class_date });
-        toast('Booked!');
-        const updated = await api.portal.classes({ week_start: start });
-        res.items = updated.items;
-        paintList();
+        toast(`Booked ${c.name}!`);
+        await reload();
       } catch (err) {
         toast(err.message || 'Could not book this class', 'error');
       }
     }
-    async function cancelClass(c) {
+    function cancelClass(c) {
+      confirmDialog({
+        title: 'Cancel this booking?',
+        message: `Your spot in ${c.name} on ${shortDate(c.class_date)} goes back to the class.`,
+        confirmLabel: 'Cancel booking',
+        danger: true,
+        onConfirm: async () => {
+          await api.portal.cancelBooking(c.my_booking_id);
+          toast('Booking cancelled');
+          await reload();
+        },
+      });
+    }
+    const handlers = { onBook: bookClass, onCancel: cancelClass };
+
+    async function goToWeek(start) {
+      weekStart = start;
+      selectedDay = start;
+      prevBtn.disabled = nextBtn.disabled = true;
       try {
-        await api.portal.cancelBooking(c.my_booking_id);
-        toast('Booking cancelled');
-        const updated = await api.portal.classes({ week_start: start });
-        res.items = updated.items;
-        paintList();
+        await reload();
       } catch (err) {
-        toast(err.message || 'Could not cancel this booking', 'error');
+        toast(err.message || 'Could not load this week', 'error');
+        paint();
       }
     }
+    prevBtn.addEventListener('click', () => goToWeek(addDays(weekStart, -7) < today() ? today() : addDays(weekStart, -7)));
+    nextBtn.addEventListener('click', () => goToWeek(addDays(weekStart, 7)));
+    viewBtn.addEventListener('click', () => {
+      weekView = !weekView;
+      paint();
+    });
 
-    function paintList() {
-      const items = res.items.filter((c) => c.class_date === selectedDay);
-      clear(listWrap);
-      append(
-        listWrap,
-        items.length
-          ? items.map((c) => classCard(c, { onBook: bookClass, onCancel: cancelClass }))
-          : [h('div', { class: 'portal-empty' }, 'No classes this day.')],
+    function emptyDay(message) {
+      return h(
+        'div',
+        { class: 'portal-schedule-empty' },
+        h('img', { class: 'portal-schedule-empty-art', src: '/images/portal/portal-schedule-empty.svg', alt: '' }),
+        h('div', { class: 'portal-schedule-empty-title' }, message),
+        h('div', { class: 'portal-schedule-empty-sub' }, 'Pick another day, or check the next week.'),
       );
     }
 
-    clear(strip).append(
-      ...days.map((iso) => {
-        const lbl = dayLabel(iso);
-        const btn = h(
-          'button',
-          { class: `portal-day-pill${iso === selectedDay ? ' active' : ''}`, type: 'button' },
-          h('span', {}, lbl.weekday),
-          h('strong', {}, String(lbl.day)),
-        );
-        btn.addEventListener('click', () => {
-          selectedDay = iso;
-          for (const el of strip.children) el.classList.remove('active');
-          btn.classList.add('active');
-          paintList();
-        });
-        return btn;
-      }),
-    );
-    paintList();
+    function paint() {
+      const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+      prevBtn.disabled = weekStart <= today();
+      nextBtn.disabled = false;
 
-    return h('div', { class: 'portal-tab-body' }, h('h2', { class: 'portal-tab-title' }, 'Schedule'), strip, listWrap);
+      clear(strip).append(
+        ...days.map((iso) => {
+          const lbl = dayLabel(iso);
+          const hasBooking = res.items.some((c) => c.class_date === iso && c.my_booking_id);
+          return h(
+            'button',
+            {
+              class: `portal-sched-day${iso === selectedDay && !weekView ? ' active' : ''}${hasBooking ? ' has-booking' : ''}`,
+              type: 'button',
+              'aria-pressed': iso === selectedDay && !weekView ? 'true' : 'false',
+              onclick: () => {
+                selectedDay = iso;
+                weekView = false;
+                paint();
+              },
+            },
+            h('span', {}, lbl.weekday),
+            h('strong', {}, String(lbl.day)),
+            h('i', { 'aria-hidden': 'true' }),
+          );
+        }),
+      );
+
+      clear(viewBtn).append(renderIcon(weekView ? 'list' : 'calendar', { size: 18 }), weekView ? 'View day' : 'View week');
+      clear(listWrap);
+
+      if (weekView) {
+        dayTitle.textContent = `${dayMonth(days[0])} – ${fmt(days[6], { day: 'numeric', month: 'short', year: 'numeric' })}`;
+        const groups = days
+          .map((iso) => ({ iso, items: res.items.filter((c) => c.class_date === iso) }))
+          .filter((g) => g.items.length);
+        if (!groups.length) {
+          listWrap.append(emptyDay('No classes this week.'));
+          return;
+        }
+        for (const g of groups) {
+          listWrap.append(
+            h('div', { class: 'portal-sched-group' }, `${fmt(g.iso, { weekday: 'long' })}, ${dayMonth(g.iso)}`),
+            ...g.items.map((c, i) => scheduleCard(c, i, handlers)),
+          );
+        }
+        return;
+      }
+
+      dayTitle.textContent = longDate(selectedDay);
+      const items = res.items.filter((c) => c.class_date === selectedDay);
+      append(listWrap, items.length ? items.map((c, i) => scheduleCard(c, i, handlers)) : [emptyDay('No classes on this day.')]);
+    }
+    paint();
+
+    return h(
+      'div',
+      { class: 'portal-tab-body portal-sched' },
+      h(
+        'div',
+        { class: 'portal-page-head' },
+        h('h2', {}, 'Schedule'),
+        h('p', {}, 'Book your favorite classes and manage your fitness routine.'),
+      ),
+      h('div', { class: 'portal-sched-week' }, prevBtn, strip, nextBtn),
+      h('div', { class: 'portal-sched-dayhead' }, dayTitle, viewBtn),
+      listWrap,
+    );
   }
 
   async function renderLibrarySchedule() {
@@ -1694,24 +2417,41 @@ function renderPortalApp(ctx, initialMe) {
 
     function setRow(exercise, set, index) {
       const previous = exercise.previous;
+      // Like Hevy, the badge is the set number and doubles as the set-type
+      // switch: warmups don't count towards the numbering and show a W, drop
+      // and failure sets their own letter.
+      const workingNumber = exercise.sets.slice(0, index + 1).filter((s) => s.set_type !== 'warmup').length;
+      const typeInfo = SET_TYPES.find((t) => t.key === set.set_type);
       const typeButton = h(
         'button',
         {
           class: `portal-set-type t-${set.set_type}`,
           type: 'button',
-          title: 'Set type',
+          title: `${typeInfo?.label ?? 'Normal'} set — tap to change type`,
+          'aria-label': `Set ${index + 1}, ${typeInfo?.label ?? 'Normal'}. Change set type`,
           onclick: () => {
-            const order = SET_TYPES.map((t) => t.key);
+            const order = ['normal', 'warmup', 'drop', 'failure'];
             set.set_type = order[(order.indexOf(set.set_type) + 1) % order.length];
             persist();
             paint();
           },
         },
-        SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '—',
+        set.set_type === 'normal' ? String(workingNumber) : (typeInfo?.short ?? String(workingNumber)),
       );
 
       const oneRm = estimate1rm(Number(set.weight_kg) || 0, Number(set.reps) || 0);
       const beatsPrevious = previous && oneRm > estimate1rm(previous.weight_kg, previous.reps);
+
+      // The greyed-out placeholders are last session's numbers; a blank box
+      // means "same as last time", so this copies them in for real.
+      const fillFromPrevious = () => {
+        if (!previous) return;
+        if (set.weight_display === '' || set.weight_display == null) {
+          set.weight_display = String(toDisplayWeight(previous.weight_kg));
+          set.weight_kg = previous.weight_kg;
+        }
+        if (set.reps === '' || set.reps == null || Number(set.reps) === 0) set.reps = previous.reps;
+      };
 
       const check = h(
         'button',
@@ -1721,6 +2461,7 @@ function renderPortalApp(ctx, initialMe) {
           'aria-label': set.completed ? 'Mark set as not done' : 'Mark set as done',
           onclick: () => {
             set.completed = !set.completed;
+            if (set.completed) fillFromPrevious();
             persist();
             if (set.completed) {
               sound.playSetComplete();
@@ -1733,18 +2474,29 @@ function renderPortalApp(ctx, initialMe) {
             paint();
           },
         },
-        renderIcon('check', { size: 15 }),
+        renderIcon('check', { size: 18, stroke: 2.4 }),
       );
 
       return h(
         'div',
         { class: `portal-set-row${set.completed ? ' completed' : ''}` },
-        h('div', { class: 'portal-set-n' }, typeButton, h('span', {}, String(index + 1))),
-        h(
-          'div',
-          { class: 'portal-set-prev' },
-          previous ? `${weightLabel(previous.weight_kg)} × ${previous.reps}` : h('span', { class: 'muted' }, '—'),
-        ),
+        typeButton,
+        previous
+          ? h(
+              'button',
+              {
+                class: 'portal-set-prev',
+                type: 'button',
+                title: 'Use last session’s numbers',
+                onclick: () => {
+                  fillFromPrevious();
+                  persist();
+                  paint();
+                },
+              },
+              `${weightLabel(previous.weight_kg)} × ${previous.reps}`,
+            )
+          : h('div', { class: 'portal-set-prev is-empty' }, '—'),
         h('input', {
           class: 'portal-set-input',
           type: 'number',
@@ -1786,6 +2538,35 @@ function renderPortalApp(ctx, initialMe) {
       );
     }
 
+    function moveExercise(from, to) {
+      if (to < 0 || to >= state.exercises.length) return;
+      const [moved] = state.exercises.splice(from, 1);
+      state.exercises.splice(to, 0, moved);
+      persist();
+      paint();
+    }
+
+    function openExerciseMenu(exercise, exIndex) {
+      actionSheet(exercise.exercise_name, [
+        { icon: 'trendUp', label: 'Exercise progress', onClick: () => openExerciseDetail(exercise) },
+        { icon: 'info', label: 'How to do it', onClick: () => openExerciseDetail(exercise, { tab: 'howto' }) },
+        exIndex > 0 ? { icon: 'arrowUp', label: 'Move up', onClick: () => moveExercise(exIndex, exIndex - 1) } : null,
+        exIndex < state.exercises.length - 1
+          ? { icon: 'arrowDown', label: 'Move down', onClick: () => moveExercise(exIndex, exIndex + 1) }
+          : null,
+        {
+          icon: 'trash',
+          label: 'Remove exercise',
+          danger: true,
+          onClick: () => {
+            state.exercises.splice(exIndex, 1);
+            persist();
+            paint();
+          },
+        },
+      ]);
+    }
+
     function exerciseCard(exercise, exIndex) {
       return h(
         'div',
@@ -1793,15 +2574,16 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'div',
           { class: 'portal-ex-head' },
+          exerciseThumbButton(exercise),
           h(
             'div',
-            {},
+            { class: 'portal-ex-title' },
             h('div', { class: 'portal-ex-name' }, exercise.exercise_name),
             h(
               'div',
               { class: 'portal-ex-meta' },
-              h('span', { class: 'portal-muscle-badge' }, exercise.muscle_group.replace('_', ' ')),
-              exercise.target_reps ? h('span', { class: 'muted' }, `target ${exercise.target_sets} × ${exercise.target_reps}`) : null,
+              h('span', { class: 'portal-muscle-badge' }, capitalise(muscleLabel(exercise.muscle_group))),
+              exercise.target_reps ? h('span', { class: 'portal-ex-target' }, `Target ${exercise.target_sets} × ${exercise.target_reps}`) : null,
             ),
           ),
           h(
@@ -1812,7 +2594,7 @@ function renderPortalApp(ctx, initialMe) {
               {
                 class: 'portal-rest-chip',
                 type: 'button',
-                title: 'Rest between sets',
+                title: 'Rest between sets — tap to change',
                 onclick: () => {
                   const next = REST_PRESETS[(REST_PRESETS.indexOf(exercise.rest_seconds) + 1) % REST_PRESETS.length];
                   exercise.rest_seconds = next;
@@ -1820,22 +2602,19 @@ function renderPortalApp(ctx, initialMe) {
                   paint();
                 },
               },
-              renderIcon('timer', { size: 12 }),
-              ` ${exercise.rest_seconds}s`,
+              renderIcon('timer', { size: 16 }),
+              h('span', {}, `${exercise.rest_seconds}s`),
             ),
             h(
               'button',
               {
-                class: 'icon-btn',
+                class: 'portal-ex-menu',
                 type: 'button',
-                title: 'Remove exercise',
-                onclick: () => {
-                  state.exercises.splice(exIndex, 1);
-                  persist();
-                  paint();
-                },
+                title: 'Exercise options',
+                'aria-label': `${exercise.exercise_name} options`,
+                onclick: () => openExerciseMenu(exercise, exIndex),
               },
-              renderIcon('close', { size: 15 }),
+              renderIcon('more', { size: 20, stroke: 2.5 }),
             ),
           ),
         ),
@@ -1855,7 +2634,7 @@ function renderPortalApp(ctx, initialMe) {
           h(
             'button',
             {
-              class: 'btn sm ghost',
+              class: 'portal-ex-btn is-add',
               type: 'button',
               onclick: () => {
                 const last = exercise.sets[exercise.sets.length - 1];
@@ -1872,115 +2651,223 @@ function renderPortalApp(ctx, initialMe) {
                 paint();
               },
             },
-            renderIcon('plus', { size: 16 }), 'Add set',
+            renderIcon('plus', { size: 18, stroke: 2.2 }),
+            h('span', {}, 'Add set'),
           ),
-          exercise.sets.length > 1
-            ? h(
-                'button',
-                {
-                  class: 'btn sm ghost',
-                  type: 'button',
-                  onclick: () => {
-                    exercise.sets.pop();
-                    persist();
-                    paint();
-                  },
-                },
-                '− Remove set',
-              )
-            : null,
+          h(
+            'button',
+            {
+              class: 'portal-ex-btn is-remove',
+              type: 'button',
+              // The last set stays: an exercise with no rows is removed from
+              // its menu, not by emptying it.
+              disabled: exercise.sets.length <= 1,
+              onclick: () => {
+                exercise.sets.pop();
+                persist();
+                paint();
+              },
+            },
+            renderIcon('trash', { size: 17 }),
+            h('span', {}, 'Remove set'),
+          ),
         ),
       );
     }
 
     function openAddExercise() {
-      let library = [];
+      let library = null;
       let query = '';
       let group = '';
-      const list = h('div', { class: 'portal-food-results' }, h('div', { class: 'portal-loading' }, 'Loading…'));
+      // Hevy-style multi-select: rows toggle in and out, and they are added in
+      // the order they were picked. A Map keeps that order and dedupes by name.
+      const selected = new Map();
+      const list = h('div', { class: 'portal-pick-list' }, h('div', { class: 'portal-loading' }, 'Loading…'));
+      const addButton = h('button', { class: 'portal-pick-submit', type: 'button', onclick: addSelected });
+      const footer = h('div', { class: 'portal-pick-footer hidden' }, addButton);
+
+      function addSelected() {
+        for (const item of selected.values()) {
+          state.exercises.push({
+            exercise_name: item.name,
+            muscle_group: item.muscle_group,
+            ...demoFields(item),
+            target_sets: 3,
+            target_reps: '',
+            rest_seconds: 90,
+            previous: item.previous ?? null,
+            sets: [{ set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false }],
+          });
+        }
+        // Newest first in the recents, so add in reverse to keep the first pick on top.
+        for (const item of [...selected.values()].reverse()) recentExercises.add(item.name);
+        persist();
+        closeModal();
+        paint();
+      }
+
+      function paintFooter() {
+        const count = selected.size;
+        footer.classList.toggle('hidden', count === 0);
+        addButton.textContent = `Add ${count} exercise${count === 1 ? '' : 's'}`;
+      }
+
+      const keyOf = (item) => item.name.toLowerCase();
+      function toggle(item) {
+        if (selected.has(keyOf(item))) selected.delete(keyOf(item));
+        else selected.set(keyOf(item), item);
+        paintList();
+        paintFooter();
+      }
+
+      function pickRow(item, { recent = false } = {}) {
+        const isOn = selected.has(keyOf(item));
+        const order = isOn ? [...selected.keys()].indexOf(keyOf(item)) + 1 : 0;
+        return h(
+          'div',
+          { class: `portal-pick-row${recent ? ' is-recent' : ''}${isOn ? ' selected' : ''}` },
+          h(
+            'button',
+            {
+              class: 'portal-pick-thumb-btn',
+              type: 'button',
+              'aria-label': `${item.name} progress and how-to`,
+              onclick: () => openExerciseDetail(item),
+            },
+            pickerThumb(item),
+          ),
+          h(
+            'button',
+            { class: 'portal-pick-main', type: 'button', 'aria-pressed': String(isOn), onclick: () => toggle(item) },
+            h(
+              'span',
+              { class: 'portal-pick-text' },
+              h('span', { class: 'portal-pick-name' }, item.name),
+              h('span', { class: 'portal-pick-sub' }, exerciseSubtitle(item)),
+            ),
+          ),
+          h(
+            'button',
+            {
+              class: 'portal-pick-stats',
+              type: 'button',
+              title: 'See progress',
+              'aria-label': `${item.name} progress`,
+              onclick: () => openExerciseDetail(item),
+            },
+            renderIcon('trendUp', { size: 18 }),
+          ),
+          h(
+            'button',
+            {
+              class: 'portal-pick-add',
+              type: 'button',
+              'aria-label': isOn ? `Unselect ${item.name}` : `Select ${item.name}`,
+              onclick: () => toggle(item),
+            },
+            isOn
+              ? selected.size > 1
+                ? h('span', { class: 'portal-pick-order' }, String(order))
+                : renderIcon('check', { size: 18, stroke: 2.6 })
+              : renderIcon('plus', { size: 20, stroke: recent ? 2.6 : 2 }),
+          ),
+        );
+      }
 
       function paintList() {
+        if (!library) return;
         const needle = query.trim().toLowerCase();
-        const matches = library.filter(
-          (e) => (!group || e.muscle_group === group) && (!needle || e.name.toLowerCase().includes(needle)),
-        );
+        const chip = PICKER_GROUPS.find((g) => g.key === group);
+        const matches = library
+          .filter((e) => !chip?.match || chip.match(e))
+          .filter((e) => !needle || `${e.name} ${muscleLabel(e.muscle_group)} ${muscleLabel(e.equipment ?? '')}`.toLowerCase().includes(needle))
+          .sort((a, b) => a.name.localeCompare(b.name));
+
         clear(list);
+        // Recents sit above the full list only while browsing: once the member
+        // is typing, the one list of matches is the answer.
+        const byName = new Map(library.map((e) => [e.name.toLowerCase(), e]));
+        const recents = needle
+          ? []
+          : recentExercises
+              .read()
+              .map((name) => byName.get(name.toLowerCase()))
+              .filter((e) => e && (!chip?.match || chip.match(e)));
+        if (recents.length) {
+          list.append(
+            h(
+              'div',
+              { class: 'portal-pick-head' },
+              h('h3', {}, 'Recent'),
+              h(
+                'button',
+                {
+                  class: 'portal-pick-clear',
+                  type: 'button',
+                  onclick: () => {
+                    recentExercises.clear();
+                    paintList();
+                  },
+                },
+                'Clear',
+              ),
+            ),
+            h('div', { class: 'portal-pick-group' }, ...recents.map((item) => pickRow(item, { recent: true }))),
+          );
+        }
+
+        list.append(h('div', { class: 'portal-pick-head' }, h('h3', {}, needle ? 'Results' : chip?.key ? `${chip.label} Exercises` : 'All Exercises')));
         if (!matches.length) {
           list.append(h('div', { class: 'portal-empty' }, 'No exercise matches that.'));
           return;
         }
-        for (const item of matches.slice(0, 60)) {
-          list.append(
-            h(
-              'button',
-              {
-                class: 'portal-food-row',
-                type: 'button',
-                onclick: () => {
-                  state.exercises.push({
-                    exercise_name: item.name,
-                    muscle_group: item.muscle_group,
-                    target_sets: 3,
-                    target_reps: '',
-                    rest_seconds: 90,
-                    previous: item.previous ?? null,
-                    sets: [{ set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false }],
-                  });
-                  persist();
-                  closeModal();
-                  paint();
-                },
-              },
-              h(
-                'div',
-                {},
-                h('div', { class: 'portal-food-name' }, item.name),
-                h(
-                  'div',
-                  { class: 'muted' },
-                  item.previous
-                    ? `Last: ${weightLabel(item.previous.weight_kg)} × ${item.previous.reps}`
-                    : item.muscle_group.replace('_', ' '),
-                ),
-              ),
-              h('span', { class: 'portal-muscle-badge' }, item.muscle_group.replace('_', ' ')),
-            ),
-          );
-        }
+        list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 120).map((item) => pickRow(item))));
       }
 
-      const search = h('input', {
-        class: 'portal-input',
-        type: 'search',
-        placeholder: 'Search exercises…',
-        oninput: (event) => {
-          query = event.target.value;
-          paintList();
-        },
-      });
+      const search = h(
+        'label',
+        { class: 'portal-pick-search' },
+        renderIcon('search', { size: 20 }),
+        h('input', {
+          type: 'search',
+          placeholder: 'Search exercises (e.g. bicep curl, bench press)',
+          'aria-label': 'Search exercises',
+          oninput: (event) => {
+            query = event.target.value;
+            paintList();
+          },
+        }),
+      );
       const chips = h(
         'div',
-        { class: 'portal-chip-row' },
-        ...[{ key: '', label: 'All' }, ...['chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio'].map((k) => ({ key: k, label: k }))].map(
-          (option) =>
-            h(
-              'button',
-              {
-                class: `fit-chip${option.key === group ? ' active' : ''}`,
-                type: 'button',
-                onclick: (event) => {
-                  group = option.key;
-                  for (const el of chips.children) el.classList.remove('active');
-                  event.currentTarget.classList.add('active');
-                  paintList();
-                },
+        { class: 'portal-pick-chips' },
+        ...PICKER_GROUPS.map((option) =>
+          h(
+            'button',
+            {
+              class: `portal-pick-chip${option.key === group ? ' active' : ''}`,
+              type: 'button',
+              onclick: (event) => {
+                group = option.key;
+                for (const el of chips.children) el.classList.remove('active');
+                event.currentTarget.classList.add('active');
+                paintList();
               },
-              option.label,
-            ),
+            },
+            option.icon ? renderIcon(option.icon, { size: 16 }) : null,
+            h('span', {}, option.label),
+          ),
         ),
       );
 
-      openModal({ title: 'Add an exercise', body: h('div', { class: 'portal-food-sheet' }, search, chips, list) });
+      openModal({
+        title: 'Add Exercise',
+        className: 'portal-pick-modal',
+        body: h('div', { class: 'portal-pick-sheet' }, search, chips, list, footer),
+      });
+      // openModal focuses the first input; browsing is the common case, so the
+      // keyboard stays down until the member taps the search box.
+      search.querySelector('input').blur();
       api.portal
         .exercises()
         .then((res) => {
@@ -2073,14 +2960,21 @@ function renderPortalApp(ctx, initialMe) {
     const metaNode = h('div', { class: 'portal-session-totals' });
     function paintMeta() {
       const t = totals();
+      const stat = (icon, value, label) =>
+        h(
+          'div',
+          { class: 'portal-session-stat' },
+          h('div', { class: 'portal-session-stat-value' }, renderIcon(icon, { size: 20, stroke: 2.2 }), h('strong', {}, value)),
+          h('span', {}, label),
+        );
       clear(metaNode).append(
-        h('div', {}, h('strong', {}, weightLabel(Math.round(t.volume * 10) / 10)), h('span', {}, 'volume')),
-        h('div', {}, h('strong', {}, String(t.sets)), h('span', {}, 'sets')),
-        h('div', {}, h('strong', {}, String(t.reps)), h('span', {}, 'reps')),
+        stat('weight', weightLabel(Math.round(t.volume * 10) / 10), 'Volume'),
+        stat('sets', String(t.sets), 'Sets'),
+        stat('refresh', String(t.reps), 'Reps'),
       );
     }
 
-    const finishBtn = h('button', { class: 'btn primary sm', type: 'button' }, 'Finish');
+    const finishBtn = h('button', { class: 'portal-session-btn is-finish', type: 'button' }, 'Finish');
     finishBtn.addEventListener('click', async () => {
       finishBtn.disabled = true;
       try {
@@ -2091,64 +2985,124 @@ function renderPortalApp(ctx, initialMe) {
       }
     });
 
+    const confirmDiscard = () =>
+      confirmDialog({
+        title: 'Discard this workout?',
+        message: 'Everything logged in this session is thrown away. This cannot be undone.',
+        confirmLabel: 'Discard',
+        danger: true,
+        onConfirm: async () => {
+          teardown();
+          activeSession.clear();
+          await onDiscard();
+        },
+      });
+
+    function openRename() {
+      const input = h('input', { class: 'portal-input', type: 'text', maxlength: 80, value: state.workout_name });
+      const save = () => {
+        const name = input.value.trim();
+        if (!name) {
+          toast('Give the workout a name', 'error');
+          return;
+        }
+        state.workout_name = name;
+        persist();
+        closeModal();
+        paint();
+      };
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') save();
+      });
+      openModal({
+        title: 'Rename workout',
+        body: input,
+        footer: [
+          h('button', { class: 'btn ghost', type: 'button', onclick: closeModal }, 'Cancel'),
+          h('button', { class: 'btn primary', type: 'button', onclick: save }, 'Save'),
+        ],
+      });
+      input.select();
+    }
+
+    function openSessionMenu() {
+      const other = weightUnit.get() === 'kg' ? 'lb' : 'kg';
+      actionSheet('Workout options', [
+        { icon: 'edit', label: 'Rename workout', onClick: openRename },
+        {
+          icon: 'weight',
+          label: `Show weights in ${other}`,
+          onClick: () => {
+            weightUnit.set(other);
+            // The typed boxes hold display units, so they are re-derived from
+            // the kilograms underneath rather than relabelled.
+            for (const set of state.exercises.flatMap((ex) => ex.sets)) {
+              if (set.weight_display !== '' && set.weight_display != null) {
+                set.weight_display = String(toDisplayWeight(Number(set.weight_kg) || 0));
+              }
+            }
+            persist();
+            paint();
+          },
+        },
+        { icon: 'trash', label: 'Discard workout', danger: true, onClick: confirmDiscard },
+      ]);
+    }
+
     function paint() {
+      const soundOn = sound.getSoundEnabled();
       clear(body).append(
         h(
           'div',
           { class: 'portal-session-bar' },
           h(
             'div',
-            {},
-            h('div', { class: 'portal-session-name' }, state.workout_name),
-            clockNode,
+            { class: 'portal-session-top' },
+            h(
+              'button',
+              { class: 'portal-session-name', type: 'button', title: 'Rename workout', onclick: openRename },
+              h('span', {}, state.workout_name),
+              renderIcon('edit', { size: 17 }),
+            ),
+            h(
+              'button',
+              { class: 'portal-session-more', type: 'button', title: 'Workout options', 'aria-label': 'Workout options', onclick: openSessionMenu },
+              renderIcon('more', { size: 22, stroke: 2.6 }),
+            ),
           ),
           h(
             'div',
-            { class: 'row', style: 'gap:6px' },
+            { class: 'portal-session-row' },
+            h('div', { class: 'portal-session-time' }, renderIcon('timer', { size: 20, stroke: 2 }), clockNode),
             h(
-              'button',
-              {
-                class: 'portal-sound-toggle',
-                type: 'button',
-                'aria-label': sound.getSoundEnabled() ? 'Mute sounds' : 'Unmute sounds',
-                title: sound.getSoundEnabled() ? 'Mute sounds' : 'Unmute sounds',
-                onclick: () => {
-                  sound.setSoundEnabled(!sound.getSoundEnabled());
-                  paint();
+              'div',
+              { class: 'portal-session-actions' },
+              h(
+                'button',
+                {
+                  class: 'portal-sound-toggle',
+                  type: 'button',
+                  'aria-label': soundOn ? 'Mute sounds' : 'Unmute sounds',
+                  title: soundOn ? 'Mute sounds' : 'Unmute sounds',
+                  onclick: () => {
+                    sound.setSoundEnabled(!soundOn);
+                    paint();
+                  },
                 },
-              },
-              renderIcon(sound.getSoundEnabled() ? 'volume' : 'volumeX', { size: 15 }),
+                renderIcon(soundOn ? 'volume' : 'volumeX', { size: 17 }),
+              ),
+              h('button', { class: 'portal-session-btn is-discard', type: 'button', onclick: confirmDiscard }, 'Discard'),
+              finishBtn,
             ),
-            h(
-              'button',
-              {
-                class: 'btn sm ghost',
-                type: 'button',
-                onclick: () =>
-                  confirmDialog({
-                    title: 'Discard this workout?',
-                    message: 'Everything logged in this session is thrown away. This cannot be undone.',
-                    confirmLabel: 'Discard',
-                    danger: true,
-                    onConfirm: async () => {
-                      teardown();
-                      activeSession.clear();
-                      await onDiscard();
-                    },
-                  }),
-              },
-              'Discard',
-            ),
-            finishBtn,
           ),
         ),
         metaNode,
         ...state.exercises.map(exerciseCard),
         h(
           'button',
-          { class: 'btn block portal-add-ex', type: 'button', onclick: openAddExercise },
-          renderIcon('plus', { size: 15 }),
-          ' Add exercise',
+          { class: 'portal-add-ex', type: 'button', onclick: openAddExercise },
+          renderIcon('plus', { size: 20, stroke: 2.2 }),
+          h('span', {}, 'Add exercise'),
         ),
         rest.node,
       );
@@ -2291,8 +3245,8 @@ function renderPortalApp(ctx, initialMe) {
             { class: 'portal-pr-wall' },
             ...prs.items.map((pr) =>
               h(
-                'div',
-                { class: 'portal-pr-card' },
+                'button',
+                { class: 'portal-pr-card', type: 'button', title: 'See progress', onclick: () => openExerciseDetail(pr) },
                 h('div', { class: 'portal-pr-trophy' }, renderIcon('trophy', { size: 15 })),
                 h('div', { class: 'portal-pr-name' }, pr.exercise_name),
                 h('div', { class: 'portal-pr-value' }, `${weightLabel(pr.max_weight_kg)} × ${pr.max_reps}`),
@@ -2305,8 +3259,8 @@ function renderPortalApp(ctx, initialMe) {
       body.append(
         sectionHead('Personal records', 'View all', openAllRecords, 'is-label'),
         h(
-          'div',
-          { class: 'portal-pr-feature' },
+          'button',
+          { class: 'portal-pr-feature', type: 'button', title: 'See progress', onclick: () => openExerciseDetail(best) },
           h(
             'div',
             { class: 'portal-pr-feature-art', 'aria-hidden': 'true' },
@@ -2843,10 +3797,58 @@ function renderPortalApp(ctx, initialMe) {
     });
   }
 
+  function openEditProfileModal() {
+    const m = me.member;
+    openModal({
+      title: 'Edit profile',
+      body: h(
+        'div',
+        { class: 'portal-edit-profile' },
+        h(
+          'p',
+          { class: 'muted' },
+          `Your name and phone number are kept by the front desk — ask them if either needs changing. You sign in with ${m.phone ? 'that phone number' : 'your member ID'}.`,
+        ),
+        buildForm(
+          [
+            { name: 'email', label: 'Email', type: 'email', value: m.email || '', full: true },
+            { name: 'emergency_contact', label: t('emergencyContact'), value: m.emergency_contact || '' },
+            { name: 'emergency_phone', label: `${t('emergencyContact')} phone`, type: 'tel', value: m.emergency_phone || '' },
+          ],
+          {
+            submitLabel: 'Save changes',
+            onSubmit: async (values) => {
+              me.member = await api.portal.updateMe(values);
+              toast('Profile updated');
+              closeModal();
+              switchTab('profile');
+            },
+          },
+        ),
+      ),
+    });
+  }
+
+  async function uploadProfilePhoto(file) {
+    try {
+      const dataUrl = await cropAndResizeImage(file, 320, 0.8);
+      me.member = await api.portal.setPhoto(dataUrl);
+      toast('Photo updated');
+      switchTab('profile');
+    } catch (err) {
+      toast(err.message || 'Could not update your photo', 'error');
+    }
+  }
+
   async function renderProfileTab() {
     const m = me.member;
     const sub = me.subscription;
-    const body = h('div', { class: 'portal-tab-body' }, h('h2', { class: 'portal-tab-title' }, 'Profile'));
+    const fullName = `${m.first_name} ${m.last_name || ''}`.trim();
+    const body = h(
+      'div',
+      { class: 'portal-tab-body portal-prof' },
+      h('div', { class: 'portal-page-head' }, h('h2', {}, 'Profile'), h('p', {}, 'Manage your account and preferences.')),
+    );
 
     if (pendingPinPrompt) {
       pendingPinPrompt = false;
@@ -2860,21 +3862,84 @@ function renderPortalApp(ctx, initialMe) {
       );
     }
 
-    append(body, [
+    /* Hero: photo (tap the camera to replace it), name, code, status */
+    const photoInput = h('input', { type: 'file', accept: 'image/*', hidden: true });
+    photoInput.addEventListener('change', () => {
+      const [file] = photoInput.files;
+      if (file) uploadProfilePhoto(file);
+    });
+    const status = (() => {
+      if (m.status === 'frozen') return { tone: 'blue', label: 'Membership frozen' };
+      if (m.status !== 'active') return { tone: 'grey', label: `Inactive ${t('member').toLowerCase()}` };
+      if (!sub) return { tone: 'amber', label: 'No active plan' };
+      return { tone: 'green', label: `Active ${t('member')}` };
+    })();
+
+    body.append(
+      h(
+        'section',
+        { class: 'portal-prof-hero' },
+        h('img', { class: 'portal-prof-hero-art', src: '/images/member/flex-silhouette.svg', alt: '' }),
+        h(
+          'div',
+          { class: 'portal-prof-photo' },
+          m.photo_url
+            ? h('img', { src: m.photo_url, alt: '' })
+            : h('span', { class: 'portal-prof-initials' }, initials(m.first_name, m.last_name)),
+          h(
+            'button',
+            { class: 'portal-prof-camera', type: 'button', 'aria-label': 'Change photo', onclick: () => photoInput.click() },
+            renderIcon('camera', { size: 16, stroke: 2.2 }),
+          ),
+          photoInput,
+        ),
+        h(
+          'div',
+          { class: 'portal-prof-who' },
+          h('div', { class: 'portal-prof-name' }, fullName),
+          h('div', { class: 'portal-prof-code' }, m.code),
+          h('span', { class: `portal-prof-status tone-${status.tone}` }, h('i'), status.label),
+        ),
+        h(
+          'button',
+          { class: 'portal-prof-edit', type: 'button', onclick: openEditProfileModal },
+          renderIcon('edit', { size: 17, stroke: 2.2 }),
+          h('span', {}, 'Edit'),
+          h('span', { class: 'portal-prof-edit-more' }, ' Profile'),
+        ),
+      ),
+    );
+
+    /* Contact details */
+    const emergency = m.emergency_contact
+      ? `${m.emergency_contact}${m.emergency_phone ? ` · ${m.emergency_phone}` : ''}`
+      : null;
+    body.append(
       h(
         'div',
-        { class: 'portal-profile-card' },
-        m.photo_url
-          ? h('img', { class: 'portal-profile-avatar', src: m.photo_url, alt: '' })
-          : h('div', { class: 'portal-profile-avatar portal-profile-avatar-fallback' }, initials(m.first_name, m.last_name)),
-        h('div', { class: 'portal-profile-name' }, `${m.first_name} ${m.last_name || ''}`.trim()),
-        h('div', { class: 'muted' }, m.code),
+        { class: 'portal-prof-card' },
+        profileRow({
+          icon: 'phone', tone: 'orange', title: 'Phone', sub: 'Your registered phone number',
+          value: m.phone || 'Not set', onclick: openEditProfileModal,
+        }),
+        profileRow({
+          icon: 'mail', tone: 'purple', title: 'Email', sub: 'Your email address',
+          value: m.email || 'Add email', onclick: openEditProfileModal, className: m.email ? '' : 'is-empty',
+        }),
+        emergency
+          ? profileRow({
+              icon: 'heartPulse', tone: 'rose', title: t('emergencyContact'), sub: 'Who we call if needed',
+              value: emergency, onclick: openEditProfileModal,
+            })
+          : null,
+        m.joined_on
+          ? profileRow({
+              icon: 'calendar', tone: 'blue', title: 'Joined', sub: `${t('member')} since`,
+              value: date(m.joined_on), onclick: () => switchTab('pay'),
+            })
+          : null,
       ),
-      profileRow('Phone', m.phone),
-      profileRow('Email', m.email),
-      profileRow(t('emergencyContact'), m.emergency_contact ? `${m.emergency_contact}${m.emergency_phone ? ` · ${m.emergency_phone}` : ''}` : null),
-      profileRow('Joined', m.joined_on ? date(m.joined_on) : null),
-    ]);
+    );
 
     // Pass and Pay are not bottom tabs (see buildTabs) — this is where they
     // live for a member who came straight to Profile instead of tapping the
@@ -2885,105 +3950,117 @@ function renderPortalApp(ctx, initialMe) {
         h('div', { class: 'portal-due-banner' }, renderIcon('outgoing', { size: 16 }), ` ${money(sub.due)} due — pay at the front desk`),
       );
     }
-    append(body, [
-      h('h3', { class: 'portal-section-title' }, 'Membership'),
-      isLibrary()
-        ? null
-        : h(
-            'button',
-            { class: 'btn ghost block portal-settings-btn', type: 'button', onclick: () => switchTab('pass') },
-            renderIcon('qrCode', { size: 16 }),
-            ' View & scan digital pass',
-          ),
+    const memberTile = (tone, icon, title, sub, onclick) =>
       h(
         'button',
-        { class: 'btn ghost block portal-settings-btn', type: 'button', onclick: () => switchTab('pay') },
-        renderIcon('billing', { size: 16 }),
-        ' Invoices & payment history',
-      ),
-    ]);
-
-    const installBtn = h(
-      'button',
-      { class: 'btn ghost block portal-settings-btn install-hidden', type: 'button' },
-      renderIcon('download', { size: 16 }),
-      ' Add to Home Screen',
-    );
-    installBtn.addEventListener('click', () => promptInstall());
-    unsubscribeInstall?.();
-    unsubscribeInstall = onInstallChange((available) => installBtn.classList.toggle('install-hidden', !available));
-
-    let previewIndex = 0;
+        { class: `portal-prof-tile tone-${tone}`, type: 'button', onclick },
+        h('span', { class: 'portal-prof-tile-mark', 'aria-hidden': 'true' }, renderIcon(icon, { size: 56, stroke: 1.6 })),
+        h('span', { class: 'portal-prof-tile-ico' }, renderIcon(icon, { size: 28, stroke: 2 })),
+        h('span', { class: 'portal-prof-tile-text' }, h('strong', {}, title), h('small', {}, sub)),
+        h('span', { class: 'portal-prof-tile-go' }, renderIcon('arrowRight', { size: 16, stroke: 2.4 })),
+      );
     body.append(
-      h('h3', { class: 'portal-section-title' }, 'Audio & Feedback'),
+      h('h3', { class: 'portal-prof-label' }, 'Membership'),
       h(
         'div',
-        { class: 'portal-audio-settings' },
-        settingsSwitch('volume', 'Sound effects', sound.getSoundEnabled(), () => {
-          sound.setSoundEnabled(!sound.getSoundEnabled());
-          switchTab('profile');
+        { class: `portal-prof-tiles${isLibrary() ? ' is-single' : ''}` },
+        isLibrary()
+          ? null
+          : memberTile('orange', 'qrCode', 'View & scan digital pass', 'Show your QR code at the gym', () => switchTab('pass')),
+        memberTile('blue', 'billing', 'Invoices & payment history', 'View all your invoices and payments', () => switchTab('pay')),
+      ),
+    );
+
+    /* Audio & feedback */
+    const soundOn = sound.getSoundEnabled();
+    let previewIndex = 0;
+    body.append(
+      h('h3', { class: 'portal-prof-label' }, 'Audio & Feedback'),
+      h(
+        'div',
+        { class: 'portal-prof-card' },
+        profileRow({
+          icon: 'volume', tone: 'orange', title: 'Sound effects', sub: 'Play sounds for actions and notifications',
+          control: settingsSwitch(soundOn, 'Sound effects', () => {
+            sound.setSoundEnabled(!soundOn);
+            switchTab('profile');
+          }),
         }),
-        h(
-          'div',
-          { class: 'portal-audio-row' },
-          h('div', { class: 'portal-audio-row-label' }, renderIcon('volume', { size: 15 }), h('span', {}, 'Volume')),
-          volumeSegmented(sound.getSoundVolume(), (value) => {
+        profileRow({
+          icon: 'barChart', tone: 'purple', title: 'Volume', sub: 'Adjust app sound volume', className: 'has-segmented',
+          control: volumeSegmented(sound.getSoundVolume(), (value) => {
             sound.setSoundVolume(value);
             switchTab('profile');
           }),
-        ),
-        settingsSwitch('smartphone', 'Vibration', sound.getHapticsEnabled(), () => {
-          sound.setHapticsEnabled(!sound.getHapticsEnabled());
-          switchTab('profile');
         }),
-      ),
-      h(
-        'button',
-        {
-          class: 'btn ghost block portal-settings-btn portal-sound-preview-btn',
-          type: 'button',
-          disabled: !sound.getSoundEnabled(),
-          onclick: () => {
-            const key = sound.SOUND_PREVIEW_ORDER[previewIndex % sound.SOUND_PREVIEW_ORDER.length];
-            previewIndex += 1;
-            const label = sound.previewSound(key);
-            if (label) toast(`🔊 ${label}`);
+        profileRow({
+          icon: 'smartphone', tone: 'green', title: 'Vibration', sub: 'Vibrate for important actions',
+          control: settingsSwitch(sound.getHapticsEnabled(), 'Vibration', () => {
+            sound.setHapticsEnabled(!sound.getHapticsEnabled());
+            switchTab('profile');
+          }),
+        }),
+        h(
+          'button',
+          {
+            class: 'portal-prof-test',
+            type: 'button',
+            disabled: !soundOn,
+            onclick: () => {
+              const key = sound.SOUND_PREVIEW_ORDER[previewIndex % sound.SOUND_PREVIEW_ORDER.length];
+              previewIndex += 1;
+              const label = sound.previewSound(key);
+              if (label) toast(`🔊 ${label}`);
+            },
           },
-        },
-        renderIcon('bell', { size: 16 }),
-        ' Test sound',
+          h('span', { class: 'portal-prof-ico' }, renderIcon('bell', { size: 20 })),
+          h(
+            'span',
+            { class: 'portal-prof-text' },
+            h('strong', {}, 'Test sound'),
+            h('small', {}, soundOn ? 'Play a sample notification sound' : 'Turn sound effects on to preview'),
+          ),
+          h('span', { class: 'portal-prof-play' }, renderIcon('play', { size: 14 })),
+        ),
       ),
     );
 
+    /* Settings */
+    const installRow = profileRow({
+      icon: 'download', tone: 'blue', title: 'Add to Home Screen', sub: 'Install the app on this phone',
+      onclick: () => promptInstall(), className: 'install-hidden',
+    });
+    unsubscribeInstall?.();
+    unsubscribeInstall = onInstallChange((available) => installRow.classList.toggle('install-hidden', !available));
+
+    const dark = getAppMode() !== 'light';
     body.append(
-      h('h3', { class: 'portal-section-title' }, 'Settings'),
-      h('button', { class: 'btn ghost block portal-settings-btn', type: 'button', onclick: openChangePinModal }, renderIcon('key', { size: 16 }), ' Change PIN'),
+      h('h3', { class: 'portal-prof-label' }, 'Settings'),
       h(
-        'button',
-        {
-          class: 'btn ghost block portal-settings-btn',
-          type: 'button',
-          onclick: () => {
+        'div',
+        { class: 'portal-prof-card' },
+        profileRow({ icon: 'key', tone: 'rose', title: 'Change PIN', sub: 'Update your app PIN for security', onclick: openChangePinModal }),
+        profileRow({
+          icon: 'moon', tone: 'purple', title: dark ? 'Dark Mode' : 'Switch to Dark Mode', sub: 'Change app appearance',
+          control: settingsSwitch(dark, 'Dark mode', () => {
             toggleAppMode();
             switchTab('profile');
-          },
-        },
-        renderIcon(getAppMode() === 'light' ? 'moon' : 'sun', { size: 16 }),
-        getAppMode() === 'light' ? ' Switch to Dark Mode' : ' Switch to Light Mode',
+          }),
+        }),
+        installRow,
       ),
-      installBtn,
       h(
         'button',
         {
-          class: 'btn danger block portal-settings-btn',
+          class: 'portal-prof-signout',
           type: 'button',
           onclick: () => {
             memberSession.clear();
             ctx.navigate('/portal/login');
           },
         },
-        renderIcon('logout', { size: 16 }),
-        ' Sign out',
+        renderIcon('logout', { size: 20 }),
+        'Sign out',
       ),
     );
 
@@ -3009,7 +4086,7 @@ function renderPortalApp(ctx, initialMe) {
       : isLibrary()
         ? h('div', { class: 'portal-topbar-logo' }, renderIcon('book', { size: 16 }))
         : h('img', { class: 'portal-topbar-logo-img', src: '/icons/gym-logo.svg', alt: gymDisplayName(ctx) }),
-    h('div', { class: 'portal-topbar-name' }, gymDisplayName(ctx)),
+    h('div', { class: 'portal-topbar-name' }, h('div', {}, gymDisplayName(ctx)), topbarSub),
     h(
       'div',
       { class: 'portal-topbar-actions' },

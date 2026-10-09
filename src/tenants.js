@@ -30,6 +30,25 @@ CREATE TABLE IF NOT EXISTS biometric_devices (
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_serial ON biometric_devices(serial_number);
+
+-- A gym's own hostname (app.theirgym.com). See src/customDomains.js.
+CREATE TABLE IF NOT EXISTS custom_domains (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_slug        TEXT NOT NULL,
+  hostname           TEXT NOT NULL,
+  status             TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
+  verification_token TEXT NOT NULL,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  verified_at        TEXT,
+  last_checked_at    TEXT,
+  last_check         TEXT,
+  UNIQUE (tenant_slug, hostname)
+);
+-- Unique among *active* rows only. Several gyms may hold a pending claim on
+-- the same hostname; the one whose verification token appears in its DNS wins,
+-- so typing someone else's domain in first cannot lock its real owner out.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_domains_active ON custom_domains(hostname) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_custom_domains_tenant ON custom_domains(tenant_slug);
 `;
 
 /** Append-only: CREATE TABLE IF NOT EXISTS never retrofits columns onto an
@@ -80,7 +99,7 @@ const MIGRATIONS = [
 
 let registryDb;
 
-function getRegistryDb() {
+export function getRegistryDb() {
   if (registryDb) return registryDb;
   fs.mkdirSync(path.dirname(path.resolve(config.platformDbFile)), { recursive: true });
   registryDb = new DatabaseSync(config.platformDbFile);
@@ -230,9 +249,9 @@ export function countTenants() {
 }
 
 /**
- * Removes a gym from the registry, along with any biometric devices pointed at
- * it — an orphaned device row would otherwise keep routing scans to a gym that
- * no longer exists.
+ * Removes a gym from the registry, along with any biometric devices and custom
+ * domains pointed at it — an orphaned row would otherwise keep routing scans
+ * or visitors to a gym that no longer exists, and keep its hostname claimed.
  *
  * Deliberately does *not* touch the gym's SQLite file: closing the open handle
  * first is the caller's job, and on Windows an unlink against an open file
@@ -241,6 +260,7 @@ export function countTenants() {
 export function deleteTenant(slug) {
   const db = getRegistryDb();
   db.prepare('DELETE FROM biometric_devices WHERE tenant_slug = ?').run(slug);
+  db.prepare('DELETE FROM custom_domains WHERE tenant_slug = ?').run(slug);
   return db.prepare('DELETE FROM tenants WHERE slug = ?').run(slug).changes;
 }
 

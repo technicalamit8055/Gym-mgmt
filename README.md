@@ -243,6 +243,7 @@ All optional — sensible defaults apply.
 | `GYM_NAME` | `GymBook` | Name shown in the UI |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | — | First-run admin account |
 | `PLATFORM_DB_FILE` | `data/platform.db` | Multi-tenant registry (which gyms exist, their billing status) |
+| `EXERCISE_MEDIA_DIR` | beside `PLATFORM_DB_FILE`, in `exercise-media/` | Exercise demo images/GIFs/clips uploaded from the operator console. Keep it on the same persistent volume as the databases; it is not part of the DB backups |
 | `TENANTS_DIR` | `data/tenants` | Per-gym SQLite files live here, one per tenant |
 | `TRIAL_DAYS` | `7` | Free trial length for a newly signed-up gym |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | — | Razorpay API credentials — billing is disabled until both are set |
@@ -253,6 +254,9 @@ All optional — sensible defaults apply.
 | `SIGNUP_MAX_ATTEMPTS` / `SIGNUP_WINDOW_MS` / `SIGNUP_LOCKOUT_MS` | `10` / `3600000` / `3600000` | Same, for `/api/platform/signup` (per IP) |
 | `ROOT_DOMAIN` | — | The exact production hostname (e.g. `yourapp.fly.dev`, later a real domain) — needed so a subdomain of it is read as a tenant slug instead of guessed from label count |
 | `TENANT_URL_MODE` | `path` | Which address signup hands a new gym: `path` (`/g/acme`, works anywhere) or `subdomain` (`acme.example.com`, needs wildcard DNS + TLS). Both are always *accepted* — this only picks which one is advertised |
+| `CUSTOM_DOMAIN_TARGET` | — | Turns on gyms connecting their own domain (`app.theirgym.com`): the hostname their CNAME points at. Needs on-demand TLS in front — see [docs/CUSTOM_DOMAINS.md](docs/CUSTOM_DOMAINS.md) |
+| `CUSTOM_DOMAIN_IPV4` | — | This server's public IPv4(s), comma-separated, for gyms mapping a root domain (A record) |
+| `CUSTOM_DOMAIN_DNS_SERVERS` / `CUSTOM_DOMAIN_LIMIT` / `CUSTOM_DOMAIN_CHECK_COOLDOWN_MS` | `1.1.1.1,8.8.8.8` / `3` / `10000` | Resolvers the "Check DNS" button queries, domains allowed per gym, and how long a check result is reused |
 | `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` | — | Operator console credentials. The console at `/#/platform` does not exist unless **both** are set |
 | `BACKUP_DIR` | `backups/` | Where snapshots are written |
 | `BACKUP_INTERVAL_HOURS` | `24` in production, off otherwise | How often the server backs itself up. `0` disables it in favour of an external scheduler |
@@ -290,6 +294,15 @@ signup advertise it.
 
 Inside a gym, **Gym settings** lets an admin change the gym name, currency and
 timezone, and shows trial/subscription state with the button that subscribes.
+
+A gym can also run at **its own domain**: typically `app.theirgym.com`, with
+`theirgym.com` left for its website. Settings shows the CNAME and ownership
+TXT records to add, and a **Check DNS** button that turns the domain live once
+both are in place. After that, visiting the domain opens that gym with no
+`/g/` prefix. The operator console's **Domains** tab can view, check, correct,
+force live or disconnect any gym's domain. The feature stays off until
+`CUSTOM_DOMAIN_TARGET` is set and TLS is arranged; see
+[docs/CUSTOM_DOMAINS.md](docs/CUSTOM_DOMAINS.md).
 
 ### Operator console
 

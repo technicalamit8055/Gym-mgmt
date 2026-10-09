@@ -5,6 +5,7 @@ import {
   clear,
   closeModal,
   confirmDialog,
+  exerciseMedia,
   h,
   money,
   openModal,
@@ -68,7 +69,7 @@ const FOOD_CATEGORIES = [
   { value: 'general', label: 'Other' },
 ];
 
-const EQUIPMENT = ['barbell', 'dumbbell', 'cable', 'machine', 'bodyweight', 'cardio'];
+const EQUIPMENT = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
 
 const labelOf = (options, value) => options.find((o) => o.value === value)?.label ?? value;
 
@@ -1063,7 +1064,7 @@ async function renderExerciseLibrary(reload) {
               name: 'equipment',
               label: 'Equipment',
               type: 'select',
-              options: EQUIPMENT.map((e) => ({ value: e, label: e.replace(/^./, (c) => c.toUpperCase()) })),
+              options: EQUIPMENT.map((e) => ({ value: e, label: e.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) })),
             },
             { name: 'instructions', label: 'Cues (optional)', type: 'textarea', full: true },
           ],
@@ -1079,9 +1080,14 @@ async function renderExerciseLibrary(reload) {
         ),
       }),
     columns: [
+      {
+        label: '',
+        render: (r) =>
+          exerciseMedia(r, { className: 'fit-lib-thumb' }) ?? h('div', { class: 'fit-lib-thumb' }),
+      },
       { label: 'Exercise', render: (r) => h('strong', {}, r.name) },
       { label: 'Muscle', render: (r) => h('span', { class: 'badge grey' }, labelOf(MUSCLE_GROUPS, r.muscle_group)) },
-      { label: 'Equipment', render: (r) => h('span', { class: 'muted', style: 'text-transform:capitalize' }, r.equipment) },
+      { label: 'Equipment', render: (r) => h('span', { class: 'muted', style: 'text-transform:capitalize' }, String(r.equipment).replace(/_/g, ' ')) },
       { label: 'Source', render: (r) => (r.is_custom ? h('span', { class: 'badge blue' }, 'Yours') : h('span', { class: 'muted' }, 'Standard')) },
       {
         label: '',

@@ -1,13 +1,16 @@
 import path from 'node:path';
 import express from 'express';
 import { config, ROOT } from './config.js';
+import { hostnameOf, isPlatformHost } from './customDomains.js';
 import { HttpError } from './errors.js';
 import { attendanceRoutes } from './routes/attendance.js';
 import { authRoutes, staffRoutes } from './routes/auth.js';
 import { bookingRoutes, classRoutes } from './routes/classes.js';
+import { handleTlsAsk } from './routes/customDomains.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { dietRoutes } from './routes/diets.js';
 import { equipmentRoutes } from './routes/equipment.js';
+import { exerciseMediaRoutes } from './routes/exerciseMedia.js';
 import { expenseRoutes } from './routes/expenses.js';
 import { fitnessAddonRoutes } from './routes/fitnessAddons.js';
 import { lockerRoutes } from './routes/lockers.js';
@@ -44,7 +47,13 @@ export function createApp() {
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('X-Frame-Options', 'DENY');
     res.set('Referrer-Policy', 'no-referrer');
-    if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    if (req.secure) {
+      // includeSubDomains only on the platform's own hostnames. On a gym's
+      // root domain it would force HTTPS onto every other site that gym runs
+      // under it — their WordPress on www, their mail webmail — for six months.
+      const ownHost = isPlatformHost(hostnameOf(req.get('host')));
+      res.set('Strict-Transport-Security', `max-age=15552000${ownHost ? '; includeSubDomains' : ''}`);
+    }
     next();
   });
 
@@ -72,6 +81,11 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+  // Asked by the TLS-terminating proxy, not a browser, before it requests a
+  // certificate for a hostname it has never seen — so it cannot depend on
+  // that hostname already resolving to a gym.
+  app.get('/api/custom-domains/tls-check', handleTlsAsk);
+
   app.use(resolveTenant);
 
   // The installed-app manifest, named after whichever gym the address resolved
@@ -88,6 +102,9 @@ export function createApp() {
   // URLs are individually signed (src/photo.js), and a lapsed gym serving
   // broken avatars on the page that takes their payment helps nobody.
   app.use('/api/member-photos', memberPhotoRoutes);
+  // Platform-wide exercise demos: not per-gym and nothing private, so it sits
+  // out here with the other URLs an <img> has to be able to fetch.
+  app.use('/api/exercise-media', exerciseMediaRoutes);
   // Same reasoning as member photos: an unauthenticated but signed URL, so an
   // <img>/<a> tag can fetch it, and reachable even for a lapsed gym.
   app.use('/api/document-files', documentFileRoutes);
@@ -154,6 +171,9 @@ export function createApp() {
   app.use((err, _req, res, _next) => {
     if (err instanceof HttpError) {
       return res.status(err.status).json({ error: err.message, details: err.details });
+    }
+    if (err?.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'That upload is too large' });
     }
     if (err?.type === 'entity.parse.failed') {
       return res.status(400).json({ error: 'Request body is not valid JSON' });

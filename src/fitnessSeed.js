@@ -16,7 +16,7 @@
  */
 
 /** [name, muscle_group, equipment] */
-const EXERCISES = [
+export const EXERCISES = [
   // chest
   ['Barbell Bench Press', 'chest', 'barbell'],
   ['Incline Barbell Bench Press', 'chest', 'barbell'],

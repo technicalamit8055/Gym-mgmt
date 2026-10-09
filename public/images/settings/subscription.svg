@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 130" width="160" height="130" fill="none">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6e8ff"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b7b9ff"/>
+      <stop offset="1" stop-color="#8f92f2"/>
+    </linearGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a5a8ff"/>
+      <stop offset="1" stop-color="#7377ee"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5b5fd6"/>
+      <stop offset=".5" stop-color="#b3b5ff"/>
+      <stop offset="1" stop-color="#5b5fd6"/>
+    </linearGradient>
+    <radialGradient id="badge" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#ffb26b"/>
+      <stop offset=".6" stop-color="#ff8a2b"/>
+      <stop offset="1" stop-color="#f06414"/>
+    </radialGradient>
+    <radialGradient id="shadow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#6366f1" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="78" cy="120" rx="60" ry="8" fill="url(#shadow)"/>
+  <g transform="rotate(-6 78 70)">
+    <rect x="30" y="30" width="96" height="86" rx="12" fill="url(#side)"/>
+    <rect x="24" y="26" width="96" height="86" rx="12" fill="url(#body)"/>
+    <path d="M24 38a12 12 0 0 1 12-12h72a12 12 0 0 1 12 12v8H24z" fill="url(#head)"/>
+    <rect x="42" y="16" width="7" height="20" rx="3.5" fill="url(#ring)"/>
+    <rect x="66" y="16" width="7" height="20" rx="3.5" fill="url(#ring)"/>
+    <rect x="90" y="16" width="7" height="20" rx="3.5" fill="url(#ring)"/>
+    <g fill="#c4c6ff">
+      <rect x="34" y="54" width="16" height="12" rx="3"/>
+      <rect x="56" y="54" width="16" height="12" rx="3"/>
+      <rect x="78" y="54" width="16" height="12" rx="3"/>
+      <rect x="100" y="54" width="12" height="12" rx="3" opacity=".7"/>
+      <rect x="34" y="72" width="16" height="12" rx="3"/>
+      <rect x="56" y="72" width="16" height="12" rx="3"/>
+      <rect x="78" y="72" width="16" height="12" rx="3" opacity=".7"/>
+      <rect x="100" y="72" width="12" height="12" rx="3" opacity=".7"/>
+      <rect x="34" y="90" width="16" height="12" rx="3" opacity=".7"/>
+      <rect x="56" y="90" width="16" height="12" rx="3" opacity=".7"/>
+      <rect x="78" y="90" width="16" height="12" rx="3" opacity=".5"/>
+    </g>
+  </g>
+  <!-- crown badge -->
+  <circle cx="122" cy="34" r="22" fill="url(#badge)"/>
+  <circle cx="122" cy="34" r="22" stroke="#fff" stroke-opacity=".5" stroke-width="2"/>
+  <path d="M110 30l6 5 6-9 6 9 6-5-3 13h-18z" fill="#fff"/>
+  <rect x="113" y="44" width="18" height="3" rx="1.5" fill="#fff"/>
+  <circle cx="114" cy="26" r="3" fill="#fff" opacity=".35"/>
+</svg>

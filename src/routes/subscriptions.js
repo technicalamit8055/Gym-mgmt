@@ -16,7 +16,7 @@ subscriptionRoutes.use(requireAuth);
 
 const SUB_SELECT = `
   SELECT s.*, p.name AS plan_name, p.duration_days,
-         m.code AS member_code, m.first_name, m.last_name,
+         m.code AS member_code, m.first_name, m.last_name, m.email, m.phone,
          sess.name AS session_name,
          COALESCE(pay.total, 0) AS paid,
          (s.price - s.discount + s.addon_total) - COALESCE(pay.total, 0) AS due

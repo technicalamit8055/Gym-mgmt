@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 100" width="190" height="100" fill="none">
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff9db0"/>
+      <stop offset="1" stop-color="#f4607d"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff5f6"/>
+      <stop offset="1" stop-color="#ffe2e7"/>
+    </linearGradient>
+    <linearGradient id="leafPink" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#e45b8f"/>
+      <stop offset="1" stop-color="#ffb3cf"/>
+    </linearGradient>
+    <linearGradient id="leafBlue" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#93c5fd"/>
+    </linearGradient>
+  </defs>
+  <!-- leaves behind -->
+  <path d="M30 100C16 78 18 52 34 36c8 22 8 46-4 64z" fill="url(#leafPink)"/>
+  <path d="M38 100c-2-24 8-42 26-50-2 22-10 38-26 50z" fill="url(#leafPink)" opacity=".8"/>
+  <path d="M22 100C10 88 6 72 10 58c12 10 16 26 12 42z" fill="url(#leafPink)" opacity=".6"/>
+  <path d="M168 100c4-26-4-50-20-64-4 24 2 46 20 64z" fill="url(#leafBlue)"/>
+  <path d="M178 100c8-16 8-32 0-46-8 14-8 30 0 46z" fill="url(#leafBlue)" opacity=".7"/>
+  <!-- screen -->
+  <rect x="58" y="22" width="96" height="70" rx="10" fill="url(#frame)"/>
+  <rect x="65" y="29" width="82" height="56" rx="5" fill="url(#screen)"/>
+  <g stroke="#ef4f6f" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M92 48v-7h7M113 41h7v7M120 66v7h-7M99 73h-7v-7"/>
+  </g>
+</svg>

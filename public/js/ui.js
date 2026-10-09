@@ -172,6 +172,16 @@ const ICONS = {
 
   /* --- payment methods --- */
   smartphone: [{ tag: 'rect', x: 6, y: 2, width: 12, height: 20, rx: 2 }, 'M11 18h2'],
+  phone: [
+    'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z',
+  ],
+  mail: [{ tag: 'rect', x: 2, y: 4, width: 20, height: 16, rx: 2 }, 'm22 7-10 6L2 7'],
+  mapPin: ['M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z', { tag: 'circle', cx: 12, cy: 10, r: 3 }],
+  heartPulse: [
+    'M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z',
+    'M3.2 12h4.3l1.5-3 2 6 1.5-3h8.3',
+  ],
+  history: ['M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8', 'M3 3v5h5', 'M12 7v5l4 2'],
   bank: ['M3 21h18', 'M6 21V11', 'M10 21V11', 'M14 21V11', 'M18 21V11', 'm2 11 10-6 10 6z'],
   globe: [
     { tag: 'circle', cx: 12, cy: 12, r: 9 },
@@ -279,6 +289,39 @@ const ICONS = {
     'M12 6V4',
   ],
   play: ['M6 4.5 19 12 6 19.5z'],
+  // Body parts — the Add Exercise filter chips.
+  muscleBack: [
+    { tag: 'circle', cx: 12, cy: 4, r: 2 },
+    'M5 9.5 8 7.5h8l3 2',
+    'M8 7.5 7 14l2.5 1.5V21',
+    'M16 7.5 17 14l-2.5 1.5V21',
+    'M12 8v13',
+    'M9.5 11h5',
+  ],
+  muscleLeg: ['M9 2.5v7.5l-1.5 5 1 6.5h3.5l-.5-5.5 1.5-4.5 4.5 2.5 1-2-5-4.5V2.5'],
+  muscleShoulders: [
+    { tag: 'circle', cx: 12, cy: 5, r: 2.5 },
+    'M3.5 21v-5.5A4.5 4.5 0 0 1 8 11h8a4.5 4.5 0 0 1 4.5 4.5V21',
+    'M8 11v10',
+    'M16 11v10',
+    'M10 15h4',
+  ],
+  muscleArm: [
+    'M5 21v-5.5c0-2.6 1.2-4.6 2.6-6.6l1.7-4a1.6 1.6 0 0 1 2.7-.4l1.5 1.9-2.5 2.1 1 2.5c2.6-1.6 6.1-1 7.6 1.4 1.3 2.2.3 5-2.1 6.4C15.8 20.3 12.8 21 10 21z',
+  ],
+  muscleCore: [
+    { tag: 'rect', x: 5, y: 3, width: 14, height: 18, rx: 4 },
+    'M12 3v18',
+    'M5 9h14',
+    'M5 15h14',
+  ],
+  // Two toggles — the "sets" counter on the workout logger.
+  sets: [
+    { tag: 'rect', x: 2.5, y: 4, width: 19, height: 7, rx: 3.5 },
+    { tag: 'circle', cx: 7.5, cy: 7.5, r: 1.6 },
+    { tag: 'rect', x: 2.5, y: 13, width: 19, height: 7, rx: 3.5 },
+    { tag: 'circle', cx: 16.5, cy: 16.5, r: 1.6 },
+  ],
   crown: ['m2.5 7.5 4.5 4.5L12 4l5 8 4.5-4.5L19.5 19h-15z', 'M5 22h14'],
   barChart: [
     { tag: 'rect', x: 3.5, y: 12, width: 4.5, height: 8.5, rx: 1 },
@@ -301,6 +344,7 @@ const ICONS = {
   ],
   chevronLeft: ['m15 18-6-6 6-6'],
   chevronRight: ['m9 18 6-6-6-6'],
+  chevronDown: ['m6 9 6 6 6-6'],
   sparkle: [
     'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z',
     'M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z',
@@ -329,6 +373,7 @@ const ICONS = {
   ],
   info: [{ tag: 'circle', cx: 12, cy: 12, r: 10 }, 'M12 16v-4', 'M12 8h.01'],
   checkCircle: ['M22 11.08V12a10 10 0 1 1-5.93-9.14', 'm9 11 3 3L22 4'],
+  fileText: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8'],
   xCircle: [{ tag: 'circle', cx: 12, cy: 12, r: 10 }, 'm15 9-6 6', 'm9 9 6 6'],
   ban: [{ tag: 'circle', cx: 12, cy: 12, r: 10 }, 'm4.9 4.9 14.2 14.2'],
   pause: [
@@ -337,6 +382,9 @@ const ICONS = {
   ],
   arrowLeft: ['m12 19-7-7 7-7', 'M19 12H5'],
   arrowRight: ['M5 12h14', 'm12 5 7 7-7 7'],
+  arrowUp: ['m5 12 7-7 7 7', 'M12 19V5'],
+  arrowDown: ['M12 5v14', 'm19 12-7 7-7-7'],
+  bag: ['M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z', 'M3 6h18', 'M16 10a4 4 0 0 1-8 0'],
   edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z'],
   home: ['m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M9 22V12h6v10'],
   unlock: [{ tag: 'rect', x: 3, y: 11, width: 18, height: 11, rx: 2 }, 'M7 11V7a5 5 0 0 1 9.9-1'],
@@ -362,6 +410,85 @@ const ICONS = {
   bell: [
     'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9',
     'M10.3 21a1.94 1.94 0 0 0 3.4 0',
+  ],
+
+  /* --- settings --- */
+  monitor: [
+    { tag: 'rect', x: 2, y: 3, width: 20, height: 14, rx: 2 },
+    'M8 21h8',
+    'M12 17v4',
+  ],
+  palette: [
+    'M12 22a10 10 0 1 1 10-10c0 2.76-2.24 4-5 4h-1.5a1.5 1.5 0 0 0-1.06 2.56A1.5 1.5 0 0 1 12 22z',
+    { tag: 'circle', cx: 7.5, cy: 10.5, r: 1 },
+    { tag: 'circle', cx: 10.5, cy: 6.5, r: 1 },
+    { tag: 'circle', cx: 15.5, cy: 7.5, r: 1 },
+  ],
+  save: [
+    'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z',
+    'M17 21v-8H7v8',
+    'M7 3v5h8',
+  ],
+  copy: [
+    { tag: 'rect', x: 9, y: 9, width: 13, height: 13, rx: 2 },
+    'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+  ],
+  link: [
+    'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
+    'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  ],
+  building: [
+    { tag: 'rect', x: 4, y: 2, width: 16, height: 20, rx: 2 },
+    'M9 22v-4h6v4',
+    'M8 6h.01', 'M16 6h.01', 'M12 6h.01',
+    'M12 10h.01', 'M12 14h.01', 'M16 10h.01',
+    'M16 14h.01', 'M8 10h.01', 'M8 14h.01',
+  ],
+
+  /* --- check-in desk --- */
+  keyboard: [
+    { tag: 'rect', x: 2, y: 5, width: 20, height: 14, rx: 2 },
+    'M6 9h.01', 'M10 9h.01', 'M14 9h.01', 'M18 9h.01',
+    'M6 12h.01', 'M10 12h.01', 'M14 12h.01', 'M18 12h.01',
+    'M7 16h10',
+  ],
+  arrowCircle: [
+    { tag: 'circle', cx: 12, cy: 12, r: 10 },
+    'm12 16 4-4-4-4',
+    'M8 12h8',
+  ],
+
+  /* --- plans --- */
+  // Level, unlike `dumbbell` (equipment), which is drawn on the diagonal.
+  barbell: [
+    { tag: 'rect', x: 3, y: 9, width: 2.5, height: 6, rx: 1 },
+    { tag: 'rect', x: 6, y: 6, width: 3, height: 12, rx: 1 },
+    'M9 12h6',
+    { tag: 'rect', x: 15, y: 6, width: 3, height: 12, rx: 1 },
+    { tag: 'rect', x: 18.5, y: 9, width: 2.5, height: 6, rx: 1 },
+  ],
+  list: ['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01'],
+  sort: ['m7 15 5 5 5-5', 'm7 9 5-5 5 5'],
+
+  /* --- class types (member Schedule tab) --- */
+  yoga: [
+    { tag: 'circle', cx: 12, cy: 4.5, r: 2 },
+    'M12 7.5v6',
+    'M6.5 13.5 9 9.5h6l2.5 4',
+    'M4 18c2.5-2.6 5.2-3.5 8-3.5s5.5.9 8 3.5',
+    'M3 21h18',
+  ],
+  userPlus: ['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', { tag: 'circle', cx: 9, cy: 7, r: 4 }, 'M19 8v6', 'M22 11h-6'],
+  music: ['M9 18V5l12-2v13', { tag: 'circle', cx: 6, cy: 18, r: 3 }, { tag: 'circle', cx: 18, cy: 16, r: 3 }],
+  bicep: [
+    'M12.4 13A5 5 0 0 1 22 15c0 3.9-4 7-9 7-4.1 0-8.2-.8-10.4-2.5-.4-.3-.6-.8-.6-1.4C2.1 12.7 2.6 2 10 2a3 3 0 0 1 3 3 2 2 0 0 1-2 2c-1.1 0-1.6-.4-2-1',
+    'M15 14a5 5 0 0 0-7.6 2',
+    'M10 6.8C8 8 9.5 13 8 15',
+  ],
+  cart: [
+    { tag: 'circle', cx: 8, cy: 21, r: 1 },
+    { tag: 'circle', cx: 19, cy: 21, r: 1 },
+    'M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12',
   ],
 };
 
@@ -390,6 +517,7 @@ Object.assign(ICONS, {
   macros: ICONS.target,
   delete: ICONS.trash,
 });
+ICONS.calendarCheck = [...ICONS.classes.slice(0, 4), 'm9 16 2 2 4-4'];
 
 /**
  * An <svg> node for `name`, or null if there is no such icon — so a caller
@@ -440,6 +568,24 @@ let currency = 'INR';
 export const setCurrency = (code) => {
   currency = code || 'INR';
 };
+
+/** The gym's currency for labels: { code: 'INR', symbol: '₹', name: 'Indian rupees' }. */
+export function currencyInfo() {
+  const part = (options) => {
+    try {
+      return new Intl.NumberFormat('en', { style: 'currency', currency, ...options })
+        .formatToParts(2)
+        .find((p) => p.type === 'currency')?.value;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    code: currency,
+    symbol: part({ currencyDisplay: 'narrowSymbol' }) || currency,
+    name: part({ currencyDisplay: 'name' }) || currency,
+  };
+}
 
 export function money(amount, { compact = false } = {}) {
   const value = Number(amount || 0);
@@ -783,7 +929,12 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-export function openModal({ title, body, footer, wide = false, onClose }) {
+/**
+ * `icon` (a renderIcon name) and `subtitle` give the head a brand tile and a
+ * one-line explanation under the title; `className` lets a dialog restyle
+ * itself without a global override.
+ */
+export function openModal({ title, subtitle, icon, className, body, footer, wide = false, onClose }) {
   const root = document.getElementById('modal-root');
   const backdrop = h(
     'div',
@@ -795,11 +946,12 @@ export function openModal({ title, body, footer, wide = false, onClose }) {
     },
     h(
       'div',
-      { class: `modal ${wide ? 'wide' : ''}` },
+      { class: `modal ${wide ? 'wide' : ''} ${className || ''}` },
       h(
         'div',
-        { class: 'modal-head' },
-        h('h2', {}, title),
+        { class: `modal-head${icon ? ' has-icon' : ''}` },
+        icon ? h('span', { class: 'modal-head-icon' }, renderIcon(icon, { size: 30, stroke: 2 })) : null,
+        subtitle ? h('div', { class: 'modal-head-text' }, h('h2', {}, title), h('p', {}, subtitle)) : h('h2', {}, title),
         h('div', { class: 'spacer' }),
         h('button', { class: 'icon-btn', onclick: closeModal, title: 'Close', 'aria-label': 'Close' }, renderIcon('close', { size: 18 })),
       ),
@@ -814,6 +966,29 @@ export function openModal({ title, body, footer, wide = false, onClose }) {
   const firstInput = backdrop.querySelector('input, select, textarea');
   if (firstInput) firstInput.focus();
   return backdrop;
+}
+
+/**
+ * An exercise's demo — image, GIF or looping clip — or null when it has none,
+ * so a caller can `?? fallback`. A clip plays muted and inline: browsers only
+ * autoplay video that is both, and a demo must never grab the sound.
+ */
+export function exerciseMedia(item, { className = '' } = {}) {
+  if (!item?.media_url) return null;
+  if (item.media_type === 'video') {
+    const video = h('video', {
+      class: className,
+      src: item.media_url,
+      loop: '',
+      playsinline: '',
+      preload: 'metadata',
+      'aria-hidden': 'true',
+    });
+    video.muted = true;
+    video.autoplay = true;
+    return video;
+  }
+  return h('img', { class: className, src: item.media_url, alt: '', loading: 'lazy', decoding: 'async' });
 }
 
 /* -------------------------------------------------------------------- forms */
@@ -860,7 +1035,7 @@ export function buildForm(fields, { onSubmit, submitLabel = 'Save', wide = false
       h(
         'label',
         { class: `field ${field.full ? 'full' : ''}` },
-        h('span', {}, field.label, field.required ? ' *' : ''),
+        h('span', {}, field.label, field.required ? h('span', { class: 'req' }, ' *') : ''),
         input,
         field.hint ? h('div', { class: 'muted', style: 'font-size:12px;margin-top:4px' }, field.hint) : null,
         errorNode,
@@ -1189,14 +1364,28 @@ const brandGradient = (id, topOpacity, bottomOpacity, token = 'var(--brand)') =>
     svg('stop', { offset: '100%', style: `stop-color:${token};stop-opacity:${bottomOpacity}` }),
   );
 
+/** The next "round" number at or above `value`: 1, 2, 2.5, 5 or 10 × 10ⁿ. */
+function niceCeil(value) {
+  if (value <= 0) return value;
+  const exp = 10 ** Math.floor(Math.log10(value));
+  const f = value / exp;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * exp;
+}
+
 /**
  * Bars on a real axis: three gridlines with captions, rounded tops, and a zero
  * line that bars can hang below when a series goes negative (the P&L report does).
  */
-export function barChart(data, { height = 210, format = (v) => v, label = (d) => d.label } = {}) {
+export function barChart(
+  data,
+  { height = 210, format = (v) => v, label = (d) => d.label, color = 'var(--brand)', ghost = false, peakOnly = false } = {},
+) {
   if (!data.length) return emptyState('No data for this period', { icon: 'reports' });
 
-  const maxValue = Math.max(0, ...data.map((d) => d.value));
+  const peakValue = Math.max(0, ...data.map((d) => d.value));
+  // A peak-labelled chart reads its height off the axis, so the axis is rounded
+  // up to a friendly figure (1,999 → 2K, halfway 1K) instead of the raw peak.
+  const maxValue = peakOnly ? niceCeil(peakValue) : peakValue;
   const minValue = Math.min(0, ...data.map((d) => d.value));
   const span = maxValue - minValue || 1;
 
@@ -1213,8 +1402,10 @@ export function barChart(data, { height = 210, format = (v) => v, label = (d) =>
     const slot = plotWidth / data.length;
     const barWidth = Math.min(slot * 0.56, 56);
     // With many bars there is no room for a caption on every one.
-    const labelEvery = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor(plotWidth / 46))));
+    const labelGap = Math.max(30, Math.max(...data.map((d) => String(d.label).length)) * 6.5 + 12);
+    const labelEvery = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor(plotWidth / labelGap))));
     const showValues = data.length <= 12 && slot >= 54;
+    const peakIndex = data.findIndex((d) => d.value === peakValue);
 
     const showTip = (event, d) => {
       clear(tooltip).append(
@@ -1229,7 +1420,7 @@ export function barChart(data, { height = 210, format = (v) => v, label = (d) =>
     return svg(
       'svg',
       { class: 'chart', width, height, viewBox: `0 0 ${width} ${height}`, onmouseleave: hideTip },
-      svg('defs', {}, brandGradient(`${id}-bar`, 0.95, 0.55), brandGradient(`${id}-neg`, 0.55, 0.95, 'var(--red)')),
+      svg('defs', {}, brandGradient(`${id}-bar`, 0.95, 0.55, color), brandGradient(`${id}-neg`, 0.55, 0.95, 'var(--red)')),
       ...ticks.map((value) =>
         svg(
           'g',
@@ -1255,6 +1446,11 @@ export function barChart(data, { height = 210, format = (v) => v, label = (d) =>
             onmousemove: (event) => showTip(event, d),
             onmouseleave: hideTip,
           }),
+          // `ghost`: an empty slot keeps a faint stub, so a quiet month still
+          // reads as a month on the axis rather than a gap.
+          ghost && d.value === 0
+            ? svg('path', { d: barPath(center - barWidth / 2, zeroY - 14, barWidth, 14, 5), fill: color, opacity: 0.12 })
+            : null,
           svg('path', {
             class: 'bar',
             d: barPath(center - barWidth / 2, y, barWidth, barHeight, 5, negative),
@@ -1263,8 +1459,8 @@ export function barChart(data, { height = 210, format = (v) => v, label = (d) =>
             onmouseleave: hideTip,
           }),
           i % labelEvery === 0 ? svg('text', { x: center, y: height - 6, 'text-anchor': 'middle' }, d.label) : null,
-          showValues && d.value !== 0
-            ? svg('text', { x: center, y: negative ? y + barHeight + 13 : y - 6, 'text-anchor': 'middle' }, format(d.value))
+          (peakOnly ? i === peakIndex && d.value > 0 : showValues && d.value !== 0)
+            ? svg('text', { class: peakOnly ? 'peak-value' : null, x: center, y: negative ? y + barHeight + 13 : y - 6, 'text-anchor': 'middle' }, format(d.value))
             : null,
         ];
       }),
@@ -1295,7 +1491,7 @@ function smoothPath(points, minY, maxY) {
   return d;
 }
 
-export function lineChart(data, { height = 210, format = (v) => v } = {}) {
+export function lineChart(data, { height = 210, format = (v) => v, color = 'var(--brand)' } = {}) {
   if (data.length < 2) return emptyState('Not enough data yet', { icon: 'activity' });
 
   const max = Math.max(...data.map((d) => d.value), 1);
@@ -1355,7 +1551,7 @@ export function lineChart(data, { height = 210, format = (v) => v } = {}) {
     return svg(
       'svg',
       { class: 'chart', width, height, viewBox: `0 0 ${width} ${height}` },
-      svg('defs', {}, brandGradient(`${id}-area`, 0.32, 0)),
+      svg('defs', {}, brandGradient(`${id}-area`, 0.32, 0, color)),
       ...ticks.map((value) =>
         svg(
           'g',
@@ -1365,9 +1561,9 @@ export function lineChart(data, { height = 210, format = (v) => v } = {}) {
         ),
       ),
       svg('path', { class: 'area', d: area, fill: `url(#${id}-area)` }),
-      svg('path', { class: 'line', d: line }),
+      svg('path', { class: 'line', d: line, style: `stroke:${color}` }),
       // The latest reading gets a standing marker; every other point appears on hover.
-      svg('circle', { class: 'dot', cx: points.at(-1)[0], cy: points.at(-1)[1], r: 4 }),
+      svg('circle', { class: 'dot', cx: points.at(-1)[0], cy: points.at(-1)[1], r: 4, style: `stroke:${color}` }),
       ...data.map((d, i) =>
         i % labelEvery === 0
           ? svg('text', { x: left + i * step, y: height - 6, 'text-anchor': i === 0 ? 'start' : 'middle' }, d.label)

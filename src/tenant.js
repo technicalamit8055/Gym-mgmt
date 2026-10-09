@@ -1,5 +1,12 @@
 import path from 'node:path';
 import { config, DEFAULT_TENANT_SLUG, ROOT } from './config.js';
+import {
+  customDomainsEnabled,
+  findTenantByCustomDomain,
+  hostnameOf,
+  isPlatformHost,
+  primaryDomainFor,
+} from './customDomains.js';
 import { tenantStorage } from './db.js';
 import { paymentRequired } from './errors.js';
 import { expireOverdueTrials, findTenantBySlug, isValidSlug, tenantDbPath, RESERVED_SLUGS } from './tenants.js';
@@ -103,6 +110,25 @@ function sendAppShell(res) {
  * default database.
  */
 export function resolveTenant(req, res, next) {
+  // A gym's own domain outranks everything else, path prefix included: the
+  // hostname alone decides which gym it is. Skipped for the platform's own
+  // hostnames so local development never opens the registry for it.
+  const hostname = hostnameOf(req.get('host'));
+  if (customDomainsEnabled() && !isPlatformHost(hostname)) {
+    expireOverdueTrials();
+    const owner = findTenantByCustomDomain(hostname);
+    if (owner) {
+      // "/g/<slug>" on a gym's own domain is only honoured for that same gym
+      // (an old bookmark). Any other gym must not render under this brand's
+      // address — it would let one gym's login page be served from another's
+      // domain.
+      const fromPath = takeTenantPathPrefix(req);
+      if (fromPath && fromPath !== owner.slug) return tenantNotFound(req, res, fromPath);
+      req.customDomain = hostname;
+      return enterTenant(req, res, next, owner);
+    }
+  }
+
   // Path prefix first: it is the most explicit signal, and it is the only one
   // that can address a specific gym on a hostname that has no wildcard DNS.
   const fromPath = takeTenantPathPrefix(req);
@@ -128,13 +154,20 @@ export function resolveTenant(req, res, next) {
   expireOverdueTrials();
 
   const tenant = findTenantBySlug(slug);
-  if (!tenant) {
-    if (!isApiRequest(req)) return sendAppShell(res);
-    // `code` so the front end can tell "this gym does not exist" apart from
-    // any other 404 the API might produce. Matching on the status alone made
-    // a plain "no such endpoint" render as a dead-end "no gym here" page.
-    return res.status(404).json({ error: `No gym found for "${slug}"`, code: 'tenant_not_found', slug });
-  }
+  if (!tenant) return tenantNotFound(req, res, slug);
+  return enterTenant(req, res, next, tenant);
+}
+
+function tenantNotFound(req, res, slug) {
+  if (!isApiRequest(req)) return sendAppShell(res);
+  // `code` so the front end can tell "this gym does not exist" apart from
+  // any other 404 the API might produce. Matching on the status alone made
+  // a plain "no such endpoint" render as a dead-end "no gym here" page.
+  return res.status(404).json({ error: `No gym found for "${slug}"`, code: 'tenant_not_found', slug });
+}
+
+/** Scopes the rest of the request to one resolved gym — however it was found. */
+function enterTenant(req, res, next, tenant) {
   // 'suspended' (lapsed trial/payment) is recoverable — login and billing
   // must stay reachable so the owner can pay to reactivate. 'cancelled' is a
   // deliberate platform-side action and stays a hard block on everything.
@@ -143,7 +176,7 @@ export function resolveTenant(req, res, next) {
     return res.status(403).json({
       error: 'This account is not currently active. Contact support.',
       code: 'tenant_cancelled',
-      slug,
+      slug: tenant.slug,
     });
   }
 
@@ -189,11 +222,25 @@ export function requireActiveSubscription(req, _res, next) {
  * whether wildcard DNS exists for ROOT_DOMAIN is invisible from inside the
  * process — so TENANT_URL_MODE decides, defaulting to the path form because
  * that one is always reachable.
+ *
+ * A gym with a live custom domain is advertised at that instead — it is the
+ * address its owner chose and set up DNS for. tenantPlatformUrl() below is
+ * the fallback that keeps working whatever happens to their DNS.
  */
 export function tenantUrl(req, slug) {
+  const domain = primaryDomainFor(slug);
+  if (domain) return `https://${domain}`;
+  return tenantPlatformUrl(req, slug);
+}
+
+/** The gym's address on this platform's own hostname, ignoring custom domains. */
+export function tenantPlatformUrl(req, slug) {
   const proto = req.protocol;
   if (config.tenantUrlMode === 'subdomain' && config.rootDomain) {
     return `${proto}://${slug}.${config.rootDomain}`;
   }
-  return `${proto}://${req.get('host')}/${TENANT_PATH_PREFIX}/${slug}`;
+  // Asked from the gym's own domain, the request's host *is* the custom
+  // domain — the platform's address has to come from configuration instead.
+  const host = req.customDomain && config.rootDomain ? config.rootDomain : req.get('host');
+  return `${proto}://${host}/${TENANT_PATH_PREFIX}/${slug}`;
 }

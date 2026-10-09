@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="600" height="160" preserveAspectRatio="none">
+  <!-- Used as a CSS mask: only alpha matters, so each card tints it with its own tone. -->
+  <path d="M0 96c80-34 170-46 260-20s190 40 340-18v102H0z" fill="#000" fill-opacity=".45"/>
+  <path d="M0 124c110-38 210-30 300-6s180 24 300-30v72H0z" fill="#000" fill-opacity=".75"/>
+  <path d="M0 146c120-22 230-18 320-2s170 14 280-14v30H0z" fill="#000"/>
+</svg>

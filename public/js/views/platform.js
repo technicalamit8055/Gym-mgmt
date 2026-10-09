@@ -4,6 +4,7 @@ import {
   buildForm,
   clear,
   closeModal,
+  confirmDialog,
   date,
   h,
   openModal,
@@ -13,6 +14,8 @@ import {
   table,
   toast,
 } from '../ui.js';
+import { checkSummary, dnsRecordsTable, domainStatusBadge } from './customDomains.js';
+import { renderCatalogSection } from './exerciseCatalog.js';
 
 /**
  * Operator console — the view for whoever runs the platform, listing every
@@ -194,6 +197,273 @@ function openBusinessTypeModal(tenant, onSaved) {
   });
 }
 
+/* ── Custom domains ──────────────────────────────────────────────────── */
+
+/** Connects a domain on a gym's behalf — the "can you set it up for us?" case. */
+function openAddDomainModal(tenant, onSaved) {
+  openModal({
+    title: `${tenant.gym_name} — connect a domain`,
+    body: buildForm(
+      [
+        { name: 'hostname', label: 'Domain', required: true, full: true, placeholder: 'app.theirgym.com' },
+        {
+          name: 'when',
+          label: 'Goes live',
+          type: 'select',
+          value: 'verify',
+          full: true,
+          options: [
+            { value: 'verify', label: 'Once its DNS checks out (recommended)' },
+            { value: 'now', label: 'Now — I have confirmed they own it another way' },
+          ],
+          hint: 'Going live now skips the ownership TXT record. Only do this when you know the domain is theirs.',
+        },
+      ],
+      {
+        submitLabel: 'Connect',
+        onSubmit: async (values) => {
+          const { domain } = await api.platformAddDomain(tenant.slug, {
+            hostname: values.hostname,
+            activate: values.when === 'now',
+          });
+          closeModal();
+          toast(domain.status === 'active' ? `${domain.hostname} is live` : `${domain.hostname} added — waiting for DNS`);
+          await onSaved();
+        },
+      },
+    ),
+  });
+}
+
+/** Moves a claim to a corrected hostname; it then has to verify again. */
+function openEditDomainModal(domain, onSaved) {
+  openModal({
+    title: `Change ${domain.hostname}`,
+    body: buildForm(
+      [
+        {
+          name: 'hostname',
+          label: 'Domain',
+          value: domain.hostname,
+          required: true,
+          full: true,
+          hint: 'The domain drops back to "Waiting for DNS" and must pass its check again under the new name.',
+        },
+      ],
+      {
+        submitLabel: 'Save',
+        onSubmit: async (values) => {
+          await api.platformUpdateDomain(domain.id, { hostname: values.hostname });
+          closeModal();
+          toast('Domain updated');
+          await onSaved();
+        },
+      },
+    ),
+  });
+}
+
+/**
+ * The operator's controls for one domain, shared by the gym drill-down and the
+ * Domains tab. `refresh` redraws in place after a quick action; `onChanged`
+ * re-renders the console after the ones that close the current view.
+ */
+function domainActions(domain, { onChanged, refresh = onChanged }) {
+  const act = (label, run, { danger = false } = {}) => {
+    const button = h('button', { class: `btn sm ${danger ? 'ghost danger' : 'ghost'}`, type: 'button' }, label);
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      button.disabled = true;
+      try {
+        await run();
+      } catch (err) {
+        toast(err.message || 'That did not work', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    };
+    return button;
+  };
+
+  return h(
+    'div',
+    { class: 'row', style: 'gap:6px;flex-wrap:wrap' },
+    act('Check DNS', async () => {
+      const { domain: updated, result } = await api.platformCheckDomain(domain.id);
+      const failing = result.routing.ok ? result.ownership.message : result.routing.message;
+      toast(
+        `${updated.hostname}: ${result.ok ? 'all records look right' : failing}`,
+        result.ok ? 'success' : 'error',
+      );
+      await refresh();
+    }),
+    domain.status === 'active'
+      ? act('Take offline', async () => {
+        await api.platformUpdateDomain(domain.id, { status: 'pending' });
+        toast(`${domain.hostname} no longer routes to the gym`);
+        await refresh();
+      })
+      : act('Force live', async () => {
+        await api.platformUpdateDomain(domain.id, { status: 'active' });
+        toast(`${domain.hostname} is live`);
+        await refresh();
+      }),
+    act('Change', async () => {
+      closeModal();
+      openEditDomainModal(domain, onChanged);
+    }),
+    act(
+      'Disconnect',
+      async () => {
+        closeModal();
+        confirmDialog({
+          title: `Disconnect ${domain.hostname}?`,
+          message: 'Visitors to this address will stop reaching the gym. The gym can connect it again later.',
+          confirmLabel: 'Disconnect',
+          danger: true,
+          onConfirm: async () => {
+            await api.platformRemoveDomain(domain.id);
+            toast(`${domain.hostname} disconnected`);
+            await onChanged();
+          },
+        });
+      },
+      { danger: true },
+    ),
+  );
+}
+
+function domainsCard(tenant, domains, setup, { onChanged, refresh }) {
+  const add = h(
+    'button',
+    { class: 'btn sm', type: 'button', onclick: () => { closeModal(); openAddDomainModal(tenant, onChanged); } },
+    renderIcon('plus', { size: 15 }),
+    'Connect a domain',
+  );
+
+  return h(
+    'div',
+    { class: 'card', style: 'grid-column:1 / -1' },
+    h(
+      'div',
+      { class: 'card-head' },
+      h('h3', {}, `Custom domains (${domains.length})`),
+      h('div', { class: 'spacer' }),
+      setup.enabled ? add : null,
+    ),
+    !setup.enabled
+      ? h('p', { class: 'muted', style: 'margin:0' }, 'Not enabled on this deployment — set CUSTOM_DOMAIN_TARGET (see docs/CUSTOM_DOMAINS.md).')
+      : !domains.length
+        ? h('p', { class: 'muted', style: 'margin:0' }, 'This gym has not connected a domain.')
+        : null,
+    ...domains.map((domain) =>
+      h(
+        'div',
+        { class: 'domain-item' },
+        h(
+          'div',
+          { class: 'domain-item-head' },
+          h(
+            'div',
+            {},
+            h('div', { class: 'domain-name' }, domain.hostname),
+            h('div', { class: 'muted', style: 'font-size:12px' }, domain.kind === 'apex' ? 'Root domain' : `Subdomain of ${domain.apex}`),
+          ),
+          domainStatusBadge(domain),
+        ),
+        dnsRecordsTable(domain),
+        checkSummary(domain),
+        h('div', { style: 'margin-top:10px' }, domainActions(domain, { onChanged, refresh })),
+      ),
+    ),
+  );
+}
+
+/**
+ * Every gym's domains in one table: the place to spot the ones stuck waiting
+ * on DNS, and to act on any of them without hunting for the gym first.
+ */
+async function renderDomainsSection(rerender) {
+  const data = await api.platformDomains();
+  const needle = { q: '' };
+  const tableNode = h('div', {});
+
+  const draw = () => {
+    const q = needle.q.toLowerCase();
+    const rows = data.items.filter(
+      (d) => !q || d.hostname.includes(q) || d.tenant_slug.includes(q) || (d.gym_name || '').toLowerCase().includes(q),
+    );
+    clear(tableNode).append(
+      table(
+        [
+          {
+            label: 'Domain',
+            render: (d) =>
+              h(
+                'div',
+                {},
+                h('a', { href: d.url, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, d.hostname),
+                h('div', { class: 'muted', style: 'font-size:12px' }, d.kind === 'apex' ? 'Root domain' : 'Subdomain'),
+              ),
+          },
+          {
+            label: 'Gym',
+            render: (d) =>
+              h('div', {}, d.gym_name || d.tenant_slug, h('div', { class: 'muted', style: 'font-size:12px' }, `/g/${d.tenant_slug}`)),
+          },
+          { label: 'Status', render: domainStatusBadge },
+          {
+            label: 'Last check',
+            render: (d) =>
+              d.last_check
+                ? h(
+                  'div',
+                  { style: 'font-size:13px' },
+                  h('span', { class: d.last_check.ok ? 'domain-ok' : 'domain-bad' }, d.last_check.ok ? 'Passing' : 'Failing'),
+                  h('div', { class: 'muted', style: 'font-size:12px' }, date(d.last_check.checked_at, { withTime: true })),
+                )
+                : h('span', { class: 'muted' }, 'Never'),
+          },
+          { label: '', align: 'right', render: (d) => domainActions(d, { onChanged: rerender }) },
+        ],
+        rows,
+        { empty: needle.q ? 'No domain matches that' : 'No gym has connected a domain yet' },
+      ),
+    );
+  };
+
+  const search = h('input', { class: 'search', type: 'search', placeholder: 'Search by domain or gym…' });
+  search.addEventListener('input', () => {
+    needle.q = search.value.trim();
+    draw();
+  });
+  draw();
+
+  const active = data.items.filter((d) => d.status === 'active').length;
+  return h(
+    'div',
+    {},
+    h(
+      'div',
+      { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
+      stat('Domains', data.total, `${active} live`),
+      stat('Waiting for DNS', data.total - active),
+      // Hostnames and IPs at stat-tile size wrap mid-word; set them smaller.
+      stat('CNAME target', h('span', { class: 'domain-stat-value' }, data.cname_target || '—'), data.enabled ? 'What gyms point at' : 'Not configured'),
+      stat('Root-domain IPs', h('span', { class: 'domain-stat-value' }, data.apex_ipv4?.length ? data.apex_ipv4.join(', ') : '—'), 'A records for root domains'),
+    ),
+    !data.enabled
+      ? h(
+        'div',
+        { class: 'card', style: 'margin-bottom:16px' },
+        h('p', { class: 'muted', style: 'margin:0' }, 'Custom domains are off. Set CUSTOM_DOMAIN_TARGET (and CUSTOM_DOMAIN_IPV4 for root domains), put an on-demand-TLS proxy in front, then restart — see docs/CUSTOM_DOMAINS.md.'),
+      )
+      : null,
+    h('div', { class: 'toolbar' }, search),
+    h('div', { class: 'card', style: 'padding:6px 6px 14px' }, tableNode),
+  );
+}
+
 /**
  * Permanent deletion, behind a typed confirmation.
  *
@@ -234,15 +504,15 @@ function openDeleteModal(tenant, onDeleted) {
       ),
       tenant.status !== 'cancelled'
         ? h(
-            'p',
-            { class: 'badge red', style: 'display:block;padding:10px;line-height:1.5' },
-            `This gym is ${tenant.status}. Only a cancelled gym can be deleted — change its status first.`,
-          )
+          'p',
+          { class: 'badge red', style: 'display:block;padding:10px;line-height:1.5' },
+          `This gym is ${tenant.status}. Only a cancelled gym can be deleted — change its status first.`,
+        )
         : h(
-            'p',
-            { class: 'muted', style: 'font-size:13px' },
-            'A final verified snapshot is written to the backups folder first, and the delete is abandoned if that snapshot cannot be taken.',
-          ),
+          'p',
+          { class: 'muted', style: 'font-size:13px' },
+          'A final verified snapshot is written to the backups folder first, and the delete is abandoned if that snapshot cannot be taken.',
+        ),
       h(
         'label',
         { class: 'field full' },
@@ -257,12 +527,24 @@ function openDeleteModal(tenant, onDeleted) {
 /** A labelled row inside the detail modal's definition lists. */
 const kv = (label, value) => [h('dt', {}, label), h('dd', {}, value ?? '—')];
 
+const bareUrl = (url) => String(url).replace(/^https?:\/\//, '');
+
 /** Opens the per-gym drill-down: who runs it, what it sells, what it earned,
  * and whether its integrations are live. */
 async function openDetailModal(row, onChanged) {
   const bodyNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
   openModal({ title: row.gym_name, body: bodyNode, wide: true });
 
+  // Redrawn in place by the domain actions, so checking DNS keeps this open
+  // on the gym instead of dropping the operator back on the list.
+  const refresh = async () => {
+    await drawDetail(row, bodyNode, { onChanged, refresh });
+    onChanged();
+  };
+  await drawDetail(row, bodyNode, { onChanged, refresh });
+}
+
+async function drawDetail(row, bodyNode, { onChanged, refresh }) {
   let data;
   try {
     data = await api.platformTenant(row.slug);
@@ -271,7 +553,7 @@ async function openDetailModal(row, onChanged) {
     return;
   }
 
-  const { tenant, stats, detail, devices, whatsapp, url } = data;
+  const { tenant, stats, detail, devices, whatsapp, url, platform_url: platformUrl, domains, domain_setup: domainSetup } = data;
   const currency = tenant.currency || 'INR';
 
   const waTone = whatsapp.connected ? 'green' : whatsapp.has_credentials ? 'amber' : 'grey';
@@ -302,7 +584,11 @@ async function openDetailModal(row, onChanged) {
         h(
           'dl',
           { class: 'kv' },
-          ...kv('Address', h('a', { href: url, target: '_blank' }, `/g/${tenant.slug}`)),
+          ...kv('Address', h('a', { href: url, target: '_blank', rel: 'noopener' }, bareUrl(url))),
+          // Only differs once the gym has a live custom domain.
+          ...(url !== platformUrl
+            ? kv('Platform address', h('a', { href: platformUrl, target: '_blank', rel: 'noopener' }, bareUrl(platformUrl)))
+            : []),
           ...kv('Status', h('span', { class: `badge ${STATUS_TONE[tenant.status] || 'grey'}` }, tenant.status)),
           ...kv('Signed up', date(tenant.created_at)),
           ...kv('Currency', currency),
@@ -376,6 +662,8 @@ async function openDetailModal(row, onChanged) {
           { empty: 'No plans set up' },
         ),
       ),
+
+      domainsCard(tenant, domains, domainSetup, { onChanged, refresh }),
     ),
 
     h(
@@ -497,9 +785,8 @@ function backupCard() {
   const load = async () => {
     try {
       const data = await api.platformBackups();
-      meta.textContent = `Every ${data.interval_hours || 0}h · keeping ${data.keep} · ${
-        data.offsite ? 'off-site copy configured' : 'this machine only'
-      }`;
+      meta.textContent = `Every ${data.interval_hours || 0}h · keeping ${data.keep} · ${data.offsite ? 'off-site copy configured' : 'this machine only'
+        }`;
       clear(listNode).append(
         table(
           [
@@ -548,6 +835,46 @@ function backupCard() {
   );
 }
 
+/** Which half of the console is showing. Module state, so it survives the
+ * full re-render every action here triggers. */
+let consoleSection = 'gyms';
+
+function consoleHeader(rerender) {
+  const tab = (section, text) =>
+    h(
+      'button',
+      {
+        class: `btn sm ${consoleSection === section ? 'primary' : 'ghost'}`,
+        type: 'button',
+        onclick: async () => {
+          consoleSection = section;
+          await rerender();
+        },
+      },
+      text,
+    );
+
+  return h(
+    'header',
+    { class: 'landing-top' },
+    h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('wrench', { size: 18 })), 'Operator console'),
+    h('div', { class: 'row', style: 'gap:6px;margin-left:16px' }, tab('gyms', 'Gyms'), tab('domains', 'Domains'), tab('catalog', 'Exercise library')),
+    h('div', { class: 'spacer' }),
+    h('a', { class: 'btn sm ghost', href: '#/' }, 'Site'),
+    h(
+      'button',
+      {
+        class: 'btn sm ghost',
+        onclick: async () => {
+          platformSession.clear();
+          await rerender();
+        },
+      },
+      'Sign out',
+    ),
+  );
+}
+
 export async function renderPlatformConsole({ context, rerender }) {
   if (!context.platform_admin) {
     return h(
@@ -568,6 +895,38 @@ export async function renderPlatformConsole({ context, rerender }) {
   }
 
   if (!platformSession.token) return loginCard(rerender);
+
+  if (consoleSection === 'catalog') {
+    return h(
+      'div',
+      { class: 'console' },
+      consoleHeader(rerender),
+      h(
+        'div',
+        { class: 'console-body' },
+        renderCatalogSection({
+          onExpired: async () => {
+            platformSession.clear();
+            await rerender();
+          },
+        }),
+      ),
+    );
+  }
+
+  if (consoleSection === 'domains') {
+    let section;
+    try {
+      section = await renderDomainsSection(rerender);
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        platformSession.clear();
+        return loginCard(rerender);
+      }
+      throw err;
+    }
+    return h('div', { class: 'console' }, consoleHeader(rerender), h('div', { class: 'console-body' }, section));
+  }
 
   let data;
   let analytics;
@@ -605,8 +964,8 @@ export async function renderPlatformConsole({ context, rerender }) {
   }
   const revenueLabel = Object.keys(revenueByCurrency).length
     ? Object.entries(revenueByCurrency)
-        .map(([code, value]) => amount(value, code))
-        .join(' + ')
+      .map(([code, value]) => amount(value, code))
+      .join(' + ')
     : amount(0);
 
   const state = { q: '', status: '', businessType: '', sort: 'created:desc' };
@@ -643,6 +1002,15 @@ export async function renderPlatformConsole({ context, rerender }) {
               onclick: (e) => e.stopPropagation(),
             },
             `/g/${row.slug}`,
+          ),
+          ...(row.custom_domains ?? []).map((domain) =>
+            h(
+              'div',
+              { class: 'muted', style: 'font-size:12px', title: domain.status === 'active' ? 'Live custom domain' : 'Custom domain waiting for DNS' },
+              renderIcon('globe', { size: 12 }),
+              ` ${domain.hostname}`,
+              domain.status === 'active' ? null : h('span', { class: 'badge amber', style: 'margin-left:6px' }, 'DNS'),
+            ),
           ),
         ),
     },
@@ -714,7 +1082,8 @@ export async function renderPlatformConsole({ context, rerender }) {
         (row) =>
           !needle ||
           row.gym_name.toLowerCase().includes(needle) ||
-          row.slug.toLowerCase().includes(needle),
+          row.slug.toLowerCase().includes(needle) ||
+          (row.custom_domains ?? []).some((domain) => domain.hostname.includes(needle)),
       )
       .sort(SORTS[state.sort]);
 
@@ -741,7 +1110,7 @@ export async function renderPlatformConsole({ context, rerender }) {
   const search = h('input', {
     class: 'search',
     type: 'search',
-    placeholder: 'Search by gym name or address…',
+    placeholder: 'Search by gym name, address or domain…',
   });
   search.addEventListener('input', () => {
     state.q = search.value.trim();
@@ -806,24 +1175,7 @@ export async function renderPlatformConsole({ context, rerender }) {
   return h(
     'div',
     { class: 'console' },
-    h(
-      'header',
-      { class: 'landing-top' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('wrench', { size: 18 })), 'Operator console'),
-      h('div', { class: 'spacer' }),
-      h('a', { class: 'btn sm ghost', href: '#/' }, 'Site'),
-      h(
-        'button',
-        {
-          class: 'btn sm ghost',
-          onclick: async () => {
-            platformSession.clear();
-            await rerender();
-          },
-        },
-        'Sign out',
-      ),
-    ),
+    consoleHeader(rerender),
 
     h(
       'div',

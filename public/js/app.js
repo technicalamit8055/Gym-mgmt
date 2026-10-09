@@ -101,17 +101,37 @@ function buildNav() {
 function buildRoutes() {
   const shared = [
     { pattern: /^\/dashboard$/, title: 'Dashboard', view: renderDashboard },
-    { pattern: /^\/check-in$/, title: t('checkin'), view: renderCheckIn },
+    {
+      pattern: /^\/check-in$/,
+      title: t('checkin'),
+      icon: 'scan',
+      iconTone: 'blue',
+      subtitle: `Quickly check in ${t('members').toLowerCase()} using QR code, card or biometric`,
+      view: renderCheckIn,
+    },
     { pattern: /^\/members$/, title: t('members'), view: renderMembers },
     { pattern: /^\/members\/(\d+)$/, title: t('member'), view: renderMemberDetail },
-    { pattern: /^\/billing$/, title: t('memberships'), view: renderBilling },
-    { pattern: /^\/plans$/, title: t('plans'), view: renderPlans },
-    { pattern: /^\/reports$/, title: 'Reports', view: renderReports },
+    { pattern: /^\/billing$/, title: t('memberships'), subtitle: 'Manage memberships, payments and invoices', view: renderBilling },
+    {
+      pattern: /^\/plans$/,
+      title: t('plans'),
+      icon: isLibrary() ? 'book' : 'barbell',
+      iconTone: 'blue',
+      subtitle: isLibrary() ? 'Create and manage library passes' : 'Create and manage gym membership plans',
+      view: renderPlans,
+    },
+    { pattern: /^\/reports$/, title: 'Reports', subtitle: 'Track your business performance and member activity', view: renderReports },
     { pattern: /^\/whatsapp$/, title: 'WhatsApp Automation', view: renderWhatsApp },
     { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
     { pattern: /^\/sessions$/, title: t('shifts'), view: renderSessions },
     { pattern: /^\/staff$/, title: t('staff'), view: renderStaff },
-    { pattern: /^\/settings$/, title: t('settings'), view: renderSettings },
+    {
+      pattern: /^\/settings$/,
+      title: t('settings'),
+      icon: 'settings',
+      subtitle: `Manage your ${isLibrary() ? 'library' : 'gym'} details, appearance and system preferences`,
+      view: renderSettings,
+    },
   ];
   if (isLibrary()) {
     return [
@@ -123,7 +143,14 @@ function buildRoutes() {
   }
   return [
     ...shared,
-    { pattern: /^\/classes$/, title: 'Classes & timetable', view: renderClasses },
+    {
+      pattern: /^\/classes$/,
+      title: 'Classes & timetable',
+      icon: 'calendar',
+      iconTone: 'orange',
+      subtitle: 'Manage your fitness classes and weekly schedule.',
+      view: renderClasses,
+    },
     { pattern: /^\/fitness-plans$/, title: 'Workout & Diet plans', view: renderFitnessPlans },
     { pattern: /^\/equipment$/, title: 'Equipment', view: renderEquipment },
   ];
@@ -475,6 +502,10 @@ function renderShell() {
   );
 
   const title = h('h1', {}, 'Dashboard');
+  // Optional one-liner under the title, set per route (see buildRoutes).
+  const subtitle = h('p', { class: 'topbar-sub', hidden: true });
+  // Optional brand tile before the title, also set per route.
+  const titleIcon = h('span', { class: 'topbar-icon', hidden: true });
   const content = h('div', { class: 'content' }, skeletonPage());
   const actions = h('div', { class: 'row' });
 
@@ -552,14 +583,14 @@ function renderShell() {
       h(
         'div',
         { class: 'main' },
-        h('header', { class: 'topbar' }, navToggle, title, h('div', { class: 'spacer' }), actions, modeTopbarBtn, fullscreenTopbarBtn),
+        h('header', { class: 'topbar' }, navToggle, titleIcon, h('div', { class: 'topbar-title' }, title, subtitle), h('div', { class: 'spacer' }), actions, modeTopbarBtn, fullscreenTopbarBtn),
         content,
       ),
       tabbar,
     ),
   );
   root().className = '';
-  return { nav, title, content, actions, navToggle, scrim, tabbar };
+  return { nav, title, titleIcon, subtitle, content, actions, navToggle, scrim, tabbar };
 }
 
 /**
@@ -680,6 +711,12 @@ async function renderRoute() {
   shell.tabbar.querySelector('.tab-more').classList.toggle('active', !onTab);
 
   shell.title.textContent = match.route.title;
+  shell.subtitle.textContent = match.route.subtitle || '';
+  shell.subtitle.hidden = !match.route.subtitle;
+  clear(shell.titleIcon);
+  if (match.route.icon) shell.titleIcon.append(renderIcon(match.route.icon, { size: 22, stroke: 2 }));
+  shell.titleIcon.hidden = !match.route.icon;
+  shell.titleIcon.dataset.tone = match.route.iconTone || '';
   clear(shell.actions);
   clear(shell.content).append(skeletonPage(/^\/(dashboard|reports)/.test(path) ? 'cards' : 'list'));
   // A new screen starts at the top. reload() re-enters this function for the

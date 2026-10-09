@@ -18,6 +18,8 @@ import { all, get, run } from './db.js';
 import { addDays, addMonths, today } from './validate.js';
 
 export const MUSCLE_GROUPS = ['chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body'];
+/** What an exercise is performed with — Hevy's list, trimmed to what a gym floor has. */
+export const EQUIPMENT_TYPES = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
 export const SET_TYPES = ['normal', 'warmup', 'drop', 'failure'];
 export const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'pre_workout', 'post_workout'];
 export const WORKOUT_GOALS = ['muscle_gain', 'fat_loss', 'strength', 'endurance', 'general_fitness'];
@@ -246,6 +248,97 @@ export function previousSetsFor(memberId, exerciseNames) {
     if (!out[row.exercise_name]) out[row.exercise_name] = row;
   }
   return out;
+}
+
+const round1 = (value) => Math.round(value * 10) / 10;
+
+/**
+ * One member's whole record on one exercise: every session that included it,
+ * newest first, plus the bests and lifetime totals the progress sheet charts.
+ *
+ * Only ticked sets count. Warmups are listed in a session's sets and add to its
+ * volume (as summariseSets does), but they never make a record or a best set —
+ * an empty-bar warmup of 20 reps is not the member's "most reps". Bests and
+ * totals cover the `limit` most recent sessions, which for anyone short of
+ * years of daily logging is all of them.
+ */
+export function exerciseHistory(memberId, exerciseName, { limit = 200 } = {}) {
+  const logs = all(
+    `SELECT l.id, l.workout_name, l.log_date, l.started_at
+     FROM workout_logs l
+     WHERE l.member_id = ?
+       AND EXISTS (SELECT 1 FROM workout_log_sets s
+                   WHERE s.log_id = l.id AND s.completed = 1 AND s.exercise_name = ? COLLATE NOCASE)
+     ORDER BY l.log_date DESC, l.id DESC
+     LIMIT ?`,
+    [memberId, exerciseName, limit],
+  );
+  const setRows = logs.length
+    ? all(
+        `SELECT log_id, set_number, set_type, weight_kg, reps, est_1rm_kg, is_pr
+         FROM workout_log_sets
+         WHERE log_id IN (${logs.map(() => '?').join(', ')})
+           AND completed = 1 AND exercise_name = ? COLLATE NOCASE
+         ORDER BY sort_order, id`,
+        [...logs.map((l) => l.id), exerciseName],
+      )
+    : [];
+
+  const byLog = new Map(logs.map((l) => [l.id, []]));
+  for (const row of setRows) byLog.get(row.log_id).push(row);
+
+  const records = {
+    heaviest_weight_kg: 0,
+    best_1rm_kg: 0,
+    best_set: null,
+    best_session_volume_kg: 0,
+    most_reps: 0,
+    total_sessions: logs.length,
+    total_sets: 0,
+    total_reps: 0,
+    total_volume_kg: 0,
+    first_logged_on: logs.at(-1)?.log_date ?? null,
+    last_logged_on: logs[0]?.log_date ?? null,
+  };
+
+  const sessions = logs.map((log) => {
+    const sets = byLog.get(log.id);
+    const working = sets.filter((s) => s.set_type !== 'warmup');
+    let bestSet = null;
+    for (const s of working) {
+      const volume = s.weight_kg * s.reps;
+      if (!bestSet || volume > bestSet.weight_kg * bestSet.reps) bestSet = s;
+    }
+    const session = {
+      log_id: log.id,
+      workout_name: log.workout_name,
+      log_date: log.log_date,
+      started_at: log.started_at,
+      sets: sets.map(({ log_id: _logId, ...set }) => set),
+      heaviest_weight_kg: Math.max(0, ...working.map((s) => s.weight_kg)),
+      best_1rm_kg: Math.max(0, ...working.map((s) => s.est_1rm_kg)),
+      best_set: bestSet ? { weight_kg: bestSet.weight_kg, reps: bestSet.reps } : null,
+      best_set_volume_kg: bestSet ? round1(bestSet.weight_kg * bestSet.reps) : 0,
+      volume_kg: round1(sets.reduce((sum, s) => sum + s.weight_kg * s.reps, 0)),
+      total_reps: sets.reduce((sum, s) => sum + s.reps, 0),
+      has_pr: sets.some((s) => s.is_pr),
+    };
+
+    records.heaviest_weight_kg = Math.max(records.heaviest_weight_kg, session.heaviest_weight_kg);
+    records.best_1rm_kg = Math.max(records.best_1rm_kg, session.best_1rm_kg);
+    records.best_session_volume_kg = Math.max(records.best_session_volume_kg, session.volume_kg);
+    records.most_reps = Math.max(records.most_reps, 0, ...working.map((s) => s.reps));
+    if (session.best_set && (!records.best_set || session.best_set_volume_kg > records.best_set.volume_kg)) {
+      records.best_set = { ...session.best_set, volume_kg: session.best_set_volume_kg, log_date: log.log_date };
+    }
+    records.total_sets += sets.length;
+    records.total_reps += session.total_reps;
+    records.total_volume_kg += session.volume_kg;
+    return session;
+  });
+  records.total_volume_kg = round1(records.total_volume_kg);
+
+  return { exercise_name: exerciseName, sessions, records };
 }
 
 /** Totals a finished session, so the summary modal and the history list read

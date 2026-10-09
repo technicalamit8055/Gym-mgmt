@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { requireAuth } from '../auth.js';
 import { all, get, run, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
+import { attachCatalogToExercises, listCatalog, mergeWithGymExercises } from '../exerciseCatalog.js';
 import {
+  EQUIPMENT_TYPES,
   MUSCLE_GROUPS,
   WORKOUT_GOALS,
   WORKOUT_LEVELS,
@@ -134,16 +136,18 @@ function writeDays(planId, days) {
 
 /** A plan with its days and each day's exercises, which is the only shape the
  * builder and the member portal ever want it in. */
-export function workoutPlanTree(planId) {
+export function workoutPlanTree(planId, { withMedia = false } = {}) {
   const plan = get('SELECT * FROM workout_plans WHERE id = ?', [planId]);
   if (!plan) return null;
   const days = all('SELECT * FROM workout_plan_days WHERE plan_id = ? ORDER BY sort_order, day_number', [planId]);
   return {
     ...plan,
-    days: days.map((day) => ({
-      ...day,
-      exercises: all('SELECT * FROM workout_plan_exercises WHERE day_id = ? ORDER BY sort_order, id', [day.id]),
-    })),
+    days: days.map((day) => {
+      const exercises = all('SELECT * FROM workout_plan_exercises WHERE day_id = ? ORDER BY sort_order, id', [day.id]);
+      // Opt-in: the clone path re-inserts these rows, and the demo fields are
+      // the catalogue's to own, not part of a plan.
+      return { ...day, exercises: withMedia ? attachCatalogToExercises(exercises) : exercises };
+    }),
   };
 }
 
@@ -183,7 +187,7 @@ workoutRoutes.post('/templates', (req, res) => {
 });
 
 workoutRoutes.get('/templates/:id', (req, res) => {
-  const plan = workoutPlanTree(Number(req.params.id));
+  const plan = workoutPlanTree(Number(req.params.id), { withMedia: true });
   if (!plan) throw notFound('Workout plan not found');
   res.json(plan);
 });
@@ -315,7 +319,7 @@ workoutRoutes.get('/members/:memberId', (req, res) => {
   );
 
   res.json({
-    assignment: assignment ? { ...assignment, plan: workoutPlanTree(assignment.plan_id) } : null,
+    assignment: assignment ? { ...assignment, plan: workoutPlanTree(assignment.plan_id, { withMedia: true }) } : null,
     logs,
     prs: all('SELECT * FROM exercise_prs WHERE member_id = ? ORDER BY est_1rm_kg DESC', [memberId]),
     stats: get(
@@ -346,35 +350,40 @@ workoutRoutes.get('/logs/:id', (req, res) => {
 
 /* ── Exercise library ──────────────────────────────────────────────────── */
 
-workoutRoutes.get('/exercises', (req, res) => {
-  const where = [];
+/**
+ * The platform catalogue (with demo media) plus this gym's own additions — see
+ * mergeWithGymExercises. The gym's seeded copies of the standard exercises are
+ * ignored here: the catalogue is the source of truth for those.
+ */
+export function exercisePickerRows({ muscle_group: group, q } = {}) {
+  const where = ['is_custom = 1'];
   const params = [];
-  if (req.query.muscle_group) {
+  if (group) {
     where.push('muscle_group = ?');
-    params.push(String(req.query.muscle_group));
+    params.push(String(group));
   }
-  if (req.query.q) {
+  if (q) {
     where.push('name LIKE ?');
-    params.push(`%${String(req.query.q)}%`);
+    params.push(`%${String(q)}%`);
   }
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  res.json({
-    items: all(`SELECT * FROM exercise_library ${clause} ORDER BY muscle_group, name`, params),
-  });
+  const gymRows = all(`SELECT * FROM exercise_library WHERE ${where.join(' AND ')}`, params);
+  return mergeWithGymExercises(listCatalog({ muscle_group: group, q }), gymRows);
+}
+
+workoutRoutes.get('/exercises', (req, res) => {
+  res.json({ items: exercisePickerRows(req.query) });
 });
 
 workoutRoutes.post('/exercises', (req, res) => {
   const body = parse(req.body, {
     name: { type: 'string', required: true, min: 2, max: 120 },
     muscle_group: { type: 'enum', values: MUSCLE_GROUPS, required: true },
-    equipment: {
-      type: 'enum',
-      values: ['barbell', 'dumbbell', 'cable', 'machine', 'bodyweight', 'cardio'],
-      default: 'barbell',
-    },
+    equipment: { type: 'enum', values: EQUIPMENT_TYPES, default: 'barbell' },
     instructions: { type: 'string', max: 1000 },
   });
 
+  const inCatalog = listCatalog({ q: body.name }).find((e) => e.name.toLowerCase() === body.name.toLowerCase());
+  if (inCatalog) return res.json(inCatalog);
   const existing = get('SELECT * FROM exercise_library WHERE name = ? COLLATE NOCASE', [body.name]);
   // Returned rather than refused: a trainer typing "Incline Bench" into the
   // picker wants the exercise, and whether it already existed is not their

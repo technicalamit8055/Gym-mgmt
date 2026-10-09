@@ -1,15 +1,40 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { issuePlatformToken, readToken } from '../auth.js';
 import { archiveTenantDatabase, listBackups, runBackup } from '../backup.js';
 import { config } from '../config.js';
+import {
+  activateDomain,
+  addDomain,
+  changeDomainHostname,
+  deactivateDomain,
+  findDomainById,
+  listAllDomains,
+  listDomainsForTenant,
+  removeDomain,
+  runDomainCheck,
+  serializeDomain,
+  setupInfo,
+} from '../customDomains.js';
+import {
+  MAX_MEDIA_BYTES,
+  MEDIA_MIMES,
+  clearCatalogMedia,
+  createCatalogExercise,
+  deleteCatalogExercise,
+  importCatalog,
+  listCatalog,
+  setCatalogMedia,
+  updateCatalogExercise,
+} from '../exerciseCatalog.js';
+import { EQUIPMENT_TYPES, MUSCLE_GROUPS } from '../fitness.js';
 import { all, closeDb, get, tenantStorage } from '../db.js';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests, unauthorized } from '../errors.js';
 import { issuePasswordReset } from '../passwordReset.js';
 import { createLimiter } from '../rateLimit.js';
 import { s3Configured } from '../s3.js';
-import { tenantUrl } from '../tenant.js';
+import { tenantPlatformUrl, tenantUrl } from '../tenant.js';
 import { BUSINESS_TYPES } from '../verticals.js';
 import {
   deleteTenant,
@@ -190,6 +215,12 @@ platformAdminRoutes.get('/tenants', (req, res) => {
 
   const withStats = req.query.stats === '1' || req.query.stats === 'true';
   const businessTypeFilter = req.query.business_type ? String(req.query.business_type) : null;
+  // One query for every gym's domains rather than one per row.
+  const domainsBySlug = new Map();
+  for (const domain of listAllDomains()) {
+    if (!domainsBySlug.has(domain.tenant_slug)) domainsBySlug.set(domain.tenant_slug, []);
+    domainsBySlug.get(domain.tenant_slug).push({ id: domain.id, hostname: domain.hostname, status: domain.status });
+  }
   const items = listTenants()
     .filter((tenant) => !businessTypeFilter || (tenant.business_type || 'gym') === businessTypeFilter)
     .map((tenant) => ({
@@ -204,6 +235,7 @@ platformAdminRoutes.get('/tenants', (req, res) => {
       suspended_at: tenant.suspended_at ?? null,
       suspended_reason: tenant.suspended_reason ?? null,
       razorpay_subscription_id: tenant.razorpay_subscription_id ?? null,
+      custom_domains: domainsBySlug.get(tenant.slug) ?? [],
       stats: withStats ? tenantStats(tenant) : undefined,
     }));
   res.json({ items, total: items.length });
@@ -256,6 +288,9 @@ platformAdminRoutes.get('/tenants/:slug', (req, res) => {
     devices: listDevicesForTenant(tenant.slug),
     whatsapp: whatsappSummary(tenant.slug),
     url: tenantUrl(req, tenant.slug),
+    platform_url: tenantPlatformUrl(req, tenant.slug),
+    domains: listDomainsForTenant(tenant.slug).map(serializeDomain),
+    domain_setup: setupInfo(),
   });
 });
 
@@ -460,4 +495,133 @@ platformAdminRoutes.post('/tenants/:slug/business-type', (req, res) => {
   });
 
   res.json({ tenant: setTenantBusinessType(tenant.slug, body.business_type) });
+});
+
+/* ── Custom domains ────────────────────────────────────────────────────── */
+
+/**
+ * Every gym's own domains in one list, for spotting the ones stuck on DNS and
+ * for support: the operator can connect a domain on a gym's behalf, re-run its
+ * check, move it to a corrected hostname, force it live (say, for a gym whose
+ * DNS host cannot publish TXT records — once you have confirmed ownership some
+ * other way), take it out of routing, or disconnect it.
+ */
+platformAdminRoutes.get('/domains', (_req, res) => {
+  const items = listAllDomains().map(serializeDomain);
+  res.json({ ...setupInfo(), items, total: items.length });
+});
+
+platformAdminRoutes.post('/tenants/:slug/domains', (req, res) => {
+  const tenant = findTenantBySlug(req.params.slug);
+  if (!tenant) throw notFound('No gym with that address');
+  const body = parse(req.body, { activate: { type: 'boolean' } });
+  const domain = addDomain(tenant.slug, req.body?.hostname, { activate: Boolean(body.activate) });
+  console.warn(
+    `[platform] domain "${domain.hostname}" added to gym "${tenant.slug}"${body.activate ? ' (activated)' : ''} by ${req.platformAdmin.email}`,
+  );
+  res.status(201).json({ domain: serializeDomain(domain) });
+});
+
+function domainOr404(id) {
+  const domain = findDomainById(Number(id));
+  if (!domain) throw notFound('No such domain');
+  return domain;
+}
+
+/** No cooldown here: the operator is debugging one domain, not mashing a button. */
+platformAdminRoutes.post('/domains/:id/check', async (req, res) => {
+  const { domain, result } = await runDomainCheck(domainOr404(req.params.id).id, { cooldownMs: 0 });
+  res.json({ domain: serializeDomain(domain), result, throttled: false });
+});
+
+platformAdminRoutes.patch('/domains/:id', (req, res) => {
+  let domain = domainOr404(req.params.id);
+  const body = parse(req.body, {
+    hostname: { type: 'string', max: 253 },
+    status: { type: 'enum', values: ['active', 'pending'] },
+  });
+
+  // Hostname first: a moved domain drops back to pending, and an explicit
+  // status in the same request then decides where it ends up.
+  if (body.hostname) domain = changeDomainHostname(domain.id, body.hostname);
+  if (body.status === 'active') domain = activateDomain(domain.id);
+  if (body.status === 'pending') domain = deactivateDomain(domain.id);
+
+  console.warn(
+    `[platform] domain #${domain.id} "${domain.hostname}" (gym "${domain.tenant_slug}") now ${domain.status}, edited by ${req.platformAdmin.email}`,
+  );
+  res.json({ domain: serializeDomain(domain) });
+});
+
+platformAdminRoutes.delete('/domains/:id', (req, res) => {
+  const domain = domainOr404(req.params.id);
+  removeDomain(domain.id);
+  console.warn(
+    `[platform] domain "${domain.hostname}" disconnected from gym "${domain.tenant_slug}" by ${req.platformAdmin.email}`,
+  );
+  res.json({ ok: true });
+});
+
+/* ── Exercise catalogue ────────────────────────────────────────────────── */
+
+/**
+ * The platform-wide exercise library: every gym and member sees these, with
+ * the demo image / GIF / clip uploaded here. See src/exerciseCatalog.js.
+ */
+
+platformAdminRoutes.get('/catalog/exercises', (req, res) => {
+  const items = listCatalog({
+    q: req.query.q ? String(req.query.q).trim() : undefined,
+    muscle_group: req.query.muscle_group,
+    equipment: req.query.equipment,
+    withMedia: req.query.media,
+  });
+  res.json({
+    items,
+    total: items.length,
+    muscle_groups: MUSCLE_GROUPS,
+    equipment: EQUIPMENT_TYPES,
+    media: { max_bytes: MAX_MEDIA_BYTES, mimes: MEDIA_MIMES },
+  });
+});
+
+platformAdminRoutes.post('/catalog/exercises', (req, res) => {
+  res.status(201).json(createCatalogExercise(req.body));
+});
+
+/** Bulk create-or-update by name. The sheet is parsed in the browser; this
+ * takes plain rows, capped so a runaway paste cannot hold the event loop. */
+platformAdminRoutes.post('/catalog/import', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) throw badRequest('Send the rows as an array', { rows: 'is required' });
+  if (rows.length > 1000) throw badRequest('Import at most 1000 exercises at a time', { rows: 'at most 1000' });
+  res.json(importCatalog(rows));
+});
+
+platformAdminRoutes.patch('/catalog/exercises/:id', (req, res) => {
+  res.json(updateCatalogExercise(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/catalog/exercises/:id', (req, res) => {
+  deleteCatalogExercise(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+/**
+ * The upload is the raw file, not JSON-wrapped base64: a GIF of several
+ * megabytes would otherwise cost a third more on the wire and blow through the
+ * JSON body limit. The format is read from the bytes themselves (see
+ * sniffMedia), so the Content-Type the browser sends only has to be present.
+ */
+platformAdminRoutes.put(
+  '/catalog/exercises/:id/media',
+  express.raw({ type: () => true, limit: MAX_MEDIA_BYTES }),
+  (req, res) => {
+    if (!Buffer.isBuffer(req.body)) throw badRequest('Send the file as the request body');
+    res.json(setCatalogMedia(Number(req.params.id), req.body));
+  },
+);
+
+platformAdminRoutes.delete('/catalog/exercises/:id/media', (req, res) => {
+  res.json(clearCatalogMedia(Number(req.params.id)));
 });

@@ -9,15 +9,17 @@ import {
   MUSCLE_GROUPS,
   SET_TYPES,
   estimate1rm,
+  exerciseHistory,
   fitnessAccessFor,
   previousSetsFor,
   recordPersonalRecords,
   summariseSets,
 } from '../fitness.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
+import { setMemberPhoto } from '../photo.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { dietPlanTree } from './diets.js';
-import { workoutPlanTree } from './workouts.js';
+import { exercisePickerRows, workoutPlanTree } from './workouts.js';
 import { generateReceiptPdf } from '../receiptPdf.js';
 import { ensureQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
 import { createLimiter } from '../rateLimit.js';
@@ -140,6 +142,35 @@ portalRoutes.post('/pin', requireMemberAuth, (req, res) => {
 });
 
 /* ── Home / profile ───────────────────────────────────────────────────── */
+
+/**
+ * The few contact details a member may change themselves. Name and phone stay
+ * with the front desk: the phone number is what they sign in with, and the
+ * name is what the gym's records and receipts carry.
+ */
+portalRoutes.patch('/me', requireMemberAuth, (req, res) => {
+  const body = parse(req.body, {
+    email: { type: 'email' },
+    emergency_contact: { type: 'string', max: 80 },
+    emergency_phone: { type: 'string', max: 30 },
+  });
+  const columns = Object.keys(body);
+  if (!columns.length) throw badRequest('Nothing to update');
+  run(`UPDATE members SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, [
+    ...columns.map((c) => body[c] || null),
+    req.member.id,
+  ]);
+  res.json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [req.member.id])));
+});
+
+/** `photo` is the data URL public/js/photo.js produces; an empty string removes it. */
+portalRoutes.put('/photo', requireMemberAuth, (req, res) => {
+  if (!req.body || typeof req.body !== 'object' || !('photo' in req.body)) {
+    throw badRequest('A photo is required', { photo: 'is required' });
+  }
+  setMemberPhoto(req.member.id, req.body.photo);
+  res.json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [req.member.id])));
+});
 
 portalRoutes.get('/me', requireMemberAuth, (req, res) => {
   expireOverdueSubscriptions();
@@ -430,7 +461,7 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
     return res.json({ assignment: null, plan: null, today_day: null, previous: {}, streak_days: 0 });
   }
 
-  const plan = workoutPlanTree(assignment.plan_id);
+  const plan = workoutPlanTree(assignment.plan_id, { withMedia: true });
   const sessionsLogged = get(
     'SELECT COUNT(*) AS n FROM workout_logs WHERE member_id = ? AND plan_id = ?',
     [req.member.id, assignment.plan_id],
@@ -649,6 +680,17 @@ portalRoutes.get('/workouts/prs', requireMemberAuth, requireModule('fitness'), r
 });
 
 /**
+ * One exercise's progress for the signed-in member: each session it appeared
+ * in and the bests across them. The name rides in the query string rather than
+ * the path because exercise names carry slashes and ampersands.
+ */
+portalRoutes.get('/workouts/exercise-history', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const name = String(req.query.name ?? '').trim();
+  if (!name || name.length > 120) throw badRequest('Choose an exercise', { name: 'required' });
+  res.json(exerciseHistory(req.member.id, name));
+});
+
+/**
  * The exercise picker, with each exercise's own last set attached.
  *
  * The history is what makes the picker useful rather than a list of names: a
@@ -656,18 +698,7 @@ portalRoutes.get('/workouts/prs', requireMemberAuth, requireModule('fitness'), r
  * week next to it, and pre-filling from it is one tap instead of remembering.
  */
 portalRoutes.get('/workouts/exercises', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
-  const where = [];
-  const params = [];
-  if (req.query.muscle_group) {
-    where.push('muscle_group = ?');
-    params.push(String(req.query.muscle_group));
-  }
-  if (req.query.q) {
-    where.push('name LIKE ?');
-    params.push(`%${String(req.query.q)}%`);
-  }
-  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const items = all(`SELECT * FROM exercise_library ${clause} ORDER BY muscle_group, name LIMIT 300`, params);
+  const items = exercisePickerRows(req.query).slice(0, 300);
   const previous = previousSetsFor(req.member.id, items.map((e) => e.name));
 
   res.json({ items: items.map((item) => ({ ...item, previous: previous[item.name] ?? null })) });

@@ -19,6 +19,7 @@ import {
   today,
   toggleFullscreen,
 } from '../ui.js';
+import { t } from '../vertical.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -189,12 +190,46 @@ async function openCheckInSettingsForm() {
   openModal({ title: 'Check-in settings', body: form });
 }
 
+const ART = '/images/checkin';
+
+/** Decoration only: each card's illustration sits behind its content. */
+const art = (file, position) =>
+  h('img', { class: `ck-art ${position}`, src: `${ART}/${file}`, alt: '', 'aria-hidden': 'true' });
+
+/** Tinted icon tile, title and one-line description — the head of every card. */
+function cardHead(icon, title, text) {
+  return h(
+    'div',
+    { class: 'ck-head' },
+    h('span', { class: 'ck-head-icon' }, renderIcon(icon, { size: 24, stroke: 1.9 })),
+    h('div', { class: 'ck-head-text' }, h('h3', {}, title), text ? h('p', {}, text) : null),
+  );
+}
+
+/** "Thu, 08 Oct 2026" — the desk's own day, for the check-ins header. */
+function longToday() {
+  const now = new Date();
+  const weekday = now.toLocaleDateString('en-GB', { weekday: 'short' });
+  const month = now.toLocaleDateString('en-GB', { month: 'short' });
+  return `${weekday}, ${String(now.getDate()).padStart(2, '0')} ${month} ${now.getFullYear()}`;
+}
+
 export async function renderCheckIn({ setActions }) {
+  // A library desk checks in students, not members.
+  const Member = t('member');
+  const member = Member.toLowerCase();
+  const org = t('org');
+
   const feedback = h('div', {});
-  const recent = h('div', {});
+  const recent = h('div', { class: 'ck-today-body' });
   const openList = h('div', {});
 
-  const input = h('input', { placeholder: 'Member code, e.g. GM0007', autocomplete: 'off' });
+  const input = h('input', {
+    class: 'ck-code',
+    placeholder: `${Member} code, e.g. GM0007`,
+    autocomplete: 'off',
+    'aria-label': `${Member} code`,
+  });
 
   async function refreshLists() {
     const [{ items: visits }, { items: open }] = await Promise.all([
@@ -202,10 +237,18 @@ export async function renderCheckIn({ setActions }) {
       api.attendance({ open: 'true', date: today(), limit: 40 }),
     ]);
 
+    const noVisits = h(
+      'div',
+      { class: 'ck-empty' },
+      h('img', { class: 'ck-empty-art', src: `${ART}/empty-checkins.svg`, alt: '', 'aria-hidden': 'true' }),
+      h('h4', {}, 'No check-ins yet today'),
+      h('p', {}, `Once a ${member} checks in, they will appear here with time and details.`),
+    );
+
     clear(recent).append(
-      table(
+      visits.length ? table(
         [
-          { label: 'Member', render: (row) => h('a', { href: `#/members/${row.member_id}` }, fullName(row)) },
+          { label: Member, render: (row) => h('a', { href: `#/members/${row.member_id}` }, fullName(row)) },
           { label: 'Code', render: (row) => h('span', { class: 'muted' }, row.member_code) },
           { label: 'In', render: (row) => time(row.check_in.slice(11)) },
           {
@@ -230,8 +273,7 @@ export async function renderCheckIn({ setActions }) {
           { label: 'Via', render: (row) => sourceBadge(row.source) },
         ],
         visits,
-        { empty: 'No check-ins yet today' },
-      ),
+      ) : noVisits,
     );
 
     clear(openList).append(
@@ -266,7 +308,13 @@ export async function renderCheckIn({ setActions }) {
               ),
             ),
           )
-        : h('div', { class: 'empty' }, 'Nobody is in the gym right now'),
+        : h(
+            'div',
+            { class: 'ck-empty-mini' },
+            renderIcon('users', { size: 30, stroke: 1.6 }),
+            h('strong', {}, `Nobody is in the ${org} right now`),
+            h('span', {}, `${t('members')} will appear here after check-in.`),
+          ),
     );
   }
 
@@ -497,21 +545,21 @@ export async function renderCheckIn({ setActions }) {
 
   const scanButton = h(
     'button',
-    { class: 'btn primary block', onclick: () => (scanning ? stopScan() : startScan()) },
-    renderIcon('scan', { size: 16 }), 'Scan a card',
+    { class: 'btn ck-btn ck-btn-art', onclick: () => (scanning ? stopScan() : startScan()) },
+    renderIcon('scan', { size: 17 }), 'Scan a card',
   );
 
   const camera = cameraAvailability();
 
   const qrCard = h(
     'div',
-    { class: 'card qr-card' },
-    h('h3', {}, renderIcon('checkin', { size: 16 }), 'Member QR card'),
-    h(
-      'p',
-      { class: 'muted', style: 'font-size:13px;margin:0 0 14px' },
+    { class: 'card ck-card tone-orange' },
+    art('qr-card.svg', 'ck-art-qr'),
+    cardHead(
+      'card',
+      `${Member} QR card`,
       camera.ok
-        ? 'Point the camera at the QR on the member’s card to see their details, then check them in.'
+        ? `Point the camera at the QR on the ${member}’s card to see their details, then check them in.`
         : camera.reason,
     ),
     camera.ok ? scanButton : null,
@@ -596,7 +644,7 @@ export async function renderCheckIn({ setActions }) {
     'button',
     {
       id: 'btn-fullscreen-checkin',
-      class: 'btn ghost',
+      class: 'btn ck-action',
       onclick: () => toggleFullscreen(),
     },
     // The icon pair here has to match what app.js's updateFullscreenButtons
@@ -605,9 +653,13 @@ export async function renderCheckIn({ setActions }) {
     isFullscreen() ? 'Exit Fullscreen' : 'Kiosk Fullscreen',
   );
   const settingsBtn = session.managesBilling
-    ? h('button', { class: 'btn ghost', onclick: () => openCheckInSettingsForm() }, renderIcon('settings', { size: 16 }), 'Settings')
+    ? h('button', { class: 'btn ck-action', onclick: () => openCheckInSettingsForm() }, renderIcon('settings', { size: 16 }), 'Settings')
     : null;
-  setActions(settingsBtn, kioskFullscreenBtn, h('a', { class: 'btn', href: '#/members' }, 'Find a member'));
+  setActions(
+    settingsBtn,
+    kioskFullscreenBtn,
+    h('a', { class: 'btn ck-action ck-find', href: '#/members' }, renderIcon('search', { size: 17 }), `Find a ${member}`),
+  );
   await refreshLists();
   setTimeout(() => input.focus(), 50);
 
@@ -616,51 +668,91 @@ export async function renderCheckIn({ setActions }) {
   const bioButton = h(
     'button',
     {
-      class: 'btn bio-btn primary block',
+      class: 'btn ck-btn ck-btn-art bio-btn',
       onclick: function () { biometricCheckIn(this); },
     },
-    h('span', { class: 'bio-icon' }, renderIcon('lock', { size: 16 })),
+    h('span', { class: 'bio-icon' }, renderIcon('lock', { size: 18, stroke: 2 })),
     'Biometric Check-in',
   );
 
   const bioCard = supportsWebAuthn()
     ? h(
         'div',
-        { class: 'card bio-card' },
-        h('h3', {}, 'Fingerprint or face scan'),
-        h('p', { class: 'muted', style: 'font-size:13px;margin:0 0 14px' }, 'Member scans their enrolled biometric on this device to check in instantly.'),
+        { class: 'card ck-card tone-green' },
+        art('biometric.svg', 'ck-art-bio'),
+        cardHead(
+          'fingerprint',
+          'Fingerprint or face scan',
+          `${Member} scans their enrolled biometric on this device to check in instantly.`,
+        ),
         bioButton,
       )
     : h(
         'div',
-        { class: 'card bio-card bio-unsupported' },
-        h('h3', {}, 'Biometric Check-in'),
-        h('p', { class: 'muted', style: 'font-size:13px;margin:0' }, renderIcon('alert', { size: 16 }), 'WebAuthn is not supported on this browser. Use a modern browser with HTTPS to enable biometric check-ins.'),
+        { class: 'card ck-card tone-green bio-unsupported' },
+        art('biometric.svg', 'ck-art-bio'),
+        cardHead(
+          'fingerprint',
+          'Biometric Check-in',
+          'WebAuthn is not supported on this browser. Use a modern browser with HTTPS to enable biometric check-ins.',
+        ),
       );
+
+  // The keyboard button just hands focus back to the box: on a tablet that is
+  // what brings the on-screen keyboard up.
+  const codeField = h(
+    'div',
+    { class: 'ck-input' },
+    h('span', { class: 'ck-input-lead' }, renderIcon('scan', { size: 22, stroke: 1.9 })),
+    input,
+    h(
+      'button',
+      { class: 'ck-input-key', type: 'button', title: 'Type a code', 'aria-label': 'Type a code', onclick: () => input.focus() },
+      renderIcon('keyboard', { size: 20 }),
+    ),
+  );
 
   return h(
     'div',
-    { class: 'grid cols-2' },
+    { class: 'grid ck-grid' },
     h(
       'div',
-      { class: 'grid', style: 'gap:16px;align-content:start' },
+      { class: 'grid ck-stack' },
       h(
         'div',
-        { class: 'card checkin-box' },
-        h('h3', {}, 'Scan or type a member code'),
-        input,
-        h(
-          'div',
-          { class: 'muted', style: 'font-size:12px;margin-top:6px' },
-          'A handheld QR scanner can type straight into this box.',
-        ),
-        h('button', { class: 'btn primary block', style: 'margin-top:12px', onclick: submit }, 'Check in'),
+        { class: 'card ck-card tone-blue' },
+        art('phone-qr.svg', 'ck-art-phone'),
+        cardHead('qrCode', `Scan or type a ${member} code`, `Enter ${member} code or scan a QR card to check them in instantly.`),
+        codeField,
+        h('div', { class: 'ck-hint' }, 'A handheld QR scanner can type straight into this box.'),
+        h('button', { class: 'btn ck-btn block', onclick: submit }, renderIcon('arrowCircle', { size: 20 }), 'Check in'),
         feedback,
       ),
       qrCard,
       bioCard,
-      h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h3', {}, 'In the gym now')), openList),
+      h(
+        'div',
+        { class: 'card ck-card tone-violet' },
+        cardHead('users', `In the ${org} now`, `Currently checked-in ${t('members').toLowerCase()} inside the ${org}.`),
+        openList,
+      ),
     ),
-    h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h3', {}, "Today's check-ins")), recent),
+    h(
+      'div',
+      { class: 'card ck-card ck-today' },
+      h(
+        'div',
+        { class: 'ck-today-head' },
+        h('span', { class: 'ck-today-icon' }, renderIcon('clock', { size: 22, stroke: 2.2 })),
+        h(
+          'div',
+          { class: 'ck-head-text' },
+          h('h3', {}, "Today's check-ins"),
+          h('p', {}, `All ${t('members').toLowerCase()} who checked in today.`),
+        ),
+        h('span', { class: 'ck-date' }, renderIcon('calendar', { size: 18 }), longToday()),
+      ),
+      recent,
+    ),
   );
 }

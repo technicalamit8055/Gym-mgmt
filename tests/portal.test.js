@@ -207,6 +207,39 @@ describe('member self-service portal', () => {
     assert.equal(res.body.subscription.due, 1000);
   });
 
+  it('lets the member edit their own contact details, but not their name or phone', async () => {
+    const res = await call(
+      'PATCH',
+      '/api/portal/me',
+      { email: 'rahul@portalgym.test', emergency_contact: 'Asha Verma', first_name: 'Hacked', phone: '0000000000' },
+      { token: memberToken, tenant: 'portalgym' },
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.email, 'rahul@portalgym.test');
+    assert.equal(res.body.emergency_contact, 'Asha Verma');
+    assert.equal(res.body.first_name, 'Rahul');
+    assert.equal(res.body.phone, '9876543210');
+
+    const bad = await call('PATCH', '/api/portal/me', { email: 'not-an-email' }, { token: memberToken, tenant: 'portalgym' });
+    assert.equal(bad.status, 400);
+  });
+
+  it('lets the member set and then remove their own photo', async () => {
+    const jpeg =
+      'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=';
+    const set = await call('PUT', '/api/portal/photo', { photo: jpeg }, { token: memberToken, tenant: 'portalgym' });
+    assert.equal(set.status, 200);
+    assert.ok(set.body.photo_url);
+
+    const svg = `data:image/svg+xml;base64,${Buffer.from('<svg onload="alert(1)"></svg>').toString('base64')}`;
+    const rejected = await call('PUT', '/api/portal/photo', { photo: svg }, { token: memberToken, tenant: 'portalgym' });
+    assert.equal(rejected.status, 400);
+
+    const cleared = await call('PUT', '/api/portal/photo', { photo: '' }, { token: memberToken, tenant: 'portalgym' });
+    assert.equal(cleared.status, 200);
+    assert.ok(!cleared.body.photo_url);
+  });
+
   it('returns a scannable digital pass', async () => {
     const res = await call('GET', '/api/portal/pass', null, { token: memberToken, tenant: 'portalgym' });
     assert.equal(res.status, 200);

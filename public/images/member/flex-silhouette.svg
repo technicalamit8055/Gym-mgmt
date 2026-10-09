@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 170" width="200" height="170" fill="#f97316" stroke="#f97316" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Double-biceps pose, decorative watermark behind the Profile card -->
+  <circle cx="100" cy="34" r="17" stroke="none" />
+  <path d="M90 46h20v16H90z" stroke="none" />
+  <path d="M66 66Q100 54 134 66L126 152Q100 162 74 152Z" stroke="none" />
+  <path d="M74 72 40 80" stroke-width="22" fill="none" />
+  <path d="M40 80 35 40" stroke-width="18" fill="none" />
+  <circle cx="34" cy="30" r="12" stroke="none" />
+  <circle cx="56" cy="69" r="14" stroke="none" />
+  <path d="M126 72l34 8" stroke-width="22" fill="none" />
+  <path d="M160 80l5-40" stroke-width="18" fill="none" />
+  <circle cx="166" cy="30" r="12" stroke="none" />
+  <circle cx="144" cy="69" r="14" stroke="none" />
+</svg>
