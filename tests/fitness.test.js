@@ -121,9 +121,9 @@ describe('the exercise and food libraries', () => {
   });
 
   it('filters exercises by muscle group and name', async () => {
-    const legs = await call('GET', '/api/workouts/exercises?muscle_group=legs', undefined, { token: trainerToken });
+    const legs = await call('GET', '/api/workouts/exercises?muscle_group=quadriceps', undefined, { token: trainerToken });
     assert.ok(legs.body.items.length > 0);
-    assert.ok(legs.body.items.every((e) => e.muscle_group === 'legs'));
+    assert.ok(legs.body.items.every((e) => e.muscle_group === 'quadriceps'));
 
     const search = await call('GET', '/api/workouts/exercises?q=Bench', undefined, { token: trainerToken });
     assert.ok(search.body.items.every((e) => e.name.includes('Bench')));

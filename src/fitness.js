@@ -17,7 +17,7 @@
 import { all, get, run } from './db.js';
 import { addDays, addMonths, today } from './validate.js';
 
-export const MUSCLE_GROUPS = ['chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body'];
+export { MUSCLE_GROUPS, muscleGroupOf, muscleLabel } from './muscles.js';
 /** What an exercise is performed with — Hevy's list, trimmed to what a gym floor has. */
 export const EQUIPMENT_TYPES = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
 export const SET_TYPES = ['normal', 'warmup', 'drop', 'failure'];

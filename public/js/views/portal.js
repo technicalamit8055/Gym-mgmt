@@ -175,14 +175,25 @@ const EXERCISE_BLURBS = {
 };
 
 const MUSCLE_BLURBS = {
-  chest: 'Build chest size and strength',
-  back: 'Build a stronger back',
-  legs: 'Build leg strength and size',
-  shoulders: 'Build strong, rounded shoulders',
-  arms: 'Build bigger arms',
-  core: 'Build a strong, stable core',
+  abdominals: 'Build a strong, stable core',
+  abductors: 'Strengthen the outer hips',
+  adductors: 'Strengthen the inner thighs',
+  biceps: 'Build bigger biceps',
+  calves: 'Build stronger calves',
   cardio: 'Boost conditioning and endurance',
+  chest: 'Build chest size and strength',
+  forearms: 'Build grip and forearm strength',
   full_body: 'Train your whole body',
+  glutes: 'Build stronger glutes',
+  hamstrings: 'Build the back of your legs',
+  lats: 'Build a wider back',
+  lower_back: 'Strengthen your lower back',
+  neck: 'Strengthen your neck',
+  quadriceps: 'Build leg strength and size',
+  shoulders: 'Build strong, rounded shoulders',
+  traps: 'Build bigger traps',
+  triceps: 'Build bigger triceps',
+  upper_back: 'Build a thicker upper back',
 };
 
 /** What a routine day is about, for the "Or train another day" tiles. Days
@@ -409,26 +420,82 @@ function exerciseThumbButton(exercise) {
   );
 }
 
-/** The Add Exercise filter chips. Olympic is not a muscle group: it is the
- * operator's "olympic" tag, plus anything filed as full body. */
-const PICKER_GROUPS = [
-  { key: '', label: 'All' },
-  ...[
-    ['chest', 'Chest', 'weight'],
-    ['back', 'Back', 'muscleBack'],
-    ['legs', 'Legs', 'muscleLeg'],
-    ['shoulders', 'Shoulders', 'muscleShoulders'],
-    ['arms', 'Arms', 'muscleArm'],
-    ['core', 'Core', 'muscleCore'],
-    ['cardio', 'Cardio', 'heartPulse'],
-  ].map(([key, label, icon]) => ({ key, label, icon, match: (e) => e.muscle_group === key })),
-  {
-    key: 'olympic',
-    label: 'Olympic',
-    icon: 'barbell',
-    match: (e) => e.muscle_group === 'full_body' || (e.tags ?? []).some((tag) => String(tag).toLowerCase() === 'olympic'),
-  },
+/** "lower_back" → "Lower Back": how the picker names a muscle or a piece of kit. */
+const titleCase = (value) =>
+  String(value ?? '')
+    .split('_')
+    .map((word) => capitalise(word))
+    .join(' ');
+
+/** Hevy's muscle groups, for when the server's list (with the operator's
+ * pictures) has not arrived — the server's MUSCLE_GROUPS, src/muscles.js. */
+const MUSCLE_KEYS = [
+  'abdominals', 'abductors', 'adductors', 'biceps', 'calves', 'cardio', 'chest', 'forearms', 'full_body', 'glutes',
+  'hamstrings', 'lats', 'lower_back', 'neck', 'quadriceps', 'shoulders', 'traps', 'triceps', 'upper_back', 'other',
 ];
+const EQUIPMENT_KEYS = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
+
+/** The drawn icon a muscle group falls back on until the operator uploads its picture. */
+const MUSCLE_ICONS = {
+  abdominals: 'muscleCore',
+  abductors: 'muscleLeg',
+  adductors: 'muscleLeg',
+  biceps: 'bicep',
+  calves: 'muscleLeg',
+  cardio: 'heartPulse',
+  chest: 'weight',
+  forearms: 'muscleArm',
+  full_body: 'activity',
+  glutes: 'muscleLeg',
+  hamstrings: 'muscleLeg',
+  lats: 'muscleBack',
+  lower_back: 'muscleBack',
+  neck: 'muscleShoulders',
+  quadriceps: 'muscleLeg',
+  shoulders: 'muscleShoulders',
+  traps: 'muscleBack',
+  triceps: 'muscleArm',
+  upper_back: 'muscleBack',
+  other: 'more',
+};
+
+const EQUIPMENT_ICONS = {
+  barbell: 'barbell',
+  dumbbell: 'weight',
+  cable: 'pullBar',
+  machine: 'equipment',
+  smith_machine: 'barbell',
+  kettlebell: 'weight',
+  band: 'activity',
+  bodyweight: 'yoga',
+  cardio: 'heartPulse',
+  other: 'more',
+};
+
+/** Exercises the member made with the picker's Create button. Kept on this
+ * device, like the recents: a member's own variation is theirs, not a row in
+ * the gym's library that every trainer then sees. */
+const CUSTOM_EXERCISES_KEY = 'gymbook.portal.customExercises';
+const customExercises = {
+  read() {
+    try {
+      const list = JSON.parse(localStorage.getItem(CUSTOM_EXERCISES_KEY) || '[]');
+      return Array.isArray(list)
+        ? list.filter((e) => e && typeof e.name === 'string' && typeof e.muscle_group === 'string')
+        : [];
+    } catch {
+      return [];
+    }
+  },
+  add(exercise) {
+    const next = [exercise, ...this.read().filter((e) => e.name.toLowerCase() !== exercise.name.toLowerCase())].slice(0, 100);
+    try {
+      localStorage.setItem(CUSTOM_EXERCISES_KEY, JSON.stringify(next));
+    } catch {
+      // Storage blocked: the exercise is still added to this workout.
+    }
+  },
+};
 
 /** The exercises this member last added from the picker, newest first, kept
  * on the device like the weight unit. */
@@ -443,25 +510,14 @@ const recentExercises = {
     }
   },
   add(name) {
-    const next = [name, ...this.read().filter((n) => n.toLowerCase() !== name.toLowerCase())].slice(0, 5);
+    const next = [name, ...this.read().filter((n) => n.toLowerCase() !== name.toLowerCase())].slice(0, 10);
     try {
       localStorage.setItem(RECENT_EXERCISES_KEY, JSON.stringify(next));
     } catch {
       // Storage blocked: the picker simply shows no recents.
     }
   },
-  clear() {
-    try {
-      localStorage.removeItem(RECENT_EXERCISES_KEY);
-    } catch {
-      // Nothing stored to clear.
-    }
-  },
 };
-
-/** "Arms · Barbell" — muscle and equipment, the way the picker labels a row. */
-const exerciseSubtitle = (item) =>
-  [item.muscle_group, item.equipment].filter(Boolean).map((part) => capitalise(muscleLabel(part))).join(' · ');
 
 /** A picker row's picture: the operator's demo, then the bundled one, then a
  * dumbbell tile so the list stays aligned. */
@@ -530,21 +586,172 @@ function routineExerciseRow(exercise) {
 }
 
 /**
- * The Add Exercise sheet: search, muscle chips, recents and a Hevy-style
- * multi-select. `onAdd` gets the picked library rows in the order they were
- * tapped — the live logger turns them into set tables, the plan builder into
- * targets.
+ * Hevy's sheet header: a text button either side of a centred title. Used by
+ * the Add Exercise screen and the Create Exercise form, which hide the
+ * modal's own head.
+ */
+function pickerBar(title, { left, right }) {
+  return h(
+    'div',
+    { class: 'portal-pick-bar' },
+    h('button', { class: 'portal-pick-bar-btn', type: 'button', onclick: left.onClick }, left.label),
+    h('h2', { class: 'portal-pick-bar-title' }, title),
+    right
+      ? h('button', { class: 'portal-pick-bar-btn strong', type: 'button', onclick: right.onClick }, right.label)
+      : h('span', { class: 'portal-pick-bar-btn' }),
+  );
+}
+
+/** A filter option's round picture: the operator's upload, else a drawn icon. */
+function optionArt(option) {
+  return h(
+    'span',
+    { class: `portal-filter-art${option.media_url ? '' : ' is-icon'}` },
+    option.media_url ? h('img', { src: option.media_url, alt: '', loading: 'lazy', decoding: 'async' }) : renderIcon(option.icon, { size: 22 }),
+  );
+}
+
+/**
+ * The "Muscle Group" / "Equipment" sheet over the picker: an "All" row, then
+ * one row per option with its round picture, and a tick on the current one.
+ * Picking closes only this sheet.
+ */
+function openFilterSheet({ title, allLabel, options, current, onPick }) {
+  const row = (option) =>
+    h(
+      'button',
+      {
+        class: `portal-filter-row${option.key === current ? ' active' : ''}`,
+        type: 'button',
+        'aria-pressed': String(option.key === current),
+        onclick: () => {
+          closeModal();
+          onPick(option.key);
+        },
+      },
+      optionArt(option),
+      h('span', { class: 'portal-filter-label' }, option.label),
+      option.key === current ? h('span', { class: 'portal-filter-tick' }, renderIcon('check', { size: 20, stroke: 2.4 })) : null,
+    );
+
+  openModal({
+    title,
+    className: 'portal-filter-modal',
+    body: h(
+      'div',
+      { class: 'portal-filter-list' },
+      row({ key: '', label: allLabel, icon: 'layoutGrid' }),
+      ...options.map(row),
+    ),
+  });
+}
+
+/**
+ * Hevy's Create Exercise form: a name, the equipment and the primary muscle,
+ * each of the last two picked from the same sheets the filters use.
+ */
+function openCreateExercise({ name = '', muscles, equipment, onCreate }) {
+  const state = { equipment: 'other', muscle: '' };
+  const nameInput = h('input', {
+    class: 'portal-create-name',
+    type: 'text',
+    maxlength: 120,
+    value: name,
+    placeholder: 'Exercise name',
+    'aria-label': 'Exercise name',
+  });
+  const muscleValue = h('span', { class: 'portal-create-value' });
+  const equipmentValue = h('span', { class: 'portal-create-value' });
+
+  const paint = () => {
+    muscleValue.textContent = state.muscle ? titleCase(state.muscle) : 'Select';
+    muscleValue.classList.toggle('is-placeholder', !state.muscle);
+    equipmentValue.textContent = titleCase(state.equipment);
+  };
+
+  const field = (label, value, onClick) =>
+    h(
+      'button',
+      { class: 'portal-create-field', type: 'button', onclick: onClick },
+      h('span', { class: 'portal-create-label' }, label),
+      value,
+      renderIcon('chevronRight', { size: 18 }),
+    );
+
+  function save() {
+    const exerciseName = nameInput.value.trim().replace(/\s+/g, ' ');
+    if (exerciseName.length < 2) return toast('Give the exercise a name', 'error');
+    if (!state.muscle) return toast('Choose the primary muscle group', 'error');
+    closeModal();
+    onCreate({ name: exerciseName, muscle_group: state.muscle, equipment: state.equipment });
+  }
+
+  openModal({
+    title: 'Create Exercise',
+    className: 'portal-pick-modal portal-hevy-modal portal-create-modal',
+    body: h(
+      'div',
+      { class: 'portal-create-sheet' },
+      pickerBar('Create Exercise', { left: { label: 'Cancel', onClick: closeModal }, right: { label: 'Save', onClick: save } }),
+      nameInput,
+      h(
+        'div',
+        { class: 'portal-create-fields' },
+        field('Equipment', equipmentValue, () =>
+          openFilterSheet({
+            title: 'Equipment',
+            allLabel: 'None',
+            options: equipment,
+            current: state.equipment === 'other' ? '' : state.equipment,
+            onPick: (key) => {
+              state.equipment = key || 'other';
+              paint();
+            },
+          }),
+        ),
+        field('Primary Muscle Group', muscleValue, () =>
+          openFilterSheet({
+            title: 'Muscle Group',
+            allLabel: 'Select',
+            options: muscles,
+            current: state.muscle,
+            onPick: (key) => {
+              state.muscle = key;
+              paint();
+            },
+          }),
+        ),
+      ),
+      h('p', { class: 'portal-create-note' }, 'Saved on this phone, so it shows up in your exercise list next time too.'),
+    ),
+  });
+  paint();
+}
+
+/**
+ * The Add Exercise screen, laid out like Hevy's: Cancel · title · Create, a
+ * search box, "All Equipment" and "All Muscles" filters that open picture
+ * sheets, then Recent Exercises above the full list. Rows toggle in and out
+ * of a multi-select; `onAdd` gets the picked library rows in the order they
+ * were tapped — the live logger turns them into set tables, the plan builder
+ * into targets.
  */
 function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   let library = null;
   let query = '';
-  let group = '';
+  const filter = { muscle: '', equipment: '' };
+  let muscles = MUSCLE_KEYS.map((key) => ({ key, label: titleCase(key), media_url: null }));
+  let equipment = EQUIPMENT_KEYS;
   // Hevy-style multi-select: rows toggle in and out, and they are added in
   // the order they were picked. A Map keeps that order and dedupes by name.
   const selected = new Map();
   const list = h('div', { class: 'portal-pick-list' }, h('div', { class: 'portal-loading' }, 'Loading…'));
   const addButton = h('button', { class: 'portal-pick-submit', type: 'button', onclick: addSelected });
   const footer = h('div', { class: 'portal-pick-footer hidden' }, addButton);
+
+  const muscleOptions = () => muscles.map((m) => ({ ...m, icon: MUSCLE_ICONS[m.key] ?? 'weight' }));
+  const equipmentOptions = () => equipment.map((key) => ({ key, label: titleCase(key), icon: EQUIPMENT_ICONS[key] ?? 'weight' }));
+  const muscleName = (key) => muscles.find((m) => m.key === key)?.label ?? titleCase(key);
 
   function addSelected() {
     const picked = [...selected.values()];
@@ -568,12 +775,11 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
     paintFooter();
   }
 
-  function pickRow(item, { recent = false } = {}) {
+  function pickRow(item) {
     const isOn = selected.has(keyOf(item));
-    const order = isOn ? [...selected.keys()].indexOf(keyOf(item)) + 1 : 0;
     return h(
       'div',
-      { class: `portal-pick-row${recent ? ' is-recent' : ''}${isOn ? ' selected' : ''}` },
+      { class: `portal-pick-row${isOn ? ' selected' : ''}` },
       h(
         'button',
         {
@@ -591,7 +797,7 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
           'span',
           { class: 'portal-pick-text' },
           h('span', { class: 'portal-pick-name' }, item.name),
-          h('span', { class: 'portal-pick-sub' }, exerciseSubtitle(item)),
+          h('span', { class: 'portal-pick-sub' }, muscleName(item.muscle_group)),
         ),
       ),
       h(
@@ -603,32 +809,20 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
           'aria-label': `${item.name} progress`,
           onclick: () => openExerciseDetail(item),
         },
-        renderIcon('trendUp', { size: 18 }),
-      ),
-      h(
-        'button',
-        {
-          class: 'portal-pick-add',
-          type: 'button',
-          'aria-label': isOn ? `Unselect ${item.name}` : `Select ${item.name}`,
-          onclick: () => toggle(item),
-        },
-        isOn
-          ? selected.size > 1
-            ? h('span', { class: 'portal-pick-order' }, String(order))
-            : renderIcon('check', { size: 18, stroke: 2.6 })
-          : renderIcon('plus', { size: 20, stroke: recent ? 2.6 : 2 }),
+        renderIcon('trendUp', { size: 18, stroke: 2.2 }),
       ),
     );
   }
 
+  const matchesFilters = (e) =>
+    (!filter.muscle || e.muscle_group === filter.muscle) && (!filter.equipment || e.equipment === filter.equipment);
+
   function paintList() {
     if (!library) return;
     const needle = query.trim().toLowerCase();
-    const chip = PICKER_GROUPS.find((g) => g.key === group);
     const matches = library
-      .filter((e) => !chip?.match || chip.match(e))
-      .filter((e) => !needle || `${e.name} ${muscleLabel(e.muscle_group)} ${muscleLabel(e.equipment ?? '')}`.toLowerCase().includes(needle))
+      .filter(matchesFilters)
+      .filter((e) => !needle || `${e.name} ${muscleName(e.muscle_group)} ${titleCase(e.equipment ?? '')}`.toLowerCase().includes(needle))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     clear(list);
@@ -640,36 +834,74 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
       : recentExercises
           .read()
           .map((name) => byName.get(name.toLowerCase()))
-          .filter((e) => e && (!chip?.match || chip.match(e)));
+          .filter((e) => e && matchesFilters(e));
     if (recents.length) {
       list.append(
-        h(
-          'div',
-          { class: 'portal-pick-head' },
-          h('h3', {}, 'Recent'),
-          h(
-            'button',
-            {
-              class: 'portal-pick-clear',
-              type: 'button',
-              onclick: () => {
-                recentExercises.clear();
-                paintList();
-              },
-            },
-            'Clear',
-          ),
-        ),
-        h('div', { class: 'portal-pick-group' }, ...recents.map((item) => pickRow(item, { recent: true }))),
+        h('h3', { class: 'portal-pick-caption' }, 'Recent Exercises'),
+        h('div', { class: 'portal-pick-group' }, ...recents.map((item) => pickRow(item))),
       );
     }
 
-    list.append(h('div', { class: 'portal-pick-head' }, h('h3', {}, needle ? 'Results' : chip?.key ? `${chip.label} Exercises` : 'All Exercises')));
+    const heading = needle ? 'Results' : filter.muscle ? `${muscleName(filter.muscle)} Exercises` : 'All Exercises';
+    list.append(h('h3', { class: 'portal-pick-caption' }, heading));
     if (!matches.length) {
-      list.append(h('div', { class: 'portal-empty' }, 'No exercise matches that.'));
+      list.append(
+        h(
+          'div',
+          { class: 'portal-pick-none' },
+          h('p', {}, 'No exercise matches that.'),
+          h('button', { class: 'portal-pick-none-btn', type: 'button', onclick: openCreate }, renderIcon('plus', { size: 16, stroke: 2.4 }), `Create "${query.trim() || 'a custom exercise'}"`),
+        ),
+      );
       return;
     }
-    list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 120).map((item) => pickRow(item))));
+    list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 150).map((item) => pickRow(item))));
+  }
+
+  /* The two filter buttons, which read their current choice like Hevy's do. */
+  const muscleButton = h('button', { class: 'portal-pick-filter', type: 'button', onclick: () => pickFilter('muscle') });
+  const equipmentButton = h('button', { class: 'portal-pick-filter', type: 'button', onclick: () => pickFilter('equipment') });
+  function paintFilters() {
+    equipmentButton.textContent = filter.equipment ? titleCase(filter.equipment) : 'All Equipment';
+    equipmentButton.classList.toggle('active', Boolean(filter.equipment));
+    muscleButton.textContent = filter.muscle ? muscleName(filter.muscle) : 'All Muscles';
+    muscleButton.classList.toggle('active', Boolean(filter.muscle));
+  }
+  function pickFilter(kind) {
+    const isMuscle = kind === 'muscle';
+    openFilterSheet({
+      title: isMuscle ? 'Muscle Group' : 'Equipment',
+      allLabel: isMuscle ? 'All Muscles' : 'All Equipment',
+      options: isMuscle ? muscleOptions() : equipmentOptions(),
+      current: filter[kind],
+      onPick: (key) => {
+        filter[kind] = key;
+        paintFilters();
+        paintList();
+      },
+    });
+  }
+  paintFilters();
+
+  function openCreate() {
+    openCreateExercise({
+      name: query.trim(),
+      muscles: muscleOptions(),
+      equipment: equipmentOptions(),
+      onCreate: (made) => {
+        // A name the library already has is that exercise, not a copy of it.
+        const existing = library?.find((e) => e.name.toLowerCase() === made.name.toLowerCase());
+        const item = existing ?? { ...made, source: 'member', previous: null, media_url: null, media_type: null };
+        if (!existing) {
+          customExercises.add(made);
+          library = [...(library ?? []), item];
+        }
+        if (!selected.has(keyOf(item))) selected.set(keyOf(item), item);
+        paintList();
+        paintFooter();
+        toast(existing ? `${item.name} is already in the list — selected it` : `${item.name} created`);
+      },
+    });
   }
 
   const search = h(
@@ -678,40 +910,31 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
     renderIcon('search', { size: 20 }),
     h('input', {
       type: 'search',
-      placeholder: 'Search exercises (e.g. bicep curl, bench press)',
-      'aria-label': 'Search exercises',
+      placeholder: 'Search exercise',
+      'aria-label': 'Search exercise',
       oninput: (event) => {
         query = event.target.value;
         paintList();
       },
     }),
   );
-  const chips = h(
-    'div',
-    { class: 'portal-pick-chips' },
-    ...PICKER_GROUPS.map((option) =>
-      h(
-        'button',
-        {
-          class: `portal-pick-chip${option.key === group ? ' active' : ''}`,
-          type: 'button',
-          onclick: (event) => {
-            group = option.key;
-            for (const el of chips.children) el.classList.remove('active');
-            event.currentTarget.classList.add('active');
-            paintList();
-          },
-        },
-        option.icon ? renderIcon(option.icon, { size: 16 }) : null,
-        h('span', {}, option.label),
-      ),
-    ),
-  );
 
   openModal({
     title,
-    className: 'portal-pick-modal',
-    body: h('div', { class: 'portal-pick-sheet' }, search, chips, list, footer),
+    className: 'portal-pick-modal portal-hevy-modal portal-pick-screen',
+    body: h(
+      'div',
+      { class: 'portal-pick-sheet' },
+      h(
+        'div',
+        { class: 'portal-pick-top' },
+        pickerBar(title, { left: { label: 'Cancel', onClick: closeModal }, right: { label: 'Create', onClick: openCreate } }),
+        search,
+        h('div', { class: 'portal-pick-filters' }, equipmentButton, muscleButton),
+      ),
+      list,
+      footer,
+    ),
   });
   // openModal focuses the first input; browsing is the common case, so the
   // keyboard stays down until the member taps the search box.
@@ -719,11 +942,21 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   api.portal
     .exercises()
     .then((res) => {
-      library = res.items;
+      if (res.muscle_groups?.length) muscles = res.muscle_groups;
+      if (res.equipment?.length) equipment = res.equipment;
+      // The member's own creations, minus any the library has since gained.
+      const names = new Set(res.items.map((e) => e.name.toLowerCase()));
+      const mine = customExercises
+        .read()
+        .filter((e) => !names.has(e.name.toLowerCase()))
+        .map((e) => ({ ...e, source: 'member', previous: null, media_url: null, media_type: null }));
+      library = [...res.items, ...mine];
+      paintFilters();
       paintList();
     })
     .catch((err) => clear(list).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load exercises')));
 }
+
 
 /**
  * One row of a Profile card: a tinted icon tile, a title over a muted line,
@@ -1638,7 +1871,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   // doesn't restart the clip.
   const summaryDemo = demoStage(item);
 
-  const subtitle = [item.muscle_group, item.equipment].filter(Boolean).map((part) => capitalise(muscleLabel(part))).join(' · ');
+  const subtitle = [item.muscle_group, item.equipment].filter(Boolean).map(titleCase).join(' · ');
   body.append(
     h(
       'div',
@@ -5045,6 +5278,10 @@ function renderPortalApp(ctx, initialMe) {
           { sets: 0, reps: 0, volume: 0 },
         );
 
+    // The set ticked by the last tap, so only its check pops — not every done
+    // check on each repaint.
+    let justTicked = null;
+
     function setRow(exercise, set, index) {
       const previous = exercise.previous;
       // Like Hevy, the badge is the set number and doubles as the set-type
@@ -5086,11 +5323,12 @@ function renderPortalApp(ctx, initialMe) {
       const check = h(
         'button',
         {
-          class: `portal-set-check${set.completed ? ' done' : ''}`,
+          class: `portal-set-check${set.completed ? ' done' : ''}${set.completed && justTicked === set ? ' pop' : ''}`,
           type: 'button',
           'aria-label': set.completed ? 'Mark set as not done' : 'Mark set as done',
           onclick: () => {
             set.completed = !set.completed;
+            justTicked = set.completed ? set : null;
             if (set.completed) fillFromPrevious();
             persist();
             if (set.completed) {
@@ -5102,6 +5340,7 @@ function renderPortalApp(ctx, initialMe) {
               sound.playSetUncheck();
             }
             paint();
+            justTicked = null;
           },
         },
         renderIcon('check', { size: 18, stroke: 2.4 }),
@@ -5160,9 +5399,13 @@ function renderPortalApp(ctx, initialMe) {
         oneRm > 0
           ? h(
               'div',
-              { class: `portal-set-1rm${beatsPrevious ? ' beats' : ''}` },
-              beatsPrevious ? renderIcon('trophy', { size: 11 }) : null,
-              ` ~${weightLabel(oneRm)} 1RM`,
+              {
+                class: `portal-set-1rm${beatsPrevious ? ' beats' : ''}`,
+                title: beatsPrevious ? 'Estimated one-rep max — beats last session' : 'Estimated one-rep max',
+              },
+              beatsPrevious ? renderIcon('trophy', { size: 11, stroke: 2.2 }) : null,
+              h('span', { class: 'portal-set-1rm-label' }, 'Est. 1RM'),
+              h('strong', {}, weightLabel(oneRm)),
             )
           : null,
       );

@@ -20,12 +20,16 @@ import {
 import {
   MAX_MEDIA_BYTES,
   MEDIA_MIMES,
+  MUSCLE_MEDIA_MIMES,
   clearCatalogMedia,
+  clearMuscleMedia,
   createCatalogExercise,
   deleteCatalogExercise,
   importCatalog,
   listCatalog,
+  listMuscleGroups,
   setCatalogMedia,
+  setMuscleMedia,
   updateCatalogExercise,
 } from '../exerciseCatalog.js';
 import { EQUIPMENT_TYPES, MUSCLE_GROUPS } from '../fitness.js';
@@ -633,6 +637,25 @@ platformAdminRoutes.put(
 
 platformAdminRoutes.delete('/catalog/exercises/:id/media', (req, res) => {
   res.json(clearCatalogMedia(Number(req.params.id)));
+});
+
+/** The muscle group pictures behind the member's "Muscle Group" filter —
+ * one highlighted-body image per group, uploaded the same raw way. */
+platformAdminRoutes.get('/catalog/muscles', (req, res) => {
+  res.json({ items: listMuscleGroups(), media: { max_bytes: MAX_MEDIA_BYTES, mimes: MUSCLE_MEDIA_MIMES } });
+});
+
+platformAdminRoutes.put(
+  '/catalog/muscles/:group/media',
+  express.raw({ type: () => true, limit: MAX_MEDIA_BYTES }),
+  (req, res) => {
+    if (!Buffer.isBuffer(req.body)) throw badRequest('Send the file as the request body');
+    res.json(setMuscleMedia(req.params.group, req.body));
+  },
+);
+
+platformAdminRoutes.delete('/catalog/muscles/:group/media', (req, res) => {
+  res.json(clearMuscleMedia(req.params.group));
 });
 
 /* ── Food catalogue ────────────────────────────────────────────────────── */

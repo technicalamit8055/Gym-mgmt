@@ -4,7 +4,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { tenantStorage } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
-import { EQUIPMENT_TYPES, MUSCLE_GROUPS } from './fitness.js';
+import { EQUIPMENT_TYPES, MUSCLE_GROUPS, muscleGroupOf, muscleLabel } from './fitness.js';
 import { EXERCISES } from './fitnessSeed.js';
 import { getRegistryDb } from './tenants.js';
 
@@ -39,7 +39,39 @@ export const MEDIA_FORMATS = {
 export const MEDIA_MIMES = Object.values(MEDIA_FORMATS).map((f) => f.mime);
 export const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 
-const MEDIA_FILE_RE = /^\d+-[a-f0-9]{8}\.(png|jpg|webp|gif|mp4|webm)$/;
+/** An exercise's demo is `<id>-<sha8>.<ext>`, a muscle group's picture
+ * `m-<group>-<sha8>.<ext>` — the only kind that may be an SVG. */
+const MEDIA_FILE_RE = /^(?:\d+-[a-f0-9]{8}\.(?:png|jpg|webp|gif|mp4|webm)|m-[a-z_]+-[a-f0-9]{8}\.(?:png|jpg|webp|gif|svg))$/;
+
+/** Anything in an SVG that runs code or reaches outside the file. An <img>
+ * would never run it, but the file is also reachable by its own URL, and the
+ * serving route's sandbox header is the second line of defence, not the first. */
+const SVG_HAZARDS = [
+  [/<script\b/i, 'a script'],
+  [/\son[a-z]+\s*=/i, 'an event handler'],
+  [/javascript\s*:/i, 'a javascript: link'],
+  [/<(?:foreignObject|iframe|embed|object|audio|video|animate|set)\b/i, 'embedded content or animation'],
+  [/<!(?:ENTITY|DOCTYPE)\b/i, 'a DOCTYPE or entity'],
+  [/@import\b/i, 'a stylesheet import'],
+  [/url\(\s*['"]?\s*(?!#|data:image\/)/i, 'an external url()'],
+  [/(?:xlink:)?href\s*=\s*['"]\s*(?!#|data:image\/(?:png|jpeg|gif|webp);)/i, 'an external link'],
+];
+
+/**
+ * A safe SVG's format, or null when the bytes are not an SVG. Throws when the
+ * file is an SVG carrying something from SVG_HAZARDS, naming what it found,
+ * so the operator can strip it in their editor and re-upload.
+ */
+export function sniffSvg(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  const text = bytes.toString('utf8').replace(/^﻿/, '');
+  // The root element, past any XML declaration and comments.
+  const body = text.replace(/^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*/, '');
+  if (!/^<svg[\s>]/i.test(body)) return null;
+  const hazard = SVG_HAZARDS.find(([pattern]) => pattern.test(text));
+  if (hazard) throw badRequest(`That SVG contains ${hazard[1]} — export it as a plain image and try again`, { file: 'unsafe SVG' });
+  return { ext: 'svg', mime: 'image/svg+xml', kind: 'image' };
+}
 
 /** The format a buffer actually is, or null. */
 export function sniffMedia(bytes) {
@@ -87,6 +119,15 @@ function db() {
       updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_catalog_exercises_group ON catalog_exercises(muscle_group);
+    -- One picture per muscle group (the highlighted-body image on the
+    -- member's Muscle Group filter). A row exists only once one is uploaded.
+    CREATE TABLE IF NOT EXISTS catalog_muscles (
+      muscle_group TEXT PRIMARY KEY,
+      media_file   TEXT NOT NULL,
+      media_mime   TEXT NOT NULL,
+      media_bytes  INTEGER NOT NULL,
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Seeded once, on the strength of a marker rather than "the table is empty":
@@ -100,9 +141,24 @@ function db() {
     for (const [name, group, equipment] of EXERCISES) insert.run(name, group, equipment);
     handle.prepare("INSERT INTO platform_meta (key, value) VALUES ('catalog_seeded', '1')").run();
   }
+  remapLegacyMuscles(handle);
 
   initialised.add(handle);
   return handle;
+}
+
+/** Re-files a catalogue written against the old eight coarse groups (back,
+ * legs, arms, core…) onto the Hevy list — primary and secondary muscles
+ * alike. Once, on a marker, like the seed. */
+function remapLegacyMuscles(handle) {
+  if (handle.prepare("SELECT value FROM platform_meta WHERE key = 'muscles_v2'").get()) return;
+  const update = handle.prepare('UPDATE catalog_exercises SET muscle_group = ?, secondary_muscles = ? WHERE id = ?');
+  for (const row of handle.prepare('SELECT id, name, muscle_group, secondary_muscles FROM catalog_exercises').all()) {
+    const primary = muscleGroupOf(row.muscle_group, row.name) ?? 'other';
+    const secondary = [...new Set(asArray(row.secondary_muscles).map((m) => muscleGroupOf(m)).filter(Boolean))].filter((m) => m !== primary);
+    update.run(primary, JSON.stringify(secondary), row.id);
+  }
+  handle.prepare("INSERT INTO platform_meta (key, value) VALUES ('muscles_v2', '1')").run();
 }
 
 const asArray = (text) => {
@@ -150,9 +206,9 @@ function cleanChoice(value, allowed, field) {
 function cleanMuscles(value, primary) {
   if (value === undefined || value === null || value === '') return [];
   const list = Array.isArray(value) ? value : String(value).split(',');
-  const muscles = [...new Set(list.map((m) => String(m).trim().toLowerCase().replace(/[\s-]+/g, '_')).filter(Boolean))];
-  for (const muscle of muscles) cleanChoice(muscle, MUSCLE_GROUPS, 'secondary_muscles');
-  return muscles.filter((m) => m !== primary);
+  const muscles = list.map((m) => String(m).trim()).filter(Boolean);
+  for (const muscle of muscles) cleanChoice(muscleGroupOf(muscle), MUSCLE_GROUPS, 'secondary_muscles');
+  return [...new Set(muscles.map((m) => muscleGroupOf(m)))].filter((m) => m !== primary);
 }
 
 function cleanTags(value) {
@@ -178,7 +234,9 @@ function cleanFields(body, { partial = false } = {}) {
   const has = (key) => Object.hasOwn(body ?? {}, key);
 
   if (!partial || has('name')) out.name = cleanName(body?.name);
-  if (!partial || has('muscle_group')) out.muscle_group = cleanChoice(body?.muscle_group, MUSCLE_GROUPS, 'muscle_group');
+  if (!partial || has('muscle_group')) {
+    out.muscle_group = cleanChoice(muscleGroupOf(body?.muscle_group, body?.name), MUSCLE_GROUPS, 'muscle_group');
+  }
   if (!partial || has('equipment')) out.equipment = cleanChoice(body?.equipment ?? 'barbell', EQUIPMENT_TYPES, 'equipment');
   if (!partial || has('instructions')) out.instructions = cleanInstructions(body?.instructions);
   if (!partial || has('tags')) out.tags = JSON.stringify(cleanTags(body?.tags));
@@ -401,4 +459,72 @@ export function clearCatalogMedia(id) {
     .run(current.id);
   removeMediaFile(current.media_file);
   return getCatalogExercise(current.id);
+}
+
+/* ── Muscle group pictures ────────────────────────────────────────────── */
+
+/** Pictures only: a muscle group's tile is a still of the highlighted body,
+ * never a clip. SVG is allowed here (anatomy charts often come as vectors),
+ * checked by sniffSvg() — unlike exercise demos, which stay raster. */
+export const MUSCLE_MEDIA_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'];
+
+/** Every muscle group in Hevy's order, with its picture's URL when the
+ * operator has uploaded one. */
+export function listMuscleGroups() {
+  const prefix = tenantStorage.getStore()?.pathPrefix ?? '';
+  const rows = new Map(db().prepare('SELECT * FROM catalog_muscles').all().map((row) => [row.muscle_group, row]));
+  return MUSCLE_GROUPS.map((key) => {
+    const row = rows.get(key);
+    return {
+      key,
+      label: muscleLabel(key),
+      media_url: row ? `${prefix}/api/exercise-media/${row.media_file}` : null,
+      media_mime: row?.media_mime ?? null,
+      media_bytes: row?.media_bytes ?? null,
+    };
+  });
+}
+
+function muscleOr404(group) {
+  const key = String(group ?? '');
+  if (!MUSCLE_GROUPS.includes(key)) throw notFound('No such muscle group');
+  return key;
+}
+
+export function setMuscleMedia(group, bytes) {
+  const key = muscleOr404(group);
+  if (!bytes?.length) throw badRequest('That file is empty');
+  if (bytes.length > MAX_MEDIA_BYTES) {
+    throw badRequest('That file is too large', { file: `must be under ${MAX_MEDIA_BYTES / 1024 / 1024} MB` });
+  }
+  const format = sniffMedia(bytes) ?? sniffSvg(bytes);
+  if (!format || format.kind === 'video') {
+    throw badRequest('That file format is not supported', { file: 'use PNG, JPG, WebP, GIF or SVG' });
+  }
+
+  const hash = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 8);
+  const file = `m-${key}-${hash}.${format.ext}`;
+  fs.mkdirSync(config.exerciseMediaDir, { recursive: true });
+  fs.writeFileSync(path.join(config.exerciseMediaDir, file), bytes);
+
+  const current = db().prepare('SELECT media_file FROM catalog_muscles WHERE muscle_group = ?').get(key);
+  db()
+    .prepare(
+      `INSERT INTO catalog_muscles (muscle_group, media_file, media_mime, media_bytes) VALUES (?, ?, ?, ?)
+       ON CONFLICT (muscle_group) DO UPDATE SET
+         media_file = excluded.media_file, media_mime = excluded.media_mime,
+         media_bytes = excluded.media_bytes, updated_at = datetime('now')`,
+    )
+    .run(key, file, format.mime, bytes.length);
+  // Same order as setCatalogMedia: the row points at the new file first.
+  if (current?.media_file && current.media_file !== file) removeMediaFile(current.media_file);
+  return listMuscleGroups().find((m) => m.key === key);
+}
+
+export function clearMuscleMedia(group) {
+  const key = muscleOr404(group);
+  const current = db().prepare('SELECT media_file FROM catalog_muscles WHERE muscle_group = ?').get(key);
+  db().prepare('DELETE FROM catalog_muscles WHERE muscle_group = ?').run(key);
+  if (current) removeMediaFile(current.media_file);
+  return listMuscleGroups().find((m) => m.key === key);
 }

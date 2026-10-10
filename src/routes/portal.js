@@ -4,13 +4,15 @@ import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { ATTENDANCE_SELECT, publicVisit } from '../checkin.js';
 import { all, get, getBusinessType, run, tx } from '../db.js';
 import { badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
+import { listMuscleGroups } from '../exerciseCatalog.js';
 import {
+  EQUIPMENT_TYPES,
   MEAL_TYPES,
-  MUSCLE_GROUPS,
   SET_TYPES,
   estimate1rm,
   exerciseHistory,
   fitnessAccessFor,
+  muscleGroupOf,
   previousSetsFor,
   recordPersonalRecords,
   summariseSets,
@@ -744,8 +746,10 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
     const setType = String(set?.set_type ?? 'normal');
     if (!SET_TYPES.includes(setType)) errors[`sets.${index}.set_type`] = `must be one of: ${SET_TYPES.join(', ')}`;
 
-    const muscleGroup = String(set?.muscle_group ?? 'full_body');
-    if (!MUSCLE_GROUPS.includes(muscleGroup)) errors[`sets.${index}.muscle_group`] = 'is not a muscle group';
+    // A workout left open across the upgrade still carries the old coarse
+    // groups ("legs"); muscleGroupOf re-files those by the exercise's name.
+    const muscleGroup = muscleGroupOf(set?.muscle_group ?? 'full_body', exerciseName);
+    if (!muscleGroup) errors[`sets.${index}.muscle_group`] = 'is not a muscle group';
 
     const weight = Number(set?.weight_kg ?? 0);
     if (!Number.isFinite(weight) || weight < 0 || weight > 1000) {
@@ -924,7 +928,13 @@ portalRoutes.get('/workouts/exercises', requireMemberAuth, requireModule('fitnes
   const items = exercisePickerRows(req.query).slice(0, 300);
   const previous = previousSetsFor(req.member.id, items.map((e) => e.name));
 
-  res.json({ items: items.map((item) => ({ ...item, previous: previous[item.name] ?? null })) });
+  res.json({
+    items: items.map((item) => ({ ...item, previous: previous[item.name] ?? null })),
+    // The picker's two filter sheets: muscle groups with the operator's
+    // highlighted-body pictures, and the equipment list.
+    muscle_groups: listMuscleGroups(),
+    equipment: EQUIPMENT_TYPES,
+  });
 });
 
 /* ── Diet tracking ────────────────────────────────────────────────────── */

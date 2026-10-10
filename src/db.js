@@ -4,6 +4,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
 import { backfillFoodFiberSugar, seedFitnessLibraries } from './fitnessSeed.js';
+import { migrateMuscleGroups } from './muscles.js';
 
 /**
  * Two kinds of time live in here and they are not interchangeable:
@@ -685,8 +686,7 @@ const MIGRATIONS = [
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         day_id        INTEGER NOT NULL REFERENCES workout_plan_days(id) ON DELETE CASCADE,
         exercise_name TEXT NOT NULL,
-        muscle_group  TEXT NOT NULL
-                      CHECK (muscle_group IN ('chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body')),
+        muscle_group  TEXT NOT NULL,
         target_sets   INTEGER NOT NULL DEFAULT 3 CHECK (target_sets > 0),
         target_reps   TEXT NOT NULL DEFAULT '8-12',
         target_rpe    REAL,
@@ -724,8 +724,7 @@ const MIGRATIONS = [
       CREATE TABLE IF NOT EXISTS exercise_library (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         name         TEXT NOT NULL UNIQUE,
-        muscle_group TEXT NOT NULL
-                     CHECK (muscle_group IN ('chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body')),
+        muscle_group TEXT NOT NULL,
         equipment    TEXT NOT NULL DEFAULT 'barbell',
         instructions TEXT,
         is_custom    INTEGER NOT NULL DEFAULT 0
@@ -963,6 +962,14 @@ const MIGRATIONS = [
   // plan is entitled for as long as that membership is active, with no add-on
   // row of their own.
   (db) => ensureColumn(db, 'plans', 'includes_fitness_addon', 'INTEGER NOT NULL DEFAULT 0'),
+  // Eight coarse muscle groups (back, legs, arms, core…) become Hevy's twenty
+  // (lats, quadriceps, biceps, abdominals…). The tables above no longer carry
+  // a CHECK on muscle_group — a list that grows should not mean rebuilding
+  // tables again — so this rebuilds older databases without it and re-files
+  // their rows (see src/muscles.js). It sits here, out of append order, because
+  // the seed below re-runs on any open that finds a library empty, and writes
+  // the new groups: the old CHECK has to be gone by then.
+  (db) => migrateMuscleGroups(db),
   (db) => seedFitnessLibraries(db),
 
   // Web Push (src/notifications.js). A subscription is one browser on one

@@ -11,7 +11,7 @@ import { clear, closeModal, confirmDialog, exerciseMedia, h, openModal, renderIc
  */
 
 const label = (value) => String(value ?? '').replace(/_/g, ' ');
-const capital = (value) => label(value).replace(/^./, (c) => c.toUpperCase());
+const capital = (value) => label(value).replace(/(^|\s)\S/g, (c) => c.toUpperCase());
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1)} MB`;
 
 /** "Pull-Up", "pull_up.gif" and "PULL UP" are the same exercise. */
@@ -73,7 +73,7 @@ export function csvToExercises(text) {
 
 const CSV_TEMPLATE = [
   'name,muscle_group,equipment,secondary_muscles,tags,instructions',
-  '"Landmine Press",shoulders,barbell,"chest, arms",unilateral,"Press the bar up and slightly forward."',
+  '"Landmine Press",shoulders,barbell,"chest, triceps",unilateral,"Press the bar up and slightly forward."',
   '"Incline Dumbbell Curl",arms,dumbbell,,isolation,"Keep the elbows back behind the torso."',
 ].join('\n');
 
@@ -319,7 +319,7 @@ function openExerciseModal(exercise, meta, onSaved) {
 
 function openImportModal(onDone) {
   const status = h('div', { class: 'muted', style: 'font-size:13px;min-height:20px' });
-  const paste = h('textarea', { rows: 8, placeholder: 'name,muscle_group,equipment,secondary_muscles,tags,instructions\n"Landmine Press",shoulders,barbell,"chest, arms",unilateral,"Press up and forward."' });
+  const paste = h('textarea', { rows: 8, placeholder: 'name,muscle_group,equipment,secondary_muscles,tags,instructions\n"Landmine Press",shoulders,barbell,"chest, triceps",unilateral,"Press up and forward."' });
   const results = h('div', {});
   let rows = [];
 
@@ -486,6 +486,173 @@ function openBulkMediaModal(items, meta, onDone) {
   });
 }
 
+/* ── Muscle group pictures ────────────────────────────────────────────── */
+
+/** Filename shorthands for the bulk upload: "abs.png" is the abdominals picture. */
+const MUSCLE_ALIASES = { abs: 'abdominals', core: 'abdominals', quads: 'quadriceps', hams: 'hamstrings', delts: 'shoulders', glute: 'glutes', calf: 'calves', bicep: 'biceps', tricep: 'triceps', trap: 'traps', lat: 'lats', forearm: 'forearms', 'full body': 'full_body' };
+
+/** The muscle group a file is named after, or undefined. */
+function muscleForFile(filename, muscles) {
+  const key = normalise(withoutPrefix(stem(filename)));
+  return (
+    muscles.find((m) => normalise(m.key) === key || normalise(m.label) === key)?.key ??
+    MUSCLE_ALIASES[key]
+  );
+}
+
+/**
+ * One highlighted-body picture per muscle group — what members see beside
+ * each group in the picker's "Muscle Group" sheet. Uploads go straight up on
+ * choosing a file; there is nothing else to save.
+ */
+function openMuscleMediaModal() {
+  let muscles = [];
+  let limits = { max_bytes: 0, mimes: [] };
+  const grid = h('div', { class: 'cat-muscle-grid' }, h('div', { class: 'empty', style: 'grid-column:1/-1' }, 'Loading…'));
+  const status = h('div', { class: 'muted', style: 'font-size:13px' });
+
+  const check = (file) => {
+    // Some systems report no type for an .svg; the server reads the bytes anyway.
+    const type = file.type || (/\.svg$/i.test(file.name) ? 'image/svg+xml' : '');
+    if (!limits.mimes.includes(type)) return 'Use a PNG, JPG, WebP, GIF or SVG picture';
+    if (file.size > limits.max_bytes) return `That file is ${mb(file.size)} — the limit is ${mb(limits.max_bytes)}`;
+    return null;
+  };
+
+  const replace = (updated) => {
+    muscles = muscles.map((m) => (m.key === updated.key ? updated : m));
+  };
+
+  async function upload(muscle, file) {
+    const problem = check(file);
+    if (problem) return toast(problem, 'error');
+    try {
+      replace(await api.platformUploadMuscleMedia(muscle.key, file));
+      draw();
+    } catch (err) {
+      toast(err.message || 'Upload failed', 'error');
+    }
+  }
+
+  function tile(muscle) {
+    const input = h('input', {
+      type: 'file',
+      accept: [...limits.mimes, '.svg'].join(','),
+      style: 'display:none',
+      onchange: (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (file) upload(muscle, file);
+      },
+    });
+    return h(
+      'div',
+      { class: `cat-muscle${muscle.media_url ? '' : ' is-empty'}` },
+      h(
+        'button',
+        { class: 'cat-muscle-pic', type: 'button', title: `Upload the ${muscle.label} picture`, onclick: () => input.click() },
+        muscle.media_url ? h('img', { src: muscle.media_url, alt: '' }) : renderIcon('image', { size: 22 }),
+      ),
+      h('div', { class: 'cat-muscle-name' }, muscle.label),
+      h(
+        'div',
+        { class: 'cat-muscle-actions' },
+        h('button', { class: 'btn sm', type: 'button', onclick: () => input.click() }, muscle.media_url ? 'Replace' : 'Upload'),
+        muscle.media_url
+          ? h(
+              'button',
+              {
+                class: 'btn sm ghost',
+                type: 'button',
+                onclick: async () => {
+                  try {
+                    replace(await api.platformClearMuscleMedia(muscle.key));
+                    draw();
+                  } catch (err) {
+                    toast(err.message || 'Could not remove it', 'error');
+                  }
+                },
+              },
+              'Remove',
+            )
+          : null,
+        input,
+      ),
+    );
+  }
+
+  function draw() {
+    const done = muscles.filter((m) => m.media_url).length;
+    status.textContent = `${done} of ${muscles.length} muscle groups have a picture. Square images with the muscle highlighted work best.`;
+    clear(grid).append(...muscles.map(tile));
+  }
+
+  /* Many at once, matched by filename: "biceps.png", "Upper Back.jpg", "abs.webp". */
+  const bulk = h('input', {
+    type: 'file',
+    multiple: true,
+    accept: 'image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg',
+    style: 'display:none',
+    onchange: async (e) => {
+      const files = [...(e.target.files ?? [])];
+      e.target.value = '';
+      const unmatched = [];
+      let uploaded = 0;
+      for (const file of files) {
+        const key = muscleForFile(file.name, muscles);
+        const muscle = muscles.find((m) => m.key === key);
+        if (!muscle) {
+          unmatched.push(file.name);
+          continue;
+        }
+        const problem = check(file);
+        if (problem) {
+          unmatched.push(`${file.name} (${problem})`);
+          continue;
+        }
+        try {
+          replace(await api.platformUploadMuscleMedia(muscle.key, file));
+          uploaded += 1;
+        } catch (err) {
+          unmatched.push(`${file.name} (${err.message})`);
+        }
+      }
+      draw();
+      if (uploaded) toast(`${uploaded} picture${uploaded === 1 ? '' : 's'} uploaded`);
+      if (unmatched.length) toast(`Not matched to a muscle group: ${unmatched.join(', ')}`, 'error');
+    },
+  });
+
+  const modal = openModal({
+    title: 'Muscle group pictures',
+    subtitle: 'Shown to members beside each group in the exercise picker\'s Muscle Group filter.',
+    wide: true,
+    body: h(
+      'div',
+      {},
+      h(
+        'div',
+        { class: 'row', style: 'gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap' },
+        h('button', { class: 'btn sm', type: 'button', onclick: () => bulk.click() }, renderIcon('upload', { size: 15 }), 'Upload many (match by filename)'),
+        bulk,
+        status,
+      ),
+      grid,
+    ),
+    footer: [h('button', { class: 'btn ghost', type: 'button', onclick: closeModal }, 'Done')],
+  });
+  modal.classList.add('cat-modal');
+
+  api
+    .platformMuscles()
+    .then((res) => {
+      muscles = res.items;
+      limits = res.media;
+      draw();
+    })
+    .catch((err) => clear(grid).append(h('div', { class: 'empty', style: 'grid-column:1/-1' }, err.message || 'Could not load the muscle groups')));
+}
+
 /* ── The section ──────────────────────────────────────────────────────── */
 
 export function renderCatalogSection({ onExpired } = {}) {
@@ -560,6 +727,7 @@ export function renderCatalogSection({ onExpired } = {}) {
     equipmentSelect,
     mediaSelect,
     h('div', { class: 'spacer', style: 'flex:1' }),
+    h('button', { class: 'btn sm', type: 'button', onclick: openMuscleMediaModal }, renderIcon('bicep', { size: 15 }), 'Muscle pictures'),
     h('button', { class: 'btn sm', type: 'button', onclick: () => openBulkMediaModal(items, meta, refresh) }, renderIcon('image', { size: 15 }), 'Bulk upload demos'),
     h('button', { class: 'btn sm', type: 'button', onclick: () => openImportModal(refresh) }, renderIcon('upload', { size: 15 }), 'Import CSV'),
     h('button', { class: 'btn primary sm', type: 'button', onclick: () => openExerciseModal(null, meta, refresh) }, renderIcon('plus', { size: 15 }), 'Add exercise'),

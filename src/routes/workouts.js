@@ -8,6 +8,7 @@ import {
   MUSCLE_GROUPS,
   WORKOUT_GOALS,
   WORKOUT_LEVELS,
+  muscleGroupOf,
 } from '../fitness.js';
 import { parse, today, toInt } from '../validate.js';
 import { requireModule } from '../verticals.js';
@@ -59,8 +60,9 @@ export function parseDays(raw) {
       const name = String(exercise?.exercise_name ?? '').trim();
       if (!name) errors[`${path}.exercise_name`] = 'is required';
 
-      const muscleGroup = String(exercise?.muscle_group ?? 'full_body').trim();
-      if (!MUSCLE_GROUPS.includes(muscleGroup)) {
+      // muscleGroupOf also takes the old coarse groups ("legs"), re-filed by name.
+      const muscleGroup = muscleGroupOf(exercise?.muscle_group ?? 'full_body', name);
+      if (!muscleGroup) {
         errors[`${path}.muscle_group`] = `must be one of: ${MUSCLE_GROUPS.join(', ')}`;
       }
 

@@ -26,16 +26,11 @@ import {
  * half-built plan.
  */
 
+/** Hevy's muscle groups, in its order — the server's MUSCLE_GROUPS (src/muscles.js). */
 const MUSCLE_GROUPS = [
-  { value: 'chest', label: 'Chest' },
-  { value: 'back', label: 'Back' },
-  { value: 'legs', label: 'Legs' },
-  { value: 'shoulders', label: 'Shoulders' },
-  { value: 'arms', label: 'Arms' },
-  { value: 'core', label: 'Core' },
-  { value: 'cardio', label: 'Cardio' },
-  { value: 'full_body', label: 'Full body' },
-];
+  'abdominals', 'abductors', 'adductors', 'biceps', 'calves', 'cardio', 'chest', 'forearms', 'full_body', 'glutes',
+  'hamstrings', 'lats', 'lower_back', 'neck', 'quadriceps', 'shoulders', 'traps', 'triceps', 'upper_back', 'other',
+].map((value) => ({ value, label: value.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') }));
 
 const WORKOUT_GOALS = [
   { value: 'muscle_gain', label: 'Muscle gain' },

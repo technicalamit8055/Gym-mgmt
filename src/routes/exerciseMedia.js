@@ -17,6 +17,12 @@ exerciseMediaRoutes.get('/:file', (req, res) => {
   if (!target) throw notFound('No such file');
 
   res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  // A muscle picture may be an SVG. Uploads are already refused if they carry
+  // script (sniffSvg), but opened by its own URL an SVG is a document on this
+  // origin, so it also gets a sandbox that runs nothing and loads nothing.
+  if (target.endsWith('.svg')) {
+    res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
+  }
   res.sendFile(target, { dotfiles: 'deny' }, (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: 'No such file' });
   });

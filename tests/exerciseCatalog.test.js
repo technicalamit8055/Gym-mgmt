@@ -121,9 +121,9 @@ describe('operator CRUD', () => {
       '/api/platform/admin/catalog/exercises',
       {
         name: '  Cable   Pull-Through ',
-        muscle_group: 'legs',
+        muscle_group: 'glutes',
         equipment: 'cable',
-        secondary_muscles: ['back', 'legs', 'core', 'back'],
+        secondary_muscles: ['hamstrings', 'glutes', 'Lower Back', 'hamstrings'],
         tags: ['Compound', 'hinge'],
         instructions: 'Hinge at the hips.',
       },
@@ -131,20 +131,20 @@ describe('operator CRUD', () => {
     );
     assert.equal(res.status, 201);
     assert.equal(res.body.name, 'Cable Pull-Through', 'whitespace is collapsed');
-    assert.deepEqual(res.body.secondary_muscles, ['back', 'core'], 'deduped, and never the primary muscle');
+    assert.deepEqual(res.body.secondary_muscles, ['hamstrings', 'lower_back'], 'deduped, normalised, and never the primary muscle');
     assert.deepEqual(res.body.tags, ['compound', 'hinge']);
     id = res.body.id;
   });
 
   it('refuses a duplicate name in any case', async () => {
-    const res = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'cable pull-through', muscle_group: 'legs', equipment: 'cable' }, { token: ops });
+    const res = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'cable pull-through', muscle_group: 'glutes', equipment: 'cable' }, { token: ops });
     assert.equal(res.status, 409);
   });
 
   it('rejects an unknown muscle group or equipment', async () => {
     const bad = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Nope', muscle_group: 'toes', equipment: 'cable' }, { token: ops });
     assert.equal(bad.status, 400);
-    const badGear = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Nope', muscle_group: 'legs', equipment: 'trebuchet' }, { token: ops });
+    const badGear = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Nope', muscle_group: 'glutes', equipment: 'trebuchet' }, { token: ops });
     assert.equal(badGear.status, 400);
   });
 
@@ -152,13 +152,20 @@ describe('operator CRUD', () => {
     const res = await call('PATCH', `/api/platform/admin/catalog/exercises/${id}`, { instructions: 'Squeeze the glutes.' }, { token: ops });
     assert.equal(res.status, 200);
     assert.equal(res.body.instructions, 'Squeeze the glutes.');
-    assert.deepEqual(res.body.secondary_muscles, ['back', 'core']);
+    assert.deepEqual(res.body.secondary_muscles, ['hamstrings', 'lower_back']);
     assert.equal(res.body.equipment, 'cable');
   });
 
   it('drops a secondary muscle that becomes the primary one', async () => {
-    const res = await call('PATCH', `/api/platform/admin/catalog/exercises/${id}`, { muscle_group: 'back' }, { token: ops });
-    assert.deepEqual(res.body.secondary_muscles, ['core']);
+    const res = await call('PATCH', `/api/platform/admin/catalog/exercises/${id}`, { muscle_group: 'hamstrings' }, { token: ops });
+    assert.deepEqual(res.body.secondary_muscles, ['lower_back']);
+  });
+
+  it('re-files the old coarse groups by the exercise\'s name', async () => {
+    const res = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Seated Leg Curl', muscle_group: 'legs', equipment: 'machine', secondary_muscles: 'core' }, { token: ops });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.muscle_group, 'hamstrings');
+    assert.deepEqual(res.body.secondary_muscles, ['abdominals']);
   });
 
   it('filters by search, muscle and media', async () => {
@@ -244,11 +251,103 @@ describe('demo media', () => {
   });
 
   it('deleting an exercise deletes its file', async () => {
-    const made = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Temp Move', muscle_group: 'core', equipment: 'bodyweight' }, { token: ops });
+    const made = await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Temp Move', muscle_group: 'abdominals', equipment: 'bodyweight' }, { token: ops });
     const withMedia = await upload(GIF, made.body.id);
     const file = withMedia.body.media_url.split('/').pop();
     assert.ok(fs.existsSync(path.join(process.env.EXERCISE_MEDIA_DIR, file)));
     await call('DELETE', `/api/platform/admin/catalog/exercises/${made.body.id}`, undefined, { token: ops });
+    assert.equal(fs.existsSync(path.join(process.env.EXERCISE_MEDIA_DIR, file)), false);
+  });
+});
+
+describe('muscle group pictures', () => {
+  const upload = (group, bytes, contentType = 'image/png') =>
+    call('PUT', `/api/platform/admin/catalog/muscles/${group}/media`, bytes, { token: ops, raw: true, contentType });
+
+  it('lists every Hevy muscle group in order, with a label', async () => {
+    const res = await call('GET', '/api/platform/admin/catalog/muscles', undefined, { token: ops });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.items.length, 20);
+    assert.deepEqual(res.body.items.slice(0, 3).map((m) => m.key), ['abdominals', 'abductors', 'adductors']);
+    assert.equal(res.body.items.find((m) => m.key === 'lower_back').label, 'Lower Back');
+    assert.ok(res.body.items.every((m) => m.media_url === null));
+  });
+
+  it('takes a picture, serves it, and shows it to members', async () => {
+    const res = await upload('biceps', PNG);
+    assert.equal(res.status, 200);
+    assert.match(res.body.media_url, /^\/api\/exercise-media\/m-biceps-[a-f0-9]{8}\.png$/);
+    assert.equal((await fetch(`${base}${res.body.media_url}`)).status, 200);
+
+    const portal = await call('GET', '/api/portal/workouts/exercises', undefined, { token: memberToken, tenant: TENANT });
+    assert.equal(portal.status, 200);
+    assert.equal(portal.body.muscle_groups.length, 20);
+    assert.equal(portal.body.muscle_groups.find((m) => m.key === 'biceps').media_url, res.body.media_url);
+    assert.ok(portal.body.equipment.includes('dumbbell'));
+  });
+
+  it('replacing a picture removes the old file', async () => {
+    const first = (await upload('calves', PNG)).body;
+    const second = (await upload('calves', GIF, 'image/gif')).body;
+    assert.notEqual(first.media_url, second.media_url);
+    assert.equal((await fetch(`${base}${first.media_url}`)).status, 404);
+  });
+
+  it('refuses a clip, a non-image and an unknown group', async () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(20)]);
+    assert.equal((await upload('chest', mp4, 'video/mp4')).status, 400);
+    assert.equal((await upload('chest', Buffer.from('<html><body>not a picture</body></html>'), 'image/png')).status, 400);
+    assert.equal((await upload('wings', PNG)).status, 404);
+  });
+
+  it('takes a plain SVG and serves it sandboxed', async () => {
+    const svg = Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8"?>\n<!-- Generator: Figma -->\n' +
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10">' +
+        '<defs><linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient></defs>' +
+        '<path d="M0 0h10v10z" fill="url(#g)"/><use xlink:href="#g"/></svg>',
+    );
+    const res = await upload('traps', svg, 'image/svg+xml');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.match(res.body.media_url, /\/m-traps-[a-f0-9]{8}\.svg$/);
+    assert.equal(res.body.media_mime, 'image/svg+xml');
+
+    const served = await fetch(`${base}${res.body.media_url}`);
+    assert.equal(served.status, 200);
+    assert.match(served.headers.get('content-type'), /^image\/svg\+xml/);
+    assert.match(served.headers.get('content-security-policy'), /sandbox/);
+    assert.match(served.headers.get('content-security-policy'), /default-src 'none'/);
+  });
+
+  it('refuses an SVG that could run code or load something', async () => {
+    const wrap = (inner, attrs = '') => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg"${attrs}>${inner}</svg>`);
+    for (const bad of [
+      wrap('<script>alert(1)</script>'),
+      wrap('<rect width="1" height="1"/>', ' onload="alert(1)"'),
+      wrap('<a href="javascript:alert(1)"><rect/></a>'),
+      wrap('<foreignObject><div>hi</div></foreignObject>'),
+      wrap('<image href="https://evil.example/x.png"/>'),
+      wrap('<style>@import "https://evil.example/x.css";</style>'),
+      Buffer.from('<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg"/>'),
+    ]) {
+      const res = await upload('neck', bad, 'image/svg+xml');
+      assert.equal(res.status, 400, bad.toString());
+    }
+  });
+
+  it('still refuses an SVG as an exercise demo', async () => {
+    const deadlift = (await catalog('?q=Deadlift')).body.items.find((e) => e.name === 'Deadlift');
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>');
+    const res = await call('PUT', `/api/platform/admin/catalog/exercises/${deadlift.id}/media`, svg, { token: ops, raw: true, contentType: 'image/svg+xml' });
+    assert.equal(res.status, 400);
+  });
+
+  it('clears a picture and its file', async () => {
+    const made = (await upload('neck', PNG)).body;
+    const file = made.media_url.split('/').pop();
+    const cleared = await call('DELETE', '/api/platform/admin/catalog/muscles/neck/media', undefined, { token: ops });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.body.media_url, null);
     assert.equal(fs.existsSync(path.join(process.env.EXERCISE_MEDIA_DIR, file)), false);
   });
 });
@@ -266,7 +365,7 @@ describe('what gyms see', () => {
   });
 
   it('returns the catalogue entry when a gym "adds" a standard exercise', async () => {
-    const res = await call('POST', '/api/workouts/exercises', { name: 'deadlift', muscle_group: 'back', equipment: 'barbell' }, { token: adminToken, tenant: TENANT });
+    const res = await call('POST', '/api/workouts/exercises', { name: 'deadlift', muscle_group: 'lower_back', equipment: 'barbell' }, { token: adminToken, tenant: TENANT });
     assert.equal(res.status, 200);
     assert.equal(res.body.source, 'catalog');
   });
@@ -297,10 +396,10 @@ describe('bulk import', () => {
       '/api/platform/admin/catalog/import',
       {
         rows: [
-          { name: 'Landmine Press', muscle_group: 'shoulders', equipment: 'barbell', secondary_muscles: 'chest, arms', tags: 'unilateral' },
+          { name: 'Landmine Press', muscle_group: 'shoulders', equipment: 'barbell', secondary_muscles: 'chest, triceps', tags: 'unilateral' },
           { name: 'Deadlift', instructions: 'Brace, push the floor away.' },
           { name: 'Mystery Move', muscle_group: 'wings', equipment: 'barbell' },
-          { name: '', muscle_group: 'legs' },
+          { name: '', muscle_group: 'quadriceps' },
         ],
       },
       { token: ops },
@@ -311,14 +410,14 @@ describe('bulk import', () => {
     assert.deepEqual(res.body.errors.map((e) => e.line), [3, 4]);
 
     const landmine = (await catalog('?q=Landmine')).body.items[0];
-    assert.deepEqual(landmine.secondary_muscles, ['chest', 'arms']);
+    assert.deepEqual(landmine.secondary_muscles, ['chest', 'triceps']);
     const deadlift = (await catalog('?q=Deadlift')).body.items.find((e) => e.name === 'Deadlift');
     assert.equal(deadlift.instructions, 'Brace, push the floor away.');
-    assert.equal(deadlift.muscle_group, 'back', 'columns the sheet did not carry are left alone');
+    assert.equal(deadlift.muscle_group, 'lower_back', 'columns the sheet did not carry are left alone');
   });
 
   it('caps the size of one import', async () => {
-    const rows = Array.from({ length: 1001 }, (_, i) => ({ name: `Bulk ${i}`, muscle_group: 'core' }));
+    const rows = Array.from({ length: 1001 }, (_, i) => ({ name: `Bulk ${i}`, muscle_group: 'abdominals' }));
     assert.equal((await call('POST', '/api/platform/admin/catalog/import', { rows }, { token: ops })).status, 400);
   });
 });

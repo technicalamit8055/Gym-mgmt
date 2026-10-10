@@ -271,6 +271,13 @@ export const api = {
     request('DELETE', `/platform/admin/catalog/exercises/${id}/media`, undefined, { token: platformSession.token }),
   platformImportExercises: (rows) =>
     request('POST', '/platform/admin/catalog/import', { rows }, { token: platformSession.token }),
+  // One highlighted-body picture per muscle group, for the member's filter sheet.
+  platformMuscles: () =>
+    request('GET', '/platform/admin/catalog/muscles', undefined, { token: platformSession.token }),
+  platformUploadMuscleMedia: (group, file) =>
+    uploadFile(`/platform/admin/catalog/muscles/${group}/media`, file, { token: platformSession.token }),
+  platformClearMuscleMedia: (group) =>
+    request('DELETE', `/platform/admin/catalog/muscles/${group}/media`, undefined, { token: platformSession.token }),
 
   // Platform-wide food catalogue, synced into every gym's food library.
   platformFoods: (params) =>
