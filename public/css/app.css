@@ -4804,24 +4804,93 @@ button.portal-set-prev:hover { color: var(--brand); }
 
 /* ------------------------------------------------- finish summary and PRs */
 
-.portal-summary { text-align: center; display: flex; flex-direction: column; gap: 16px; }
-.portal-summary-burst { font-size: 46px; line-height: 1; animation: summary-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1); }
-.portal-summary h3 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+.portal-summary-modal { width: min(520px, 100%); overflow: hidden; }
+.portal-summary-modal .modal-head { border-bottom: none; padding: 20px 22px 0; }
+.portal-summary-modal .modal-head h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.portal-summary-modal .modal-head .icon-btn svg { width: 22px; height: 22px; }
+.portal-summary-modal .modal-body { padding-top: 6px; }
+
+.portal-summary { text-align: center; display: flex; flex-direction: column; gap: 14px; }
+.portal-summary h3 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
+.portal-summary-sub { margin: -8px 0 6px; font-size: 14px; color: var(--muted); }
+
+/* The emoji in a soft sun, with rays and confetti fanning out behind it and a
+   warm glow bleeding into the sheet. */
+.portal-summary-hero { position: relative; height: 150px; display: grid; place-items: center; }
+.portal-summary-hero::before {
+  content: ''; position: absolute; inset: -40px 0 -20px; pointer-events: none;
+  background:
+    radial-gradient(closest-side at 32% 52%, rgba(251, 191, 36, 0.16), transparent),
+    radial-gradient(closest-side at 70% 46%, rgba(244, 63, 94, 0.09), transparent);
+}
+.portal-summary-confetti {
+  position: absolute; left: 50%; top: 50%; width: 320px; height: 160px; transform: translate(-50%, -50%);
+  overflow: visible; pointer-events: none;
+}
+.portal-summary-confetti line {
+  stroke: #facc15; stroke-width: 5; stroke-linecap: round;
+  animation: summary-ray 0.5s calc(0.12s + var(--i) * 0.025s) var(--ease) both;
+  transform-origin: 160px 82px;
+}
+/* Opacity only — a CSS transform would replace the pieces' rotate() attribute. */
+.portal-summary-confetti rect, .portal-summary-confetti circle { animation: fade 0.6s 0.25s var(--ease) both; }
+.portal-summary-burst {
+  position: relative; display: grid; place-items: center; width: 104px; height: 104px; border-radius: 50%;
+  font-size: 66px; line-height: 1;
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, #fbbf24 30%, transparent), color-mix(in srgb, #fbbf24 12%, transparent) 70%, transparent);
+  animation: summary-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
+  filter: drop-shadow(0 8px 14px rgba(245, 158, 11, 0.22));
+}
 @keyframes summary-pop {
   from { transform: scale(0.4) rotate(-12deg); opacity: 0; }
   to { transform: scale(1) rotate(0); opacity: 1; }
 }
+@keyframes summary-ray {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .portal-summary-burst { animation: none; }
+  .portal-summary-burst, .portal-summary-confetti * { animation: none; }
 }
 
-.portal-summary-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-  padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+.portal-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; text-align: left; }
+.portal-summary-stat {
+  --tone: var(--brand);
+  display: flex; align-items: center; gap: 16px; min-width: 0;
+  padding: 14px 16px; border-radius: 14px;
+  background: color-mix(in srgb, var(--tone) 8%, transparent);
 }
-.portal-summary-grid > div { display: flex; flex-direction: column; gap: 2px; }
-.portal-summary-grid strong { font-size: 15px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-.portal-summary-grid span { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.portal-summary-stat[data-tone='violet'] { --tone: var(--violet); }
+.portal-summary-stat[data-tone='blue'] { --tone: var(--blue); }
+.portal-summary-stat[data-tone='red'] { --tone: var(--red); }
+.portal-summary-stat[data-tone='green'] { --tone: var(--green); }
+.portal-summary-stat-icon {
+  flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+.portal-summary-stat > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.portal-summary-stat strong {
+  font-size: 22px; font-weight: 800; line-height: 1.15; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.portal-summary-stat > div > span { font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+
+.btn.primary.portal-summary-done {
+  display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+  min-height: 56px; margin-top: 4px; border-radius: 14px; font-size: 17px; font-weight: 700;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 82%, white), var(--brand));
+  border-color: transparent;
+  box-shadow: 0 10px 22px -10px color-mix(in srgb, var(--brand) 70%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+@media (max-width: 420px) {
+  .portal-summary-grid { gap: 10px; }
+  .portal-summary-stat { gap: 10px; padding: 12px; }
+  .portal-summary-stat-icon { width: 42px; height: 42px; }
+  .portal-summary-stat-icon svg { width: 20px; height: 20px; }
+  .portal-summary-stat strong { font-size: 19px; }
+  .portal-summary-stat > div > span { font-size: 10.5px; letter-spacing: 0.06em; }
+}
 
 .portal-summary-prs { display: flex; flex-direction: column; gap: 8px; text-align: left; }
 .portal-pr-line {
@@ -5610,12 +5679,23 @@ body[data-mode='light'] .portal-insights { --i-carbs: #f59e0b; }
 .portal-weight-readout { font-size: 12px; font-weight: 600; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .portal-summary-kcal {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px;
-  padding: 10px; border-radius: var(--radius); color: var(--green);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 14px 16px; border-radius: 14px; color: var(--green);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
 }
-.portal-summary-kcal strong { color: var(--text); font-size: 14px; }
-.portal-summary-kcal span { flex-basis: 100%; font-size: 11.5px; color: var(--muted); }
+.portal-summary-kcal-text { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.portal-summary-kcal strong {
+  display: inline-flex; align-items: center; gap: 10px;
+  color: var(--text); font-size: 21px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.portal-summary-kcal-text > span { font-size: 13.5px; color: var(--muted); }
+/* A solid flame with the inner tongue cut out in the card's colour. */
+.portal-summary-kcal-icon { display: inline-grid; color: var(--green); }
+.portal-summary-kcal-icon path:first-of-type { fill: currentColor; }
+.portal-summary-kcal-icon path:last-of-type { fill: color-mix(in srgb, var(--green) 9%, var(--surface)); stroke: none; }
+.portal-summary-ticks { flex: none; width: 26px; height: 40px; }
+.portal-summary-ticks line { stroke: color-mix(in srgb, var(--green) 65%, transparent); stroke-width: 3.5; stroke-linecap: round; }
+.portal-summary-kcal > .portal-summary-ticks:last-child { transform: scaleX(-1); }
 
 /* ------------------------------------------------------ diet settings */
 
@@ -5769,7 +5849,6 @@ body[data-mode='light'] .portal-insights { --i-carbs: #f59e0b; }
 
 @media (max-width: 480px) {
   .portal-pr-wall { grid-template-columns: 1fr; }
-  .portal-summary-grid { grid-template-columns: repeat(2, 1fr); }
   /*
    * The builders' fixed grids stop being grids on a phone: an eight-column row
    * of inputs at 360px gives every cell 30px. Each field goes full width with
@@ -5832,7 +5911,7 @@ body[data-mode='light'] .portal-insights { --i-carbs: #f59e0b; }
   position: relative; aspect-ratio: 4 / 3; overflow: hidden;
   display: grid; place-items: center; background: var(--surface-2);
 }
-.cat-preview img, .cat-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cat-preview img, .cat-preview video, .cat-preview canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cat-preview-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
 .cat-card-body { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px 13px; }
 .cat-card-name { font-size: 14px; font-weight: 700; line-height: 1.25; }

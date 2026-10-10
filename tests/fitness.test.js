@@ -526,6 +526,23 @@ describe('the paid add-on', () => {
 
     await call('PUT', '/api/fitness-addons/settings', { trial_days: 0 }, { token: adminToken });
   });
+
+  it('lets staff cancel one member’s trial early, and restore it inside the window', async () => {
+    await call('PUT', '/api/fitness-addons/settings', { trial_days: 7 }, { token: adminToken });
+    const fresh = await call('POST', '/api/members', { first_name: 'Tara', phone: '9876500111' }, { token: adminToken });
+    const url = `/api/fitness-addons/members/${fresh.body.id}`;
+
+    let res = await call('POST', `${url}/trial`, { cancelled: true }, { token: adminToken });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.has_access, false);
+    assert.equal(res.body.trial_cancelled, true);
+
+    res = await call('POST', `${url}/trial`, { cancelled: false }, { token: adminToken });
+    assert.equal(res.body.source, 'trial');
+    assert.equal(res.body.trial_ends_on, addDays(today(), 7));
+
+    await call('PUT', '/api/fitness-addons/settings', { trial_days: 0 }, { token: adminToken });
+  });
 });
 
 describe('Heavy-style workout logging in the portal', () => {

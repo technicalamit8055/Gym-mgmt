@@ -83,7 +83,7 @@ function previewBox(exercise, className = 'cat-preview') {
   return h(
     'div',
     { class: className },
-    exerciseMedia(exercise) ?? h('div', { class: 'cat-preview-empty' }, renderIcon('weight', { size: 26 })),
+    exerciseMedia(exercise, { still: true }) ?? h('div', { class: 'cat-preview-empty' }, renderIcon('weight', { size: 26 })),
   );
 }
 

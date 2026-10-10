@@ -454,6 +454,7 @@ function fitnessSection(member, { reload }) {
   }
 
   function addonBadge(access) {
+    if (!access.has_access && access.trial_cancelled) return h('span', { class: 'badge red' }, 'Trial cancelled');
     if (!access.has_access) return h('span', { class: 'badge red' }, 'Not subscribed');
     if (access.source === 'free') return h('span', { class: 'badge green' }, 'Free for all members');
     if (access.source === 'plan') return h('span', { class: 'badge blue' }, `Included with ${access.bundled_plan}`);
@@ -527,6 +528,41 @@ function fitnessSection(member, { reload }) {
                       }),
                   },
                   'Cancel',
+                )
+              : null,
+            access.source === 'trial'
+              ? h(
+                  'button',
+                  {
+                    class: 'btn sm danger',
+                    onclick: () =>
+                      confirmDialog({
+                        title: 'Cancel the free trial?',
+                        message: `${member.first_name} loses the tracker immediately and sees the upgrade screen in the member app. You can restore it until ${date(access.trial_ends_on)}.`,
+                        confirmLabel: 'Cancel trial',
+                        danger: true,
+                        onConfirm: async () => {
+                          await api.setFitnessTrialCancelled(member.id, true);
+                          toast('Trial cancelled');
+                          await load();
+                        },
+                      }),
+                  },
+                  'Cancel trial',
+                )
+              : null,
+            access.trial_cancelled && !access.has_access
+              ? h(
+                  'button',
+                  {
+                    class: 'btn sm',
+                    onclick: async () => {
+                      await api.setFitnessTrialCancelled(member.id, false);
+                      toast('Trial restored');
+                      await load();
+                    },
+                  },
+                  'Restore trial',
                 )
               : null,
           )
@@ -1098,6 +1134,28 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     );
   }
 
+  /** Hand-edit the running membership's dates — a comp, a correction, a deal. */
+  function openDatesForm(sub) {
+    openModal({
+      title: `Change ${tl('membership')} dates · ${fullName(member)}`,
+      body: buildForm(
+        [
+          { name: 'start_date', label: 'Start date', type: 'date', required: true, value: sub.start_date },
+          { name: 'end_date', label: 'End date', type: 'date', required: true, value: sub.end_date },
+        ],
+        {
+          submitLabel: 'Save dates',
+          onSubmit: async (values) => {
+            await api.updateSubscriptionDates(sub.id, { start_date: values.start_date, end_date: values.end_date });
+            closeModal();
+            toast(`${t('membership')} now runs ${date(values.start_date)} → ${date(values.end_date)}`);
+            reload();
+          },
+        },
+      ),
+    });
+  }
+
   const membershipCard = h(
     'div',
     { class: 'card md-card md-membership tone-purple' },
@@ -1174,6 +1232,11 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
                       },
                       renderIcon('play', { size: 15 }), 'Resume',
                     ),
+                h(
+                  'button',
+                  { class: 'btn sm md-soft', onclick: () => openDatesForm(shownSub) },
+                  renderIcon('calendar', { size: 15 }), 'Change dates',
+                ),
                 h(
                   'button',
                   {

@@ -213,6 +213,39 @@ export async function promptInstall() {
   return false;
 }
 
+/* ---------------------------------------------------- member Home reminder */
+
+/** The member Home's "install the app" card snoozes like push.js's
+ * notification card — longer each time "Not now" is tapped — rather than
+ * being dismissed for good the way the one-time banner below is. Scoped per
+ * gym: two gyms on one origin are two separate installs. */
+const INSTALL_PRIMER_KEY = `gymbook.install.reminder${pathPrefix ? `.${pathPrefix.slice(3)}` : ''}`;
+const INSTALL_SNOOZE_DAYS = [2, 5, 10, 21, 30];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function readInstallPrimer() {
+  try {
+    const value = JSON.parse(localStorage.getItem(INSTALL_PRIMER_KEY));
+    if (value && typeof value === 'object') return { count: Number(value.count) || 0, until: Number(value.until) || 0 };
+  } catch {
+    // Missing, unreadable or storage blocked: never snoozed.
+  }
+  return { count: 0, until: 0 };
+}
+
+/** Whether the Home install card may show now (it still needs canInstall()). */
+export const installPrimerDue = (now = Date.now()) => readInstallPrimer().until <= now;
+
+export function snoozeInstallPrimer(now = Date.now()) {
+  const { count } = readInstallPrimer();
+  const days = INSTALL_SNOOZE_DAYS[Math.min(count, INSTALL_SNOOZE_DAYS.length - 1)];
+  try {
+    localStorage.setItem(INSTALL_PRIMER_KEY, JSON.stringify({ count: count + 1, until: now + days * DAY_MS }));
+  } catch {
+    // Storage blocked: the card simply comes back next visit.
+  }
+}
+
 /* ----------------------------------------------------------------- banner */
 
 /** A one-time nudge, and only where it can be acted on. Dismissing it is

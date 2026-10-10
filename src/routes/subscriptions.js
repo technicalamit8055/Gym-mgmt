@@ -284,6 +284,62 @@ subscriptionRoutes.post('/:id/resume', requireRole(...MANAGES_BILLING), (req, re
   res.json({ ...get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]), days_credited: frozenDays });
 });
 
+/**
+ * Moves a running membership's dates by hand — a comp, a correction, a deal
+ * struck at the desk. Price and payments are left alone: changing the dates
+ * is not a re-sale.
+ *
+ * The only guard is overlap with the member's other live memberships in the
+ * same shift (a queued renewal, usually), which is the same rule a sale obeys.
+ * An end date in the past is allowed and simply expires the membership on the
+ * next sweep.
+ */
+subscriptionRoutes.patch('/:id/dates', requireRole(...MANAGES_BILLING), (req, res) => {
+  const sub = loadSubscription(req.params.id);
+  if (sub.status !== 'active' && sub.status !== 'frozen') {
+    throw badRequest('Only an active or frozen membership can have its dates changed');
+  }
+  const body = parse(req.body, {
+    start_date: { type: 'date', required: true },
+    end_date: { type: 'date', required: true },
+  });
+  if (body.end_date < body.start_date) {
+    throw badRequest('End date cannot be before the start date', { end_date: 'must be on or after the start date' });
+  }
+
+  const clash = get(
+    `SELECT start_date, end_date FROM subscriptions
+     WHERE member_id = ? AND id != ? AND status IN ('active', 'frozen') AND session_id IS ?
+       AND start_date <= ? AND end_date >= ?
+     ORDER BY start_date LIMIT 1`,
+    [sub.member_id, sub.id, sub.session_id, body.end_date, body.start_date],
+  );
+  if (clash) {
+    throw conflict(`Those dates overlap another membership (${clash.start_date} to ${clash.end_date})`);
+  }
+
+  tx(() => {
+    run('UPDATE subscriptions SET start_date = ?, end_date = ? WHERE id = ?', [body.start_date, body.end_date, sub.id]);
+    // Seat and locker ride on the membership, as in /resume.
+    if (moduleEnabled('seats')) {
+      run("UPDATE seat_allocations SET start_date = ?, end_date = ? WHERE subscription_id = ? AND status = 'active'", [
+        body.start_date,
+        body.end_date,
+        sub.id,
+      ]);
+    }
+    if (moduleEnabled('lockers')) {
+      run("UPDATE locker_allocations SET end_date = ? WHERE subscription_id = ? AND status = 'active'", [
+        body.end_date,
+        sub.id,
+      ]);
+    }
+  });
+  expireOverdueSubscriptions();
+
+  res.json(get(`${SUB_SELECT} WHERE s.id = ?`, [sub.id]));
+});
+
 subscriptionRoutes.post('/:id/cancel', requireRole(...MANAGES_BILLING), (req, res) => {
   const sub = loadSubscription(req.params.id);
   if (sub.status === 'cancelled') throw badRequest('This membership is already cancelled');

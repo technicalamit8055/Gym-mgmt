@@ -1079,7 +1079,7 @@ async function renderExerciseLibrary(reload) {
       {
         label: '',
         render: (r) =>
-          exerciseMedia(r, { className: 'fit-lib-thumb' }) ?? h('div', { class: 'fit-lib-thumb' }),
+          exerciseMedia(r, { className: 'fit-lib-thumb', still: true }) ?? h('div', { class: 'fit-lib-thumb' }),
       },
       { label: 'Exercise', render: (r) => h('strong', {}, r.name) },
       { label: 'Muscle', render: (r) => h('span', { class: 'badge grey' }, labelOf(MUSCLE_GROUPS, r.muscle_group)) },

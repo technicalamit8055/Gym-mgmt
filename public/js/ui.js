@@ -230,6 +230,18 @@ const ICONS = {
   ],
   search: [{ tag: 'circle', cx: 11, cy: 11, r: 8 }, 'm21 21-4.3-4.3'],
   refresh: ['M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5'],
+  // Two arrows chasing each other — "reps" on the workout summary.
+  refreshCw: [
+    'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8',
+    'M21 3v5h-5',
+    'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16',
+    'M8 16H3v5',
+  ],
+  layers: [
+    'M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z',
+    'm22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65',
+    'm22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65',
+  ],
   check: ['M20 6 9 17l-5-5'],
   close: ['M18 6 6 18', 'm6 6 12 12'],
   print: [
@@ -1166,21 +1178,40 @@ export function openModal({ title, subtitle, icon, className, body, footer, wide
  * An exercise's demo — image, GIF or looping clip — or null when it has none,
  * so a caller can `?? fallback`. A clip plays muted and inline: browsers only
  * autoplay video that is both, and a demo must never grab the sound.
+ *
+ * `still` is for thumbnails in a list: a clip shows its first frame and a GIF
+ * its first frame on a canvas, so a screen of rows isn't decoding a dozen
+ * animations at once. The demo only moves once the member opens it.
  */
-export function exerciseMedia(item, { className = '' } = {}) {
+export function exerciseMedia(item, { className = '', still = false } = {}) {
   if (!item?.media_url) return null;
   if (item.media_type === 'video') {
+    // "#t=0.001" makes mobile browsers paint the first frame of a clip that
+    // never plays; without it a paused <video> is often a blank box.
+    const src = still && !item.media_url.includes('#') ? `${item.media_url}#t=0.001` : item.media_url;
     const video = h('video', {
       class: className,
-      src: item.media_url,
+      src,
       loop: '',
       playsinline: '',
       preload: 'metadata',
       'aria-hidden': 'true',
     });
     video.muted = true;
-    video.autoplay = true;
+    video.autoplay = !still;
     return video;
+  }
+  if (still && item.media_type === 'gif') {
+    const canvas = h('canvas', { class: className, 'aria-hidden': 'true' });
+    const frame = new Image();
+    frame.decoding = 'async';
+    frame.onload = () => {
+      canvas.width = frame.naturalWidth;
+      canvas.height = frame.naturalHeight;
+      canvas.getContext('2d')?.drawImage(frame, 0, 0);
+    };
+    frame.src = item.media_url;
+    return canvas;
   }
   return h('img', { class: className, src: item.media_url, alt: '', loading: 'lazy', decoding: 'async' });
 }

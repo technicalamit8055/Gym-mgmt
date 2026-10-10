@@ -1242,6 +1242,11 @@ const MIGRATIONS = [
   (db) => ensureColumn(db, 'food_library', 'catalog_id', 'INTEGER'),
   (db) => ensureColumn(db, 'food_library', 'verified', 'INTEGER NOT NULL DEFAULT 0'),
   (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_food_library_catalog ON food_library(catalog_id) WHERE catalog_id IS NOT NULL'),
+
+  /* ------------------------------------------- Per-member add-on trial cut --- */
+  // Set when staff end a member's free tracker trial early. NULL means the
+  // gym-wide trial applies as usual (see fitnessAccessFor() in src/fitness.js).
+  (db) => ensureColumn(db, 'members', 'fitness_trial_cancelled_at', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

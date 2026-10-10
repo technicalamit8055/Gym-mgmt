@@ -311,6 +311,7 @@ export const api = {
   freezeSubscription: (id) => request('POST', `/subscriptions/${id}/freeze`),
   resumeSubscription: (id) => request('POST', `/subscriptions/${id}/resume`),
   cancelSubscription: (id) => request('POST', `/subscriptions/${id}/cancel`),
+  updateSubscriptionDates: (id, payload) => request('PATCH', `/subscriptions/${id}/dates`, payload),
 
   payments: (params) => request('GET', `/payments${query(params)}`),
   createPayment: (payload) => request('POST', '/payments', payload),
@@ -482,6 +483,8 @@ export const api = {
   memberFitnessAddon: (memberId) => request('GET', `/fitness-addons/members/${memberId}`),
   sellFitnessAddon: (payload) => request('POST', '/fitness-addons/subscribe', payload),
   cancelFitnessAddon: (id) => request('POST', `/fitness-addons/cancel/${id}`),
+  setFitnessTrialCancelled: (memberId, cancelled) =>
+    request('POST', `/fitness-addons/members/${memberId}/trial`, { cancelled }),
 
   // Member self-service portal. `anonymous` on login: a stale member token
   // from a previous member on this device must not turn a fresh sign-in

@@ -10,22 +10,39 @@
  */
 
 let vertical = 'gym';
-let currentLibraryTheme = localStorage.getItem('library_theme') || 'emerald';
-let currentGymTheme = localStorage.getItem('gym_theme') || 'flame';
 let currentMode = localStorage.getItem('app_mode') || 'dark';
 
+const DEFAULT_THEME = { gym: 'flame', library: 'emerald' };
+
 /**
- * `theme` is the palette the owner saved on the gym (see publicTenant in
- * src/routes/platform.js), so every device — staff app and member portal —
- * paints the same. localStorage only caches it for the next first paint; it
- * is used on its own only when the server sent none (no gym, or offline).
+ * The palette the owner saved on this gym (see publicTenant in
+ * src/routes/platform.js), so its staff app and member portal paint the same
+ * on every device. Held in memory only, never localStorage: storage is per
+ * origin, and the landing page, the operator console and — in path mode —
+ * every other gym share this one, so a cached palette would leak into them.
+ * Null means no gym is loaded, and the default palette stands.
  */
+let gymTheme = null;
+/** Set while a platform-owned page (landing, signup, operator console) is on
+ * screen: those are GymBook's own pages and never wear a gym's palette. */
+let platformPage = false;
+
+function paintTheme() {
+  document.body.dataset.theme = (!platformPage && gymTheme) || DEFAULT_THEME[vertical];
+}
+
 export function setVertical(type, theme) {
   vertical = type === 'library' ? 'library' : 'gym';
+  gymTheme = theme || null;
   document.body.dataset.vertical = vertical;
   document.body.dataset.mode = currentMode;
-  if (theme) setAppTheme(theme);
-  else document.body.dataset.theme = getAppTheme();
+  paintTheme();
+}
+
+/** Called by the router on every page change. */
+export function usePlatformTheme(on) {
+  platformPage = Boolean(on);
+  paintTheme();
 }
 
 export function setAppMode(mode) {
@@ -43,24 +60,24 @@ export function toggleAppMode() {
   return currentMode;
 }
 
+/** This gym's palette, after the owner saved a new one. */
 export function setAppTheme(theme) {
-  if (vertical === 'library') {
-    currentLibraryTheme = theme || 'emerald';
-    localStorage.setItem('library_theme', currentLibraryTheme);
-    document.body.dataset.theme = currentLibraryTheme;
-  } else {
-    currentGymTheme = theme || 'flame';
-    localStorage.setItem('gym_theme', currentGymTheme);
-    document.body.dataset.theme = currentGymTheme;
-  }
+  gymTheme = theme || null;
+  paintTheme();
 }
 
 export function getAppTheme() {
-  return vertical === 'library' ? currentLibraryTheme : currentGymTheme;
+  return gymTheme || DEFAULT_THEME[vertical];
 }
 
-export function setLibraryTheme(theme) { setAppTheme(theme); }
-export function getLibraryTheme() { return getAppTheme(); }
+// Clear the palettes earlier builds cached per browser, so nothing is left
+// that could be mistaken for a live setting.
+try {
+  localStorage.removeItem('gym_theme');
+  localStorage.removeItem('library_theme');
+} catch {
+  // Storage blocked: nothing was cached either.
+}
 
 export const isLibrary = () => vertical === 'library';
 

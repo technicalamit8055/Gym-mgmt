@@ -13,7 +13,16 @@ import {
   onFullscreenChange,
 } from './ui.js';
 import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
-import { getAppMode, getAppTheme, isLibrary, setAppTheme, setVertical, t, toggleAppMode } from './vertical.js';
+import {
+  getAppMode,
+  getAppTheme,
+  isLibrary,
+  setAppTheme,
+  setVertical,
+  t,
+  toggleAppMode,
+  usePlatformTheme,
+} from './vertical.js';
 import { renderLanding } from './views/landing.js';
 import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderSignup } from './views/signup.js';
@@ -182,11 +191,12 @@ const PUBLIC_ROUTES = [
   {
     pattern: /^\/?$/,
     landing: true,
+    platformOwned: true,
     title: () => (landingBrand === 'library' ? 'SeatBook — Study Hall Management' : 'GymBook — Gym Management'),
     view: (ctx) => (landingBrand === 'library' ? renderLandingLibrary(ctx) : renderLanding(ctx)),
   },
-  { pattern: /^\/signup$/, title: 'Set up your account', view: renderSignup },
-  { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole },
+  { pattern: /^\/signup$/, title: 'Set up your account', view: renderSignup, platformOwned: true },
+  { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole, platformOwned: true },
   // Public by necessity — someone redeeming a reset link cannot sign in. The
   // pattern allows the trailing `?token=…` the link carries in the hash.
   { pattern: /^\/reset(\?|$)/, title: 'Set a new password', view: renderReset },
@@ -796,6 +806,10 @@ async function dispatch() {
   // domain wants their dashboard too rather than bouncing off their own
   // marketing page on every reload. Signup and the console are always public.
   const skipLanding = publicRoute?.landing && Boolean(platform.tenant || session.token);
+
+  // GymBook's own pages keep the default palette even under a gym's address;
+  // everything else here — staff app, login, member portal — wears the gym's.
+  usePlatformTheme(publicRoute?.platformOwned && !skipLanding);
 
   if (publicRoute && !skipLanding) {
     await renderPublicRoute(publicRoute);

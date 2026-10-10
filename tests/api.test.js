@@ -344,6 +344,35 @@ describe('freeze and resume', () => {
   });
 });
 
+describe('changing membership dates', () => {
+  it('moves the dates of a running membership', async () => {
+    const res = await call('PATCH', '/api/subscriptions/1/dates', {
+      start_date: addDays(today(), -5),
+      end_date: addDays(today(), 10),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.start_date, addDays(today(), -5));
+    assert.equal(res.body.end_date, addDays(today(), 10));
+    assert.equal(res.body.status, 'active');
+  });
+
+  it('refuses an end date before the start', async () => {
+    const res = await call('PATCH', '/api/subscriptions/1/dates', { start_date: today(), end_date: addDays(today(), -1) });
+    assert.equal(res.status, 400);
+  });
+
+  it('refuses dates that run into the queued renewal', async () => {
+    // Membership 2 is the renewal starting the day after the original end.
+    const res = await call('PATCH', '/api/subscriptions/1/dates', { start_date: today(), end_date: addDays(today(), 40) });
+    assert.equal(res.status, 409);
+  });
+
+  it('puts the original dates back', async () => {
+    const res = await call('PATCH', '/api/subscriptions/1/dates', { start_date: today(), end_date: addDays(today(), 29) });
+    assert.equal(res.status, 200);
+  });
+});
+
 describe('classes and bookings', () => {
   const nextMonday = () => {
     let candidate = today();

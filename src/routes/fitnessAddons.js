@@ -179,6 +179,25 @@ fitnessAddonRoutes.post('/cancel/:id', requireRole(...MANAGES_BILLING), (req, re
   });
 });
 
+/**
+ * Ends one member's free trial early, or puts it back.
+ *
+ * Restoring only reopens the original window (join date + trial_days); it never
+ * starts a fresh trial, for the same reason the trial is anchored on the join
+ * date in the first place.
+ */
+fitnessAddonRoutes.post('/members/:memberId/trial', requireRole(...MANAGES_BILLING), (req, res) => {
+  const memberId = Number(req.params.memberId);
+  if (!get('SELECT id FROM members WHERE id = ?', [memberId])) throw notFound('Member not found');
+  const body = parse(req.body, { cancelled: { type: 'boolean', required: true } });
+
+  run(
+    "UPDATE members SET fitness_trial_cancelled_at = ?, updated_at = datetime('now') WHERE id = ?",
+    [body.cancelled ? today() : null, memberId],
+  );
+  res.json(fitnessAccessFor(memberId));
+});
+
 /** The add-on's own revenue line, kept separate from membership takings. */
 fitnessAddonRoutes.get('/revenue', (req, res) => {
   const months = Math.min(toInt(req.query.months, 6), 24);

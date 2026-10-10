@@ -24,7 +24,7 @@ import {
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { cropAndResizeImage } from '../photo.js';
-import { canInstall, isIos, onInstallChange, promptInstall } from '../pwa.js';
+import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
 import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
@@ -406,7 +406,7 @@ function exerciseDemoBody(exercise) {
 function exerciseThumbButton(exercise) {
   const bundled = EXERCISE_THUMBS[exercise.exercise_name.trim().toLowerCase()];
   const media =
-    exerciseMedia(exercise, { className: 'portal-ex-thumb-media' }) ??
+    exerciseMedia(exercise, { className: 'portal-ex-thumb-media', still: true }) ??
     (bundled ? h('img', { class: 'portal-ex-thumb-media', src: `/images/workout/ex-${bundled}.png`, alt: '' }) : null);
   return h(
     'button',
@@ -524,7 +524,7 @@ const recentExercises = {
 function pickerThumb(item) {
   const bundled = EXERCISE_THUMBS[item.name.trim().toLowerCase()];
   return (
-    exerciseMedia(item, { className: 'portal-pick-thumb' }) ??
+    exerciseMedia(item, { className: 'portal-pick-thumb', still: true }) ??
     (bundled
       ? h('img', { class: 'portal-pick-thumb', src: `/images/workout/ex-${bundled}.png`, alt: '', loading: 'lazy' })
       : h('span', { class: 'portal-pick-thumb is-empty' }, renderIcon('weight', { size: 22 })))
@@ -570,7 +570,7 @@ function routineExerciseRow(exercise) {
     'button',
     { class: 'portal-routine-row', type: 'button', onclick: () => openExerciseDemo(exercise) },
     // The operator's demo wins; the bundled picture covers an exercise that has none yet.
-    exerciseMedia(exercise, { className: 'portal-routine-thumb' }) ??
+    exerciseMedia(exercise, { className: 'portal-routine-thumb', still: true }) ??
       (thumb
         ? h('img', { class: 'portal-routine-thumb', src: `/images/workout/ex-${thumb}.png`, alt: '', width: 88, height: 44, loading: 'lazy' })
         : h('span', { class: 'portal-routine-thumb is-empty' }, renderIcon('weight', { size: 20 }))),
@@ -1401,6 +1401,29 @@ const REST_PRESETS = [30, 60, 90, 120, 180];
 const UNIT_KEY = 'gymbook.portal.weightUnit';
 const LB_PER_KG = 2.20462;
 
+/** The open tab, so a reload — the browser's pull-to-refresh, most often —
+ * lands back where the member was instead of on Home. sessionStorage, not
+ * localStorage: it survives a reload but not closing the app, so a fresh
+ * launch still opens on Home. */
+const LAST_TAB_KEY = 'gymbook.portal.lastTab';
+
+const lastTab = {
+  get() {
+    try {
+      return sessionStorage.getItem(LAST_TAB_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set(key) {
+    try {
+      sessionStorage.setItem(LAST_TAB_KEY, key);
+    } catch {
+      // Storage blocked: a reload just starts on Home again.
+    }
+  },
+};
+
 const weightUnit = {
   get() {
     try {
@@ -1460,6 +1483,50 @@ const clockFrom = (seconds) => {
 };
 
 const minutesLabel = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
+
+/** The burst of rays and confetti around the workout summary's emoji. Rays are
+ * [angle°, inner radius, outer radius] about the emoji's centre. */
+function summaryConfetti() {
+  const cx = 160;
+  const cy = 82;
+  const at = (deg, r) => [cx + r * Math.cos((deg * Math.PI) / 180), cy + r * Math.sin((deg * Math.PI) / 180)];
+  const rays = [
+    [-118, 70, 92], [-148, 66, 84], [180, 72, 76], [155, 66, 84], [126, 74, 78],
+    [-66, 84, 89], [-38, 70, 94], [0, 70, 74], [22, 66, 82], [54, 74, 78],
+  ];
+  const piece = (deg, r, w, len, rotate, fill) => {
+    const [x, y] = at(deg, r);
+    return svg('rect', {
+      x: x - w / 2, y: y - len / 2, width: w, height: len, rx: w / 2, fill,
+      transform: `rotate(${rotate} ${x} ${y})`,
+    });
+  };
+  const [dotX, dotY] = at(168, 128);
+  return svg(
+    'svg',
+    { class: 'portal-summary-confetti', viewBox: '0 0 320 160', 'aria-hidden': 'true', focusable: 'false' },
+    ...rays.map(([deg, r1, r2], i) => {
+      const [x1, y1] = at(deg, r1);
+      const [x2, y2] = at(deg, r2);
+      return svg('line', { x1, y1, x2, y2, style: `--i:${i}` });
+    }),
+    piece(-158, 112, 8, 15, -30, '#22c55e'),
+    piece(-24, 116, 7, 15, 28, '#f59e0b'),
+    piece(14, 138, 7, 15, -52, '#3b82f6'),
+    svg('circle', { cx: dotX, cy: dotY, r: 5, fill: '#f43f5e' }),
+  );
+}
+
+/** Three short strokes either side of the kcal card — the right-hand copy is
+ * mirrored in CSS. */
+const summaryTicks = () =>
+  svg(
+    'svg',
+    { class: 'portal-summary-ticks', viewBox: '0 0 32 48', 'aria-hidden': 'true', focusable: 'false' },
+    svg('line', { x1: 18, y1: 5, x2: 24, y2: 15 }),
+    svg('line', { x1: 3, y1: 23, x2: 15, y2: 26 }),
+    svg('line', { x1: 18, y1: 43, x2: 24, y2: 37 }),
+  );
 
 /** Epley, mirroring estimate1rm() in src/fitness.js — shown live as the member
  * types, which is why it cannot wait for a round trip. */
@@ -4457,6 +4524,7 @@ function renderPortalApp(ctx, initialMe) {
     }
     stopTicking();
     active = key;
+    lastTab.set(key);
     paintTabbar();
     topbarSub.textContent = TOPBAR_SUBTITLES[key] ?? '';
     content.classList.remove('is-refresh');
@@ -4755,6 +4823,7 @@ function renderPortalApp(ctx, initialMe) {
       ),
       heroCard,
       pushPrimerSlot(),
+      installPrimerSlot(),
       quickActions,
       todaysFocus,
       statsRow,
@@ -5605,28 +5674,56 @@ function renderPortalApp(ctx, initialMe) {
     }
 
     function openSummary(res) {
+      const stat = (tone, icon, value, label) =>
+        h(
+          'div',
+          { class: 'portal-summary-stat', 'data-tone': tone },
+          h('span', { class: 'portal-summary-stat-icon' }, renderIcon(icon, { size: 24, stroke: 2.4 })),
+          h('div', {}, h('strong', {}, value), h('span', {}, label)),
+        );
       openModal({
         title: 'Workout complete',
+        className: 'portal-summary-modal',
         body: h(
           'div',
           { class: 'portal-summary' },
-          h('div', { class: 'portal-summary-burst' }, res.prs.length ? '🏆' : '💪'),
+          h(
+            'div',
+            { class: 'portal-summary-hero' },
+            summaryConfetti(),
+            h('div', { class: 'portal-summary-burst' }, res.prs.length ? '🏆' : '💪'),
+          ),
           h('h3', {}, res.prs.length ? `${res.prs.length} new personal record${res.prs.length === 1 ? '' : 's'}!` : 'Session logged'),
+          h(
+            'p',
+            { class: 'portal-summary-sub' },
+            res.prs.length ? 'You beat your best. Great job!' : 'Great job! You’ve completed your workout.',
+          ),
           h(
             'div',
             { class: 'portal-summary-grid' },
-            h('div', {}, h('strong', {}, weightLabel(res.log.total_volume_kg)), h('span', {}, 'volume')),
-            h('div', {}, h('strong', {}, String(res.log.total_sets)), h('span', {}, 'sets')),
-            h('div', {}, h('strong', {}, String(res.log.total_reps)), h('span', {}, 'reps')),
-            h('div', {}, h('strong', {}, minutesLabel(res.log.duration_seconds)), h('span', {}, 'duration')),
+            stat('violet', 'weight', weightLabel(res.log.total_volume_kg), 'volume'),
+            stat('blue', 'layers', String(res.log.total_sets), 'sets'),
+            stat('red', 'refreshCw', String(res.log.total_reps), 'reps'),
+            stat('green', 'clock', minutesLabel(res.log.duration_seconds), 'duration'),
           ),
           res.log.calories_burned
             ? h(
                 'div',
                 { class: 'portal-summary-kcal' },
-                renderIcon('flame', { size: 16, stroke: 2.2 }),
-                h('strong', {}, `~${res.log.calories_burned} kcal burned`),
-                h('span', {}, 'counted on your Diet tab'),
+                summaryTicks(),
+                h(
+                  'div',
+                  { class: 'portal-summary-kcal-text' },
+                  h(
+                    'strong',
+                    {},
+                    h('span', { class: 'portal-summary-kcal-icon' }, renderIcon('flame', { size: 26, stroke: 1.6 })),
+                    `~${res.log.calories_burned} kcal burned`,
+                  ),
+                  h('span', {}, 'counted on your Diet tab'),
+                ),
+                summaryTicks(),
               )
             : null,
           res.prs.length
@@ -5651,7 +5748,12 @@ function renderPortalApp(ctx, initialMe) {
                 ),
               )
             : null,
-          h('button', { class: 'btn primary block', type: 'button', onclick: closeModal }, 'Done'),
+          h(
+            'button',
+            { class: 'btn primary block portal-summary-done', type: 'button', onclick: closeModal },
+            'Done',
+            renderIcon('arrowRight', { size: 20, stroke: 2.2 }),
+          ),
         ),
       });
     }
@@ -7554,6 +7656,100 @@ function renderPortalApp(ctx, initialMe) {
     return card;
   }
 
+  /**
+   * Home's "install the app" card, for members still using the portal in a
+   * browser tab. Shown only where an install can actually happen (canInstall():
+   * Chrome has offered its install prompt, or Safari on iPhone/iPad) — Chrome
+   * stops offering it once the app is installed, so a member who installed
+   * and then opened a link in the browser is not nagged.
+   *
+   * Live rather than decided once: Chrome's beforeinstallprompt often lands
+   * after Home has rendered, and appinstalled should take the card away.
+   *
+   * Steps aside on an iPhone when the notification card is already asking
+   * for the same Home Screen install, so Home never shows two of them.
+   */
+  function installPrimerSlot() {
+    const slot = h('div', { class: 'portal-push-slot' });
+    if (!installPrimerDue()) return slot;
+    if (push.pushCapability() === 'ios-install' && push.primerDue()) return slot;
+
+    let card = null;
+    let unsubscribe = null;
+    const detach = () => {
+      unsubscribe?.();
+      unsubscribe = null;
+    };
+    unsubscribe = onInstallChange((available) => {
+      // A refreshed Home replaces this slot without a tab switch, so the
+      // cleanup below never runs for it — let go once it has left the page.
+      if (card && !slot.isConnected) return detach();
+      if (available && !card) slot.append((card = installPrimerCard(() => detach())));
+      else if (!available && card) {
+        card.remove();
+        card = null;
+      }
+    });
+    registerCleanup(detach);
+    return slot;
+  }
+
+  function installPrimerCard(onDone) {
+    const name = gymDisplayName(ctx);
+    const ios = isIos();
+    const card = h(
+      'div',
+      { class: 'portal-push-primer is-install' },
+      h('span', { class: 'portal-push-primer-ico' }, renderIcon('download', { size: 22 })),
+      h(
+        'div',
+        { class: 'portal-push-primer-text' },
+        h('strong', {}, ios ? `Add ${name} to your Home Screen` : `Install the ${name} app`),
+        h(
+          'span',
+          {},
+          isLibrary()
+            ? 'Opens full screen in one tap, with your seat pass always ready at the desk.'
+            : 'Opens full screen in one tap, with your gym pass always ready at the door.',
+        ),
+      ),
+      h(
+        'div',
+        { class: 'portal-push-primer-actions' },
+        h(
+          'button',
+          {
+            class: 'btn sm primary',
+            type: 'button',
+            onclick: async () => {
+              // iOS only gets the how-to modal back, so the card stays until
+              // the app is opened from the Home Screen (or "Not now").
+              if (await promptInstall()) {
+                card.remove();
+                onDone();
+              }
+            },
+          },
+          ios ? 'Show me how' : 'Install',
+        ),
+        h(
+          'button',
+          {
+            class: 'btn sm ghost',
+            type: 'button',
+            onclick: () => {
+              snoozeInstallPrimer();
+              card.remove();
+              onDone();
+            },
+          },
+          'Not now',
+        ),
+      ),
+    );
+    return card;
+  }
+
   const PUSH_UNAVAILABLE = {
     denied: {
       title: 'Notifications are blocked',
@@ -8082,7 +8278,8 @@ function renderPortalApp(ctx, initialMe) {
   const requested = window.location.hash.replace(/^#\/portal\/?/, '').split(/[/?]/)[0];
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
   const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
-  switchTab(reachable.has(requested) ? requested : 'home');
+  const restored = lastTab.get();
+  switchTab(reachable.has(requested) ? requested : reachable.has(restored) ? restored : 'home');
   if (requested === 'notifications') openNotificationCenter();
 
   return h('div', { class: 'portal-frame' }, h('div', { class: 'portal-app' }, topbar, content, tabbar));

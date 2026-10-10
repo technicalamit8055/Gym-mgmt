@@ -109,10 +109,13 @@ export function fitnessAccessFor(memberId) {
   );
 
   // Anchored on the join date, so a trial is a welcome offer rather than
-  // something a member can restart by clicking around.
-  const member = get('SELECT joined_on FROM members WHERE id = ?', [memberId]);
+  // something a member can restart by clicking around. Staff can still end it
+  // early for one member, which is the only way it closes before its date.
+  const member = get('SELECT joined_on, fitness_trial_cancelled_at FROM members WHERE id = ?', [memberId]);
   const trialEndsOn = settings.trial_days > 0 && member ? addDays(member.joined_on, settings.trial_days) : null;
-  const onTrial = Boolean(trialEndsOn) && today() <= trialEndsOn;
+  const inTrialWindow = Boolean(trialEndsOn) && today() <= trialEndsOn;
+  const trialCancelled = Boolean(member?.fitness_trial_cancelled_at);
+  const onTrial = inTrialWindow && !trialCancelled;
 
   let source = null;
   if (!settings.enabled) source = 'free';
@@ -127,6 +130,9 @@ export function fitnessAccessFor(memberId) {
     is_bundled: Boolean(bundled),
     bundled_plan: bundled?.plan_name ?? null,
     trial_ends_on: onTrial ? trialEndsOn : null,
+    // A cancelled trial whose window is still open, so the console can offer
+    // to put it back.
+    trial_cancelled: inTrialWindow && trialCancelled,
     settings: {
       enabled: settings.enabled,
       monthly_price: settings.monthly_price,
