@@ -5,7 +5,6 @@ import { ATTENDANCE_SELECT, publicVisit } from '../checkin.js';
 import { all, get, getBusinessType, run, tx } from '../db.js';
 import { badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
 import {
-  DEFAULT_DIET_TARGETS,
   MEAL_TYPES,
   MUSCLE_GROUPS,
   SET_TYPES,
@@ -16,7 +15,25 @@ import {
   recordPersonalRecords,
   summariseSets,
 } from '../fitness.js';
+import { insertBarcodeFood, libraryFoodByBarcode, lookupBarcode, normaliseBarcode } from '../foodBarcode.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
+import {
+  ACTIVITY_KEYS,
+  ACTIVITY_LEVELS,
+  ACTIVITY_TYPES,
+  ADDBACK_OPTIONS,
+  NUTRITION_GOALS,
+  SEXES,
+  TRAINING_INTENSITIES,
+  activityCalories,
+  ageOn,
+  effectiveDietTargets,
+  exerciseForDay,
+  nutritionProfile,
+  suggestTargets,
+  weightOn,
+  workoutCalories,
+} from '../nutrition.js';
 import { setMemberPhoto } from '../photo.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { dietPlanTree } from './diets.js';
@@ -763,12 +780,23 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
   // to that morning, not to the day before (see the header of src/db.js).
   const logDate = today();
 
+  // Costed now, at today's body weight, so a later weigh-in cannot rewrite
+  // what this session earned on the Diet tab (see src/nutrition.js).
+  const rpes = sets.filter((s) => s.completed && s.rpe !== null).map((s) => s.rpe);
+  const caloriesBurned = workoutCalories({
+    duration_seconds: body.duration_seconds,
+    total_sets: totals.total_sets,
+    avg_rpe: rpes.length ? rpes.reduce((a, b) => a + b, 0) / rpes.length : null,
+    weight_kg: weightOn(req.member.id, logDate),
+    intensity: nutritionProfile(req.member.id).training_intensity,
+  });
+
   const result = tx(() => {
     const logId = run(
       `INSERT INTO workout_logs
          (member_id, plan_id, day_id, workout_name, log_date, started_at, ended_at,
-          duration_seconds, total_volume_kg, total_sets, total_reps, notes)
-       VALUES (?, ?, ?, ?, ?, datetime('now', '-' || ? || ' seconds'), datetime('now'), ?, ?, ?, ?, ?)`,
+          duration_seconds, total_volume_kg, total_sets, total_reps, notes, calories_burned)
+       VALUES (?, ?, ?, ?, ?, datetime('now', '-' || ? || ' seconds'), datetime('now'), ?, ?, ?, ?, ?, ?)`,
       [
         req.member.id,
         body.plan_id ?? null,
@@ -781,6 +809,7 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
         totals.total_sets,
         totals.total_reps,
         body.notes ?? null,
+        caloriesBurned,
       ],
     ).lastInsertRowid;
 
@@ -917,20 +946,17 @@ portalRoutes.get('/diets/current', requireMemberAuth, requireModule('fitness'), 
     [req.member.id],
   );
   const plan = assignment ? dietPlanTree(assignment.plan_id) : null;
+  const effective = effectiveDietTargets(req.member.id);
 
   res.json({
     assignment: assignment ?? null,
+    // The trainer's plan is still sent when the member follows their own
+    // targets: its meals stay useful as suggestions either way.
     plan,
-    targets: plan
-      ? {
-          target_calories: plan.target_calories,
-          target_protein_g: plan.target_protein_g,
-          target_carbs_g: plan.target_carbs_g,
-          target_fats_g: plan.target_fats_g,
-          target_water_ml: plan.target_water_ml,
-        }
-      : DEFAULT_DIET_TARGETS,
-    using_default_targets: !plan,
+    targets: effective.targets,
+    target_source: effective.source,
+    exercise_addback_pct: effective.exercise_addback_pct,
+    using_default_targets: effective.source === 'default',
   });
 });
 
@@ -958,15 +984,89 @@ portalRoutes.get('/diets/daily', requireMemberAuth, requireModule('fitness'), re
       protein_g: Math.round((acc.protein_g + entry.protein_g) * 10) / 10,
       carbs_g: Math.round((acc.carbs_g + entry.carbs_g) * 10) / 10,
       fats_g: Math.round((acc.fats_g + entry.fats_g) * 10) / 10,
+      fiber_g: Math.round((acc.fiber_g + entry.fiber_g) * 10) / 10,
+      sugar_g: Math.round((acc.sugar_g + entry.sugar_g) * 10) / 10,
     }),
-    { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 },
+    { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0, fiber_g: 0, sugar_g: 0 },
   );
 
   const meals = {};
   for (const type of MEAL_TYPES) meals[type] = [];
   for (const entry of entries) meals[entry.meal_type]?.push(entry);
 
-  res.json({ log_date: logDate, water_ml: log?.water_ml ?? 0, entries, meals, totals });
+  // MyFitnessPal's equation: goal − food + exercise = remaining, where the
+  // exercise term is only the share the member chose to eat back.
+  const { targets, exercise_addback_pct: addback } = effectiveDietTargets(req.member.id);
+  const exercise = exerciseForDay(req.member.id, logDate);
+  const credited = Math.round((exercise.total_burned * addback) / 100);
+
+  res.json({
+    log_date: logDate,
+    water_ml: log?.water_ml ?? 0,
+    entries,
+    meals,
+    totals,
+    exercise: { ...exercise, addback_pct: addback, credited },
+    budget: {
+      goal: targets.target_calories,
+      food: totals.calories,
+      exercise: credited,
+      remaining: targets.target_calories - totals.calories + credited,
+    },
+  });
+});
+
+/**
+ * Day-by-day totals for the insights screen's week view, oldest first, with
+ * each day's budget (today's goal plus that day's credited exercise). Days
+ * with nothing logged are included as zeros so the chart has no gaps.
+ *
+ * The goal is the member's current one: targets are not versioned, and a
+ * week is short enough for that to be the honest comparison.
+ */
+portalRoutes.get('/diets/summary', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const end = req.query.end ? String(req.query.end) : today();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) throw badRequest('Pick a date formatted YYYY-MM-DD', { end: 'is not a date' });
+  const count = Math.min(Math.max(toInt(req.query.days, 7), 1), 31);
+  const start = addDays(end, -(count - 1));
+
+  const rows = all(
+    `SELECT dl.log_date, dl.water_ml,
+            COALESCE(SUM(e.calories), 0) AS calories,
+            ROUND(COALESCE(SUM(e.protein_g), 0), 1) AS protein_g,
+            ROUND(COALESCE(SUM(e.carbs_g), 0), 1) AS carbs_g,
+            ROUND(COALESCE(SUM(e.fats_g), 0), 1) AS fats_g,
+            ROUND(COALESCE(SUM(e.fiber_g), 0), 1) AS fiber_g,
+            ROUND(COALESCE(SUM(e.sugar_g), 0), 1) AS sugar_g,
+            COUNT(e.id) AS entry_count
+     FROM diet_logs dl LEFT JOIN diet_log_entries e ON e.diet_log_id = dl.id
+     WHERE dl.member_id = ? AND dl.log_date BETWEEN ? AND ?
+     GROUP BY dl.id`,
+    [req.member.id, start, end],
+  );
+  const byDate = new Map(rows.map((r) => [r.log_date, r]));
+  const { targets, exercise_addback_pct: addback } = effectiveDietTargets(req.member.id);
+
+  const days = Array.from({ length: count }, (_, i) => {
+    const logDate = addDays(start, i);
+    const row = byDate.get(logDate);
+    const burned = exerciseForDay(req.member.id, logDate).total_burned;
+    return {
+      log_date: logDate,
+      calories: row?.calories ?? 0,
+      protein_g: row?.protein_g ?? 0,
+      carbs_g: row?.carbs_g ?? 0,
+      fats_g: row?.fats_g ?? 0,
+      fiber_g: row?.fiber_g ?? 0,
+      sugar_g: row?.sugar_g ?? 0,
+      water_ml: row?.water_ml ?? 0,
+      entry_count: row?.entry_count ?? 0,
+      burned,
+      budget: targets.target_calories + Math.round((burned * addback) / 100),
+    };
+  });
+
+  res.json({ days, targets });
 });
 
 portalRoutes.post('/diets/entries', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
@@ -980,6 +1080,8 @@ portalRoutes.post('/diets/entries', requireMemberAuth, requireModule('fitness'),
     protein_g: { type: 'number', min: 0, max: 2000 },
     carbs_g: { type: 'number', min: 0, max: 2000 },
     fats_g: { type: 'number', min: 0, max: 2000 },
+    fiber_g: { type: 'number', min: 0, max: 500 },
+    sugar_g: { type: 'number', min: 0, max: 2000 },
     log_date: { type: 'date', default: today() },
   });
 
@@ -1000,6 +1102,8 @@ portalRoutes.post('/diets/entries', requireMemberAuth, requireModule('fitness'),
       protein_g: Math.round(food.protein_g * body.quantity * 10) / 10,
       carbs_g: Math.round(food.carbs_g * body.quantity * 10) / 10,
       fats_g: Math.round(food.fats_g * body.quantity * 10) / 10,
+      fiber_g: Math.round(food.fiber_g * body.quantity * 10) / 10,
+      sugar_g: Math.round(food.sugar_g * body.quantity * 10) / 10,
     };
   } else {
     if (!body.food_name) throw badRequest('Name the food or pick one from the library', { food_name: 'is required' });
@@ -1012,15 +1116,29 @@ portalRoutes.post('/diets/entries', requireMemberAuth, requireModule('fitness'),
       protein_g: body.protein_g ?? 0,
       carbs_g: body.carbs_g ?? 0,
       fats_g: body.fats_g ?? 0,
+      fiber_g: body.fiber_g ?? 0,
+      sugar_g: body.sugar_g ?? 0,
     };
   }
 
   const log = ensureDietLog(req.member.id, body.log_date);
   const info = run(
     `INSERT INTO diet_log_entries
-       (diet_log_id, meal_type, food_name, quantity, serving_unit, calories, protein_g, carbs_g, fats_g)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [log.id, body.meal_type, name, body.quantity, unit, macros.calories, macros.protein_g, macros.carbs_g, macros.fats_g],
+       (diet_log_id, meal_type, food_name, quantity, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      log.id,
+      body.meal_type,
+      name,
+      body.quantity,
+      unit,
+      macros.calories,
+      macros.protein_g,
+      macros.carbs_g,
+      macros.fats_g,
+      macros.fiber_g,
+      macros.sugar_g,
+    ],
   );
 
   res.status(201).json(get('SELECT * FROM diet_log_entries WHERE id = ?', [info.lastInsertRowid]));
@@ -1084,7 +1202,8 @@ portalRoutes.get('/diets/foods', requireMemberAuth, requireModule('fitness'), re
     // What this member logs most, so the search box opens on their own food
     // rather than on whatever happens to sort first alphabetically.
     recent: all(
-      `SELECT e.food_name, e.serving_unit, e.calories, e.protein_g, e.carbs_g, e.fats_g, MAX(e.logged_at) AS last_logged
+      `SELECT e.food_name, e.serving_unit, e.calories, e.protein_g, e.carbs_g, e.fats_g, e.fiber_g, e.sugar_g,
+              MAX(e.logged_at) AS last_logged
        FROM diet_log_entries e JOIN diet_logs l ON l.id = e.diet_log_id
        WHERE l.member_id = ?
        GROUP BY e.food_name COLLATE NOCASE
@@ -1092,4 +1211,280 @@ portalRoutes.get('/diets/foods', requireMemberAuth, requireModule('fitness'), re
       [req.member.id],
     ),
   });
+});
+
+/* ── Own nutrition targets ────────────────────────────────────────────── */
+
+const fitnessGate = [requireMemberAuth, requireModule('fitness'), requireFitnessAccess];
+
+/* ── Barcode foods ────────────────────────────────────────────────────── */
+
+/** A scanned (or typed) barcode → a library food the sheet can log by id, or
+ * found: false with whatever the database knew, to prefill "add it". */
+portalRoutes.get('/diets/barcode/:code', ...fitnessGate, async (req, res) => {
+  res.json(await lookupBarcode(req.params.code));
+});
+
+/**
+ * A product nobody has scanned before and Open Food Facts does not know,
+ * typed off the label per 100 g / 100 ml. It joins the gym's library — the
+ * next member with the same pack finds it — and staff can delete it there.
+ */
+portalRoutes.post('/diets/barcode-foods', ...fitnessGate, (req, res) => {
+  const body = parse(req.body, {
+    barcode: { type: 'string', required: true, max: 20 },
+    name: { type: 'string', required: true, min: 2, max: 100 },
+    brand: { type: 'string', max: 80 },
+    basis: { type: 'enum', values: ['100g', '100ml'], default: '100g' },
+    calories: { type: 'int', required: true, min: 0, max: 900 },
+    protein_g: { type: 'number', min: 0, max: 100, default: 0 },
+    carbs_g: { type: 'number', min: 0, max: 100, default: 0 },
+    fats_g: { type: 'number', min: 0, max: 100, default: 0 },
+    fiber_g: { type: 'number', min: 0, max: 100, default: 0 },
+    sugar_g: { type: 'number', min: 0, max: 100, default: 0 },
+    serving_size_g: { type: 'number', min: 1, max: 2000 },
+  });
+  const barcode = normaliseBarcode(body.barcode);
+  // Two members adding the same pack at once: the first one wins.
+  const existing = libraryFoodByBarcode(barcode);
+  if (existing) return res.json(existing);
+
+  const brand = body.brand?.trim() || null;
+  const name = brand && !body.name.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${body.name}` : body.name;
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const food = insertBarcodeFood(
+    {
+      name: name.slice(0, 120),
+      brand,
+      serving_unit: body.basis,
+      calories: body.calories,
+      protein_g: round1(body.protein_g),
+      carbs_g: round1(body.carbs_g),
+      fats_g: round1(body.fats_g),
+      fiber_g: round1(body.fiber_g),
+      sugar_g: round1(body.sugar_g),
+      serving_size_g: body.serving_size_g ? round1(body.serving_size_g) : null,
+      serving_label: body.serving_size_g ? `${round1(body.serving_size_g)} ${body.basis === '100ml' ? 'ml' : 'g'}` : null,
+    },
+    { barcode, source: 'member' },
+  );
+  return res.status(201).json(food);
+});
+
+/** One weigh-in per day: a second one that day replaces the first. */
+function recordWeight(memberId, weightKg, logDate) {
+  run(
+    `INSERT INTO body_weight_logs (member_id, log_date, weight_kg) VALUES (?, ?, ?)
+     ON CONFLICT (member_id, log_date) DO UPDATE SET weight_kg = excluded.weight_kg, created_at = datetime('now')`,
+    [memberId, logDate, Math.round(weightKg * 10) / 10],
+  );
+  return get('SELECT id, log_date, weight_kg FROM body_weight_logs WHERE member_id = ? AND log_date = ?', [
+    memberId,
+    logDate,
+  ]);
+}
+
+const latestWeighIn = (memberId) =>
+  get('SELECT id, log_date, weight_kg FROM body_weight_logs WHERE member_id = ? ORDER BY log_date DESC LIMIT 1', [
+    memberId,
+  ]) ?? null;
+
+function nutritionState(memberId) {
+  const profile = nutritionProfile(memberId);
+  const plan = get(
+    `SELECT p.id, p.name, p.target_calories, p.target_protein_g, p.target_carbs_g, p.target_fats_g, p.target_water_ml
+     FROM member_diet_assignments a JOIN diet_plans p ON p.id = a.plan_id
+     WHERE a.member_id = ? AND a.status = 'active'`,
+    [memberId],
+  );
+  return {
+    profile,
+    age: ageOn(profile.birth_date),
+    latest_weight: latestWeighIn(memberId),
+    trainer_plan: plan ?? null,
+    effective: effectiveDietTargets(memberId),
+  };
+}
+
+const TARGET_FIELDS = {
+  target_calories: { type: 'int', min: 800, max: 10000 },
+  target_protein_g: { type: 'int', min: 0, max: 1000 },
+  target_carbs_g: { type: 'int', min: 0, max: 2000 },
+  target_fats_g: { type: 'int', min: 0, max: 1000 },
+  target_fiber_g: { type: 'int', min: 0, max: 200 },
+  target_sugar_g: { type: 'int', min: 0, max: 1000 },
+  target_water_ml: { type: 'int', min: 0, max: 15000 },
+};
+
+/** Body stats, shared by saving the profile and by asking for a suggestion —
+ * a member can try numbers in the calculator without committing them. */
+const BODY_FIELDS = {
+  height_cm: { type: 'number', min: 100, max: 250 },
+  sex: { type: 'enum', values: SEXES },
+  birth_date: { type: 'date' },
+  activity_level: { type: 'enum', values: Object.keys(ACTIVITY_LEVELS) },
+  training_days: { type: 'int', min: 0, max: 7 },
+  training_intensity: { type: 'enum', values: Object.keys(TRAINING_INTENSITIES) },
+  goal: { type: 'enum', values: NUTRITION_GOALS },
+  goal_rate_kg: { type: 'number', min: 0.1, max: 1 },
+  goal_weight_kg: { type: 'number', min: 30, max: 350 },
+  exercise_addback_pct: { type: 'int' },
+  weight_kg: { type: 'number', min: 25, max: 350 },
+};
+
+function checkBodyFields(body) {
+  if (body.exercise_addback_pct != null && !ADDBACK_OPTIONS.includes(body.exercise_addback_pct)) {
+    throw badRequest('Add back 0%, 50% or 100% of exercise', { exercise_addback_pct: 'must be 0, 50 or 100' });
+  }
+  if (body.birth_date) {
+    const age = ageOn(body.birth_date);
+    if (age < 13 || age > 100) throw badRequest('Check your date of birth', { birth_date: 'must give an age from 13 to 100' });
+  }
+}
+
+portalRoutes.get('/nutrition', ...fitnessGate, (req, res) => {
+  res.json(nutritionState(req.member.id));
+});
+
+portalRoutes.put('/nutrition', ...fitnessGate, (req, res) => {
+  const body = parse(req.body, {
+    use_own_targets: { type: 'boolean' },
+    ...TARGET_FIELDS,
+    ...BODY_FIELDS,
+  });
+  checkBodyFields(body);
+
+  const memberId = req.member.id;
+  const { weight_kg: weightKg, ...columns } = body;
+  // NOT NULL columns: a cleared field means "leave it", not "store nothing".
+  for (const key of ['use_own_targets', 'exercise_addback_pct', 'activity_level', 'training_days', 'training_intensity', 'goal', 'goal_rate_kg']) {
+    if (columns[key] === null) delete columns[key];
+  }
+
+  // Switching to "my own" with nothing to switch to would silently show the
+  // defaults under a label that says otherwise.
+  const ownCalories = 'target_calories' in columns ? columns.target_calories : nutritionProfile(memberId).target_calories;
+  if (columns.use_own_targets && !ownCalories) {
+    throw badRequest('Set a daily calorie target before switching to your own', { target_calories: 'is required' });
+  }
+
+  tx(() => {
+    run('INSERT OR IGNORE INTO member_nutrition_profiles (member_id) VALUES (?)', [memberId]);
+    const keys = Object.keys(columns);
+    if (keys.length) {
+      run(
+        `UPDATE member_nutrition_profiles SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now')
+         WHERE member_id = ?`,
+        [...keys.map((k) => columns[k]), memberId],
+      );
+    }
+    if (weightKg) recordWeight(memberId, weightKg, today());
+  });
+
+  res.json(nutritionState(memberId));
+});
+
+/**
+ * The calculator. Anything sent overrides what is stored, so the settings
+ * screen can preview a suggestion from unsaved fields; whatever is missing
+ * from both is reported per field.
+ */
+portalRoutes.post('/nutrition/suggest', ...fitnessGate, (req, res) => {
+  const body = parse(req.body, BODY_FIELDS);
+  checkBodyFields(body);
+
+  const stored = nutritionProfile(req.member.id);
+  const pick = (key) => body[key] ?? stored[key];
+  const input = {
+    weight_kg: body.weight_kg ?? latestWeighIn(req.member.id)?.weight_kg ?? null,
+    height_cm: pick('height_cm'),
+    sex: pick('sex'),
+    age: ageOn(pick('birth_date')),
+    activity_level: pick('activity_level'),
+    training_days: pick('training_days'),
+    training_intensity: pick('training_intensity'),
+    goal: pick('goal'),
+    goal_rate_kg: pick('goal_rate_kg'),
+    exercise_addback_pct: pick('exercise_addback_pct'),
+  };
+
+  const missing = {};
+  if (!input.weight_kg) missing.weight_kg = 'is required';
+  if (!input.height_cm) missing.height_cm = 'is required';
+  if (!input.sex) missing.sex = 'is required';
+  if (input.age === null) missing.birth_date = 'is required';
+  if (Object.keys(missing).length) throw badRequest('A few details are needed to work out your targets', missing);
+
+  const result = suggestTargets(input);
+  const goalWeight = body.goal_weight_kg ?? stored.goal_weight_kg;
+  const rate = input.goal === 'maintain' ? 0 : input.goal_rate_kg;
+  const towardsGoal = goalWeight && rate
+    && (input.goal === 'lose' ? goalWeight < input.weight_kg : goalWeight > input.weight_kg);
+
+  res.json({
+    ...result,
+    input,
+    weeks_to_goal: towardsGoal ? Math.ceil(Math.abs(input.weight_kg - goalWeight) / rate) : null,
+  });
+});
+
+/* ── Weigh-ins ────────────────────────────────────────────────────────── */
+
+portalRoutes.get('/weight', ...fitnessGate, (req, res) => {
+  const days = Math.min(Math.max(toInt(req.query.days, 180), 7), 730);
+  res.json({
+    items: all(
+      'SELECT id, log_date, weight_kg FROM body_weight_logs WHERE member_id = ? AND log_date >= ? ORDER BY log_date',
+      [req.member.id, addDays(today(), -days)],
+    ),
+    latest: latestWeighIn(req.member.id),
+    goal_weight_kg: nutritionProfile(req.member.id).goal_weight_kg,
+  });
+});
+
+portalRoutes.post('/weight', ...fitnessGate, (req, res) => {
+  const body = parse(req.body, {
+    weight_kg: { type: 'number', required: true, min: 25, max: 350 },
+    log_date: { type: 'date', default: today() },
+  });
+  if (body.log_date > today()) throw badRequest('That date has not happened yet', { log_date: 'is in the future' });
+  res.status(201).json(recordWeight(req.member.id, body.weight_kg, body.log_date));
+});
+
+portalRoutes.delete('/weight/:id', ...fitnessGate, (req, res) => {
+  const info = run('DELETE FROM body_weight_logs WHERE id = ? AND member_id = ?', [Number(req.params.id), req.member.id]);
+  if (!info.changes) throw notFound('That weigh-in is not in your log');
+  res.json({ ok: true });
+});
+
+/* ── Activities ───────────────────────────────────────────────────────── */
+
+portalRoutes.get('/activities/types', ...fitnessGate, (req, res) => {
+  res.json({ items: ACTIVITY_TYPES, weight_kg: weightOn(req.member.id) });
+});
+
+portalRoutes.post('/activities', ...fitnessGate, (req, res) => {
+  const body = parse(req.body, {
+    activity: { type: 'enum', values: ACTIVITY_KEYS, required: true },
+    name: { type: 'string', max: 80 },
+    duration_minutes: { type: 'int', required: true, min: 1, max: 600 },
+    calories: { type: 'int', min: 0, max: 5000 },
+    log_date: { type: 'date', default: today() },
+  });
+  if (body.log_date > today()) throw badRequest('That date has not happened yet', { log_date: 'is in the future' });
+
+  const type = ACTIVITY_TYPES.find((a) => a.key === body.activity);
+  // A number the member typed (off a watch, say) beats the estimate.
+  const calories = body.calories ?? activityCalories(body.activity, body.duration_minutes, weightOn(req.member.id, body.log_date));
+  const info = run(
+    'INSERT INTO activity_logs (member_id, log_date, activity, name, duration_minutes, calories) VALUES (?, ?, ?, ?, ?, ?)',
+    [req.member.id, body.log_date, body.activity, body.name || type.label, body.duration_minutes, calories],
+  );
+  res.status(201).json(get('SELECT * FROM activity_logs WHERE id = ?', [info.lastInsertRowid]));
+});
+
+portalRoutes.delete('/activities/:id', ...fitnessGate, (req, res) => {
+  const info = run('DELETE FROM activity_logs WHERE id = ? AND member_id = ?', [Number(req.params.id), req.member.id]);
+  if (!info.changes) throw notFound('That activity is not in your log');
+  res.json({ ok: true });
 });

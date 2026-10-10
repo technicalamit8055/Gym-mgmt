@@ -1132,6 +1132,8 @@ async function renderFoodLibrary(reload) {
             { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1' },
             { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1' },
             { name: 'fats_g', label: 'Fats (g)', type: 'number', min: 0, step: '0.1' },
+            { name: 'fiber_g', label: 'Fibre (g)', type: 'number', min: 0, step: '0.1' },
+            { name: 'sugar_g', label: 'Sugar (g)', type: 'number', min: 0, step: '0.1' },
           ],
           {
             submitLabel: 'Add food',
@@ -1142,6 +1144,8 @@ async function renderFoodLibrary(reload) {
                 protein_g: Number(values.protein_g || 0),
                 carbs_g: Number(values.carbs_g || 0),
                 fats_g: Number(values.fats_g || 0),
+                fiber_g: Number(values.fiber_g || 0),
+                sugar_g: Number(values.sugar_g || 0),
               });
               closeModal();
               toast('Food added');
@@ -1151,7 +1155,24 @@ async function renderFoodLibrary(reload) {
         ),
       }),
     columns: [
-      { label: 'Food', render: (r) => h('strong', {}, r.name) },
+      {
+        label: 'Food',
+        // Scanned packs say where their numbers came from, so a trainer can
+        // check the ones a member typed in off a label.
+        render: (r) =>
+          r.barcode
+            ? h(
+                'div',
+                {},
+                h('strong', {}, r.name),
+                h(
+                  'div',
+                  { class: 'muted', style: 'font-size:12px' },
+                  `${r.source === 'member' ? 'Added by a member' : 'Open Food Facts'} · ${r.barcode}`,
+                ),
+              )
+            : h('strong', {}, r.name),
+      },
       { label: 'Serving', render: (r) => h('span', { class: 'muted' }, r.serving_unit) },
       { label: 'Kcal', align: 'right', render: (r) => r.calories },
       { label: 'Protein', align: 'right', render: (r) => `${r.protein_g}g` },

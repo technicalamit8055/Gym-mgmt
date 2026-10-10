@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import { gymOffsetMinutes } from './clock.js';
 import { config, DEFAULT_TENANT_SLUG } from './config.js';
 import { all, get, run, tenantStorage, tx } from './db.js';
-import { DEFAULT_DIET_TARGETS, fitnessAccessFor } from './fitness.js';
+import { fitnessAccessFor } from './fitness.js';
+import { effectiveDietTargets } from './nutrition.js';
 import { addDays } from './validate.js';
 import { moduleEnabled, say } from './verticals.js';
 import { tenantBranding } from './tenants.js';
@@ -605,15 +606,8 @@ function reachableMembers(prefKey) {
   );
 }
 
-function waterTargetFor(memberId) {
-  return (
-    get(
-      `SELECT p.target_water_ml FROM member_diet_assignments a JOIN diet_plans p ON p.id = a.plan_id
-       WHERE a.member_id = ? AND a.status = 'active'`,
-      [memberId],
-    )?.target_water_ml ?? DEFAULT_DIET_TARGETS.target_water_ml
-  );
-}
+/** The same goal the Diet tab shows: the trainer's, the member's own, or the default. */
+const waterTargetFor = (memberId) => effectiveDietTargets(memberId).targets.target_water_ml;
 
 function hydrationNudges(settings, clock) {
   const slot = (parseTimeList(settings.water_times) ?? []).find((t) => inSlot(clock, t));

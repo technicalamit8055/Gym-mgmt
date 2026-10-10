@@ -13,6 +13,7 @@
     "seed": "node --no-warnings=ExperimentalWarning scripts/seed.js",
     "test": "node --no-warnings=ExperimentalWarning --test \"tests/**/*.test.js\"",
     "vendor:jsqr": "node scripts/vendor-jsqr.js",
+    "vendor:zxing": "node scripts/vendor-zxing.js",
     "icons:gen": "node scripts/gen-icons.js",
     "icons:gen:library": "node scripts/gen-icons-library.js",
     "emulator": "powershell -ExecutionPolicy Bypass -File scripts/open-emulator.ps1"

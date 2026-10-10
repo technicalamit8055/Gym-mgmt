@@ -14,6 +14,7 @@ const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
 const { closeRegistryDb } = await import('../src/tenants.js');
 const { estimate1rm } = await import('../src/fitness.js');
+const { suggestTargets, workoutCalories } = await import('../src/nutrition.js');
 const { addDays, addMonths, today } = await import('../src/validate.js');
 
 const TENANT = 'fitgym';
@@ -1120,6 +1121,226 @@ describe('Lifesum-style diet logging in the portal', () => {
     const day = await call(`GET`, `/api/diets/members/${memberId}/day?date=${today()}`, undefined, { token: trainerToken });
     assert.equal(day.body.entries.length, 2);
     assert.equal(day.body.water_ml, 2000);
+  });
+});
+
+describe('the target calculator', () => {
+  const base = { weight_kg: 80, height_cm: 180, age: 30, sex: 'male', activity_level: 'light', training_days: 4, training_intensity: 'moderate' };
+
+  it('builds maintenance from Mifflin-St Jeor and splits the macros', () => {
+    const res = suggestTargets({ ...base, goal: 'maintain' });
+    assert.equal(res.bmr, 1780);
+    // 1780 × 1.375; training is left to the logs at 100% add-back.
+    assert.equal(res.targets.target_calories, 2450);
+    assert.equal(res.training_built_in, 0);
+    assert.equal(res.targets.target_protein_g, 128);
+    assert.equal(res.targets.target_fats_g, 82);
+    assert.equal(res.targets.target_carbs_g, 300);
+    assert.equal(res.targets.target_fiber_g, 34);
+  });
+
+  it('builds training into the number when the member will not add it back', () => {
+    const res = suggestTargets({ ...base, goal: 'maintain', exercise_addback_pct: 0 });
+    // Four moderate hours a week at (5 − 1) METs × 80 kg, spread over seven days.
+    assert.equal(res.training_built_in, 183);
+    assert.equal(res.targets.target_calories, 2630);
+  });
+
+  it('takes a deficit off and lifts protein while cutting', () => {
+    const res = suggestTargets({ ...base, goal: 'lose', goal_rate_kg: 0.5 });
+    assert.equal(res.goal_adjustment, -550);
+    assert.equal(res.targets.target_calories, 1900);
+    assert.equal(res.targets.target_protein_g, 144);
+    assert.equal(res.floored, false);
+  });
+
+  it('never suggests below the safe floor', () => {
+    const res = suggestTargets({
+      weight_kg: 45, height_cm: 150, age: 60, sex: 'female', activity_level: 'sedentary',
+      training_days: 0, goal: 'lose', goal_rate_kg: 1,
+    });
+    assert.equal(res.targets.target_calories, 1200);
+    assert.equal(res.floored, true);
+  });
+
+  it('costs a session by net METs, falling back to its set count', () => {
+    assert.equal(workoutCalories({ duration_seconds: 3600, weight_kg: 80 }), 320);
+    assert.equal(workoutCalories({ duration_seconds: 3600, weight_kg: 80, avg_rpe: 9 }), 400);
+    assert.equal(workoutCalories({ duration_seconds: 0, total_sets: 10, weight_kg: 80 }), 133);
+    // A logger left running all night is capped at three hours.
+    assert.equal(workoutCalories({ duration_seconds: 10 * 3600, weight_kg: 80 }), 960);
+  });
+});
+
+describe('own nutrition targets in the portal', () => {
+  const birthYear = Number(today().slice(0, 4)) - 30;
+
+  it('follows the trainer plan until the member switches', async () => {
+    const res = await call('GET', '/api/portal/nutrition', undefined, { token: memberToken });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.effective.source, 'trainer');
+    assert.equal(res.body.trainer_plan.target_calories, 1800);
+    assert.equal(res.body.profile.use_own_targets, 0);
+    assert.equal(res.body.profile.exercise_addback_pct, 100);
+  });
+
+  it('refuses to switch to own targets that do not exist yet', async () => {
+    const res = await call('PUT', '/api/portal/nutrition', { use_own_targets: true }, { token: memberToken });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.details.target_calories);
+  });
+
+  it('says which body stats the calculator still needs', async () => {
+    const res = await call('POST', '/api/portal/nutrition/suggest', {}, { token: memberToken });
+    assert.equal(res.status, 400);
+    for (const field of ['weight_kg', 'height_cm', 'sex', 'birth_date']) assert.ok(res.body.details[field], field);
+  });
+
+  it('suggests targets from the saved profile and logs the weight given', async () => {
+    const saved = await call(
+      'PUT',
+      '/api/portal/nutrition',
+      {
+        weight_kg: 80, height_cm: 180, sex: 'male', birth_date: `${birthYear}-01-01`,
+        activity_level: 'light', training_days: 4, training_intensity: 'moderate',
+        goal: 'lose', goal_rate_kg: 0.5, goal_weight_kg: 74, exercise_addback_pct: 50,
+      },
+      { token: memberToken },
+    );
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.latest_weight.weight_kg, 80);
+    assert.equal(saved.body.profile.exercise_addback_pct, 50);
+    // Saving stats alone does not move the member off their trainer's plan.
+    assert.equal(saved.body.effective.source, 'trainer');
+
+    const res = await call('POST', '/api/portal/nutrition/suggest', {}, { token: memberToken });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.input.weight_kg, 80);
+    assert.deepEqual(res.body.targets, suggestTargets(res.body.input).targets);
+    assert.equal(res.body.weeks_to_goal, 12);
+
+    // A preview from unsaved numbers overrides what is stored.
+    const preview = await call('POST', '/api/portal/nutrition/suggest', { goal: 'maintain' }, { token: memberToken });
+    assert.ok(preview.body.targets.target_calories > res.body.targets.target_calories);
+  });
+
+  it('switches the Diet tab to the member’s own targets', async () => {
+    const res = await call(
+      'PUT',
+      '/api/portal/nutrition',
+      { use_own_targets: true, target_calories: 2100, target_protein_g: 150, target_carbs_g: 220, target_fats_g: 70, target_water_ml: 3000 },
+      { token: memberToken },
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.effective.source, 'own');
+
+    const current = await call('GET', '/api/portal/diets/current', undefined, { token: memberToken });
+    assert.equal(current.body.target_source, 'own');
+    assert.equal(current.body.targets.target_calories, 2100);
+    // Fibre and sugar were left blank, so they follow from the calories.
+    assert.equal(current.body.targets.target_fiber_g, 29);
+    assert.equal(current.body.targets.target_sugar_g, 53);
+    // The trainer's meals stay available as suggestions.
+    assert.ok(current.body.plan.meals.length >= 3);
+  });
+
+  it('logs fibre and sugar from the library', async () => {
+    const banana = (await call('GET', '/api/portal/diets/foods?q=Banana', undefined, { token: memberToken })).body.items[0];
+    assert.equal(banana.fiber_g, 3.1);
+    const res = await call('POST', '/api/portal/diets/entries', { meal_type: 'snack', food_id: banana.id, quantity: 2 }, { token: memberToken });
+    assert.equal(res.body.fiber_g, 6.2);
+    assert.equal(res.body.sugar_g, 28.8);
+  });
+
+  it('costs a finished workout', async () => {
+    const res = await call(
+      'POST',
+      '/api/portal/workouts/logs',
+      { workout_name: 'Costed', duration_seconds: 3600, sets: [{ exercise_name: 'Back Squat', muscle_group: 'legs', weight_kg: 100, reps: 5 }] },
+      { token: memberToken },
+    );
+    assert.equal(res.status, 201);
+    // An hour at moderate effort, at the 80 kg weigh-in.
+    assert.equal(res.body.log.calories_burned, 320);
+  });
+
+  it('logs an activity and adds back the chosen share of the burn', async () => {
+    const types = await call('GET', '/api/portal/activities/types', undefined, { token: memberToken });
+    assert.ok(types.body.items.some((t) => t.key === 'running'));
+
+    const run = await call('POST', '/api/portal/activities', { activity: 'running', duration_minutes: 30 }, { token: memberToken });
+    assert.equal(run.status, 201);
+    // (8.3 − 1) METs × 80 kg × half an hour.
+    assert.equal(run.body.calories, 292);
+    assert.equal(run.body.name, 'Running (easy pace)');
+
+    const typed = await call('POST', '/api/portal/activities', { activity: 'football', duration_minutes: 60, calories: 500 }, { token: memberToken });
+    assert.equal(typed.body.calories, 500);
+
+    const day = (await call('GET', '/api/portal/diets/daily', undefined, { token: memberToken })).body;
+    assert.equal(day.exercise.activities.length, 2);
+    assert.ok(day.exercise.workouts.some((w) => w.workout_name === 'Costed' && w.calories === 320));
+    const burned = day.exercise.workouts.reduce((s, w) => s + w.calories, 0) + 292 + 500;
+    assert.equal(day.exercise.total_burned, burned);
+    assert.equal(day.exercise.credited, Math.round(burned / 2));
+    assert.equal(day.budget.goal, 2100);
+    assert.equal(day.budget.remaining, 2100 - day.totals.calories + day.exercise.credited);
+    assert.ok(day.totals.fiber_g >= 6.2);
+
+    const other = await call('POST', '/api/members', { first_name: 'Other', phone: '9876503333' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
+    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '3333' })).body.token;
+    assert.equal((await call('DELETE', `/api/portal/activities/${typed.body.id}`, undefined, { token: otherToken })).status, 404);
+    assert.equal((await call('DELETE', `/api/portal/activities/${typed.body.id}`, undefined, { token: memberToken })).status, 200);
+  });
+
+  it('keeps one weigh-in a day and charts the rest', async () => {
+    await call('POST', '/api/portal/weight', { weight_kg: 81.2, log_date: addDays(today(), -14) }, { token: memberToken });
+    await call('POST', '/api/portal/weight', { weight_kg: 79.64 }, { token: memberToken });
+    const res = await call('GET', '/api/portal/weight', undefined, { token: memberToken });
+    assert.deepEqual(res.body.items.map((w) => w.weight_kg), [81.2, 79.6]);
+    assert.equal(res.body.latest.weight_kg, 79.6);
+    assert.equal(res.body.goal_weight_kg, 74);
+
+    const future = await call('POST', '/api/portal/weight', { weight_kg: 79, log_date: addDays(today(), 2) }, { token: memberToken });
+    assert.equal(future.status, 400);
+  });
+
+  it('shows the trainer what the member is actually following', async () => {
+    const res = await call('GET', `/api/diets/members/${memberId}`, undefined, { token: trainerToken });
+    assert.equal(res.body.target_source, 'own');
+    assert.equal(res.body.targets.target_calories, 2100);
+    assert.equal(res.body.body.latest_weight.weight_kg, 79.6);
+    const todayRow = res.body.days.find((d) => d.log_date === today());
+    assert.equal(todayRow.target, 2100 + Math.round(todayRow.burned / 2));
+  });
+
+  it('summarises the week for the insights screen, gaps included', async () => {
+    const res = await call('GET', '/api/portal/diets/summary?days=7', undefined, { token: memberToken });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.days.length, 7);
+    assert.equal(res.body.days.at(-1).log_date, today());
+    assert.equal(res.body.days[0].log_date, addDays(today(), -6));
+
+    const day = (await call('GET', '/api/portal/diets/daily', undefined, { token: memberToken })).body;
+    const todayRow = res.body.days.at(-1);
+    assert.equal(todayRow.calories, day.totals.calories);
+    assert.equal(todayRow.fiber_g, day.totals.fiber_g);
+    assert.equal(todayRow.burned, day.exercise.total_burned);
+    assert.equal(todayRow.budget, day.budget.goal + day.exercise.credited);
+    // A day with nothing logged is a zero row, not a missing one.
+    assert.equal(res.body.days[0].entry_count, 0);
+    assert.equal(res.body.days[0].budget, 2100);
+
+    assert.equal((await call('GET', '/api/portal/diets/summary?end=soon', undefined, { token: memberToken })).status, 400);
+  });
+
+  it('switches back to the trainer plan in one step', async () => {
+    const res = await call('PUT', '/api/portal/nutrition', { use_own_targets: false }, { token: memberToken });
+    assert.equal(res.body.effective.source, 'trainer');
+    assert.equal(res.body.profile.target_calories, 2100, 'own targets are kept for next time');
+    const current = await call('GET', '/api/portal/diets/current', undefined, { token: memberToken });
+    assert.equal(current.body.targets.target_calories, 1800);
   });
 });
 

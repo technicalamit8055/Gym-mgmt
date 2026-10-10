@@ -8,6 +8,7 @@ import {
   confirmDialog,
   currencyInfo,
   date,
+  dateField,
   exerciseMedia,
   h,
   initials,
@@ -20,6 +21,7 @@ import {
   toast,
   today,
 } from '../ui.js';
+import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { cropAndResizeImage } from '../photo.js';
 import { canInstall, isIos, onInstallChange, promptInstall } from '../pwa.js';
 import * as push from '../push.js';
@@ -1714,56 +1716,127 @@ function macroBar(label, eaten, target, tone, icon = null) {
 
 /* ── Food search sheet ─────────────────────────────────────────────────── */
 
+/** "150 g" for 1.5 × a per-100 g food — how scanned packs are logged — and
+ * "2 × 1 egg (50g)" for anything counted in servings. */
+function portionLabel(entry) {
+  const per100 = /^100\s?(g|ml)$/i.exec(entry.serving_unit || '');
+  if (per100) return `${Math.round(entry.quantity * 100)} ${per100[1].toLowerCase()}`;
+  return `${entry.quantity === 1 ? '' : `${entry.quantity} × `}${entry.serving_unit}`;
+}
+
 /**
  * The add-food sheet: search the library, or type a packet's numbers in.
  *
  * Serving arithmetic is previewed live but recomputed on the server (see the
  * entries POST) — the preview is a courtesy, not the source of truth.
  */
-function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
+function openFoodSearch({ mealType, mealLabel, logDate, onAdded, startOn = 'search' }) {
   let foods = [];
   let recent = [];
   let selected = null;
   let quantity = 1;
+  let unitKey = null;
+  let amount = 1;
 
   const results = h('div', { class: 'portal-food-results' }, h('div', { class: 'portal-loading' }, 'Loading foods…'));
   const detail = h('div', {});
 
+  /**
+   * How an amount can be entered for `food`, each turned into a multiple of
+   * its serving_unit (what the server scales by). A per-100 g food — every
+   * scanned pack, and much of the library — is entered in grams, or in the
+   * pack's own servings when the label gives one; anything else in servings.
+   */
+  function unitsFor(food) {
+    const per100 = /^100\s?(g|ml)$/i.exec(food.serving_unit || '');
+    if (!per100) {
+      return [{ key: 'serving', label: 'Servings', hint: `× ${food.serving_unit}`, start: 1, step: 0.25, toQty: (n) => n }];
+    }
+    const measure = per100[1].toLowerCase();
+    const units = [];
+    if (food.serving_size_g) {
+      units.push({
+        key: 'pack',
+        label: 'Servings',
+        hint: `× ${food.serving_label || `${food.serving_size_g} ${measure}`}`,
+        start: 1,
+        step: 0.5,
+        toQty: (n) => (n * food.serving_size_g) / 100,
+      });
+    }
+    units.push({ key: 'amount', label: measure === 'ml' ? 'Millilitres' : 'Grams', hint: measure, start: 100, step: 5, toQty: (n) => n / 100 });
+    return units;
+  }
+
+  function selectFood(food) {
+    selected = food;
+    const [first] = unitsFor(food);
+    unitKey = first.key;
+    amount = first.start;
+    quantity = first.toQty(amount);
+    paintResults();
+    paintDetail();
+  }
+
   function paintDetail() {
     clear(detail);
     if (!selected) return;
-    const scale = quantity || 1;
-    const scaled = {
-      calories: Math.round(selected.calories * scale),
-      protein_g: Math.round(selected.protein_g * scale * 10) / 10,
-      carbs_g: Math.round(selected.carbs_g * scale * 10) / 10,
-      fats_g: Math.round(selected.fats_g * scale * 10) / 10,
+    const units = unitsFor(selected);
+    const unit = units.find((u) => u.key === unitKey) ?? units[0];
+
+    // Only the numbers repaint as the member types: rebuilding the input on
+    // every keystroke would drop its focus between "1" and "1.5".
+    const macros = h('div', {});
+    const scaledFor = (q) => ({
+      calories: Math.round(selected.calories * q),
+      protein_g: Math.round(selected.protein_g * q * 10) / 10,
+      carbs_g: Math.round(selected.carbs_g * q * 10) / 10,
+      fats_g: Math.round(selected.fats_g * q * 10) / 10,
+      fiber_g: Math.round((selected.fiber_g || 0) * q * 10) / 10,
+      sugar_g: Math.round((selected.sugar_g || 0) * q * 10) / 10,
+    });
+    const paintMacros = () => {
+      const scaled = scaledFor(quantity || 0);
+      clear(macros).append(
+        h(
+          'div',
+          { class: 'portal-food-macros' },
+          h('div', {}, h('strong', {}, String(scaled.calories)), h('span', {}, 'kcal')),
+          h('div', {}, h('strong', {}, `${scaled.protein_g}g`), h('span', {}, 'protein')),
+          h('div', {}, h('strong', {}, `${scaled.carbs_g}g`), h('span', {}, 'carbs')),
+          h('div', {}, h('strong', {}, `${scaled.fats_g}g`), h('span', {}, 'fats')),
+        ),
+        h('div', { class: 'portal-food-extra' }, `Fibre ${scaled.fiber_g}g · Sugar ${scaled.sugar_g}g`),
+      );
     };
 
     const qtyInput = h('input', {
       class: 'portal-input portal-qty',
       type: 'number',
-      min: 0.05,
-      step: 0.25,
-      value: quantity,
+      inputmode: 'decimal',
+      min: unit.step,
+      step: unit.step,
+      value: amount,
       oninput: (event) => {
-        quantity = Number(event.target.value);
-        paintDetail();
+        amount = Number(event.target.value) || 0;
+        quantity = unit.toQty(amount);
+        paintMacros();
       },
     });
 
-    const addBtn = h(
-      'button',
-      { class: 'btn primary block', type: 'button' },
-      `Add to ${mealLabel}`,
-    );
+    const addBtn = h('button', { class: 'btn primary block', type: 'button' }, `Add to ${mealLabel}`);
     addBtn.addEventListener('click', async () => {
+      if (!(quantity >= 0.05)) {
+        toast(unit.key === 'amount' ? `Enter at least 5 ${unit.hint}` : 'Enter how much you had', 'error');
+        return;
+      }
       addBtn.disabled = true;
       try {
+        const scaled = scaledFor(quantity);
         await api.portal.addFoodEntry({
           meal_type: mealType,
           food_id: selected.id,
-          quantity: quantity || 1,
+          quantity: Math.round(quantity * 1000) / 1000,
           log_date: logDate,
         });
         closeModal();
@@ -1776,25 +1849,47 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
       }
     });
 
+    const sourceNote = selected.source === 'openfoodfacts'
+      ? 'From Open Food Facts'
+      : selected.source === 'member'
+        ? 'Added by a member from the label'
+        : null;
+
+    paintMacros();
     append(detail, [
       h(
         'div',
         { class: 'portal-food-detail' },
-        h('div', { class: 'portal-food-detail-name' }, selected.name),
         h(
           'div',
-          { class: 'portal-food-qty-row' },
-          h('span', { class: 'muted' }, `× serving of ${selected.serving_unit}`),
-          qtyInput,
+          {},
+          h('div', { class: 'portal-food-detail-name' }, selected.name),
+          sourceNote ? h('div', { class: 'portal-food-source' }, renderIcon('scan', { size: 12 }), sourceNote) : null,
         ),
-        h(
-          'div',
-          { class: 'portal-food-macros' },
-          h('div', {}, h('strong', {}, String(scaled.calories)), h('span', {}, 'kcal')),
-          h('div', {}, h('strong', {}, `${scaled.protein_g}g`), h('span', {}, 'protein')),
-          h('div', {}, h('strong', {}, `${scaled.carbs_g}g`), h('span', {}, 'carbs')),
-          h('div', {}, h('strong', {}, `${scaled.fats_g}g`), h('span', {}, 'fats')),
-        ),
+        units.length > 1
+          ? h(
+              'div',
+              { class: 'portal-segmented portal-seg-full' },
+              ...units.map((u) =>
+                h(
+                  'button',
+                  {
+                    class: `portal-segment${u.key === unit.key ? ' active' : ''}`,
+                    type: 'button',
+                    onclick: () => {
+                      unitKey = u.key;
+                      amount = u.start;
+                      quantity = u.toQty(amount);
+                      paintDetail();
+                    },
+                  },
+                  u.label,
+                ),
+              ),
+            )
+          : null,
+        h('div', { class: 'portal-food-qty-row' }, h('span', { class: 'muted' }, unit.hint), qtyInput),
+        macros,
         addBtn,
       ),
     ]);
@@ -1806,18 +1901,13 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
       {
         class: `portal-food-row${selected?.id === food.id ? ' active' : ''}`,
         type: 'button',
-        onclick: () => {
-          selected = food;
-          quantity = 1;
-          paintResults();
-          paintDetail();
-        },
+        onclick: () => selectFood(food),
       },
       h(
         'div',
         {},
         h('div', { class: 'portal-food-name' }, food.name),
-        h('div', { class: 'muted' }, `${food.serving_unit} · P ${food.protein_g}g · C ${food.carbs_g}g · F ${food.fats_g}g`),
+        h('div', { class: 'muted' }, `${food.brand ? `${food.brand} · ` : ''}${food.serving_unit} · P ${food.protein_g}g · C ${food.carbs_g}g · F ${food.fats_g}g`),
       ),
       h('div', { class: 'portal-food-kcal' }, `${food.calories}`),
     );
@@ -1852,6 +1942,8 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
                     protein_g: item.protein_g,
                     carbs_g: item.carbs_g,
                     fats_g: item.fats_g,
+                    fiber_g: item.fiber_g,
+                    sugar_g: item.sugar_g,
                     log_date: logDate,
                   });
                   closeModal();
@@ -1901,6 +1993,8 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
       { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1' },
       { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1' },
       { name: 'fats_g', label: 'Fats (g)', type: 'number', min: 0, step: '0.1' },
+      { name: 'fiber_g', label: 'Fibre (g)', type: 'number', min: 0, step: '0.1' },
+      { name: 'sugar_g', label: 'Sugar (g)', type: 'number', min: 0, step: '0.1' },
     ],
     {
       submitLabel: `Add to ${mealLabel}`,
@@ -1914,6 +2008,8 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
           protein_g,
           carbs_g: Number(values.carbs_g || 0),
           fats_g: Number(values.fats_g || 0),
+          fiber_g: Number(values.fiber_g || 0),
+          sugar_g: Number(values.sugar_g || 0),
           log_date: logDate,
         });
         closeModal();
@@ -1924,33 +2020,213 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
     },
   );
 
-  const libraryPane = h('div', {}, search, results, detail);
-  const customPane = h('div', { class: 'hidden' }, customForm);
-  const switcher = h(
+  /* Scan: camera or typed digits → the library food, or "add it" */
+  const cameraIssue = cameraProblem();
+  const scanVideo = h('video', { class: 'portal-scan-video', playsinline: '', muted: '', 'aria-label': 'Camera view' });
+  const scanStage = h(
     'div',
-    { class: 'portal-sheet-switch' },
-    ...[
-      ['Search', libraryPane],
-      ['Custom', customPane],
-    ].map(([label, pane], index) =>
+    { class: 'portal-scan-stage' },
+    scanVideo,
+    h('div', { class: 'portal-scan-guide', 'aria-hidden': 'true' }, h('i')),
+  );
+  const scanStatus = h('div', { class: 'portal-scan-status', role: 'status' });
+  const scanResult = h('div', {});
+  const scanAgain = h('button', { class: 'btn block hidden', type: 'button' }, renderIcon('scan', { size: 16 }), 'Scan again');
+  let stopCamera = null;
+  let scanPane;
+
+  function stopScan() {
+    stopCamera?.();
+    stopCamera = null;
+    scanStage.classList.remove('live');
+  }
+
+  async function startScan() {
+    if (cameraIssue || stopCamera) return;
+    clear(scanResult);
+    scanAgain.classList.add('hidden');
+    scanStatus.textContent = 'Starting camera…';
+    try {
+      stopCamera = await startBarcodeScan(scanVideo, {
+        onCode: (code) => {
+          stopCamera = null;
+          scanStage.classList.remove('live');
+          lookupBarcode(code);
+        },
+      });
+    } catch (err) {
+      stopCamera = null;
+      scanAgain.classList.remove('hidden');
+      scanStatus.textContent = err?.name === 'NotAllowedError'
+        ? 'Camera access was blocked — allow it in your browser settings, or type the digits below.'
+        : err?.message || 'Could not start the camera — type the digits below instead.';
+      return;
+    }
+    // The member may have switched tabs or closed the sheet while the
+    // camera was starting; it must not keep running behind their back.
+    if (scanPane.classList.contains('hidden') || !scanVideo.isConnected) {
+      stopScan();
+      return;
+    }
+    scanStage.classList.add('live');
+    scanStatus.textContent = 'Hold the barcode level inside the frame';
+  }
+  scanAgain.addEventListener('click', startScan);
+
+  /** Shows a found food on the Search pane, ready to log. */
+  function showFood(food) {
+    if (!foods.some((f) => f.id === food.id)) foods = [food, ...foods];
+    showPane(libraryPane);
+    selectFood(food);
+    detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  async function lookupBarcode(code) {
+    clear(scanResult);
+    scanAgain.classList.add('hidden');
+    scanStatus.textContent = `Looking up ${code}…`;
+    try {
+      const res = await api.portal.barcodeFood(code);
+      scanStatus.textContent = '';
+      if (res.found) {
+        showFood(res.food);
+        return;
+      }
+      scanResult.append(addProductForm(res));
+      scanAgain.classList.toggle('hidden', Boolean(cameraIssue));
+    } catch (err) {
+      scanStatus.textContent = err.message || 'Could not look that up';
+      scanAgain.classList.toggle('hidden', Boolean(cameraIssue));
+    }
+  }
+
+  /** The label, typed in: saved to the gym's library so the next member with
+   * the same pack finds it, then shown ready to log like any other food. */
+  function addProductForm({ barcode, product }) {
+    return h(
+      'div',
+      { class: 'portal-scan-missing' },
+      h('strong', {}, product?.name ? `${product.name} has no nutrition info yet` : 'Not in the food database yet'),
       h(
-        'button',
+        'p',
+        { class: 'muted' },
+        `Barcode ${barcode}. Copy the nutrition panel from the pack (the per 100 g / 100 ml column) and it is saved for everyone at your gym.`,
+      ),
+      buildForm(
+        [
+          { name: 'name', label: 'Product name', required: true, full: true, value: product?.name || '' },
+          { name: 'brand', label: 'Brand', value: product?.brand || '' },
+          {
+            name: 'basis',
+            label: 'Values per',
+            type: 'select',
+            options: [
+              { value: '100g', label: '100 g' },
+              { value: '100ml', label: '100 ml' },
+            ],
+          },
+          { name: 'calories', label: 'Calories (kcal)', type: 'number', required: true, min: 0 },
+          { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'fats_g', label: 'Fat (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'fiber_g', label: 'Fibre (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'sugar_g', label: 'Sugar (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'serving_size_g', label: 'One serving (g or ml)', type: 'number', min: 0, hint: 'Optional — if the pack states one' },
+        ],
         {
-          class: `portal-sheet-tab${index === 0 ? ' active' : ''}`,
-          type: 'button',
-          onclick: (event) => {
-            for (const el of switcher.children) el.classList.remove('active');
-            event.currentTarget.classList.add('active');
-            libraryPane.classList.toggle('hidden', pane !== libraryPane);
-            customPane.classList.toggle('hidden', pane !== customPane);
+          submitLabel: 'Save product',
+          onSubmit: async (values) => {
+            const number = (key) => (values[key] === '' ? undefined : Number(values[key]));
+            const food = await api.portal.addBarcodeFood({
+              barcode,
+              name: values.name,
+              brand: values.brand || undefined,
+              basis: values.basis,
+              calories: number('calories'),
+              protein_g: number('protein_g'),
+              carbs_g: number('carbs_g'),
+              fats_g: number('fats_g'),
+              fiber_g: number('fiber_g'),
+              sugar_g: number('sugar_g'),
+              serving_size_g: number('serving_size_g') || undefined,
+            });
+            toast('Saved — thanks for adding it');
+            showFood(food);
           },
         },
-        label,
+      ),
+    );
+  }
+
+  const digits = h('input', {
+    class: 'portal-input',
+    type: 'text',
+    inputmode: 'numeric',
+    autocomplete: 'off',
+    placeholder: 'Or type the barcode digits',
+    maxlength: 18,
+  });
+  const lookupTyped = () => {
+    const code = digits.value.replace(/\D/g, '');
+    if (code.length < 8) {
+      toast('A barcode has 8 to 14 digits', 'error');
+      return;
+    }
+    stopScan();
+    lookupBarcode(code);
+  };
+  digits.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') lookupTyped();
+  });
+
+  scanPane = h(
+    'div',
+    { class: 'portal-scan-pane hidden' },
+    cameraIssue ? h('div', { class: 'portal-scan-status' }, cameraIssue) : scanStage,
+    cameraIssue ? null : scanStatus,
+    scanAgain,
+    h(
+      'div',
+      { class: 'portal-scan-manual' },
+      digits,
+      h('button', { class: 'btn', type: 'button', onclick: lookupTyped }, 'Look up'),
+    ),
+    cameraIssue ? scanStatus : null,
+    scanResult,
+  );
+
+  const libraryPane = h('div', {}, search, results, detail);
+  const customPane = h('div', { class: 'hidden' }, customForm);
+  const panes = [
+    ['Search', libraryPane],
+    ['Scan', scanPane],
+    ['Custom', customPane],
+  ];
+  const switcher = h('div', { class: 'portal-sheet-switch' });
+
+  function showPane(pane) {
+    for (const [, p] of panes) p.classList.toggle('hidden', p !== pane);
+    panes.forEach(([, p], index) => switcher.children[index].classList.toggle('active', p === pane));
+    if (pane === scanPane) startScan();
+    else stopScan();
+  }
+
+  switcher.append(
+    ...panes.map(([label, pane], index) =>
+      h(
+        'button',
+        { class: `portal-sheet-tab${index === 0 ? ' active' : ''}`, type: 'button', onclick: () => showPane(pane) },
+        label === 'Scan' ? [renderIcon('scan', { size: 14 }), ' Scan'] : label,
       ),
     ),
   );
 
-  openModal({ title: `Add to ${mealLabel}`, body: h('div', { class: 'portal-food-sheet' }, switcher, libraryPane, customPane) });
+  openModal({
+    title: `Add to ${mealLabel}`,
+    body: h('div', { class: 'portal-food-sheet' }, switcher, libraryPane, scanPane, customPane),
+    onClose: stopScan,
+  });
+  if (startOn === 'scan') showPane(scanPane);
 
   api.portal
     .foods()
@@ -1963,6 +2239,937 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded }) {
     .catch((err) => {
       clear(results).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load the food library'));
     });
+}
+
+/* ── Diet settings ─────────────────────────────────────────────────────── */
+
+const ACTIVITY_LEVEL_OPTIONS = [
+  { value: 'sedentary', label: 'Sedentary (desk job)' },
+  { value: 'light', label: 'Lightly active' },
+  { value: 'moderate', label: 'Active (on your feet a lot)' },
+  { value: 'very_active', label: 'Very active (physical job)' },
+];
+const INTENSITY_OPTIONS = [
+  ['light', 'Light'],
+  ['moderate', 'Moderate'],
+  ['hard', 'Hard'],
+];
+const GOAL_OPTIONS = [
+  ['lose', 'Lose'],
+  ['maintain', 'Maintain'],
+  ['gain', 'Gain'],
+];
+const ADDBACK_OPTIONS = [
+  [100, 'All'],
+  [50, 'Half'],
+  [0, 'None'],
+];
+const ADDBACK_HINT = {
+  100: 'Every calorie you burn is added to what you can eat that day.',
+  50: 'Half of what you burn is added — burn estimates run high, so this is the cautious choice.',
+  0: 'Your budget stays fixed. The calculator builds your usual training into it instead.',
+};
+const KCAL_PER_GRAM = { protein: 4, carbs: 4, fats: 9 };
+
+/** A segmented control that repaints itself; `onPick` gets the option's value. */
+function segmentedPicker(options, current, onPick) {
+  const wrap = h('div', { class: 'portal-segmented portal-seg-full' });
+  const paint = (value) => {
+    clear(wrap).append(
+      ...options.map(([optionValue, label]) =>
+        h(
+          'button',
+          {
+            class: `portal-segment${optionValue === value ? ' active' : ''}`,
+            type: 'button',
+            onclick: () => {
+              paint(optionValue);
+              onPick(optionValue);
+            },
+          },
+          label,
+        ),
+      ),
+    );
+  };
+  paint(current);
+  return wrap;
+}
+
+/** A label only around a real input: a <label> wrapped round a segmented
+ * control would press its first button whenever the caption is tapped. */
+const nutriField = (label, control, hint) =>
+  h(
+    ['INPUT', 'SELECT'].includes(control.tagName) ? 'label' : 'div',
+    { class: 'portal-nutri-field' },
+    h('span', {}, label),
+    control,
+    hint ? h('small', {}, hint) : null,
+  );
+
+const numberInput = (value, { step = 1, min = 0, placeholder = '', oninput } = {}) =>
+  h('input', {
+    class: 'portal-input',
+    type: 'number',
+    inputmode: 'decimal',
+    step,
+    min,
+    placeholder,
+    value: value ?? '',
+    oninput,
+  });
+
+/**
+ * openModal for a long sheet: no autofocus — on a phone that opens the
+ * keyboard over the first section, and focusing mid slide-up scrolls the
+ * backdrop to the bottom — so it starts at the top instead.
+ */
+function openTallSheet(options) {
+  const backdrop = openModal(options);
+  backdrop.querySelector(':focus')?.blur();
+  backdrop.scrollTop = 0;
+  return backdrop;
+}
+
+/**
+ * The member's own targets, MyFitnessPal/Lifesum-style: whose numbers to
+ * follow, the numbers themselves (grams or a percentage split), how much
+ * exercise to eat back, and the body stats the calculator suggests from.
+ *
+ * One Save at the bottom: a suggestion only fills the target fields, so the
+ * member sees the numbers before they become the ones they are held to.
+ */
+async function openNutritionSettings({ onSaved } = {}) {
+  const data = await api.portal.nutrition();
+  const { profile, trainer_plan: trainerPlan, effective, latest_weight: latestWeight } = data;
+  const lb = weightUnit.get() === 'lb';
+
+  // Blank own targets start from whatever the member follows today, so
+  // switching to "my own" is a tweak rather than a blank form.
+  const seed = profile.target_calories ? profile : effective.targets;
+  const state = {
+    source: effective.source === 'own' || !trainerPlan ? 'own' : 'trainer',
+    mode: 'g',
+    calories: seed.target_calories,
+    grams: { protein: seed.target_protein_g ?? 0, carbs: seed.target_carbs_g ?? 0, fats: seed.target_fats_g ?? 0 },
+    pct: {},
+    fiber: profile.target_fiber_g,
+    sugar: profile.target_sugar_g,
+    water: seed.target_water_ml ?? 3000,
+    addback: profile.exercise_addback_pct,
+    goal: profile.goal,
+    rate: profile.goal_rate_kg,
+    intensity: profile.training_intensity,
+  };
+  const syncPct = () => {
+    for (const [key, perGram] of Object.entries(KCAL_PER_GRAM)) {
+      state.pct[key] = state.calories ? Math.round(((state.grams[key] * perGram) / state.calories) * 100) : 0;
+    }
+  };
+
+  /* Whose targets */
+  const sourceHint = h('p', { class: 'portal-nutri-hint' });
+  const paintSourceHint = () => {
+    sourceHint.textContent = !trainerPlan
+      ? 'No trainer plan is assigned, so these are the targets your Diet tab uses.'
+      : state.source === 'own'
+        ? `Your own numbers replace your trainer's plan, ${trainerPlan.name}. Its meals stay visible as suggestions, and you can switch back any time.`
+        : `Following your trainer's plan, ${trainerPlan.name}. Switch to My own to set your numbers.`;
+    targetsCard.classList.toggle('is-muted', state.source === 'trainer');
+  };
+
+  /* Daily targets */
+  const targetsCard = h('div', { class: 'portal-nutri-card' });
+  const macroHint = h('div', { class: 'portal-nutri-total' });
+  const macroInputs = {};
+  const macroGrams = {};
+
+  const paintMacroHint = () => {
+    if (state.mode === 'pct') {
+      const total = state.pct.protein + state.pct.carbs + state.pct.fats;
+      macroHint.textContent = `Split adds up to ${total}%`;
+      macroHint.classList.toggle('warn', total !== 100);
+      for (const key of Object.keys(KCAL_PER_GRAM)) macroGrams[key].textContent = `${state.grams[key]} g`;
+    } else {
+      const kcal = Object.entries(KCAL_PER_GRAM).reduce((sum, [key, perGram]) => sum + state.grams[key] * perGram, 0);
+      macroHint.textContent = `Macros add up to ${kcal} kcal`;
+      macroHint.classList.toggle('warn', Boolean(state.calories) && Math.abs(kcal - state.calories) > state.calories * 0.05);
+      for (const key of Object.keys(KCAL_PER_GRAM)) {
+        macroGrams[key].textContent = state.calories ? `${Math.round(((state.grams[key] * KCAL_PER_GRAM[key]) / state.calories) * 100)}%` : '';
+      }
+    }
+  };
+
+  const gramsFromPct = (key) => Math.round((state.calories * (state.pct[key] || 0)) / 100 / KCAL_PER_GRAM[key]);
+
+  function paintTargets() {
+    syncPct();
+    const macroRow = (key, label) => {
+      const pctMode = state.mode === 'pct';
+      macroInputs[key] = numberInput(pctMode ? state.pct[key] : state.grams[key], {
+        oninput: (event) => {
+          const value = Number(event.target.value) || 0;
+          if (pctMode) {
+            state.pct[key] = value;
+            state.grams[key] = gramsFromPct(key);
+          } else {
+            state.grams[key] = value;
+          }
+          paintMacroHint();
+        },
+      });
+      macroGrams[key] = h('em', {});
+      return h(
+        'label',
+        { class: `portal-nutri-macro ${key}` },
+        h('i', {}),
+        h('span', {}, label),
+        h('div', { class: 'portal-nutri-macro-in' }, macroInputs[key], h('b', {}, pctMode ? '%' : 'g')),
+        macroGrams[key],
+      );
+    };
+
+    clear(targetsCard).append(
+      h(
+        'div',
+        { class: 'portal-nutri-kcal' },
+        renderIcon('flame', { size: 22 }),
+        numberInput(state.calories, {
+          step: 10,
+          placeholder: 'e.g. 2200',
+          oninput: (event) => {
+            state.calories = Number(event.target.value) || 0;
+            if (state.mode === 'pct') {
+              for (const key of Object.keys(KCAL_PER_GRAM)) state.grams[key] = gramsFromPct(key);
+            }
+            paintMacroHint();
+          },
+        }),
+        h('span', {}, 'kcal a day'),
+      ),
+      h(
+        'div',
+        { class: 'portal-nutri-row' },
+        h('strong', {}, 'Macros'),
+        segmentedPicker(
+          [
+            ['g', 'Grams'],
+            ['pct', '% split'],
+          ],
+          state.mode,
+          (mode) => {
+            state.mode = mode;
+            paintTargets();
+          },
+        ),
+      ),
+      macroRow('protein', 'Protein'),
+      macroRow('carbs', 'Carbs'),
+      macroRow('fats', 'Fat'),
+      macroHint,
+      h(
+        'div',
+        { class: 'portal-nutri-grid' },
+        nutriField(
+          'Fibre (g)',
+          numberInput(state.fiber, { placeholder: 'Auto', oninput: (e) => (state.fiber = e.target.value === '' ? null : Number(e.target.value)) }),
+        ),
+        nutriField(
+          'Sugar limit (g)',
+          numberInput(state.sugar, { placeholder: 'Auto', oninput: (e) => (state.sugar = e.target.value === '' ? null : Number(e.target.value)) }),
+        ),
+        nutriField(
+          'Water (ml)',
+          numberInput(state.water, { step: 250, oninput: (e) => (state.water = Number(e.target.value) || 0) }),
+        ),
+      ),
+      h('small', { class: 'portal-nutri-hint' }, 'Leave fibre and sugar blank to follow your calories (14 g fibre per 1000 kcal, sugar under 10%).'),
+    );
+    paintMacroHint();
+  }
+
+  /* About you */
+  const weightIn = numberInput(latestWeight ? toDisplayWeight(latestWeight.weight_kg) : '', { step: 0.1, placeholder: lb ? 'lb' : 'kg' });
+  const goalWeightIn = numberInput(profile.goal_weight_kg ? toDisplayWeight(profile.goal_weight_kg) : '', {
+    step: 0.1,
+    placeholder: 'Optional',
+  });
+  const totalInches = profile.height_cm ? profile.height_cm / 2.54 : null;
+  const heightCm = numberInput(profile.height_cm ?? '', { step: 0.5, placeholder: 'cm' });
+  const heightFt = numberInput(totalInches ? Math.floor(totalInches / 12) : '', { placeholder: 'ft' });
+  const heightIn = numberInput(totalInches ? Math.round(totalInches % 12) : '', { placeholder: 'in' });
+  const sexSelect = h(
+    'select',
+    { class: 'portal-input' },
+    h('option', { value: '' }, 'Choose…'),
+    ...[
+      ['male', 'Male'],
+      ['female', 'Female'],
+      ['other', 'Prefer not to say'],
+    ].map(([value, label]) => h('option', { value, selected: profile.sex === value }, label)),
+  );
+  const birthIn = dateField({ value: profile.birth_date ?? '', class: 'portal-date' });
+  const activitySelect = h(
+    'select',
+    { class: 'portal-input' },
+    ...ACTIVITY_LEVEL_OPTIONS.map((o) => h('option', { value: o.value, selected: profile.activity_level === o.value }, o.label)),
+  );
+  const daysSelect = h(
+    'select',
+    { class: 'portal-input' },
+    ...Array.from({ length: 8 }, (_, n) =>
+      h('option', { value: n, selected: profile.training_days === n }, n === 0 ? 'None' : `${n} day${n === 1 ? '' : 's'} a week`),
+    ),
+  );
+
+  const rateSelect = h('select', { class: 'portal-input' });
+  const paintRates = () => {
+    const rates = state.goal === 'gain' ? [0.25, 0.5] : [0.25, 0.5, 0.75, 1];
+    if (!rates.includes(state.rate)) state.rate = 0.5;
+    clear(rateSelect).append(
+      ...rates.map((r) =>
+        h('option', { value: r, selected: r === state.rate }, `${lb ? Math.round(r * LB_PER_KG * 10) / 10 : r} ${lb ? 'lb' : 'kg'} a week`),
+      ),
+    );
+    rateField.hidden = state.goal === 'maintain';
+  };
+  rateSelect.addEventListener('change', () => (state.rate = Number(rateSelect.value)));
+  const rateField = nutriField('Pace', rateSelect);
+
+  const bodyPayload = () => {
+    const out = {
+      activity_level: activitySelect.value,
+      training_days: Number(daysSelect.value),
+      training_intensity: state.intensity,
+      goal: state.goal,
+      goal_rate_kg: state.rate,
+      exercise_addback_pct: state.addback,
+    };
+    if (weightIn.value) out.weight_kg = toKg(Number(weightIn.value));
+    if (goalWeightIn.value) out.goal_weight_kg = toKg(Number(goalWeightIn.value));
+    const cm = lb
+      ? ((Number(heightFt.value) || 0) * 12 + (Number(heightIn.value) || 0)) * 2.54
+      : Number(heightCm.value);
+    if (cm) out.height_cm = Math.round(cm * 10) / 10;
+    if (sexSelect.value) out.sex = sexSelect.value;
+    if (birthIn.value) out.birth_date = birthIn.value;
+    return out;
+  };
+
+  /* Calculator result */
+  const resultBox = h('div', {});
+  const FIELD_NAMES = { weight_kg: 'weight', height_cm: 'height', sex: 'sex', birth_date: 'date of birth' };
+
+  async function calculate(button) {
+    button.disabled = true;
+    try {
+      const res = await api.portal.suggestNutrition(bodyPayload());
+      const t = res.targets;
+      const line = (label, value) => h('div', { class: 'portal-nutri-line' }, h('span', {}, label), h('strong', {}, value));
+      const signed = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)} kcal`;
+      clear(resultBox).append(
+        h(
+          'div',
+          { class: 'portal-nutri-result' },
+          h('div', { class: 'portal-nutri-result-kcal' }, h('strong', {}, String(t.target_calories)), h('span', {}, 'kcal a day')),
+          h(
+            'div',
+            { class: 'portal-food-macros' },
+            h('div', {}, h('strong', {}, `${t.target_protein_g}g`), h('span', {}, 'protein')),
+            h('div', {}, h('strong', {}, `${t.target_carbs_g}g`), h('span', {}, 'carbs')),
+            h('div', {}, h('strong', {}, `${t.target_fats_g}g`), h('span', {}, 'fat')),
+            h('div', {}, h('strong', {}, `${(t.target_water_ml / 1000).toFixed(1)}L`), h('span', {}, 'water')),
+          ),
+          line('Resting burn (BMR)', `${res.bmr} kcal`),
+          line('With daily activity', `${res.maintenance - res.training_built_in} kcal`),
+          res.training_built_in ? line('Training not added back', signed(res.training_built_in)) : null,
+          res.goal_adjustment ? line(state.goal === 'lose' ? 'Deficit' : 'Surplus', signed(res.goal_adjustment)) : null,
+          res.floored
+            ? h('p', { class: 'portal-nutri-warn' }, renderIcon('alert', { size: 15 }), 'That pace would take you below a safe minimum, so this is held at the floor. A slower pace is kinder.')
+            : null,
+          res.weeks_to_goal ? h('p', { class: 'portal-nutri-hint' }, `At this pace you would reach your goal weight in about ${res.weeks_to_goal} weeks.`) : null,
+          h(
+            'button',
+            {
+              class: 'btn primary block',
+              type: 'button',
+              onclick: () => {
+                state.calories = t.target_calories;
+                state.grams = { protein: t.target_protein_g, carbs: t.target_carbs_g, fats: t.target_fats_g };
+                state.water = t.target_water_ml;
+                state.fiber = null;
+                state.sugar = null;
+                state.source = 'own';
+                paintSource();
+                paintTargets();
+                targetsCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                toast('Targets filled in — tap Save to start using them');
+              },
+            },
+            'Use these targets',
+          ),
+        ),
+      );
+      resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (err) {
+      const missing = Object.keys(err.details ?? {}).map((k) => FIELD_NAMES[k] ?? k.replace(/_/g, ' '));
+      toast(missing.length ? `${err.message}: ${missing.join(', ')}` : err.message || 'Could not work that out', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  /* Save */
+  async function save(button) {
+    button.disabled = true;
+    try {
+      const own = state.source === 'own';
+      const payload = {
+        ...bodyPayload(),
+        // Without a trainer plan their own numbers apply anyway; leaving the
+        // switch off means a plan assigned later still takes over.
+        use_own_targets: Boolean(trainerPlan) && own,
+        target_water_ml: state.water,
+      };
+      // Untouched targets on the trainer's side are not saved as the
+      // member's own: the seed numbers came from the plan, not from them.
+      if (own || profile.target_calories) {
+        Object.assign(payload, {
+          target_calories: state.calories || null,
+          target_protein_g: state.grams.protein,
+          target_carbs_g: state.grams.carbs,
+          target_fats_g: state.grams.fats,
+          target_fiber_g: state.fiber ?? null,
+          target_sugar_g: state.sugar ?? null,
+        });
+      } else {
+        delete payload.target_water_ml;
+      }
+      // Only a changed weight becomes a weigh-in.
+      if (latestWeight && payload.weight_kg && Math.abs(payload.weight_kg - latestWeight.weight_kg) < 0.05) delete payload.weight_kg;
+      await api.portal.saveNutrition(payload);
+      closeModal();
+      toast('Diet settings saved');
+      await onSaved?.();
+    } catch (err) {
+      const fields = Object.keys(err.details ?? {}).map((k) => FIELD_NAMES[k] ?? k.replace(/^target_|_g$|_ml$/g, '').replace(/_/g, ' '));
+      toast(fields.length ? `${err.message}: ${fields.join(', ')}` : err.message || 'Could not save', 'error');
+      button.disabled = false;
+    }
+  }
+
+  const sourceSlot = h('div', {});
+  const paintSource = () => {
+    clear(sourceSlot).append(
+      trainerPlan
+        ? segmentedPicker(
+            [
+              ['trainer', 'Trainer plan'],
+              ['own', 'My own'],
+            ],
+            state.source,
+            (value) => {
+              state.source = value;
+              paintSourceHint();
+            },
+          )
+        : null,
+      sourceHint,
+    );
+    paintSourceHint();
+  };
+
+  const addbackHint = h('p', { class: 'portal-nutri-hint' }, ADDBACK_HINT[state.addback]);
+  const goalSlot = segmentedPicker(GOAL_OPTIONS, state.goal, (goal) => {
+    state.goal = goal;
+    paintRates();
+  });
+
+  paintTargets();
+  paintSource();
+  paintRates();
+
+  const saveBtn = h('button', { class: 'btn primary block', type: 'button' }, 'Save');
+  saveBtn.addEventListener('click', () => save(saveBtn));
+  const calcBtn = h('button', { class: 'btn block portal-nutri-calc', type: 'button' }, renderIcon('sparkle', { size: 16 }), 'Suggest my targets');
+  calcBtn.addEventListener('click', () => calculate(calcBtn));
+
+  openTallSheet({
+    title: 'Diet settings',
+    className: 'portal-nutri-modal',
+    body: h(
+      'div',
+      { class: 'portal-nutri' },
+      h('h4', { class: 'portal-nutri-label' }, 'Targets to follow'),
+      sourceSlot,
+      h('h4', { class: 'portal-nutri-label' }, 'Daily targets'),
+      targetsCard,
+      h('h4', { class: 'portal-nutri-label' }, 'Exercise calories'),
+      h(
+        'div',
+        { class: 'portal-nutri-card' },
+        h('p', { class: 'portal-nutri-q' }, 'How much of what you burn should be added back to your food budget?'),
+        segmentedPicker(ADDBACK_OPTIONS, state.addback, (value) => {
+          state.addback = value;
+          addbackHint.textContent = ADDBACK_HINT[value];
+        }),
+        addbackHint,
+      ),
+      h('h4', { class: 'portal-nutri-label' }, 'About you'),
+      h(
+        'div',
+        { class: 'portal-nutri-card' },
+        h('p', { class: 'portal-nutri-hint' }, 'Used to suggest targets and to estimate what your workouts burn. Only you and your trainer see it.'),
+        h(
+          'div',
+          { class: 'portal-nutri-grid' },
+          nutriField(`Weight (${lb ? 'lb' : 'kg'})`, weightIn),
+          lb
+            ? nutriField('Height', h('div', { class: 'portal-nutri-pair' }, heightFt, heightIn))
+            : nutriField('Height (cm)', heightCm),
+          nutriField('Sex', sexSelect, 'For the BMR formula'),
+          nutriField('Date of birth', birthIn),
+        ),
+        nutriField('Daily activity', activitySelect, 'Leave your workouts out — those are counted separately.'),
+        nutriField('Training', daysSelect),
+        nutriField('Training effort', segmentedPicker(INTENSITY_OPTIONS, state.intensity, (value) => (state.intensity = value))),
+        nutriField('Goal', goalSlot),
+        h('div', { class: 'portal-nutri-grid' }, rateField, nutriField(`Goal weight (${lb ? 'lb' : 'kg'})`, goalWeightIn)),
+        calcBtn,
+        resultBox,
+      ),
+      h('div', { class: 'portal-nutri-save' }, saveBtn),
+    ),
+  });
+}
+
+/* ── Nutrition insights ────────────────────────────────────────────────── */
+
+const MACRO_PARTS = [
+  { key: 'protein', label: 'Protein', grams: 'protein_g', target: 'target_protein_g', kcalPerGram: 4 },
+  { key: 'carbs', label: 'Carbs', grams: 'carbs_g', target: 'target_carbs_g', kcalPerGram: 4 },
+  { key: 'fats', label: 'Fat', grams: 'fats_g', target: 'target_fats_g', kcalPerGram: 9 },
+];
+
+const formatKcal = (n) => Math.round(n).toLocaleString();
+
+/** A bar with a 4 px rounded top and a square foot on the baseline. */
+function roundedBar(x, y, width, height, radius = 4) {
+  const r = Math.min(radius, width / 2, height);
+  return `M${x},${y + height} V${y + r} Q${x},${y} ${x + r},${y} H${x + width - r} Q${x + width},${y} ${x + width},${y + r} V${y + height} Z`;
+}
+
+/** One 100% bar split by each macro's share of energy, labelled where a
+ * segment is wide enough to hold its number. */
+function macroSplitBar(grams, caption) {
+  const kcal = MACRO_PARTS.map((m) => (grams[m.key] || 0) * m.kcalPerGram);
+  const total = kcal.reduce((a, b) => a + b, 0);
+  const pct = kcal.map((k) => (total ? Math.round((k / total) * 100) : 0));
+  return {
+    pct,
+    node: h(
+      'div',
+      { class: 'portal-ins-split-row' },
+      h('span', { class: 'portal-ins-split-caption' }, caption),
+      total
+        ? h(
+            'div',
+            { class: 'portal-ins-split', role: 'img', 'aria-label': `${caption}: ${MACRO_PARTS.map((m, i) => `${m.label} ${pct[i]}%`).join(', ')}` },
+            ...MACRO_PARTS.map((m, i) =>
+              pct[i] > 0
+                ? h(
+                    'span',
+                    { class: `portal-ins-seg ${m.key}`, style: `flex:${kcal[i]} 1 0`, title: `${m.label}: ${pct[i]}% of energy` },
+                    pct[i] >= 12 ? `${pct[i]}%` : '',
+                  )
+                : null,
+            ),
+          )
+        : h('div', { class: 'portal-ins-split empty' }, 'Nothing logged yet'),
+    ),
+  };
+}
+
+/**
+ * The last seven days as bars, each with a tick at that day's budget (the
+ * goal plus the exercise eaten back, so the target moves with the training).
+ * Tapping or hovering a day reads it out under the chart.
+ */
+function weekChart(days, selectedDate) {
+  const W = 340;
+  const H = 150;
+  const top = 12;
+  const base = H - 22;
+  const max = Math.max(1, ...days.map((d) => Math.max(d.calories, d.budget))) * 1.08;
+  const slot = W / days.length;
+  const barW = Math.min(26, slot * 0.55);
+  const y = (v) => base - (v / max) * (base - top);
+  const readout = h('div', { class: 'portal-ins-readout', role: 'status' });
+  const bars = [];
+
+  const select = (i) => {
+    const d = days[i];
+    bars.forEach((bar, j) => bar.classList.toggle('active', j === i));
+    readout.textContent = d.entry_count
+      ? `${dayLabel(d.log_date).weekday} ${shortDate(d.log_date)} · ${formatKcal(d.calories)} of ${formatKcal(d.budget)} kcal · P ${Math.round(d.protein_g)}g`
+      : `${dayLabel(d.log_date).weekday} ${shortDate(d.log_date)} · nothing logged`;
+  };
+
+  const chart = svg(
+    'svg',
+    { class: 'portal-ins-week', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Calories eaten each day against that day’s budget' },
+    svg('line', { class: 'portal-ins-axis', x1: 0, x2: W, y1: base, y2: base }),
+    ...days.map((d, i) => {
+      const cx = slot * i + slot / 2;
+      const bar = svg('path', {
+        class: `portal-ins-bar${d.log_date === selectedDate ? ' selected' : ''}`,
+        d: d.calories > 0 ? roundedBar(cx - barW / 2, y(d.calories), barW, base - y(d.calories)) : '',
+      });
+      bars.push(bar);
+      const hit = svg('rect', { class: 'portal-ins-hit', x: slot * i, y: 0, width: slot, height: H });
+      hit.addEventListener('pointerenter', () => select(i));
+      hit.addEventListener('click', () => select(i));
+      return svg(
+        'g',
+        {},
+        bar,
+        svg('line', { class: 'portal-ins-budget', x1: cx - barW / 2 - 4, x2: cx + barW / 2 + 4, y1: y(d.budget), y2: y(d.budget) }),
+        svg('text', { class: 'portal-ins-day', x: cx, y: H - 6, 'text-anchor': 'middle' }, dayLabel(d.log_date).weekday.slice(0, 2)),
+        hit,
+      );
+    }),
+  );
+
+  select(Math.max(0, days.findIndex((d) => d.log_date === selectedDate)));
+  return h(
+    'div',
+    {},
+    h(
+      'div',
+      { class: 'portal-ins-legend-inline' },
+      h('span', {}, h('i', { class: 'swatch bar' }), 'Eaten'),
+      h('span', {}, h('i', { class: 'swatch tick' }), 'Budget'),
+    ),
+    chart,
+    readout,
+  );
+}
+
+/**
+ * Lifesum-style detail for one day and the week behind it: the calorie sum,
+ * how the energy splits across macros against the target split, which meals
+ * and foods it came from, every tracked nutrient against its goal or limit,
+ * and the last seven days. The Diet tab's card keeps only what reads at a
+ * glance; everything that needs reading lives here, on a screen of its own
+ * (see openScreen in renderPortalApp).
+ */
+async function buildNutritionInsights({ day, targets, logDate }) {
+  const week = await api.portal.dietSummary({ end: logDate, days: 7 });
+  const card = (title, ...children) =>
+    h('section', { class: 'portal-ins-card' }, h('h4', { class: 'portal-ins-title' }, title), ...children);
+
+  /* Calories */
+  const { budget, exercise } = day;
+  const cell = (value, label, tone = '') =>
+    h('div', { class: `portal-budget-cell ${tone}` }, h('strong', {}, formatKcal(value)), h('span', {}, label));
+  const op = (symbol) => h('span', { class: 'portal-budget-op', 'aria-hidden': 'true' }, symbol);
+  const exerciseNote = !exercise.total_burned
+    ? 'No exercise logged this day.'
+    : exercise.addback_pct === 0
+      ? `You burned ${formatKcal(exercise.total_burned)} kcal; exercise is not added to your budget.`
+      : `You burned ${formatKcal(exercise.total_burned)} kcal; ${exercise.addback_pct}% of it is added to your budget.`;
+
+  const caloriesCard = card(
+    'Calories',
+    h(
+      'div',
+      { class: 'portal-budget', role: 'img', 'aria-label': `Goal ${budget.goal} minus food ${budget.food} plus exercise ${budget.exercise} leaves ${budget.remaining} kcal` },
+      cell(budget.goal, 'Goal'),
+      op('−'),
+      cell(budget.food, 'Food'),
+      op('+'),
+      cell(budget.exercise, 'Exercise', 'exercise'),
+      op('='),
+      cell(budget.remaining, budget.remaining < 0 ? 'Over' : 'Left', budget.remaining < 0 ? 'over' : 'left'),
+    ),
+    h('p', { class: 'portal-ins-note' }, exerciseNote),
+  );
+
+  /* Macro split: eaten against target */
+  const eatenGrams = { protein: day.totals.protein_g, carbs: day.totals.carbs_g, fats: day.totals.fats_g };
+  const targetGrams = { protein: targets.target_protein_g, carbs: targets.target_carbs_g, fats: targets.target_fats_g };
+  const eaten = macroSplitBar(eatenGrams, 'Eaten');
+  const planned = macroSplitBar(targetGrams, 'Target');
+  const macroCard = card(
+    'Macro split',
+    eaten.node,
+    planned.node,
+    h(
+      'div',
+      { class: 'portal-ins-legend' },
+      ...MACRO_PARTS.map((m, i) =>
+        h(
+          'div',
+          { class: 'portal-ins-legend-row' },
+          h('i', { class: `swatch ${m.key}` }),
+          h('span', { class: 'portal-ins-legend-name' }, m.label),
+          h('span', { class: 'portal-ins-legend-val' }, `${Math.round(eatenGrams[m.key])} / ${targetGrams[m.key]} g`),
+          h('span', { class: 'portal-ins-legend-pct' }, `${eaten.pct[i]}% · target ${planned.pct[i]}%`),
+        ),
+      ),
+    ),
+  );
+
+  /* Calories by meal */
+  const mealRows = MEAL_SLOTS.map((slot) => ({
+    ...slot,
+    kcal: (day.meals[slot.key] ?? []).reduce((sum, e) => sum + e.calories, 0),
+    count: (day.meals[slot.key] ?? []).length,
+  })).filter((m) => m.count || ['breakfast', 'lunch', 'dinner', 'snack'].includes(m.key));
+  const mealMax = Math.max(1, ...mealRows.map((m) => m.kcal));
+  const foodTotal = day.totals.calories;
+  const mealCard = card(
+    'Calories by meal',
+    ...mealRows.map((m) =>
+      h(
+        'div',
+        { class: 'portal-ins-meal' },
+        h('span', { class: 'portal-ins-meal-name' }, renderIcon(m.icon, { size: 15 }), m.label),
+        h('div', { class: 'portal-ins-track' }, h('i', { style: `width:${(m.kcal / mealMax) * 100}%` })),
+        h('span', { class: 'portal-ins-meal-val' }, `${formatKcal(m.kcal)} kcal`, h('small', {}, foodTotal ? `${Math.round((m.kcal / foodTotal) * 100)}%` : '–')),
+      ),
+    ),
+  );
+
+  /* Nutrients: goals to reach, and sugar as a limit to stay under */
+  const nutrient = ({ label, eatenValue, target, unit, kind = 'goal', tone }) => {
+    const value = Math.round(eatenValue * 10) / 10;
+    const pctOf = target > 0 ? Math.min((eatenValue / target) * 100, 100) : 0;
+    let status;
+    if (kind === 'limit') {
+      status = eatenValue > target
+        ? h('span', { class: 'portal-ins-status bad' }, renderIcon('alert', { size: 13 }), `${Math.round(eatenValue - target).toLocaleString()} ${unit} over limit`)
+        : h('span', { class: 'portal-ins-status' }, `${Math.round(target - eatenValue).toLocaleString()} ${unit} under limit`);
+    } else {
+      status = target > 0 && eatenValue >= target
+        ? h('span', { class: 'portal-ins-status good' }, renderIcon('checkCircle', { size: 13 }), 'Goal reached')
+        : h('span', { class: 'portal-ins-status' }, `${Math.round(target - eatenValue).toLocaleString()} ${unit} to go`);
+    }
+    return h(
+      'div',
+      { class: `portal-ins-nutrient ${tone}${kind === 'limit' && eatenValue > target ? ' over' : ''}` },
+      h(
+        'div',
+        { class: 'portal-ins-nutrient-top' },
+        h('strong', {}, label, kind === 'limit' ? h('small', {}, ' limit') : null),
+        h('span', {}, `${value.toLocaleString()} / ${target.toLocaleString()} ${unit}`),
+      ),
+      h('div', { class: 'portal-ins-track' }, h('i', { style: `width:${pctOf}%` })),
+      status,
+    );
+  };
+  const nutrientCard = card(
+    'Nutrients',
+    nutrient({ label: 'Protein', eatenValue: day.totals.protein_g, target: targets.target_protein_g, unit: 'g', tone: 'protein' }),
+    nutrient({ label: 'Carbs', eatenValue: day.totals.carbs_g, target: targets.target_carbs_g, unit: 'g', tone: 'carbs' }),
+    nutrient({ label: 'Fat', eatenValue: day.totals.fats_g, target: targets.target_fats_g, unit: 'g', tone: 'fats' }),
+    nutrient({ label: 'Fibre', eatenValue: day.totals.fiber_g, target: targets.target_fiber_g, unit: 'g', tone: 'fiber' }),
+    nutrient({ label: 'Sugar', eatenValue: day.totals.sugar_g, target: targets.target_sugar_g, unit: 'g', kind: 'limit', tone: 'sugar' }),
+    nutrient({ label: 'Water', eatenValue: day.water_ml, target: targets.target_water_ml, unit: 'ml', tone: 'water' }),
+  );
+
+  /* Where the calories came from */
+  const topFoods = [...day.entries].sort((a, b) => b.calories - a.calories).slice(0, 5);
+  const foodsCard = card(
+    'Top foods',
+    ...(topFoods.length
+      ? topFoods.map((e) =>
+          h(
+            'div',
+            { class: 'portal-ins-food' },
+            h('div', {}, h('strong', {}, e.food_name), h('small', {}, portionLabel(e))),
+            h('span', {}, `${formatKcal(e.calories)} kcal`, h('small', {}, foodTotal ? `${Math.round((e.calories / foodTotal) * 100)}%` : '')),
+          ),
+        )
+      : [h('p', { class: 'portal-ins-note' }, 'Log a meal to see which foods your calories come from.')]),
+  );
+
+  /* The week */
+  const logged = week.days.filter((d) => d.entry_count > 0);
+  const avg = (key) => (logged.length ? logged.reduce((sum, d) => sum + d[key], 0) / logged.length : 0);
+  // "On target" is the same ±15% band the trainer's adherence view uses.
+  const onTarget = logged.filter((d) => Math.abs(d.calories - d.budget) <= d.budget * 0.15).length;
+  const stat = (value, label) => h('div', { class: 'portal-ins-stat' }, h('strong', {}, value), h('span', {}, label));
+  const weekCard = card(
+    'Last 7 days',
+    weekChart(week.days, logDate),
+    logged.length
+      ? h(
+          'div',
+          { class: 'portal-ins-stats' },
+          stat(formatKcal(avg('calories')), 'avg kcal / day'),
+          stat(`${onTarget} of ${logged.length}`, 'days on target'),
+          stat(`${Math.round(avg('protein_g'))} g`, 'avg protein'),
+        )
+      : h('p', { class: 'portal-ins-note' }, 'Nothing logged this week yet.'),
+  );
+
+  return h('div', { class: 'portal-insights' }, caloriesCard, macroCard, mealCard, nutrientCard, foodsCard, weekCard);
+}
+
+/* ── Exercise & weigh-in sheets ───────────────────────────────────────── */
+
+/**
+ * Exercise outside the logger. The estimate is previewed with the same net-MET
+ * arithmetic the server uses (src/nutrition.js); typing over it sends the
+ * member's own number, which the server keeps as given.
+ */
+async function openActivitySheet({ logDate, onAdded }) {
+  const { items, weight_kg: weightKg } = await api.portal.activityTypes();
+  let selected = items.find((a) => a.key === 'walking') ?? items[0];
+  let minutes = 30;
+  let typedKcal = null;
+
+  const estimate = () => Math.round(Math.max(0, selected.met - 1) * (weightKg || 70) * (minutes / 60));
+  const kcalIn = numberInput(estimate(), {
+    oninput: (event) => (typedKcal = event.target.value === '' ? null : Number(event.target.value)),
+  });
+  const refreshKcal = () => {
+    if (typedKcal === null) kcalIn.value = estimate();
+  };
+  const nameIn = h('input', { class: 'portal-input', placeholder: 'What did you do?', maxlength: 80 });
+  const nameField = nutriField('Name', nameIn);
+
+  const grid = h('div', { class: 'portal-act-grid' });
+  const paintGrid = () => {
+    clear(grid).append(
+      ...items.map((type) =>
+        h(
+          'button',
+          {
+            class: `portal-act-chip${type.key === selected.key ? ' active' : ''}`,
+            type: 'button',
+            onclick: () => {
+              selected = type;
+              nameField.hidden = type.key !== 'other';
+              paintGrid();
+              refreshKcal();
+            },
+          },
+          renderIcon(type.icon, { size: 16 }),
+          type.label,
+        ),
+      ),
+    );
+  };
+  paintGrid();
+  nameField.hidden = true;
+
+  const minutesIn = numberInput(minutes, {
+    min: 1,
+    oninput: (event) => {
+      minutes = Number(event.target.value) || 0;
+      refreshKcal();
+    },
+  });
+  const quick = h(
+    'div',
+    { class: 'portal-chip-row' },
+    ...[15, 30, 45, 60, 90].map((m) =>
+      h(
+        'button',
+        {
+          class: 'portal-act-quick',
+          type: 'button',
+          onclick: () => {
+            minutes = m;
+            minutesIn.value = m;
+            refreshKcal();
+          },
+        },
+        `${m} min`,
+      ),
+    ),
+  );
+
+  const addBtn = h('button', { class: 'btn primary block', type: 'button' }, 'Add activity');
+  addBtn.addEventListener('click', async () => {
+    if (!minutes) {
+      toast('How long did it take?', 'error');
+      return;
+    }
+    addBtn.disabled = true;
+    try {
+      await api.portal.logActivity({
+        activity: selected.key,
+        name: selected.key === 'other' ? nameIn.value.trim() || undefined : undefined,
+        duration_minutes: Math.round(minutes),
+        calories: typedKcal ?? undefined,
+        log_date: logDate,
+      });
+      closeModal();
+      toast(`${selected.label} logged`);
+      await onAdded();
+    } catch (err) {
+      toast(err.message || 'Could not log that', 'error');
+      addBtn.disabled = false;
+    }
+  });
+
+  openTallSheet({
+    title: 'Log activity',
+    body: h(
+      'div',
+      { class: 'portal-nutri' },
+      grid,
+      nameField,
+      h('div', { class: 'portal-nutri-grid' }, nutriField('Minutes', minutesIn), nutriField('Calories burned', kcalIn)),
+      quick,
+      h(
+        'small',
+        { class: 'portal-nutri-hint' },
+        weightKg
+          ? 'Estimated from your weight. Got a number from a watch? Type it in instead.'
+          : 'Estimated for 70 kg — log your weight on the Diet tab for a closer number.',
+      ),
+      addBtn,
+    ),
+  });
+}
+
+function openWeightSheet({ latest, onSaved }) {
+  const unit = weightUnit.get();
+  const input = numberInput(latest ? toDisplayWeight(latest.weight_kg) : '', { step: 0.1, placeholder: unit });
+  const dateIn = dateField({ value: today(), class: 'portal-date' });
+  const saveBtn = h('button', { class: 'btn primary block', type: 'button' }, 'Save weigh-in');
+  saveBtn.addEventListener('click', async () => {
+    const value = Number(input.value);
+    if (!value) {
+      toast('Enter your weight', 'error');
+      return;
+    }
+    saveBtn.disabled = true;
+    try {
+      await api.portal.logWeight({ weight_kg: toKg(value), log_date: dateIn.value || today() });
+      closeModal();
+      toast('Weigh-in saved');
+      await onSaved();
+    } catch (err) {
+      toast(err.message || 'Could not save that', 'error');
+      saveBtn.disabled = false;
+    }
+  });
+
+  openModal({
+    title: 'Log weight',
+    body: h(
+      'div',
+      { class: 'portal-nutri' },
+      h('div', { class: 'portal-nutri-grid' }, nutriField(`Weight (${unit})`, input), nutriField('Date', dateIn)),
+      h('small', { class: 'portal-nutri-hint' }, 'Weigh in at the same time of day — first thing in the morning is most consistent. A second weigh-in on the same day replaces the first.'),
+      saveBtn,
+    ),
+  });
 }
 
 /* -------------------------------------------------------------------- app */
@@ -2049,7 +3256,85 @@ function renderPortalApp(ctx, initialMe) {
     );
   }
 
+  /**
+   * A full screen pushed over the current tab — a page of its own with a back
+   * arrow, as opposed to a bottom sheet — for detail that needs room to read.
+   * The tab bar stays put, Lifesum-style.
+   *
+   * Opening one adds a history entry so the phone's back button or gesture
+   * pops it. Tab switches never touch the URL (see the module header), so a
+   * popstate while a screen is open can only mean "leave this screen".
+   */
+  let screenOpen = false;
+  let skipNextPop = false;
+
+  function onPopState() {
+    // A portal instance replaced by a re-render (or a sign-out) must stop
+    // listening, or it would repaint a detached tab on the next back press.
+    if (!content.isConnected) {
+      window.removeEventListener('popstate', onPopState);
+      return;
+    }
+    if (skipNextPop) {
+      skipNextPop = false;
+      return;
+    }
+    if (screenOpen) {
+      screenOpen = false;
+      switchTab(active);
+    }
+  }
+  window.addEventListener('popstate', onPopState);
+
+  async function openScreen({ title, subtitle, render }) {
+    stopTicking();
+    if (!screenOpen) {
+      history.pushState({ portalScreen: true }, '', window.location.href);
+      screenOpen = true;
+    }
+    const head = h(
+      'div',
+      { class: 'portal-screen-head' },
+      h(
+        'button',
+        { class: 'portal-screen-back', type: 'button', 'aria-label': 'Back', onclick: () => history.back() },
+        renderIcon('arrowLeft', { size: 20 }),
+      ),
+      h('div', { class: 'portal-screen-title' }, h('h2', {}, title), subtitle ? h('p', {}, subtitle) : null),
+    );
+    clear(content).append(h('div', { class: 'portal-tab-body portal-screen' }, head, h('div', { class: 'portal-loading' }, 'Loading…')));
+    content.scrollTop = 0;
+    try {
+      const node = await render();
+      if (!screenOpen) return; // Backed out while it was loading.
+      clear(content).append(h('div', { class: 'portal-tab-body portal-screen' }, head, node));
+      content.scrollTop = 0;
+    } catch (err) {
+      if (!screenOpen) return;
+      clear(content).append(
+        h(
+          'div',
+          { class: 'portal-tab-body portal-screen' },
+          head,
+          h(
+            'div',
+            { class: 'portal-error' },
+            h('p', {}, err.message || 'Could not load this page'),
+            h('button', { class: 'btn', type: 'button', onclick: () => openScreen({ title, subtitle, render }) }, 'Try again'),
+          ),
+        ),
+      );
+    }
+  }
+
   async function switchTab(key) {
+    // Leaving a pushed screen through the tab bar: drop its history entry
+    // too, so the next back press is not swallowed by a screen already gone.
+    if (screenOpen) {
+      screenOpen = false;
+      skipNextPop = true;
+      history.back();
+    }
     stopTicking();
     active = key;
     paintTabbar();
@@ -3153,6 +4438,15 @@ function renderPortalApp(ctx, initialMe) {
             h('div', {}, h('strong', {}, String(res.log.total_reps)), h('span', {}, 'reps')),
             h('div', {}, h('strong', {}, minutesLabel(res.log.duration_seconds)), h('span', {}, 'duration')),
           ),
+          res.log.calories_burned
+            ? h(
+                'div',
+                { class: 'portal-summary-kcal' },
+                renderIcon('flame', { size: 16, stroke: 2.2 }),
+                h('strong', {}, `~${res.log.calories_burned} kcal burned`),
+                h('span', {}, 'counted on your Diet tab'),
+              )
+            : null,
           res.prs.length
             ? h(
                 'div',
@@ -4297,8 +5591,17 @@ function renderPortalApp(ctx, initialMe) {
     if (!status.has_access) return upgradeSheet(status, { onRefresh: () => switchTab('diet') });
 
     let logDate = dietDate;
-    const [plan, day] = await Promise.all([api.portal.currentDiet(), api.portal.dietDay(logDate)]);
+    const [plan, day, weights] = await Promise.all([
+      api.portal.currentDiet(),
+      api.portal.dietDay(logDate),
+      api.portal.weightLog({ days: 90 }).catch(() => null),
+    ]);
     const targets = plan.targets;
+    // The ring is measured against the day's whole budget: the goal plus the
+    // share of exercise the member chose to eat back.
+    const budgetTotal = day.budget.goal + day.budget.exercise;
+    const openSettings = () =>
+      openNutritionSettings({ onSaved: reload }).catch((err) => toast(err.message || 'Could not open diet settings', 'error'));
 
     // `added` is the macros of a food entry that just went in — undefined for a
     // deletion or a water bump, which can only move totals away from target.
@@ -4306,8 +5609,8 @@ function renderPortalApp(ctx, initialMe) {
     // catches the exact moment a target is crossed without a second fetch.
     const reload = async (added) => {
       if (added) {
-        const crossedCalories = day.totals.calories < targets.target_calories
-          && day.totals.calories + (added.calories || 0) >= targets.target_calories;
+        const crossedCalories = day.totals.calories < budgetTotal
+          && day.totals.calories + (added.calories || 0) >= budgetTotal;
         const crossedProtein = day.totals.protein_g < targets.target_protein_g
           && day.totals.protein_g + (added.protein_g || 0) >= targets.target_protein_g;
         if (crossedCalories || crossedProtein) sound.playTargetReached();
@@ -4353,12 +5656,13 @@ function renderPortalApp(ctx, initialMe) {
       });
     }
 
-    /* Hero: calorie ring + macro bars, with the plan underneath */
+    /* Hero: calorie ring + macro bars. The budget sum, fibre, sugar and the
+       rest live on the insights screen — this card stays one glance. */
     body.append(
       h(
         'section',
         { class: 'portal-diet-hero' },
-        calorieRing(day.totals.calories, targets.target_calories, { size: 168, stroke: 12, icon: 'flame' }),
+        calorieRing(day.totals.calories, budgetTotal, { size: 168, stroke: 12, icon: 'flame' }),
         h(
           'div',
           { class: 'portal-dmacro-stack' },
@@ -4366,24 +5670,219 @@ function renderPortalApp(ctx, initialMe) {
           dietMacro('Carbs', day.totals.carbs_g, targets.target_carbs_g, 'carbs'),
           dietMacro('Fats', day.totals.fats_g, targets.target_fats_g, 'fats', renderIcon('droplet', { size: 13, stroke: 2.4 })),
         ),
+        h(
+          'button',
+          {
+            class: 'portal-insights-link',
+            type: 'button',
+            onclick: () =>
+              openScreen({
+                title: 'Nutrition insights',
+                subtitle: logDate === today() ? 'Today' : longDate(logDate),
+                render: () => buildNutritionInsights({ day, targets, logDate }),
+              }),
+          },
+          renderIcon('barChart', { size: 17 }),
+          h('span', {}, 'Nutrition insights'),
+          renderIcon('chevronRight', { size: 16 }),
+        ),
       ),
     );
 
+    // Where today's numbers come from, and the way into Diet settings.
+    const planRow = (() => {
+      if (plan.target_source === 'trainer' && plan.plan) {
+        return h(
+          'button',
+          { class: 'portal-plan-row', type: 'button', onclick: () => openPlanSheet(plan.plan, targets) },
+          h('span', { class: 'portal-plan-ico' }, renderIcon('target', { size: 22 })),
+          h('span', { class: 'portal-plan-text' }, `Plan: ${plan.plan.name}`),
+          renderIcon('chevronRight', { size: 18 }),
+        );
+      }
+      const text = plan.target_source === 'own'
+        ? `My targets · ${targets.target_calories} kcal`
+        : `Default targets — ${targets.target_calories} kcal. Tap to set your own.`;
+      return h(
+        'button',
+        { class: `portal-plan-row${plan.target_source === 'default' ? ' static' : ''}`, type: 'button', onclick: openSettings },
+        h('span', { class: 'portal-plan-ico' }, renderIcon(plan.target_source === 'own' ? 'user' : 'target', { size: 22 })),
+        h('span', { class: 'portal-plan-text' }, text),
+        renderIcon('chevronRight', { size: 18 }),
+      );
+    })();
     body.append(
-      plan.plan
-        ? h(
-            'button',
-            { class: 'portal-plan-row', type: 'button', onclick: () => openPlanSheet(plan.plan, targets) },
-            h('span', { class: 'portal-plan-ico' }, renderIcon('target', { size: 22 })),
-            h('span', { class: 'portal-plan-text' }, `Plan: ${plan.plan.name}`),
-            renderIcon('chevronRight', { size: 18 }),
-          )
-        : h(
-            'div',
-            { class: 'portal-plan-row static' },
-            h('span', { class: 'portal-plan-ico' }, renderIcon('target', { size: 22 })),
-            h('span', { class: 'portal-plan-text' }, `Default targets — ${targets.target_calories} kcal. Ask a trainer to set yours.`),
+      h(
+        'div',
+        { class: 'portal-plan-wrap' },
+        planRow,
+        h(
+          'button',
+          { class: 'portal-plan-gear', type: 'button', 'aria-label': 'Diet settings', title: 'Diet settings', onclick: openSettings },
+          renderIcon('settings', { size: 20 }),
+        ),
+      ),
+    );
+
+    /* Exercise & weight: one compact row of tiles with the detail in sheets,
+       so the meals sit close under the summary — logging food is what this
+       tab is opened for most. */
+    const ex = day.exercise;
+
+    /** Leaves the sheet before the tab repaints underneath it, so nothing
+     * stale is left on screen. */
+    const fromSheet = (fn) => () => {
+      closeModal();
+      fn();
+    };
+
+    function openExerciseSheet() {
+      const exRow = ({ icon, name, meta, kcal, onRemove }) =>
+        h(
+          'div',
+          { class: 'portal-ex-row' },
+          h('span', { class: 'portal-ex-ico' }, renderIcon(icon, { size: 17 })),
+          h('div', { class: 'portal-ex-text' }, h('strong', {}, name), h('small', {}, meta)),
+          h('span', { class: 'portal-ex-kcal' }, `${kcal} kcal`),
+          onRemove
+            ? h(
+                'button',
+                {
+                  class: 'icon-btn',
+                  type: 'button',
+                  'aria-label': `Remove ${name}`,
+                  onclick: async (event) => {
+                    event.currentTarget.disabled = true;
+                    try {
+                      await onRemove();
+                      closeModal();
+                      toast(`${name} removed`);
+                      await reload();
+                    } catch (err) {
+                      toast(err.message || 'Could not remove that', 'error');
+                      event.currentTarget.disabled = false;
+                    }
+                  },
+                },
+                renderIcon('close', { size: 14 }),
+              )
+            : null,
+        );
+      const addbackNote = ex.addback_pct === 0
+        ? 'Not added to your food budget — change this in Diet settings.'
+        : ex.addback_pct === 50
+          ? `Half added to your food budget: +${ex.credited} kcal.`
+          : `Added to your food budget: +${ex.credited} kcal.`;
+
+      openModal({
+        title: 'Exercise',
+        subtitle: `${ex.total_burned} kcal burned`,
+        body: h(
+          'div',
+          { class: 'portal-ex-sheet' },
+          ...ex.workouts.map((w) =>
+            exRow({ icon: 'weight', name: w.workout_name, meta: `Workout · ${minutesLabel(w.duration_seconds)}`, kcal: w.calories }),
           ),
+          ...ex.activities.map((a) =>
+            exRow({ icon: 'activity', name: a.name, meta: `${a.duration_minutes} min`, kcal: a.calories, onRemove: () => api.portal.deleteActivity(a.id) }),
+          ),
+          ex.workouts.length || ex.activities.length
+            ? h('small', { class: 'portal-ex-note' }, addbackNote)
+            : h('div', { class: 'portal-ex-empty' }, 'Nothing yet. Workouts you finish in the app appear here on their own.'),
+          h(
+            'button',
+            {
+              class: 'portal-add-food',
+              type: 'button',
+              onclick: fromSheet(() =>
+                openActivitySheet({ logDate, onAdded: reload }).catch((err) => toast(err.message || 'Could not open that', 'error')),
+              ),
+            },
+            h('span', { class: 'portal-add-ico' }, renderIcon('plus', { size: 13, stroke: 2.4 })),
+            'Log activity',
+          ),
+        ),
+      });
+    }
+
+    const latestWeight = weights?.latest ?? null;
+    const unit = weightUnit.get();
+    const firstWeight = weights?.items[0];
+    const weightChange = latestWeight && firstWeight && firstWeight.log_date !== latestWeight.log_date
+      ? Math.round((toDisplayWeight(latestWeight.weight_kg) - toDisplayWeight(firstWeight.weight_kg)) * 10) / 10
+      : null;
+    const signed = (n) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${Math.abs(n)} ${unit}`;
+
+    function openWeightTrend() {
+      const points = weights.items.map((w) => ({ date: w.log_date, value: toDisplayWeight(w.weight_kg) }));
+      const readout = h('div', { class: 'portal-weight-readout' });
+      const sub = [
+        weightChange !== null ? `${signed(weightChange)} since ${shortDate(firstWeight.log_date)}` : null,
+        weights.goal_weight_kg ? `goal ${weightLabel(weights.goal_weight_kg)}` : null,
+      ].filter(Boolean).join(' · ');
+
+      openModal({
+        title: 'Weight',
+        subtitle: sub || weightLabel(latestWeight.weight_kg),
+        body: h(
+          'div',
+          { class: 'portal-ex-sheet' },
+          points.length >= 2
+            ? h(
+                'div',
+                { class: 'portal-weight-chart' },
+                progressChart(points, {
+                  format: (v) => String(Math.round(v * 10) / 10),
+                  onSelect: (i) => {
+                    readout.textContent = `${points[i].value} ${unit} · ${shortDate(points[i].date)}`;
+                  },
+                }),
+                readout,
+              )
+            : h('div', { class: 'portal-ex-empty' }, 'Log another weigh-in to start your trend line.'),
+          h(
+            'button',
+            { class: 'portal-add-food', type: 'button', onclick: fromSheet(() => openWeightSheet({ latest: latestWeight, onSaved: reload })) },
+            h('span', { class: 'portal-add-ico' }, renderIcon('plus', { size: 13, stroke: 2.4 })),
+            'Log weight',
+          ),
+        ),
+      });
+    }
+
+    const miniTile = ({ tone, icon, label, value, note, onclick }) =>
+      h(
+        'button',
+        { class: `portal-mini-tile ${tone}`, type: 'button', onclick },
+        h('span', { class: 'portal-mini-ico' }, renderIcon(icon, { size: 18, stroke: 2 })),
+        h('span', { class: 'portal-mini-text' }, h('small', {}, label), h('strong', {}, value), note ? h('em', {}, note) : null),
+        renderIcon('chevronRight', { size: 16 }),
+      );
+
+    body.append(
+      h(
+        'div',
+        { class: 'portal-mini-row' },
+        miniTile({
+          tone: 'exercise',
+          icon: 'flame',
+          label: 'Exercise',
+          value: ex.total_burned ? `${ex.total_burned} kcal` : 'None yet',
+          note: ex.workouts.length + ex.activities.length ? `${ex.workouts.length + ex.activities.length} logged` : 'Tap to log',
+          onclick: openExerciseSheet,
+        }),
+        weights
+          ? miniTile({
+              tone: 'weight',
+              icon: 'weight',
+              label: 'Weight',
+              value: latestWeight ? weightLabel(latestWeight.weight_kg) : 'Not logged',
+              note: weightChange !== null ? signed(weightChange) : latestWeight ? shortDate(latestWeight.log_date) : 'Tap to log',
+              // Nothing to chart yet: straight to the weigh-in.
+              onclick: latestWeight ? openWeightTrend : () => openWeightSheet({ latest: null, onSaved: reload }),
+            })
+          : null,
+      ),
     );
 
     /* Water */
@@ -4497,7 +5996,7 @@ function renderPortalApp(ctx, initialMe) {
                   h(
                     'div',
                     { class: 'muted' },
-                    `${entry.quantity === 1 ? '' : `${entry.quantity} × `}${entry.serving_unit} · P ${entry.protein_g}g · C ${entry.carbs_g}g · F ${entry.fats_g}g`,
+                    `${portionLabel(entry)} · P ${entry.protein_g}g · C ${entry.carbs_g}g · F ${entry.fats_g}g`,
                   ),
                 ),
                 h('div', { class: 'portal-entry-kcal' }, String(entry.calories)),
@@ -4569,15 +6068,31 @@ function renderPortalApp(ctx, initialMe) {
           ),
           planned.length ? loggedBox : null,
           h(
-            'button',
-            {
-              class: 'portal-add-food',
-              type: 'button',
-              onclick: () =>
-                openFoodSearch({ mealType: slot.key, mealLabel: slot.label, logDate, onAdded: reload }),
-            },
-            h('span', { class: 'portal-add-ico' }, renderIcon('plus', { size: 13, stroke: 2.4 })),
-            'Add food',
+            'div',
+            { class: 'portal-add-row' },
+            h(
+              'button',
+              {
+                class: 'portal-add-food',
+                type: 'button',
+                onclick: () =>
+                  openFoodSearch({ mealType: slot.key, mealLabel: slot.label, logDate, onAdded: reload }),
+              },
+              h('span', { class: 'portal-add-ico' }, renderIcon('plus', { size: 13, stroke: 2.4 })),
+              'Add food',
+            ),
+            h(
+              'button',
+              {
+                class: 'portal-add-food portal-add-scan',
+                type: 'button',
+                'aria-label': `Scan a barcode for ${slot.label}`,
+                title: 'Scan a barcode',
+                onclick: () =>
+                  openFoodSearch({ mealType: slot.key, mealLabel: slot.label, logDate, onAdded: reload, startOn: 'scan' }),
+              },
+              renderIcon('scan', { size: 19 }),
+            ),
           ),
         ),
       );
@@ -5051,6 +6566,21 @@ function renderPortalApp(ctx, initialMe) {
     }
   }
 
+  /** Diet settings from Profile. Without the tracker the Diet tab's upgrade
+   * screen is the honest answer, so that is where a locked member lands. */
+  async function openDietSettings() {
+    try {
+      const status = await api.portal.fitnessStatus();
+      if (!status.has_access) {
+        await switchTab('diet');
+        return;
+      }
+      await openNutritionSettings({ onSaved: () => (active === 'diet' ? switchTab('diet') : null) });
+    } catch (err) {
+      toast(err.message || 'Could not open diet settings', 'error');
+    }
+  }
+
   async function renderProfileTab() {
     const m = me.member;
     const sub = me.subscription;
@@ -5253,6 +6783,12 @@ function renderPortalApp(ctx, initialMe) {
       h(
         'div',
         { class: 'portal-prof-card' },
+        TABS.some((tabDef) => tabDef.key === 'diet')
+          ? profileRow({
+              icon: 'nutrition', tone: 'green', title: 'Diet & nutrition', sub: 'Calorie and macro goals, body stats, exercise calories',
+              onclick: openDietSettings,
+            })
+          : null,
         profileRow({ icon: 'key', tone: 'rose', title: 'Change PIN', sub: 'Update your app PIN for security', onclick: openChangePinModal }),
         profileRow({
           icon: 'moon', tone: 'purple', title: dark ? 'Dark Mode' : 'Switch to Dark Mode', sub: 'Change app appearance',

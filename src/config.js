@@ -44,6 +44,11 @@ export const config = {
     process.env.EXERCISE_MEDIA_DIR ||
     path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'exercise-media'),
   trialDays: Number(process.env.TRIAL_DAYS || 7),
+  // Open Food Facts, for the member app's barcode scanner (src/foodBarcode.js).
+  // Overridable so tests can point it at a local stub instead of the internet.
+  foodDbUrl: (process.env.FOOD_DB_URL || 'https://world.openfoodfacts.org').replace(/\/+$/, ''),
+  // Open Food Facts asks every client to identify itself this way.
+  foodDbUserAgent: process.env.FOOD_DB_USER_AGENT || 'GymBook/1.0 (gym management software; member food logging)',
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',

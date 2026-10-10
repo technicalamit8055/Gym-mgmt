@@ -695,6 +695,32 @@ function fitnessSection(member, { reload }) {
             )
           : null,
       ),
+      // The member switched to targets they set in the app, so the plan below
+      // (if any) is not what their adherence is measured against.
+      diet.target_source === 'own'
+        ? h(
+            'p',
+            { class: 'md-meta', style: 'margin:0 0 8px' },
+            h('span', { class: 'badge amber' }, 'Own targets'),
+            ` ${member.first_name} follows targets they set: ${diet.targets.target_calories} kcal · P ${diet.targets.target_protein_g}g`
+              + ` · C ${diet.targets.target_carbs_g}g · F ${diet.targets.target_fats_g}g`
+              + (diet.exercise_addback_pct ? `, plus ${diet.exercise_addback_pct}% of exercise` : ''),
+          )
+        : null,
+      diet.body?.latest_weight
+        ? h(
+            'p',
+            { class: 'md-meta', style: 'margin:0 0 8px' },
+            `Weight ${diet.body.latest_weight.weight_kg} kg on ${date(diet.body.latest_weight.log_date)}`
+              + (diet.body.previous_weight
+                ? ` (${diet.body.latest_weight.weight_kg >= diet.body.previous_weight.weight_kg ? '+' : '−'}${Math.abs(
+                  Math.round((diet.body.latest_weight.weight_kg - diet.body.previous_weight.weight_kg) * 10) / 10,
+                )} kg)`
+                : '')
+              + (diet.body.goal !== 'maintain' ? ` • aiming to ${diet.body.goal} ${diet.body.goal_rate_kg} kg/week` : '')
+              + (diet.body.goal_weight_kg ? ` • goal ${diet.body.goal_weight_kg} kg` : ''),
+          )
+        : null,
       dietAssignment
         ? h(
             'div',

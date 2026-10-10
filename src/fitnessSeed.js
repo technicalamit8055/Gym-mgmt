@@ -169,6 +169,75 @@ const FOODS = [
   ['Orange Juice', 'general', '250 ml', 112, 1.7, 26, 0.5],
 ];
 
+/**
+ * [fiber_g, sugar_g] per serving for the foods above, keyed by name. Kept apart
+ * from FOODS because those columns arrived later: the backfill below has to
+ * fill them in on libraries that were seeded before they existed.
+ */
+const FOOD_FIBER_SUGAR = {
+  'Whole Egg': [0, 0.2],
+  'Egg White': [0, 0.2],
+  Paneer: [0, 1.2],
+  Tofu: [0.3, 0.6],
+  'Soya Chunks (dry)': [13, 6],
+  'Greek Yogurt (plain)': [0, 3.2],
+  'Cottage Cheese (low fat)': [0, 2.7],
+  'Chickpeas (boiled)': [7.6, 4.8],
+  'Rajma (boiled)': [6.4, 0.3],
+  'Toor Dal (cooked)': [5, 0.5],
+  'Moong Dal (cooked)': [4, 1],
+  'Lentils (cooked)': [7.9, 1.8],
+  'White Rice (cooked)': [0.4, 0.1],
+  'Brown Rice (cooked)': [1.6, 0.4],
+  'Roti / Chapati': [2, 0.5],
+  'Oats (dry)': [10.6, 1],
+  'Whole Wheat Bread': [2, 1.4],
+  'Sweet Potato (boiled)': [2.5, 5.7],
+  'Potato (boiled)': [1.8, 0.9],
+  'Quinoa (cooked)': [2.8, 0.9],
+  'Pasta (cooked)': [1.8, 0.6],
+  'Poha (cooked)': [0.7, 0.5],
+  Idli: [0.9, 0.3],
+  'Plain Dosa': [0.9, 0.5],
+  'Corn Flakes': [3, 8],
+  Almonds: [12.5, 4.4],
+  Walnuts: [6.7, 2.6],
+  Cashews: [3.3, 5.9],
+  Peanuts: [8.5, 4],
+  'Peanut Butter': [0.9, 1.5],
+  Avocado: [6.7, 0.7],
+  'Chia Seeds': [34, 0],
+  'Flax Seeds': [27, 1.6],
+  'Full Fat Milk': [0, 12.5],
+  'Skimmed Milk': [0, 12.5],
+  'Curd / Dahi': [0, 4.7],
+  'Cheese Slice': [0, 1],
+  Banana: [3.1, 14.4],
+  Apple: [4.4, 19],
+  Orange: [3.1, 12],
+  Papaya: [1.7, 7.8],
+  Watermelon: [0.4, 6.2],
+  Broccoli: [2.6, 1.7],
+  Spinach: [2.2, 0.4],
+  Cucumber: [0.5, 1.7],
+  'Mixed Vegetable Salad': [2, 3],
+  'Whey Protein': [0, 2],
+  'Mass Gainer': [1, 12],
+  'Coconut Water': [2.8, 6.5],
+  'Orange Juice': [0.5, 21],
+};
+
+/**
+ * Fills fibre and sugar on the standard foods. Only rows still at 0/0 are
+ * touched, so a re-run is a no-op and a gym's own corrections survive.
+ */
+export function backfillFoodFiberSugar(db) {
+  const update = db.prepare(
+    'UPDATE food_library SET fiber_g = ?, sugar_g = ? WHERE name = ? AND is_custom = 0 AND fiber_g = 0 AND sugar_g = 0',
+  );
+  for (const [name, [fiber, sugar]] of Object.entries(FOOD_FIBER_SUGAR)) update.run(fiber, sugar, name);
+}
+
 /** Exercise rows are [name, muscle_group, target_sets, target_reps, rest_seconds]. */
 const WORKOUT_TEMPLATES = [
   {

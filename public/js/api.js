@@ -504,10 +504,23 @@ export const api = {
     setActivePlan: (planId) => request('PUT', '/portal/workouts/active', { plan_id: planId }, { member: true }),
     currentDiet: () => request('GET', '/portal/diets/current', undefined, { member: true }),
     dietDay: (date) => request('GET', `/portal/diets/daily${query({ date })}`, undefined, { member: true }),
+    dietSummary: (params) => request('GET', `/portal/diets/summary${query(params)}`, undefined, { member: true }),
     addFoodEntry: (payload) => request('POST', '/portal/diets/entries', payload, { member: true }),
     deleteFoodEntry: (id) => request('DELETE', `/portal/diets/entries/${id}`, undefined, { member: true }),
     logWater: (payload) => request('POST', '/portal/diets/water', payload, { member: true }),
     foods: (params) => request('GET', `/portal/diets/foods${query(params)}`, undefined, { member: true }),
+    barcodeFood: (code) => request('GET', `/portal/diets/barcode/${encodeURIComponent(code)}`, undefined, { member: true }),
+    addBarcodeFood: (payload) => request('POST', '/portal/diets/barcode-foods', payload, { member: true }),
+    // Own targets, the calculator, weigh-ins and activities outside the logger.
+    nutrition: () => request('GET', '/portal/nutrition', undefined, { member: true }),
+    saveNutrition: (payload) => request('PUT', '/portal/nutrition', payload, { member: true }),
+    suggestNutrition: (payload) => request('POST', '/portal/nutrition/suggest', payload, { member: true }),
+    weightLog: (params) => request('GET', `/portal/weight${query(params)}`, undefined, { member: true }),
+    logWeight: (payload) => request('POST', '/portal/weight', payload, { member: true }),
+    deleteWeight: (id) => request('DELETE', `/portal/weight/${id}`, undefined, { member: true }),
+    activityTypes: () => request('GET', '/portal/activities/types', undefined, { member: true }),
+    logActivity: (payload) => request('POST', '/portal/activities', payload, { member: true }),
+    deleteActivity: (id) => request('DELETE', `/portal/activities/${id}`, undefined, { member: true }),
 
     // Push notifications and the notification center (see public/js/push.js).
     notifications: {

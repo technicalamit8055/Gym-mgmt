@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
-import { seedFitnessLibraries } from './fitnessSeed.js';
+import { backfillFoodFiberSugar, seedFitnessLibraries } from './fitnessSeed.js';
 
 /**
  * Two kinds of time live in here and they are not interchangeable:
@@ -1104,6 +1104,95 @@ const MIGRATIONS = [
   // assignment stays live underneath, so a member can never archive their
   // trainer's programming, and switching back is one tap.
   (db) => ensureColumn(db, 'members', 'own_workout_plan_id', 'INTEGER REFERENCES workout_plans(id) ON DELETE SET NULL'),
+
+  /* ------------------------------------------- Own nutrition targets --- */
+  // A member's own calorie budget and the body stats the calculator suggests
+  // it from (see src/nutrition.js). Targets stay NULL until the member sets
+  // them; `use_own_targets` is their switch away from a trainer's plan, which
+  // stays assigned underneath — the same pointer-not-assignment idea as
+  // own_workout_plan_id above.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_nutrition_profiles (
+        member_id            INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        use_own_targets      INTEGER NOT NULL DEFAULT 0,
+        target_calories      INTEGER,
+        target_protein_g     INTEGER,
+        target_carbs_g       INTEGER,
+        target_fats_g        INTEGER,
+        target_fiber_g       INTEGER,
+        target_sugar_g       INTEGER,
+        target_water_ml      INTEGER,
+        exercise_addback_pct INTEGER NOT NULL DEFAULT 100 CHECK (exercise_addback_pct IN (0, 50, 100)),
+        height_cm            REAL,
+        sex                  TEXT CHECK (sex IN ('male', 'female', 'other') OR sex IS NULL),
+        birth_date           TEXT,
+        activity_level       TEXT NOT NULL DEFAULT 'light'
+                             CHECK (activity_level IN ('sedentary', 'light', 'moderate', 'very_active')),
+        training_days        INTEGER NOT NULL DEFAULT 4 CHECK (training_days BETWEEN 0 AND 7),
+        training_intensity   TEXT NOT NULL DEFAULT 'moderate'
+                             CHECK (training_intensity IN ('light', 'moderate', 'hard')),
+        goal                 TEXT NOT NULL DEFAULT 'maintain' CHECK (goal IN ('lose', 'maintain', 'gain')),
+        goal_rate_kg         REAL NOT NULL DEFAULT 0.5 CHECK (goal_rate_kg BETWEEN 0 AND 1),
+        goal_weight_kg       REAL,
+        updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
+  // One weigh-in per gym-local day: weighing twice replaces the morning's
+  // number rather than putting two dots on the trend for one day.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS body_weight_logs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        log_date   TEXT NOT NULL,
+        weight_kg  REAL NOT NULL CHECK (weight_kg > 0),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (member_id, log_date)
+      )
+    `);
+  },
+  // Exercise outside the workout logger — a run, a match, a yoga class.
+  // `calories` is stored, not recomputed: the member may have typed their
+  // watch's number over the estimate, and that is the one they trust.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id        INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        log_date         TEXT NOT NULL,
+        activity         TEXT NOT NULL,
+        name             TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL CHECK (duration_minutes > 0),
+        calories         INTEGER NOT NULL DEFAULT 0 CHECK (calories >= 0),
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_activity_logs_member ON activity_logs(member_id, log_date)');
+  },
+  // Costed when the session is saved, at that day's body weight, so a later
+  // weigh-in cannot rewrite what an old workout earned. NULL on sessions from
+  // before this existed — those are estimated on read.
+  (db) => ensureColumn(db, 'workout_logs', 'calories_burned', 'INTEGER'),
+  (db) => ensureColumn(db, 'food_library', 'fiber_g', 'REAL NOT NULL DEFAULT 0'),
+  (db) => ensureColumn(db, 'food_library', 'sugar_g', 'REAL NOT NULL DEFAULT 0'),
+  (db) => ensureColumn(db, 'diet_log_entries', 'fiber_g', 'REAL NOT NULL DEFAULT 0'),
+  (db) => ensureColumn(db, 'diet_log_entries', 'sugar_g', 'REAL NOT NULL DEFAULT 0'),
+  (db) => backfillFoodFiberSugar(db),
+
+  /* ---------------------------------------------------- Barcode foods --- */
+  // Packaged foods found by barcode (src/foodBarcode.js). `source` says who
+  // vouches for the numbers: 'openfoodfacts', or 'member' (typed off the label
+  // by someone at the gym); NULL for everything that predates scanning.
+  // Nutrition stays per serving_unit (100g / 100ml for these); serving_size_g
+  // is the pack's own serving, offered as a shortcut.
+  (db) => ensureColumn(db, 'food_library', 'barcode', 'TEXT'),
+  (db) => ensureColumn(db, 'food_library', 'brand', 'TEXT'),
+  (db) => ensureColumn(db, 'food_library', 'serving_size_g', 'REAL'),
+  (db) => ensureColumn(db, 'food_library', 'serving_label', 'TEXT'),
+  (db) => ensureColumn(db, 'food_library', 'source', 'TEXT'),
+  (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_food_library_barcode ON food_library(barcode) WHERE barcode IS NOT NULL'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

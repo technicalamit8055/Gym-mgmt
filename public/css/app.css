@@ -5015,6 +5015,334 @@ body:not([data-mode='light']) .portal-add-food { border-color: color-mix(in srgb
 
 .portal-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* ------------------------------------------------- budget, fibre, sugar */
+
+/* The hero wraps so the insights link sits under the ring and macro bars,
+   inside the same card. */
+.portal-diet-hero { flex-wrap: wrap; row-gap: 16px; }
+.portal-budget {
+  flex: 1 1 100%; display: flex; align-items: center; justify-content: space-between; gap: 4px;
+  padding: 10px 12px; border-radius: 16px; background: var(--d-inset);
+}
+.portal-budget-cell { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.portal-budget-cell strong { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.portal-budget-cell span { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.portal-budget-cell.exercise strong { color: var(--green); }
+.portal-budget-cell.left strong { color: var(--brand); }
+.portal-budget-cell.over strong { color: var(--red); }
+.portal-budget-op { color: var(--muted); font-weight: 600; font-size: 15px; }
+
+/* The one way from the card into the insights screen */
+.portal-insights-link {
+  flex: 1 1 100%; display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 14px;
+  border: 0; background: var(--d-inset); color: var(--text); font: inherit; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: transform 0.12s ease;
+}
+.portal-insights-link > .svg-icon:first-child { color: var(--brand); }
+.portal-insights-link > span { flex: 1; text-align: left; }
+.portal-insights-link > .svg-icon:last-child { color: var(--muted); }
+.portal-insights-link:active { transform: scale(0.99); }
+
+/* Plan row + the gear into Diet settings */
+.portal-plan-wrap { display: flex; gap: 8px; margin-top: -4px; }
+.portal-plan-wrap > .portal-plan-row { margin-top: 0; flex: 1; min-width: 0; }
+.portal-plan-gear {
+  flex: none; width: 50px; display: grid; place-items: center; border-radius: 18px; cursor: pointer;
+  color: var(--muted); border: 1px solid var(--d-card-border); background: var(--d-card); box-shadow: var(--d-card-shadow);
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.portal-plan-gear:hover { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+.portal-plan-gear:active { transform: scale(0.95); }
+
+/* ------------------------------------------------- exercise & weight */
+
+/* Two compact tiles under the plan row; the detail opens in a sheet. */
+.portal-mini-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin-top: -4px; }
+.portal-mini-tile {
+  --t: var(--green);
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 10px 10px 12px; border-radius: 18px;
+  font: inherit; text-align: left; color: var(--muted); cursor: pointer;
+  border: 1px solid var(--d-card-border); background: var(--d-card); box-shadow: var(--d-card-shadow);
+  transition: transform 0.12s ease, border-color 0.15s ease;
+}
+.portal-mini-tile.weight { --t: var(--brand); }
+.portal-mini-tile:hover { border-color: color-mix(in srgb, var(--t) 40%, var(--border)); }
+.portal-mini-tile:active { transform: scale(0.98); }
+.portal-mini-ico {
+  flex: none; width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center;
+  color: var(--t); background: color-mix(in srgb, var(--t) 14%, transparent);
+}
+.portal-mini-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.portal-mini-text small { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.portal-mini-text strong {
+  font-size: 15px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.portal-mini-text em { font-style: normal; font-size: 11.5px; color: var(--t); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The exercise and weight sheets reuse the Diet tab's rows outside its
+   .portal-diet scope, so they bring the tokens those rows read. */
+.portal-ex-sheet {
+  --d-card: var(--surface); --d-card-border: var(--border); --d-inset: var(--surface-2);
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* ---------------------------------------------------- nutrition insights */
+
+/* Chart colours were run through the dataviz validator against both
+   surfaces: the light amber is too pale for a dark card, so dark mode takes a
+   deeper step of the same hue. Text never wears these; values stay in ink. */
+.portal-insights {
+  --i-protein: #3b82f6; --i-carbs: #c88504; --i-fats: #e11d48;
+  --i-fiber: #10b981; --i-sugar: #a855f7; --i-water: #0ea5e9;
+  --d-inset: var(--surface-2);
+  display: flex; flex-direction: column; gap: 12px;
+}
+body[data-mode='light'] .portal-insights { --i-carbs: #f59e0b; }
+@media (max-width: 560px) {
+  .modal.portal-insights-modal { min-height: calc(100dvh - 36px - var(--safe-top)); }
+}
+.portal-ins-card {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px;
+  border-radius: 18px; border: 1px solid var(--border); background: var(--bg-alt);
+}
+.portal-ins-title { margin: 0; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.portal-ins-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.portal-insights .portal-budget { background: var(--surface-2); }
+
+.portal-ins-split-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 10px; }
+.portal-ins-split-caption { font-size: 12px; font-weight: 600; color: var(--muted); }
+/* 2 px surface gaps between segments; labels in white ink on the fill. */
+.portal-ins-split { display: flex; gap: 2px; height: 24px; border-radius: 6px; overflow: hidden; }
+.portal-ins-split.empty {
+  align-items: center; justify-content: center; font-size: 11.5px; color: var(--muted);
+  background: var(--surface-2);
+}
+.portal-ins-seg {
+  display: grid; place-items: center; min-width: 4px; overflow: hidden; font-size: 11px; font-weight: 700;
+  color: #fff; font-variant-numeric: tabular-nums;
+}
+.portal-ins-seg.protein, .swatch.protein { background: var(--i-protein); }
+.portal-ins-seg.carbs, .swatch.carbs { background: var(--i-carbs); }
+.portal-ins-seg.fats, .swatch.fats { background: var(--i-fats); }
+.portal-ins-legend { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+.portal-ins-legend-row {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; grid-template-areas: 'sw name val' '. pct pct';
+  align-items: center; column-gap: 8px; font-size: 13px;
+}
+.portal-ins-legend-row .swatch { grid-area: sw; }
+.portal-ins-legend-name { grid-area: name; font-weight: 600; }
+.portal-ins-legend-val { grid-area: val; font-variant-numeric: tabular-nums; }
+.portal-ins-legend-pct { grid-area: pct; font-size: 11.5px; color: var(--muted); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+
+.portal-ins-track { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 9%, transparent); overflow: hidden; }
+.portal-ins-track > i { display: block; height: 100%; border-radius: 999px; background: var(--c, var(--brand)); }
+
+.portal-ins-meal { display: grid; grid-template-columns: 112px minmax(0, 1fr) 92px; align-items: center; gap: 10px; }
+.portal-ins-meal-name { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.portal-ins-meal-name .svg-icon { color: var(--muted); }
+.portal-ins-meal-val { text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; }
+.portal-ins-meal-val small { display: block; font-size: 11px; color: var(--muted); }
+
+.portal-ins-nutrient { --c: var(--brand); display: flex; flex-direction: column; gap: 5px; }
+.portal-ins-nutrient + .portal-ins-nutrient { padding-top: 10px; border-top: 1px solid var(--border); }
+.portal-ins-nutrient.protein { --c: var(--i-protein); }
+.portal-ins-nutrient.carbs { --c: var(--i-carbs); }
+.portal-ins-nutrient.fats { --c: var(--i-fats); }
+.portal-ins-nutrient.fiber { --c: var(--i-fiber); }
+.portal-ins-nutrient.sugar { --c: var(--i-sugar); }
+.portal-ins-nutrient.water { --c: var(--i-water); }
+.portal-ins-nutrient.over { --c: var(--red); }
+.portal-ins-nutrient-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13.5px; }
+.portal-ins-nutrient-top small { font-weight: 500; color: var(--muted); }
+.portal-ins-nutrient-top span { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.portal-ins-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
+.portal-ins-status.good .svg-icon { color: var(--green); }
+.portal-ins-status.bad { color: var(--text); }
+.portal-ins-status.bad .svg-icon { color: var(--red); }
+
+.portal-ins-food { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portal-ins-food + .portal-ins-food { padding-top: 8px; border-top: 1px solid var(--border); }
+.portal-ins-food > div { min-width: 0; display: flex; flex-direction: column; }
+.portal-ins-food strong { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-ins-food small { font-size: 11.5px; color: var(--muted); }
+.portal-ins-food > span { text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.portal-ins-food > span small { display: block; font-weight: 500; }
+
+.portal-ins-legend-inline { display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); }
+.portal-ins-legend-inline span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch.bar { background: var(--brand); }
+.swatch.tick { height: 2px; width: 14px; border-radius: 1px; background: var(--text); }
+.portal-ins-week { display: block; width: 100%; height: auto; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.portal-ins-axis { stroke: var(--border); stroke-width: 1; }
+.portal-ins-bar { fill: var(--brand); opacity: 0.45; transition: opacity 0.15s ease; }
+.portal-ins-bar.selected { opacity: 0.8; }
+.portal-ins-bar.active { opacity: 1; }
+.portal-ins-budget { stroke: var(--text); stroke-width: 2; stroke-linecap: round; opacity: 0.75; }
+.portal-ins-day { fill: var(--muted); font-size: 10.5px; font-family: inherit; }
+.portal-ins-hit { fill: transparent; cursor: pointer; }
+.portal-ins-readout { min-height: 18px; text-align: center; font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.portal-ins-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid var(--border); }
+.portal-ins-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; padding-top: 10px; text-align: center; }
+.portal-ins-stat strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.portal-ins-stat span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.portal-ex-row {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 14px; background: var(--d-inset);
+}
+.portal-ex-ico {
+  width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
+  color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.portal-ex-text { min-width: 0; display: flex; flex-direction: column; }
+.portal-ex-text strong { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-ex-text small { font-size: 11.5px; color: var(--muted); }
+.portal-ex-kcal { font-size: 13px; font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.portal-ex-note { font-size: 12px; color: var(--muted); }
+.portal-ex-empty { font-size: 12.5px; color: var(--muted); padding: 4px 0; }
+.portal-weight-chart { display: flex; flex-direction: column; gap: 4px; }
+.portal-weight-readout { font-size: 12px; font-weight: 600; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.portal-food-extra { font-size: 12px; color: var(--muted); text-align: center; margin-top: -4px; }
+.portal-summary-kcal {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px;
+  padding: 10px; border-radius: var(--radius); color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+.portal-summary-kcal strong { color: var(--text); font-size: 14px; }
+.portal-summary-kcal span { flex-basis: 100%; font-size: 11.5px; color: var(--muted); }
+
+/* ------------------------------------------------------ diet settings */
+
+.portal-nutri { display: flex; flex-direction: column; gap: 12px; }
+.portal-nutri-label {
+  margin: 6px 0 -4px; font-size: 11.5px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.portal-nutri-label:first-child { margin-top: 0; }
+.portal-nutri-card {
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  border-radius: 18px; border: 1px solid var(--border); background: var(--surface-2);
+  transition: opacity 0.2s ease;
+}
+/* Following the trainer: the member's own numbers stay editable but read as
+   not in force. */
+.portal-nutri-card.is-muted { opacity: 0.55; }
+.portal-nutri-hint { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.portal-nutri-q { margin: 0; font-size: 13.5px; font-weight: 600; }
+.portal-seg-full { display: flex; width: 100%; }
+.portal-seg-full .portal-segment { flex: 1; padding: 8px 6px; }
+
+.portal-nutri-kcal { display: flex; align-items: center; gap: 10px; color: var(--brand); }
+.portal-nutri-kcal .portal-input { flex: 1; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; padding: 8px 12px; }
+.portal-nutri-kcal span { color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.portal-nutri-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portal-nutri-row .portal-seg-full { width: auto; flex: 0 1 220px; }
+
+.portal-nutri-macro {
+  --c: var(--macro-protein);
+  display: grid; grid-template-columns: 12px minmax(0, 1fr) 118px 46px; align-items: center; gap: 10px;
+}
+.portal-nutri-macro.carbs { --c: var(--macro-carbs); }
+.portal-nutri-macro.fats { --c: var(--macro-fats); }
+.portal-nutri-macro > i { width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
+.portal-nutri-macro > span { font-size: 14px; font-weight: 600; }
+.portal-nutri-macro-in { position: relative; }
+.portal-nutri-macro-in .portal-input { padding: 9px 26px 9px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+.portal-nutri-macro-in b { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--muted); font-weight: 600; }
+.portal-nutri-macro em { font-style: normal; font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.portal-nutri-total { font-size: 12px; font-weight: 600; color: var(--muted); text-align: right; }
+.portal-nutri-total.warn { color: var(--amber); }
+
+.portal-nutri-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.portal-nutri-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.portal-nutri-field[hidden] { display: none; }
+.portal-nutri-field > span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.portal-nutri-field > small { font-size: 11px; color: var(--muted); }
+.portal-nutri-field .portal-input { padding: 10px 12px; font-size: 15px; }
+.portal-nutri-field .date-field { max-width: none; }
+.portal-nutri-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.portal-nutri-calc { gap: 8px; color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+
+.portal-nutri-result {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 16px;
+  border: 1px solid var(--brand); background: var(--brand-soft);
+}
+.portal-nutri-result-kcal { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
+.portal-nutri-result-kcal strong { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; color: var(--brand); }
+.portal-nutri-result-kcal span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.portal-nutri-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.portal-nutri-line span { color: var(--muted); }
+.portal-nutri-line strong { font-variant-numeric: tabular-nums; }
+.portal-nutri-warn { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-size: 12.5px; color: var(--amber); }
+.portal-nutri-warn .svg-icon { flex: none; margin-top: 1px; }
+
+/* Save stays in reach at the bottom of a long sheet. */
+.portal-nutri-save {
+  position: sticky; bottom: 0; z-index: 1; margin: 4px -4px 0; padding: 10px 4px 2px;
+  background: linear-gradient(180deg, transparent, var(--surface) 30%);
+}
+
+/* Activity picker */
+.portal-act-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 38vh; overflow-y: auto; }
+.portal-act-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 500;
+}
+.portal-act-chip .svg-icon { color: var(--muted); }
+.portal-act-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.portal-act-chip.active .svg-icon { color: var(--brand); }
+.portal-act-quick {
+  padding: 6px 12px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600;
+  border: 1px solid var(--border); background: none; color: var(--muted);
+}
+.portal-act-quick:hover { color: var(--brand); border-color: var(--brand); }
+
+/* ------------------------------------------------------ barcode scan */
+
+.portal-scan-pane { display: flex; flex-direction: column; gap: 10px; }
+.portal-scan-stage {
+  position: relative; aspect-ratio: 4 / 3; max-height: 42vh; border-radius: var(--radius); overflow: hidden;
+  background: #05080d; border: 1px solid var(--border);
+}
+.portal-scan-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* The guide: a wide window the barcode is held level in — the strip the
+   fallback decoder actually reads — and a scan line while the camera runs. */
+.portal-scan-guide {
+  position: absolute; left: 8%; right: 8%; top: 30%; bottom: 30%; border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.85); box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.35);
+}
+.portal-scan-guide i {
+  position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; border-radius: 2px;
+  background: var(--brand); box-shadow: 0 0 10px var(--brand); opacity: 0;
+}
+.portal-scan-stage.live .portal-scan-guide i { opacity: 1; animation: scan-sweep 1.6s ease-in-out infinite alternate; }
+@keyframes scan-sweep { from { top: 12%; } to { top: 88%; } }
+@media (prefers-reduced-motion: reduce) { .portal-scan-stage.live .portal-scan-guide i { animation: none; } }
+.portal-scan-status { font-size: 13px; color: var(--muted); text-align: center; min-height: 18px; }
+.portal-scan-manual { display: flex; gap: 8px; }
+.portal-scan-manual .portal-input { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.portal-scan-missing {
+  display: flex; flex-direction: column; gap: 6px; padding: 13px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-alt);
+}
+.portal-scan-missing p { margin: 0 0 4px; font-size: 12.5px; line-height: 1.45; }
+.portal-food-source { display: flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+.portal-sheet-tab { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+
+/* Meal card: Add food, with a barcode shortcut beside it */
+.portal-add-row { display: flex; gap: 8px; }
+.portal-add-row > .portal-add-food:first-child { flex: 1; }
+.portal-add-scan { flex: none; width: 54px; }
+
+@media (max-width: 380px) {
+  .portal-nutri-macro { grid-template-columns: 12px minmax(0, 1fr) 96px 40px; gap: 8px; }
+  .portal-budget-cell strong { font-size: 13.5px; }
+  .portal-budget-op { font-size: 13px; }
+}
+
 /* ----------------------------------------------------------- responsive */
 
 /*

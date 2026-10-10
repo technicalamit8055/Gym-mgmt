@@ -3,6 +3,7 @@ import { requireAuth } from '../auth.js';
 import { all, get, run, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { DIET_GOALS } from '../fitness.js';
+import { effectiveDietTargets, exerciseForDay, nutritionProfile } from '../nutrition.js';
 import { parse, today, toInt } from '../validate.js';
 import { requireModule } from '../verticals.js';
 
@@ -332,16 +333,39 @@ dietRoutes.get('/members/:memberId', (req, res) => {
   );
 
   const plan = assignment ? dietPlanTree(assignment.plan_id) : null;
-  const target = plan?.target_calories ?? 0;
+  // Judged against what the member is actually following — which may be
+  // their own targets rather than this plan — plus the exercise they ate back.
+  const effective = effectiveDietTargets(memberId);
+  const base = effective.source === 'default' ? 0 : effective.targets.target_calories;
+  for (const day of days) {
+    day.burned = exerciseForDay(memberId, day.log_date).total_burned;
+    day.target = base + Math.round((day.burned * effective.exercise_addback_pct) / 100);
+  }
   // Adherence is the share of logged days that landed within 15% of target —
   // a band, because hitting a calorie number exactly is not a thing anyone
   // does, and "close enough, most days" is what actually predicts results.
-  const onTarget = target ? days.filter((d) => Math.abs(d.calories - target) <= target * 0.15).length : 0;
+  const onTarget = base ? days.filter((d) => Math.abs(d.calories - d.target) <= d.target * 0.15).length : 0;
+
+  const profile = nutritionProfile(memberId);
+  const weighIns = all(
+    'SELECT log_date, weight_kg FROM body_weight_logs WHERE member_id = ? ORDER BY log_date DESC LIMIT 2',
+    [memberId],
+  );
 
   res.json({
     assignment: assignment ? { ...assignment, plan } : null,
     days,
-    adherence_pct: days.length && target ? Math.round((onTarget / days.length) * 100) : null,
+    adherence_pct: days.length && base ? Math.round((onTarget / days.length) * 100) : null,
+    targets: effective.targets,
+    target_source: effective.source,
+    exercise_addback_pct: effective.exercise_addback_pct,
+    body: {
+      latest_weight: weighIns[0] ?? null,
+      previous_weight: weighIns[1] ?? null,
+      goal: profile.goal,
+      goal_rate_kg: profile.goal_rate_kg,
+      goal_weight_kg: profile.goal_weight_kg,
+    },
   });
 });
 
@@ -390,15 +414,27 @@ dietRoutes.post('/foods', (req, res) => {
     protein_g: { type: 'number', min: 0, max: 500, default: 0 },
     carbs_g: { type: 'number', min: 0, max: 1000, default: 0 },
     fats_g: { type: 'number', min: 0, max: 500, default: 0 },
+    fiber_g: { type: 'number', min: 0, max: 200, default: 0 },
+    sugar_g: { type: 'number', min: 0, max: 500, default: 0 },
   });
 
   const existing = get('SELECT * FROM food_library WHERE name = ? COLLATE NOCASE', [body.name]);
   if (existing) return res.json(existing);
 
   const info = run(
-    `INSERT INTO food_library (name, category, serving_unit, calories, protein_g, carbs_g, fats_g, is_custom)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-    [body.name, body.category, body.serving_unit, body.calories, body.protein_g, body.carbs_g, body.fats_g],
+    `INSERT INTO food_library (name, category, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g, is_custom)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    [
+      body.name,
+      body.category,
+      body.serving_unit,
+      body.calories,
+      body.protein_g,
+      body.carbs_g,
+      body.fats_g,
+      body.fiber_g,
+      body.sugar_g,
+    ],
   );
   return res.status(201).json(get('SELECT * FROM food_library WHERE id = ?', [info.lastInsertRowid]));
 });
