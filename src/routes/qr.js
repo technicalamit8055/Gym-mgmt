@@ -114,6 +114,7 @@ qrRoutes.get('/app', async (req, res) => {
   res.json({
     url,
     gym_name: gymNameFor(req),
+    tagline: req.tenant?.tagline || null,
     logo_url: hasLogo ? tenantLogoUrl(req.tenant.slug, req.tenant.logo_version || 1) : null,
     svg,
     png,

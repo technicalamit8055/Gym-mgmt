@@ -356,4 +356,35 @@ describe('Member-app poster QR', () => {
     const res = await call('GET', '/g/pulse-fit/api/qr/app', null, { token });
     assert.ok(!res.body.url.startsWith(`${QR_PREFIX}:`));
   });
+
+  it('carries the gym tagline, which starts empty', async () => {
+    const before = await call('GET', '/g/pulse-fit/api/qr/app', null, { token });
+    assert.equal(before.body.tagline, null);
+
+    const saved = await call('PATCH', '/g/pulse-fit/api/platform/tenant', { tagline: '  Train Harder. Be Stronger. ' }, { token });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.tenant.tagline, 'Train Harder. Be Stronger.');
+
+    const after = await call('GET', '/g/pulse-fit/api/qr/app', null, { token });
+    assert.equal(after.body.tagline, 'Train Harder. Be Stronger.');
+  });
+
+  it('keeps the tagline when other settings change, and clears it when sent empty', async () => {
+    const renamed = await call('PATCH', '/g/pulse-fit/api/platform/tenant', { gym_name: 'Pulse Fit Club' }, { token });
+    assert.equal(renamed.body.tenant.tagline, 'Train Harder. Be Stronger.');
+
+    const cleared = await call('PATCH', '/g/pulse-fit/api/platform/tenant', { tagline: '' }, { token });
+    assert.equal(cleared.body.tenant.tagline, null);
+  });
+
+  it('rejects a tagline too long for the poster', async () => {
+    const res = await call('PATCH', '/g/pulse-fit/api/platform/tenant', { tagline: 'x'.repeat(61) }, { token });
+    assert.equal(res.status, 400);
+  });
+
+  it('serves the poster artwork at its lowercase path (Linux hosts are case-sensitive)', async () => {
+    const res = await fetch(`${base}/images/poster/gym-poster-bg.png`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'image/png');
+  });
 });

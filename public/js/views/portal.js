@@ -423,6 +423,202 @@ function routineExerciseRow(exercise) {
 }
 
 /**
+ * The Add Exercise sheet: search, muscle chips, recents and a Hevy-style
+ * multi-select. `onAdd` gets the picked library rows in the order they were
+ * tapped — the live logger turns them into set tables, the plan builder into
+ * targets.
+ */
+function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
+  let library = null;
+  let query = '';
+  let group = '';
+  // Hevy-style multi-select: rows toggle in and out, and they are added in
+  // the order they were picked. A Map keeps that order and dedupes by name.
+  const selected = new Map();
+  const list = h('div', { class: 'portal-pick-list' }, h('div', { class: 'portal-loading' }, 'Loading…'));
+  const addButton = h('button', { class: 'portal-pick-submit', type: 'button', onclick: addSelected });
+  const footer = h('div', { class: 'portal-pick-footer hidden' }, addButton);
+
+  function addSelected() {
+    const picked = [...selected.values()];
+    // Newest first in the recents, so add in reverse to keep the first pick on top.
+    for (const item of [...picked].reverse()) recentExercises.add(item.name);
+    closeModal();
+    onAdd(picked);
+  }
+
+  function paintFooter() {
+    const count = selected.size;
+    footer.classList.toggle('hidden', count === 0);
+    addButton.textContent = `Add ${count} exercise${count === 1 ? '' : 's'}`;
+  }
+
+  const keyOf = (item) => item.name.toLowerCase();
+  function toggle(item) {
+    if (selected.has(keyOf(item))) selected.delete(keyOf(item));
+    else selected.set(keyOf(item), item);
+    paintList();
+    paintFooter();
+  }
+
+  function pickRow(item, { recent = false } = {}) {
+    const isOn = selected.has(keyOf(item));
+    const order = isOn ? [...selected.keys()].indexOf(keyOf(item)) + 1 : 0;
+    return h(
+      'div',
+      { class: `portal-pick-row${recent ? ' is-recent' : ''}${isOn ? ' selected' : ''}` },
+      h(
+        'button',
+        {
+          class: 'portal-pick-thumb-btn',
+          type: 'button',
+          'aria-label': `${item.name} progress and how-to`,
+          onclick: () => openExerciseDetail(item),
+        },
+        pickerThumb(item),
+      ),
+      h(
+        'button',
+        { class: 'portal-pick-main', type: 'button', 'aria-pressed': String(isOn), onclick: () => toggle(item) },
+        h(
+          'span',
+          { class: 'portal-pick-text' },
+          h('span', { class: 'portal-pick-name' }, item.name),
+          h('span', { class: 'portal-pick-sub' }, exerciseSubtitle(item)),
+        ),
+      ),
+      h(
+        'button',
+        {
+          class: 'portal-pick-stats',
+          type: 'button',
+          title: 'See progress',
+          'aria-label': `${item.name} progress`,
+          onclick: () => openExerciseDetail(item),
+        },
+        renderIcon('trendUp', { size: 18 }),
+      ),
+      h(
+        'button',
+        {
+          class: 'portal-pick-add',
+          type: 'button',
+          'aria-label': isOn ? `Unselect ${item.name}` : `Select ${item.name}`,
+          onclick: () => toggle(item),
+        },
+        isOn
+          ? selected.size > 1
+            ? h('span', { class: 'portal-pick-order' }, String(order))
+            : renderIcon('check', { size: 18, stroke: 2.6 })
+          : renderIcon('plus', { size: 20, stroke: recent ? 2.6 : 2 }),
+      ),
+    );
+  }
+
+  function paintList() {
+    if (!library) return;
+    const needle = query.trim().toLowerCase();
+    const chip = PICKER_GROUPS.find((g) => g.key === group);
+    const matches = library
+      .filter((e) => !chip?.match || chip.match(e))
+      .filter((e) => !needle || `${e.name} ${muscleLabel(e.muscle_group)} ${muscleLabel(e.equipment ?? '')}`.toLowerCase().includes(needle))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    clear(list);
+    // Recents sit above the full list only while browsing: once the member
+    // is typing, the one list of matches is the answer.
+    const byName = new Map(library.map((e) => [e.name.toLowerCase(), e]));
+    const recents = needle
+      ? []
+      : recentExercises
+          .read()
+          .map((name) => byName.get(name.toLowerCase()))
+          .filter((e) => e && (!chip?.match || chip.match(e)));
+    if (recents.length) {
+      list.append(
+        h(
+          'div',
+          { class: 'portal-pick-head' },
+          h('h3', {}, 'Recent'),
+          h(
+            'button',
+            {
+              class: 'portal-pick-clear',
+              type: 'button',
+              onclick: () => {
+                recentExercises.clear();
+                paintList();
+              },
+            },
+            'Clear',
+          ),
+        ),
+        h('div', { class: 'portal-pick-group' }, ...recents.map((item) => pickRow(item, { recent: true }))),
+      );
+    }
+
+    list.append(h('div', { class: 'portal-pick-head' }, h('h3', {}, needle ? 'Results' : chip?.key ? `${chip.label} Exercises` : 'All Exercises')));
+    if (!matches.length) {
+      list.append(h('div', { class: 'portal-empty' }, 'No exercise matches that.'));
+      return;
+    }
+    list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 120).map((item) => pickRow(item))));
+  }
+
+  const search = h(
+    'label',
+    { class: 'portal-pick-search' },
+    renderIcon('search', { size: 20 }),
+    h('input', {
+      type: 'search',
+      placeholder: 'Search exercises (e.g. bicep curl, bench press)',
+      'aria-label': 'Search exercises',
+      oninput: (event) => {
+        query = event.target.value;
+        paintList();
+      },
+    }),
+  );
+  const chips = h(
+    'div',
+    { class: 'portal-pick-chips' },
+    ...PICKER_GROUPS.map((option) =>
+      h(
+        'button',
+        {
+          class: `portal-pick-chip${option.key === group ? ' active' : ''}`,
+          type: 'button',
+          onclick: (event) => {
+            group = option.key;
+            for (const el of chips.children) el.classList.remove('active');
+            event.currentTarget.classList.add('active');
+            paintList();
+          },
+        },
+        option.icon ? renderIcon(option.icon, { size: 16 }) : null,
+        h('span', {}, option.label),
+      ),
+    ),
+  );
+
+  openModal({
+    title,
+    className: 'portal-pick-modal',
+    body: h('div', { class: 'portal-pick-sheet' }, search, chips, list, footer),
+  });
+  // openModal focuses the first input; browsing is the common case, so the
+  // keyboard stays down until the member taps the search box.
+  search.querySelector('input').blur();
+  api.portal
+    .exercises()
+    .then((res) => {
+      library = res.items;
+      paintList();
+    })
+    .catch((err) => clear(list).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load exercises')));
+}
+
+/**
  * One row of a Profile card: a tinted icon tile, a title over a muted line,
  * then whatever sits on the right — a value, a switch, a segmented control.
  * `onclick` turns the whole row into a button with a chevron; `tone` is one of
@@ -2885,19 +3081,9 @@ function renderPortalApp(ctx, initialMe) {
       );
     }
 
-    function openAddExercise() {
-      let library = null;
-      let query = '';
-      let group = '';
-      // Hevy-style multi-select: rows toggle in and out, and they are added in
-      // the order they were picked. A Map keeps that order and dedupes by name.
-      const selected = new Map();
-      const list = h('div', { class: 'portal-pick-list' }, h('div', { class: 'portal-loading' }, 'Loading…'));
-      const addButton = h('button', { class: 'portal-pick-submit', type: 'button', onclick: addSelected });
-      const footer = h('div', { class: 'portal-pick-footer hidden' }, addButton);
-
-      function addSelected() {
-        for (const item of selected.values()) {
+    const openAddExercise = () =>
+      openExercisePicker((items) => {
+        for (const item of items) {
           state.exercises.push({
             exercise_name: item.name,
             muscle_group: item.muscle_group,
@@ -2909,183 +3095,9 @@ function renderPortalApp(ctx, initialMe) {
             sets: [{ set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false }],
           });
         }
-        // Newest first in the recents, so add in reverse to keep the first pick on top.
-        for (const item of [...selected.values()].reverse()) recentExercises.add(item.name);
         persist();
-        closeModal();
         paint();
-      }
-
-      function paintFooter() {
-        const count = selected.size;
-        footer.classList.toggle('hidden', count === 0);
-        addButton.textContent = `Add ${count} exercise${count === 1 ? '' : 's'}`;
-      }
-
-      const keyOf = (item) => item.name.toLowerCase();
-      function toggle(item) {
-        if (selected.has(keyOf(item))) selected.delete(keyOf(item));
-        else selected.set(keyOf(item), item);
-        paintList();
-        paintFooter();
-      }
-
-      function pickRow(item, { recent = false } = {}) {
-        const isOn = selected.has(keyOf(item));
-        const order = isOn ? [...selected.keys()].indexOf(keyOf(item)) + 1 : 0;
-        return h(
-          'div',
-          { class: `portal-pick-row${recent ? ' is-recent' : ''}${isOn ? ' selected' : ''}` },
-          h(
-            'button',
-            {
-              class: 'portal-pick-thumb-btn',
-              type: 'button',
-              'aria-label': `${item.name} progress and how-to`,
-              onclick: () => openExerciseDetail(item),
-            },
-            pickerThumb(item),
-          ),
-          h(
-            'button',
-            { class: 'portal-pick-main', type: 'button', 'aria-pressed': String(isOn), onclick: () => toggle(item) },
-            h(
-              'span',
-              { class: 'portal-pick-text' },
-              h('span', { class: 'portal-pick-name' }, item.name),
-              h('span', { class: 'portal-pick-sub' }, exerciseSubtitle(item)),
-            ),
-          ),
-          h(
-            'button',
-            {
-              class: 'portal-pick-stats',
-              type: 'button',
-              title: 'See progress',
-              'aria-label': `${item.name} progress`,
-              onclick: () => openExerciseDetail(item),
-            },
-            renderIcon('trendUp', { size: 18 }),
-          ),
-          h(
-            'button',
-            {
-              class: 'portal-pick-add',
-              type: 'button',
-              'aria-label': isOn ? `Unselect ${item.name}` : `Select ${item.name}`,
-              onclick: () => toggle(item),
-            },
-            isOn
-              ? selected.size > 1
-                ? h('span', { class: 'portal-pick-order' }, String(order))
-                : renderIcon('check', { size: 18, stroke: 2.6 })
-              : renderIcon('plus', { size: 20, stroke: recent ? 2.6 : 2 }),
-          ),
-        );
-      }
-
-      function paintList() {
-        if (!library) return;
-        const needle = query.trim().toLowerCase();
-        const chip = PICKER_GROUPS.find((g) => g.key === group);
-        const matches = library
-          .filter((e) => !chip?.match || chip.match(e))
-          .filter((e) => !needle || `${e.name} ${muscleLabel(e.muscle_group)} ${muscleLabel(e.equipment ?? '')}`.toLowerCase().includes(needle))
-          .sort((a, b) => a.name.localeCompare(b.name));
-
-        clear(list);
-        // Recents sit above the full list only while browsing: once the member
-        // is typing, the one list of matches is the answer.
-        const byName = new Map(library.map((e) => [e.name.toLowerCase(), e]));
-        const recents = needle
-          ? []
-          : recentExercises
-              .read()
-              .map((name) => byName.get(name.toLowerCase()))
-              .filter((e) => e && (!chip?.match || chip.match(e)));
-        if (recents.length) {
-          list.append(
-            h(
-              'div',
-              { class: 'portal-pick-head' },
-              h('h3', {}, 'Recent'),
-              h(
-                'button',
-                {
-                  class: 'portal-pick-clear',
-                  type: 'button',
-                  onclick: () => {
-                    recentExercises.clear();
-                    paintList();
-                  },
-                },
-                'Clear',
-              ),
-            ),
-            h('div', { class: 'portal-pick-group' }, ...recents.map((item) => pickRow(item, { recent: true }))),
-          );
-        }
-
-        list.append(h('div', { class: 'portal-pick-head' }, h('h3', {}, needle ? 'Results' : chip?.key ? `${chip.label} Exercises` : 'All Exercises')));
-        if (!matches.length) {
-          list.append(h('div', { class: 'portal-empty' }, 'No exercise matches that.'));
-          return;
-        }
-        list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 120).map((item) => pickRow(item))));
-      }
-
-      const search = h(
-        'label',
-        { class: 'portal-pick-search' },
-        renderIcon('search', { size: 20 }),
-        h('input', {
-          type: 'search',
-          placeholder: 'Search exercises (e.g. bicep curl, bench press)',
-          'aria-label': 'Search exercises',
-          oninput: (event) => {
-            query = event.target.value;
-            paintList();
-          },
-        }),
-      );
-      const chips = h(
-        'div',
-        { class: 'portal-pick-chips' },
-        ...PICKER_GROUPS.map((option) =>
-          h(
-            'button',
-            {
-              class: `portal-pick-chip${option.key === group ? ' active' : ''}`,
-              type: 'button',
-              onclick: (event) => {
-                group = option.key;
-                for (const el of chips.children) el.classList.remove('active');
-                event.currentTarget.classList.add('active');
-                paintList();
-              },
-            },
-            option.icon ? renderIcon(option.icon, { size: 16 }) : null,
-            h('span', {}, option.label),
-          ),
-        ),
-      );
-
-      openModal({
-        title: 'Add Exercise',
-        className: 'portal-pick-modal',
-        body: h('div', { class: 'portal-pick-sheet' }, search, chips, list, footer),
       });
-      // openModal focuses the first input; browsing is the common case, so the
-      // keyboard stays down until the member taps the search box.
-      search.querySelector('input').blur();
-      api.portal
-        .exercises()
-        .then((res) => {
-          library = res.items;
-          paintList();
-        })
-        .catch((err) => clear(list).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load exercises')));
-    }
 
     async function finish() {
       const sets = state.exercises.flatMap((exercise) =>
@@ -3331,6 +3343,565 @@ function renderPortalApp(ctx, initialMe) {
     return body;
   }
 
+  /* ---------------------------------------------------- Member-built plans */
+
+  const REST_CHOICES = [0, 30, 45, 60, 90, 120, 150, 180, 240, 300];
+  const restLabel = (seconds) =>
+    seconds === 0 ? 'Off' : seconds < 60 ? `${seconds}s` : seconds % 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds / 60} min`;
+  const daysLabel = (count) => `${count} day${count === 1 ? '' : 's'}`;
+
+  /** An exercise as the plan editor holds it: the fields the server stores,
+   * plus the demo fields so the thumbnails still show. Takes a plan row
+   * (exercise_name) or a picker row (name). */
+  const editableExercise = (exercise) => ({
+    exercise_name: exercise.exercise_name ?? exercise.name,
+    muscle_group: exercise.muscle_group,
+    target_sets: exercise.target_sets ?? 3,
+    target_reps: exercise.target_reps ?? '8-12',
+    rest_seconds: exercise.rest_seconds ?? 90,
+    notes: exercise.notes ?? null,
+    ...demoFields(exercise),
+  });
+
+  /**
+   * Hevy's "Create routine", stretched to a week: a named plan of up to seven
+   * days, each a list of exercises with target sets, reps and rest. Takes over
+   * the tab body the way the live logger does — a builder this size is a
+   * screen, not a sheet — and hands back to the Workout tab on save or cancel.
+   * `plan` is a full tree to edit, or null for a new one.
+   */
+  function openPlanEditor(plan = null) {
+    stopTicking();
+    const isNew = !plan?.id;
+    const draft = {
+      name: plan?.name ?? '',
+      description: plan?.description ?? '',
+      days: plan?.days?.length
+        ? plan.days.map((day) => ({ day_name: day.day_name, notes: day.notes ?? null, exercises: day.exercises.map(editableExercise) }))
+        : [{ day_name: 'Day 1', notes: null, exercises: [] }],
+      activate: true,
+    };
+    const pristine = JSON.stringify(draft);
+    const body = h('div', { class: 'portal-tab-body portal-pe' });
+    const leave = () => switchTab('workout');
+
+    const cancel = () => {
+      if (JSON.stringify(draft) === pristine) return leave();
+      return confirmDialog({
+        title: 'Discard changes?',
+        message: isNew ? 'This plan has not been saved.' : 'Your edits to this plan will be lost.',
+        confirmLabel: 'Discard',
+        danger: true,
+        onConfirm: leave,
+      });
+    };
+
+    /** The client-side half of the server's checks, so the common slips get a
+     * message that names the day instead of a generic 400. */
+    function problemWithDraft() {
+      if (draft.name.trim().length < 2) return 'Give your plan a name';
+      for (const [index, day] of draft.days.entries()) {
+        if (!day.day_name.trim()) return `Give day ${index + 1} a name`;
+        if (!day.exercises.length) return `Add at least one exercise to ${day.day_name.trim()}`;
+      }
+      return null;
+    }
+
+    const saveBtn = h('button', { class: 'portal-session-btn is-finish', type: 'button' }, 'Save');
+    saveBtn.addEventListener('click', async () => {
+      const problem = problemWithDraft();
+      if (problem) {
+        toast(problem, 'error');
+        return;
+      }
+      const payload = {
+        name: draft.name.trim(),
+        description: draft.description.trim() || null,
+        days: draft.days.map((day) => ({
+          day_name: day.day_name.trim(),
+          notes: day.notes,
+          exercises: day.exercises.map((e) => ({
+            exercise_name: e.exercise_name,
+            muscle_group: e.muscle_group,
+            target_sets: e.target_sets,
+            target_reps: String(e.target_reps).trim() || '8-12',
+            rest_seconds: e.rest_seconds,
+            notes: e.notes,
+          })),
+        })),
+      };
+      saveBtn.disabled = true;
+      try {
+        if (isNew) {
+          const saved = await api.portal.createRoutine({ ...payload, activate: draft.activate });
+          toast(saved.active ? `Saved — you're now training with ${saved.name}` : 'Plan saved');
+        } else {
+          await api.portal.updateRoutine(plan.id, payload);
+          toast('Plan updated');
+        }
+        await leave();
+      } catch (err) {
+        toast(err.message || 'Could not save this plan', 'error');
+        saveBtn.disabled = false;
+      }
+    });
+
+    const move = (list, from, to) => {
+      if (to < 0 || to >= list.length) return;
+      list.splice(to, 0, list.splice(from, 1)[0]);
+      paint();
+    };
+
+    function openDayMenu(dayIndex) {
+      const day = draft.days[dayIndex];
+      const removeDay = () => {
+        draft.days.splice(dayIndex, 1);
+        paint();
+      };
+      actionSheet(day.day_name.trim() || `Day ${dayIndex + 1}`, [
+        { icon: 'arrowUp', label: 'Move day up', disabled: dayIndex === 0, onClick: () => move(draft.days, dayIndex, dayIndex - 1) },
+        { icon: 'arrowDown', label: 'Move day down', disabled: dayIndex === draft.days.length - 1, onClick: () => move(draft.days, dayIndex, dayIndex + 1) },
+        {
+          icon: 'copy',
+          label: 'Duplicate day',
+          disabled: draft.days.length >= 7,
+          onClick: () => {
+            draft.days.splice(dayIndex + 1, 0, {
+              ...day,
+              day_name: `${day.day_name.trim()} (copy)`.slice(0, 120),
+              exercises: day.exercises.map((e) => ({ ...e })),
+            });
+            paint();
+          },
+        },
+        {
+          icon: 'trash',
+          label: 'Delete day',
+          danger: true,
+          disabled: draft.days.length === 1,
+          onClick: () =>
+            day.exercises.length
+              ? confirmDialog({
+                  title: 'Delete this day?',
+                  message: `${day.day_name.trim() || 'This day'} and its ${day.exercises.length} exercise${day.exercises.length === 1 ? '' : 's'} are removed from the plan.`,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                  onConfirm: removeDay,
+                })
+              : removeDay(),
+        },
+      ]);
+    }
+
+    function openExerciseMenu(day, exIndex) {
+      actionSheet(day.exercises[exIndex].exercise_name, [
+        { icon: 'arrowUp', label: 'Move up', disabled: exIndex === 0, onClick: () => move(day.exercises, exIndex, exIndex - 1) },
+        { icon: 'arrowDown', label: 'Move down', disabled: exIndex === day.exercises.length - 1, onClick: () => move(day.exercises, exIndex, exIndex + 1) },
+        {
+          icon: 'trash',
+          label: 'Remove exercise',
+          danger: true,
+          onClick: () => {
+            day.exercises.splice(exIndex, 1);
+            paint();
+          },
+        },
+      ]);
+    }
+
+    /** Sets, reps and rest under one exercise. Edited in place — the draft
+     * changes but nothing repaints, so typing never loses focus. */
+    function targetFields(exercise) {
+      const setsValue = h('strong', { class: 'portal-pe-sets-value' }, String(exercise.target_sets));
+      const step = (delta) => {
+        exercise.target_sets = Math.min(20, Math.max(1, exercise.target_sets + delta));
+        setsValue.textContent = String(exercise.target_sets);
+      };
+      const rests = REST_CHOICES.includes(exercise.rest_seconds) ? REST_CHOICES : [...REST_CHOICES, exercise.rest_seconds].sort((a, b) => a - b);
+      const field = (label, control) => h('label', { class: 'portal-pe-field' }, h('span', {}, label), control);
+
+      return h(
+        'div',
+        { class: 'portal-pe-targets' },
+        field(
+          'Sets',
+          h(
+            'div',
+            { class: 'portal-pe-stepper' },
+            h('button', { type: 'button', 'aria-label': 'One set fewer', onclick: () => step(-1) }, '−'),
+            setsValue,
+            h('button', { type: 'button', 'aria-label': 'One set more', onclick: () => step(1) }, '+'),
+          ),
+        ),
+        field(
+          'Reps',
+          h('input', {
+            class: 'portal-pe-input',
+            type: 'text',
+            inputmode: 'text',
+            maxlength: 30,
+            placeholder: '8-12',
+            value: exercise.target_reps,
+            oninput: (event) => {
+              exercise.target_reps = event.target.value;
+            },
+          }),
+        ),
+        field(
+          'Rest',
+          h(
+            'select',
+            {
+              class: 'portal-pe-input',
+              onchange: (event) => {
+                exercise.rest_seconds = Number(event.target.value);
+              },
+            },
+            ...rests.map((seconds) =>
+              h('option', { value: String(seconds), selected: seconds === exercise.rest_seconds }, restLabel(seconds)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    function exerciseRow(day, exercise, exIndex) {
+      return h(
+        'div',
+        { class: 'portal-pe-ex' },
+        h(
+          'div',
+          { class: 'portal-pe-ex-head' },
+          exerciseThumbButton(exercise),
+          h(
+            'div',
+            { class: 'portal-pe-ex-title' },
+            h('div', { class: 'portal-ex-name' }, exercise.exercise_name),
+            h('span', { class: 'portal-muscle-badge', 'data-m': exercise.muscle_group }, muscleLabel(exercise.muscle_group)),
+          ),
+          h(
+            'button',
+            { class: 'portal-ex-menu', type: 'button', 'aria-label': `${exercise.exercise_name} options`, onclick: () => openExerciseMenu(day, exIndex) },
+            renderIcon('more', { size: 20 }),
+          ),
+        ),
+        targetFields(exercise),
+      );
+    }
+
+    function dayCard(day, dayIndex) {
+      return h(
+        'section',
+        { class: 'portal-pe-day' },
+        h(
+          'div',
+          { class: 'portal-pe-day-head' },
+          h('span', { class: 'portal-pe-day-num' }, String(dayIndex + 1)),
+          h('input', {
+            class: 'portal-pe-day-name',
+            type: 'text',
+            maxlength: 120,
+            placeholder: 'Day name, e.g. Push',
+            'aria-label': `Day ${dayIndex + 1} name`,
+            value: day.day_name,
+            oninput: (event) => {
+              day.day_name = event.target.value;
+            },
+          }),
+          h(
+            'button',
+            { class: 'portal-ex-menu', type: 'button', 'aria-label': 'Day options', onclick: () => openDayMenu(dayIndex) },
+            renderIcon('more', { size: 20 }),
+          ),
+        ),
+        ...(day.exercises.length
+          ? day.exercises.map((exercise, exIndex) => exerciseRow(day, exercise, exIndex))
+          : [h('p', { class: 'portal-pe-empty' }, 'No exercises yet — add the ones you want to train on this day.')]),
+        h(
+          'button',
+          {
+            class: 'portal-add-ex',
+            type: 'button',
+            onclick: () =>
+              openExercisePicker(
+                (items) => {
+                  day.exercises.push(...items.map(editableExercise));
+                  paint();
+                },
+                { title: `Add to ${day.day_name.trim() || `day ${dayIndex + 1}`}` },
+              ),
+          },
+          renderIcon('plus', { size: 20, stroke: 2.2 }),
+          h('span', {}, 'Add exercises'),
+        ),
+      );
+    }
+
+    function paint() {
+      append(clear(body), [
+        h(
+          'div',
+          { class: 'portal-session-bar' },
+          h(
+            'div',
+            { class: 'portal-session-row' },
+            h('button', { class: 'portal-session-btn is-discard', type: 'button', onclick: cancel }, 'Cancel'),
+            h('strong', { class: 'portal-pe-title' }, isNew ? 'New plan' : 'Edit plan'),
+            saveBtn,
+          ),
+        ),
+        h(
+          'div',
+          { class: 'portal-pe-head' },
+          h('input', {
+            class: 'portal-input portal-pe-name',
+            type: 'text',
+            maxlength: 100,
+            placeholder: 'Plan name, e.g. My Push Pull Legs',
+            'aria-label': 'Plan name',
+            value: draft.name,
+            oninput: (event) => {
+              draft.name = event.target.value;
+            },
+          }),
+          h(
+            'textarea',
+            {
+              class: 'portal-input portal-pe-notes',
+              rows: 2,
+              maxlength: 1000,
+              placeholder: 'Notes (optional)',
+              'aria-label': 'Plan notes',
+              oninput: (event) => {
+                draft.description = event.target.value;
+              },
+            },
+            draft.description,
+          ),
+        ),
+        ...draft.days.map(dayCard),
+        draft.days.length < 7
+          ? h(
+              'button',
+              {
+                class: 'btn ghost block portal-pe-add-day',
+                type: 'button',
+                onclick: () => {
+                  draft.days.push({ day_name: `Day ${draft.days.length + 1}`, notes: null, exercises: [] });
+                  paint();
+                  body.querySelectorAll('.portal-pe-day-name')[draft.days.length - 1]?.select();
+                },
+              },
+              renderIcon('plus', { size: 16 }),
+              ' Add day',
+            )
+          : h('p', { class: 'portal-pe-empty' }, 'A plan holds up to seven days.'),
+        isNew
+          ? h(
+              'div',
+              { class: 'portal-pe-toggle' },
+              h(
+                'div',
+                {},
+                h('strong', {}, 'Train with this plan now'),
+                h('small', {}, "Your trainer's plan stays — you can switch back any time."),
+              ),
+              settingsSwitch(draft.activate, 'Train with this plan now', () => {
+                draft.activate = !draft.activate;
+                paint();
+              }),
+            )
+          : null,
+        isNew
+          ? null
+          : h(
+              'button',
+              {
+                class: 'btn danger block',
+                type: 'button',
+                onclick: () =>
+                  confirmDialog({
+                    title: 'Delete this plan?',
+                    message: 'The plan is removed. Workouts you logged with it stay in your history.',
+                    confirmLabel: 'Delete',
+                    danger: true,
+                    onConfirm: async () => {
+                      await api.portal.deleteRoutine(plan.id);
+                      toast('Plan deleted');
+                      await leave();
+                    },
+                  }),
+              },
+              'Delete plan',
+            ),
+      ]);
+    }
+
+    paint();
+    clear(content).append(body);
+    content.scrollTop = 0;
+  }
+
+  /** Points the Workout tab at a plan: one of the member's own, or null for
+   * the trainer's. */
+  async function useWorkoutPlan(planId, name) {
+    try {
+      await api.portal.setActivePlan(planId);
+      toast(`Now training with ${name}`);
+      await switchTab('workout');
+    } catch (err) {
+      toast(err.message || 'Could not switch plans', 'error');
+    }
+  }
+
+  /** Copies a plan (the trainer's, or one of the member's own) into a new plan
+   * of theirs and opens it in the editor — the trainer's copy is untouched. */
+  async function copyPlanToEdit(planId) {
+    try {
+      const copy = await api.portal.copyRoutine({ plan_id: planId });
+      toast('Copied to your plans — make it yours');
+      openPlanEditor(copy);
+    } catch (err) {
+      toast(err.message || 'Could not copy that plan', 'error');
+    }
+  }
+
+  async function editOwnPlan(planId) {
+    try {
+      openPlanEditor(await api.portal.routine(planId));
+    } catch (err) {
+      toast(err.message || 'Could not open that plan', 'error');
+    }
+  }
+
+  const isActivePlan = (routines, source, planId) =>
+    routines.active.source === source && (source === 'trainer' || routines.active.plan_id === planId);
+
+  /** The "Switch" sheet on the routine card: every plan the member can follow,
+   * a tick on the live one, and a way to start a new one. */
+  function openPlanSwitcher(routines) {
+    const { trainer, items } = routines;
+    actionSheet('Switch plan', [
+      trainer && {
+        icon: isActivePlan(routines, 'trainer') ? 'check' : 'crown',
+        label: `${trainer.plan_name} · trainer`,
+        disabled: isActivePlan(routines, 'trainer'),
+        onClick: () => useWorkoutPlan(null, trainer.plan_name),
+      },
+      ...items.map((plan) => ({
+        icon: isActivePlan(routines, 'own', plan.id) ? 'check' : 'weight',
+        label: plan.name,
+        disabled: isActivePlan(routines, 'own', plan.id),
+        onClick: () => useWorkoutPlan(plan.id, plan.name),
+      })),
+      { icon: 'plus', label: 'Create a new plan', onClick: () => openPlanEditor() },
+    ]);
+  }
+
+  /** The member's plans on the Workout tab: the trainer's on top, their own
+   * below, the live one marked and every other one a tap away. */
+  function myPlansSection(routines) {
+    const { trainer, items } = routines;
+
+    const planRow = ({ icon, tone, title, sub, active, onUse, actions }) =>
+      h(
+        'div',
+        { class: `portal-myplan tone-${tone}${active ? ' is-active' : ''}` },
+        h('span', { class: 'portal-myplan-ico' }, renderIcon(icon, { size: 20 })),
+        h('div', { class: 'portal-myplan-text' }, h('strong', {}, title), h('small', {}, sub)),
+        active
+          ? h('span', { class: 'portal-myplan-active' }, renderIcon('check', { size: 13, stroke: 2.8 }), 'Active')
+          : h('button', { class: 'portal-myplan-use', type: 'button', onclick: onUse }, 'Use'),
+        h(
+          'button',
+          { class: 'portal-ex-menu', type: 'button', 'aria-label': `${title} options`, onclick: () => actionSheet(title, actions) },
+          renderIcon('more', { size: 20 }),
+        ),
+      );
+
+    const rows = [];
+    if (trainer) {
+      const active = isActivePlan(routines, 'trainer');
+      rows.push(
+        planRow({
+          icon: 'crown',
+          tone: 'purple',
+          title: trainer.plan_name,
+          sub: [trainer.assigned_by_name ? `From ${trainer.assigned_by_name}` : 'From your trainer', daysLabel(trainer.day_count)].join(' · '),
+          active,
+          onUse: () => useWorkoutPlan(null, trainer.plan_name),
+          actions: [
+            !active && { icon: 'check', label: 'Train with this plan', onClick: () => useWorkoutPlan(null, trainer.plan_name) },
+            { icon: 'copy', label: 'Copy to my plans & edit', onClick: () => copyPlanToEdit(trainer.plan_id) },
+          ],
+        }),
+      );
+    }
+    for (const plan of items) {
+      const active = isActivePlan(routines, 'own', plan.id);
+      rows.push(
+        planRow({
+          icon: 'weight',
+          tone: 'orange',
+          title: plan.name,
+          sub: `Your plan · ${daysLabel(plan.day_count)} · ${plan.exercise_count} exercise${plan.exercise_count === 1 ? '' : 's'}`,
+          active,
+          onUse: () => useWorkoutPlan(plan.id, plan.name),
+          actions: [
+            !active && { icon: 'check', label: 'Train with this plan', onClick: () => useWorkoutPlan(plan.id, plan.name) },
+            { icon: 'edit', label: 'Edit plan', onClick: () => editOwnPlan(plan.id) },
+            { icon: 'copy', label: 'Duplicate', onClick: () => copyPlanToEdit(plan.id) },
+            {
+              icon: 'trash',
+              label: 'Delete plan',
+              danger: true,
+              onClick: () =>
+                confirmDialog({
+                  title: `Delete ${plan.name}?`,
+                  message: active
+                    ? `Workouts you logged with it stay in your history.${trainer ? " You'll go back to your trainer's plan." : ''}`
+                    : 'Workouts you logged with it stay in your history.',
+                  confirmLabel: 'Delete',
+                  danger: true,
+                  onConfirm: async () => {
+                    await api.portal.deleteRoutine(plan.id);
+                    toast('Plan deleted');
+                    await switchTab('workout');
+                  },
+                }),
+            },
+          ],
+        }),
+      );
+    }
+
+    return h(
+      'div',
+      { class: 'portal-section portal-myplans' },
+      sectionHead('My plans', 'New plan', () => openPlanEditor(), 'is-label'),
+      rows.length ? h('div', { class: 'portal-myplan-list' }, ...rows) : null,
+      items.length
+        ? null
+        : h(
+            'button',
+            { class: 'portal-myplan-create', type: 'button', onclick: () => openPlanEditor() },
+            h('span', { class: 'portal-myplan-ico' }, renderIcon('plus', { size: 22, stroke: 2.4 })),
+            h(
+              'span',
+              { class: 'portal-myplan-text' },
+              h('strong', {}, 'Build your own plan'),
+              h(
+                'small',
+                {},
+                trainer
+                  ? "Pick your exercises and set your own sets, reps and rest. Switch between it and your trainer's plan any time."
+                  : 'Pick your exercises and set your own sets, reps and rest for each day.',
+              ),
+            ),
+          ),
+    );
+  }
+
   async function renderWorkoutTab() {
     const status = await api.portal.fitnessStatus();
     if (!status.has_access) return upgradeSheet(status, { onRefresh: () => switchTab('workout') });
@@ -3348,10 +3919,11 @@ function renderPortalApp(ctx, initialMe) {
       });
     }
 
-    const [current, history, prs] = await Promise.all([
+    const [current, history, prs, routines] = await Promise.all([
       api.portal.currentWorkout(),
       api.portal.workoutLogs({ limit: 20 }),
       api.portal.personalRecords(),
+      api.portal.routines(),
     ]);
 
     const body = h('div', { class: 'portal-tab-body' });
@@ -3380,9 +3952,21 @@ function renderPortalApp(ctx, initialMe) {
           { class: 'portal-routine-card' },
           h(
             'div',
-            { class: 'portal-routine-hero' },
+            { class: 'portal-routine-hero has-switch' },
             h('img', { class: 'portal-routine-art', src: '/images/workout/hero-pull-down.png', alt: '' }),
-            h('div', { class: 'portal-routine-kicker' }, renderIcon('weight', { size: 20 }), h('span', {}, current.plan.name)),
+            h(
+              'button',
+              { class: 'portal-routine-switch', type: 'button', onclick: () => openPlanSwitcher(routines) },
+              renderIcon('refresh', { size: 14, stroke: 2.4 }),
+              h('span', {}, 'Switch'),
+            ),
+            h(
+              'div',
+              { class: 'portal-routine-kicker' },
+              renderIcon(current.source === 'own' ? 'member' : 'weight', { size: 20 }),
+              h('span', {}, current.plan.name),
+            ),
+            h('div', { class: 'portal-routine-source' }, current.source === 'own' ? 'Your own plan' : "Your trainer's plan"),
             h('h2', { class: 'portal-routine-day' }, day.day_name),
             day.notes ? h('p', { class: 'portal-routine-note' }, day.notes) : null,
             h(
@@ -3413,7 +3997,7 @@ function renderPortalApp(ctx, initialMe) {
           modal.classList.add('portal-days-modal');
         };
         body.append(
-          sectionHead('Or train another day', 'View all plans', openAllDays, 'is-label'),
+          sectionHead('Or train another day', 'View all days', openAllDays, 'is-label'),
           dayCardGrid(otherDays, (d) => startSession(d.day_name, d)),
         );
       }
@@ -3425,17 +4009,29 @@ function renderPortalApp(ctx, initialMe) {
           h(
             'div',
             { class: 'portal-routine-hero is-plain' },
-            h('h2', { class: 'portal-routine-day' }, 'No routine assigned yet'),
+            h('h2', { class: 'portal-routine-day' }, 'No routine yet'),
             h(
               'p',
               { class: 'portal-routine-note' },
-              'Ask a trainer to put you on a plan — or start a freestyle session and log whatever you do today.',
+              'Build your own plan, ask a trainer to put you on one — or start a freestyle session and log whatever you do today.',
             ),
           ),
-          h('div', { class: 'portal-routine-sheet' }, startButton('Start a freestyle workout', () => startSession('Freestyle workout', null))),
+          h(
+            'div',
+            { class: 'portal-routine-sheet' },
+            startButton('Start a freestyle workout', () => startSession('Freestyle workout', null)),
+            h(
+              'button',
+              { class: 'btn ghost block portal-pe-add-day', type: 'button', onclick: () => openPlanEditor() },
+              renderIcon('plus', { size: 16 }),
+              ' Create your own plan',
+            ),
+          ),
         ),
       );
     }
+
+    body.append(myPlansSection(routines));
 
     /* Lifetime stats */
     body.append(

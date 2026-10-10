@@ -20,7 +20,7 @@ import { expireOverdueSubscriptions } from '../maintenance.js';
 import { setMemberPhoto } from '../photo.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { dietPlanTree } from './diets.js';
-import { exercisePickerRows, workoutPlanTree } from './workouts.js';
+import { exercisePickerRows, parseDays, workoutPlanTree, writeDays } from './workouts.js';
 import { generateReceiptPdf } from '../receiptPdf.js';
 import { ensureQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
 import { createLimiter } from '../rateLimit.js';
@@ -449,23 +449,45 @@ portalRoutes.get('/fitness/status', requireMemberAuth, requireModule('fitness'),
  * have skipped it. A calendar-locked rotation would quietly delete a workout
  * from their week every time life got in the way.
  */
-portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+/**
+ * Which plan drives the member's Workout tab: one of their own if they have
+ * switched to it, otherwise the trainer's assignment. `assignment` is returned
+ * either way, so the portal can offer the way back to the trainer's plan.
+ *
+ * The own-plan pointer is re-checked against ownership rather than trusted: a
+ * stale pointer (a plan since deleted, or never theirs) falls back to the
+ * trainer instead of serving someone else's routine.
+ */
+function liveWorkoutFor(memberId) {
   const assignment = get(
-    `SELECT a.*, u.name AS assigned_by_name
+    `SELECT a.*, u.name AS assigned_by_name, wp.name AS plan_name
      FROM member_workout_assignments a
+     JOIN workout_plans wp ON wp.id = a.plan_id
      LEFT JOIN users u ON u.id = a.assigned_by
      WHERE a.member_id = ? AND a.status = 'active'`,
-    [req.member.id],
+    [memberId],
   );
+  const own = get(
+    `SELECT wp.id FROM members m JOIN workout_plans wp ON wp.id = m.own_workout_plan_id
+     WHERE m.id = ? AND wp.member_id = m.id AND wp.member_created = 1`,
+    [memberId],
+  );
+  if (own) return { assignment: assignment ?? null, source: 'own', plan_id: own.id };
+  if (assignment) return { assignment, source: 'trainer', plan_id: assignment.plan_id };
+  return { assignment: null, source: null, plan_id: null };
+}
 
-  if (!assignment) {
-    return res.json({ assignment: null, plan: null, today_day: null, previous: {}, streak_days: 0 });
+portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const { assignment, source, plan_id: planId } = liveWorkoutFor(req.member.id);
+
+  if (!planId) {
+    return res.json({ assignment: null, source: null, plan: null, today_day: null, previous: {}, streak_days: 0 });
   }
 
-  const plan = workoutPlanTree(assignment.plan_id, { withMedia: true });
+  const plan = workoutPlanTree(planId, { withMedia: true });
   const sessionsLogged = get(
     'SELECT COUNT(*) AS n FROM workout_logs WHERE member_id = ? AND plan_id = ?',
-    [req.member.id, assignment.plan_id],
+    [req.member.id, planId],
   ).n;
 
   // The day after whichever one they last actually did, which also handles a
@@ -476,7 +498,7 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
     `SELECT day_id FROM workout_logs
      WHERE member_id = ? AND plan_id = ? AND day_id IS NOT NULL
      ORDER BY log_date DESC, id DESC LIMIT 1`,
-    [req.member.id, assignment.plan_id],
+    [req.member.id, planId],
   );
   // -1 covers both a fresh plan and a day_id whose row is gone (the trainer
   // rebuilt the routine), and either way lands on day one.
@@ -489,6 +511,7 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
 
   return res.json({
     assignment,
+    source,
     plan,
     today_day: todayDay,
     previous: previousSetsFor(req.member.id, names),
@@ -498,6 +521,175 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
       [req.member.id],
     ) ?? null,
   });
+});
+
+/* ── Member-built plans ───────────────────────────────────────────────── */
+
+/**
+ * Plans a member writes for themselves, Hevy-style: named days, each a list of
+ * exercises with target sets, reps and rest. Stored as ordinary workout_plans
+ * rows (member_created = 1) so the logger, the rotation and the trainer's
+ * read-only view all work on them unchanged.
+ */
+const MAX_OWN_PLANS = 20;
+const MAX_EXERCISES_PER_DAY = 30;
+
+const OWN_PLAN_FIELDS = {
+  name: { type: 'string', required: true, min: 2, max: 100 },
+  description: { type: 'string', max: 1000 },
+};
+
+/** The member's own plan, or 404 — for a trainer's plan as much as for another
+ * member's: neither is the member's to edit. */
+function ownPlanOr404(memberId, planId) {
+  const plan = get('SELECT * FROM workout_plans WHERE id = ? AND member_id = ? AND member_created = 1', [planId, memberId]);
+  if (!plan) throw notFound('Plan not found');
+  return plan;
+}
+
+/** parseDays, plus what a finished plan needs that a trainer's half-built
+ * template does not: at least one day, and something to do on each. */
+function parseOwnPlanDays(raw) {
+  const days = parseDays(raw ?? []);
+  if (!days.length) throw badRequest('Add at least one day to your plan', { days: 'is required' });
+  const errors = {};
+  days.forEach((day, index) => {
+    if (!day.exercises.length) errors[`days.${index}.exercises`] = 'add at least one exercise';
+    if (day.exercises.length > MAX_EXERCISES_PER_DAY) {
+      errors[`days.${index}.exercises`] = `at most ${MAX_EXERCISES_PER_DAY} exercises a day`;
+    }
+  });
+  if (Object.keys(errors).length) throw badRequest('Every day needs at least one exercise', errors);
+  return days;
+}
+
+function assertRoomForAnotherPlan(memberId) {
+  const count = get('SELECT COUNT(*) AS n FROM workout_plans WHERE member_id = ? AND member_created = 1', [memberId]).n;
+  if (count >= MAX_OWN_PLANS) throw badRequest(`You can keep up to ${MAX_OWN_PLANS} plans — delete one you no longer use first`);
+}
+
+function insertOwnPlan(memberId, { name, description }, days) {
+  const planId = run(
+    `INSERT INTO workout_plans (name, description, days_per_week, is_template, member_id, member_created)
+     VALUES (?, ?, ?, 0, ?, 1)`,
+    [name, description ?? null, days.length, memberId],
+  ).lastInsertRowid;
+  writeDays(planId, days);
+  return planId;
+}
+
+/** Switches to a plan when asked, or when nothing else would be live — a
+ * member's first plan with no trainer behind it should not sit unused while the
+ * Workout tab says "no routine". */
+function maybeActivate(memberId, planId, activate) {
+  if (activate || !liveWorkoutFor(memberId).plan_id) {
+    run('UPDATE members SET own_workout_plan_id = ? WHERE id = ?', [planId, memberId]);
+  }
+}
+
+portalRoutes.get('/workouts/routines', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const live = liveWorkoutFor(req.member.id);
+  const { assignment } = live;
+  res.json({
+    items: all(
+      `SELECT wp.id, wp.name, wp.description, wp.days_per_week, wp.created_at, wp.updated_at,
+              (SELECT COUNT(*) FROM workout_plan_days d WHERE d.plan_id = wp.id) AS day_count,
+              (SELECT COUNT(*) FROM workout_plan_exercises e
+                 JOIN workout_plan_days d ON d.id = e.day_id WHERE d.plan_id = wp.id) AS exercise_count
+       FROM workout_plans wp
+       WHERE wp.member_id = ? AND wp.member_created = 1
+       ORDER BY wp.updated_at DESC, wp.id DESC`,
+      [req.member.id],
+    ),
+    active: { source: live.source, plan_id: live.plan_id },
+    trainer: assignment
+      ? {
+          plan_id: assignment.plan_id,
+          plan_name: assignment.plan_name,
+          assigned_by_name: assignment.assigned_by_name,
+          start_date: assignment.start_date,
+          day_count: get('SELECT COUNT(*) AS n FROM workout_plan_days WHERE plan_id = ?', [assignment.plan_id]).n,
+        }
+      : null,
+  });
+});
+
+portalRoutes.get('/workouts/routines/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const plan = ownPlanOr404(req.member.id, Number(req.params.id));
+  res.json(workoutPlanTree(plan.id, { withMedia: true }));
+});
+
+portalRoutes.post('/workouts/routines', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const body = parse(req.body, { ...OWN_PLAN_FIELDS, activate: { type: 'boolean', default: 0 } });
+  const days = parseOwnPlanDays(req.body?.days);
+  assertRoomForAnotherPlan(req.member.id);
+
+  const planId = tx(() => {
+    const id = insertOwnPlan(req.member.id, body, days);
+    maybeActivate(req.member.id, id, body.activate);
+    return id;
+  });
+  res.status(201).json({ ...workoutPlanTree(planId), active: liveWorkoutFor(req.member.id).plan_id === planId });
+});
+
+/**
+ * Copies the trainer's plan (or one of the member's own) into a new plan the
+ * member can edit — the way to tweak a trainer's routine without touching the
+ * trainer's copy, which may be a template the whole gym trains off.
+ */
+portalRoutes.post('/workouts/routines/copy', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const body = parse(req.body, {
+    plan_id: { type: 'int', required: true, min: 1 },
+    name: { type: 'string', min: 2, max: 100 },
+  });
+  const { assignment } = liveWorkoutFor(req.member.id);
+  const isTrainerPlan = assignment?.plan_id === body.plan_id;
+  if (!isTrainerPlan) ownPlanOr404(req.member.id, body.plan_id);
+  assertRoomForAnotherPlan(req.member.id);
+
+  const source = workoutPlanTree(body.plan_id);
+  if (!source.days.length) throw badRequest('That plan has no days to copy yet');
+  const name = body.name || `${source.name.slice(0, 92)} (copy)`;
+  const planId = tx(() => insertOwnPlan(req.member.id, { name, description: source.description }, source.days));
+  res.status(201).json(workoutPlanTree(planId, { withMedia: true }));
+});
+
+portalRoutes.put('/workouts/routines/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const plan = ownPlanOr404(req.member.id, Number(req.params.id));
+  const body = parse(req.body, OWN_PLAN_FIELDS);
+  const days = parseOwnPlanDays(req.body?.days);
+
+  tx(() => {
+    run(
+      `UPDATE workout_plans SET name = ?, description = ?, days_per_week = ?, updated_at = datetime('now') WHERE id = ?`,
+      [body.name, body.description ?? null, days.length, plan.id],
+    );
+    writeDays(plan.id, days);
+  });
+  res.json(workoutPlanTree(plan.id, { withMedia: true }));
+});
+
+portalRoutes.delete('/workouts/routines/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const plan = ownPlanOr404(req.member.id, Number(req.params.id));
+  // Sessions logged against it survive (workout_logs.plan_id is SET NULL), and
+  // so does the member: with the pointer cleared they fall back to the trainer.
+  tx(() => {
+    run('UPDATE members SET own_workout_plan_id = NULL WHERE id = ? AND own_workout_plan_id = ?', [req.member.id, plan.id]);
+    run('DELETE FROM workout_plans WHERE id = ?', [plan.id]);
+  });
+  res.json({ ok: true });
+});
+
+/**
+ * Switches the plan the Workout tab follows: `plan_id` is one of the member's
+ * own, and null (or absent) goes back to the trainer's assignment.
+ */
+portalRoutes.put('/workouts/active', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const body = parse(req.body, { plan_id: { type: 'int', min: 1 } });
+  const planId = body.plan_id ? ownPlanOr404(req.member.id, body.plan_id).id : null;
+  run('UPDATE members SET own_workout_plan_id = ? WHERE id = ?', [planId, req.member.id]);
+  const live = liveWorkoutFor(req.member.id);
+  res.json({ source: live.source, plan_id: live.plan_id });
 });
 
 /**

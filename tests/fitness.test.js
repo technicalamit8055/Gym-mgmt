@@ -788,6 +788,193 @@ describe('Heavy-style workout logging in the portal', () => {
   });
 });
 
+describe('Hevy-style plans a member builds for themselves', () => {
+  let trainerPlanId;
+  let ownPlan;
+
+  const myPlan = {
+    name: 'My Bro Split',
+    days: [
+      {
+        day_name: 'Chest',
+        exercises: [
+          { exercise_name: 'Barbell Bench Press', muscle_group: 'chest', target_sets: 4, target_reps: '6-8', rest_seconds: 120 },
+          { exercise_name: 'Cable Fly', muscle_group: 'chest', target_sets: 3, target_reps: '12', rest_seconds: 60 },
+        ],
+      },
+      { day_name: 'Back', exercises: [{ exercise_name: 'Deadlift', muscle_group: 'back', target_sets: 3, target_reps: '5' }] },
+    ],
+  };
+
+  it('starts out on the trainer\'s plan with no plans of its own', async () => {
+    const res = await call('GET', '/api/portal/workouts/routines', undefined, { token: memberToken });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.items, []);
+    assert.equal(res.body.active.source, 'trainer');
+    assert.ok(res.body.trainer.plan_name);
+    assert.equal(res.body.trainer.day_count, 4);
+    trainerPlanId = res.body.trainer.plan_id;
+  });
+
+  it('refuses a plan with no days, or a day with nothing in it', async () => {
+    const noDays = await call('POST', '/api/portal/workouts/routines', { name: 'Empty', days: [] }, { token: memberToken });
+    assert.equal(noDays.status, 400);
+
+    const emptyDay = await call(
+      'POST',
+      '/api/portal/workouts/routines',
+      { name: 'Lazy', days: [{ day_name: 'Rest', exercises: [] }] },
+      { token: memberToken },
+    );
+    assert.equal(emptyDay.status, 400);
+    assert.ok(emptyDay.body.details['days.0.exercises']);
+  });
+
+  it('saves a plan without taking over from the trainer unless asked', async () => {
+    const res = await call('POST', '/api/portal/workouts/routines', myPlan, { token: memberToken });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.active, false, 'the trainer\'s plan is still live');
+    assert.equal(res.body.member_created, 1);
+    assert.equal(res.body.is_template, 0);
+    assert.equal(res.body.days_per_week, 2);
+    assert.equal(res.body.days[0].exercises[0].target_reps, '6-8');
+    ownPlan = res.body;
+
+    const current = await call('GET', '/api/portal/workouts/current', undefined, { token: memberToken });
+    assert.equal(current.body.source, 'trainer');
+    assert.equal(current.body.plan.id, trainerPlanId);
+  });
+
+  it('switches to the member\'s own plan and back to the trainer\'s', async () => {
+    const own = await call('PUT', '/api/portal/workouts/active', { plan_id: ownPlan.id }, { token: memberToken });
+    assert.equal(own.status, 200);
+    assert.deepEqual(own.body, { source: 'own', plan_id: ownPlan.id });
+
+    const current = await call('GET', '/api/portal/workouts/current', undefined, { token: memberToken });
+    assert.equal(current.body.source, 'own');
+    assert.equal(current.body.plan.id, ownPlan.id);
+    assert.equal(current.body.today_day.day_name, 'Chest');
+    assert.equal(current.body.assignment.plan_id, trainerPlanId, 'the trainer\'s assignment stays live underneath');
+
+    const trainerView = await call('GET', `/api/workouts/members/${memberId}`, undefined, { token: trainerToken });
+    assert.equal(trainerView.body.own_plan.id, ownPlan.id, 'the trainer can see the member switched');
+    assert.equal(trainerView.body.assignment.plan_id, trainerPlanId);
+
+    const back = await call('PUT', '/api/portal/workouts/active', { plan_id: null }, { token: memberToken });
+    assert.deepEqual(back.body, { source: 'trainer', plan_id: trainerPlanId });
+  });
+
+  it('rotates through the member\'s own days as they log them', async () => {
+    await call('PUT', '/api/portal/workouts/active', { plan_id: ownPlan.id }, { token: memberToken });
+    const logged = await call(
+      'POST',
+      '/api/portal/workouts/logs',
+      {
+        workout_name: 'Chest',
+        plan_id: ownPlan.id,
+        day_id: ownPlan.days[0].id,
+        duration_seconds: 1800,
+        sets: [{ exercise_name: 'Barbell Bench Press', muscle_group: 'chest', weight_kg: 60, reps: 8 }],
+      },
+      { token: memberToken },
+    );
+    assert.equal(logged.status, 201);
+
+    const current = await call('GET', '/api/portal/workouts/current', undefined, { token: memberToken });
+    assert.equal(current.body.today_day.day_name, 'Back');
+  });
+
+  it('edits the plan as a whole', async () => {
+    const res = await call(
+      'PUT',
+      `/api/portal/workouts/routines/${ownPlan.id}`,
+      { name: 'My Bro Split v2', days: [...myPlan.days, { day_name: 'Legs', exercises: [{ exercise_name: 'Back Squat', muscle_group: 'legs' }] }] },
+      { token: memberToken },
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.name, 'My Bro Split v2');
+    assert.equal(res.body.days.length, 3);
+    assert.equal(res.body.days_per_week, 3);
+  });
+
+  it('copies the trainer\'s plan into an editable one, leaving the trainer\'s alone', async () => {
+    const res = await call('POST', '/api/portal/workouts/routines/copy', { plan_id: trainerPlanId }, { token: memberToken });
+    assert.equal(res.status, 201);
+    assert.notEqual(res.body.id, trainerPlanId);
+    assert.equal(res.body.member_created, 1);
+    assert.equal(res.body.days.length, 4);
+    assert.match(res.body.name, /\(copy\)$/);
+
+    const edited = await call(
+      'PUT',
+      `/api/portal/workouts/routines/${res.body.id}`,
+      { name: 'Tweaked', days: myPlan.days },
+      { token: memberToken },
+    );
+    assert.equal(edited.status, 200);
+    const trainerCopy = (await call('GET', `/api/workouts/templates/${trainerPlanId}`, undefined, { token: trainerToken })).body;
+    assert.equal(trainerCopy.days.length, 4, 'the trainer\'s plan is untouched');
+
+    const list = await call('GET', '/api/portal/workouts/routines', undefined, { token: memberToken });
+    assert.equal(list.body.items.length, 2);
+  });
+
+  it('keeps the trainer\'s plan, and other members\' plans, out of reach', async () => {
+    const editTrainer = await call('PUT', `/api/portal/workouts/routines/${trainerPlanId}`, myPlan, { token: memberToken });
+    assert.equal(editTrainer.status, 404);
+    const useTrainerAsOwn = await call('PUT', '/api/portal/workouts/active', { plan_id: trainerPlanId }, { token: memberToken });
+    assert.equal(useTrainerAsOwn.status, 404);
+
+    const other = await call('POST', '/api/members', { first_name: 'Nosy', phone: '9876504444' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
+    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '4444' })).body.token;
+
+    for (const [method, url, body] of [
+      ['GET', `/api/portal/workouts/routines/${ownPlan.id}`],
+      ['PUT', `/api/portal/workouts/routines/${ownPlan.id}`, myPlan],
+      ['DELETE', `/api/portal/workouts/routines/${ownPlan.id}`],
+      ['PUT', '/api/portal/workouts/active', { plan_id: ownPlan.id }],
+      ['POST', '/api/portal/workouts/routines/copy', { plan_id: ownPlan.id }],
+    ]) {
+      const res = await call(method, url, body, { token: otherToken });
+      assert.equal(res.status, 404, `${method} ${url}`);
+    }
+
+    // With no trainer plan, a member's first plan goes live on its own.
+    const first = await call('POST', '/api/portal/workouts/routines', myPlan, { token: otherToken });
+    assert.equal(first.body.active, true);
+  });
+
+  it('hands control back to the trainer when they assign a new plan', async () => {
+    const templates = (await call('GET', '/api/workouts/templates', undefined, { token: trainerToken })).body.items;
+    const assigned = await call(
+      'POST',
+      '/api/workouts/assign',
+      { member_id: memberId, plan_id: templates[0].id, customise: true },
+      { token: trainerToken },
+    );
+    assert.equal(assigned.status, 201);
+
+    const current = await call('GET', '/api/portal/workouts/current', undefined, { token: memberToken });
+    assert.equal(current.body.source, 'trainer');
+    assert.equal(current.body.plan.id, assigned.body.plan.id);
+    trainerPlanId = assigned.body.plan.id;
+  });
+
+  it('falls back to the trainer when the live plan is deleted, keeping its sessions', async () => {
+    await call('PUT', '/api/portal/workouts/active', { plan_id: ownPlan.id }, { token: memberToken });
+    const deleted = await call('DELETE', `/api/portal/workouts/routines/${ownPlan.id}`, undefined, { token: memberToken });
+    assert.equal(deleted.status, 200);
+
+    const current = await call('GET', '/api/portal/workouts/current', undefined, { token: memberToken });
+    assert.equal(current.body.source, 'trainer');
+    assert.equal(current.body.plan.id, trainerPlanId);
+
+    const history = await call('GET', '/api/portal/workouts/logs', undefined, { token: memberToken });
+    assert.ok(history.body.items.some((log) => log.workout_name === 'Chest'), 'the session logged on it survives');
+  });
+});
+
 describe('Lifesum-style diet logging in the portal', () => {
   it('serves the assigned targets', async () => {
     const res = await call('GET', '/api/portal/diets/current', undefined, { token: memberToken });

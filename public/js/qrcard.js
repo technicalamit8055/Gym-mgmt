@@ -1,4 +1,5 @@
 import { clear, date, fullName, h } from './ui.js';
+import { gymPosterNode, gymPosterPngBlob } from './gymPoster.js';
 import { getGymLogoUrl } from './receipt.js';
 import { isLibrary, t } from './vertical.js';
 
@@ -245,8 +246,10 @@ export async function downloadCardPng(card) {
  * from GET /api/qr/app: the QR opens the gym's member portal, which the phone
  * then installs to its home screen like an app.
  *
- * The same copy feeds the printed sheet and the downloadable PNG, so the two
- * never drift apart.
+ * Gyms get the illustrated poster in gymPoster.js. Libraries get this plain
+ * one: that artwork is dumbbells and whey, which would be wrong for a study
+ * hall. Its copy feeds both the printed sheet and the PNG, so the two never
+ * drift apart.
  */
 function posterCopy(poster) {
   const member = t('member').toLowerCase();
@@ -271,7 +274,7 @@ function brandColor() {
   return /^#[0-9a-f]{3,8}$/i.test(value) ? value : '#111827';
 }
 
-export function appPosterNode(poster) {
+function plainPosterNode(poster) {
   const copy = posterCopy(poster);
   const logoUrl = poster.logo_url || getGymLogoUrl();
   return h(
@@ -293,13 +296,22 @@ export function appPosterNode(poster) {
   );
 }
 
+/** The desk poster this account gets, as DOM — see posterCopy() for which. */
+export async function appPosterNode(poster) {
+  return isLibrary() ? plainPosterNode(poster) : gymPosterNode(poster);
+}
+
 /** Same #print-root mechanism as printCards() — see there for why. */
-export function printAppPoster(poster) {
+export async function printAppPoster(poster) {
   const root = document.getElementById('print-root');
   if (!root) return;
 
-  clear(root).append(h('div', { class: 'app-poster-page' }, appPosterNode(poster)));
+  const node = await appPosterNode(poster);
+  clear(root).append(h('div', { class: 'app-poster-page' }, node));
   document.body.classList.add('printing');
+  // The illustrated poster's artwork is an <image> inside the SVG; printing
+  // before it arrives would put a blank sheet with floating text on paper.
+  await node.ready;
 
   const cleanup = () => {
     document.body.classList.remove('printing');
@@ -331,11 +343,8 @@ function wrapLines(ctx, text, maxWidth) {
   return lines;
 }
 
-/**
- * The poster as an A4 PNG (150 dpi) — for a print shop, or for printing from
- * a phone, which has no print dialog worth the name.
- */
-export async function downloadAppPosterPng(poster) {
+/** The plain poster as an A4 PNG (150 dpi). */
+async function plainPosterPngBlob(poster) {
   const copy = posterCopy(poster);
   const accent = brandColor();
   const width = 1240;
@@ -447,7 +456,15 @@ export async function downloadAppPosterPng(poster) {
   ctx.font = '400 26px ui-monospace, monospace';
   ctx.fillText(`Or type ${copy.url}`, width / 2, height - 60, textWidth);
 
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+}
+
+/**
+ * Saves the desk poster as a PNG — for a print shop, or for printing from a
+ * phone, which has no print dialog worth the name.
+ */
+export async function downloadAppPosterPng(poster) {
+  const blob = isLibrary() ? await plainPosterPngBlob(poster) : await gymPosterPngBlob(poster);
   const slug = poster.gym_name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'gym';
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);

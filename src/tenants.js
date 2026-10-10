@@ -99,6 +99,9 @@ const MIGRATIONS = [
   // that opens this gym — staff app and member portal alike. NULL means the
   // vertical's default palette (see `themes` in verticals.js).
   (db) => ensureColumn(db, 'tenants', 'theme', 'TEXT'),
+  // A short motto under the gym's name on the member-app desk poster.
+  // NULL or empty means none.
+  (db) => ensureColumn(db, 'tenants', 'tagline', 'TEXT'),
 ];
 
 let registryDb;
@@ -223,7 +226,7 @@ export function setTenantBusinessType(slug, businessType) {
  */
 export function updateTenantProfile(
   slug,
-  { gymName, currency, timezone, theme, logoMime, logoBytes, iconMime, iconBytes, clearLogo } = {},
+  { gymName, currency, timezone, theme, tagline, logoMime, logoBytes, iconMime, iconBytes, clearLogo } = {},
 ) {
   const sets = [
     'gym_name     = COALESCE(?, gym_name)',
@@ -231,8 +234,9 @@ export function updateTenantProfile(
     'currency     = COALESCE(?, currency)',
     'timezone     = COALESCE(?, timezone)',
     'theme        = COALESCE(?, theme)',
+    'tagline      = COALESCE(?, tagline)',
   ];
-  const params = [gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, theme ?? null];
+  const params = [gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, theme ?? null, tagline ?? null];
 
   // The logo and the app icon drawn from it are one fact, written and cleared
   // together: leaving a stale icon behind would keep installing the old brand.

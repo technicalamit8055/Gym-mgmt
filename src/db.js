@@ -1092,6 +1092,18 @@ const MIGRATIONS = [
   (db) => ensureColumn(db, 'push_announcements', 'image_mime', 'TEXT'),
   (db) => ensureColumn(db, 'push_announcements', 'image_bytes', 'BLOB'),
   (db) => ensureColumn(db, 'push_announcements', 'image_token', 'TEXT'),
+
+  /* ------------------------------------------------ Member-built routines --- */
+  // A plan the member wrote for themselves in the portal (Hevy's "Create
+  // routine"). A trainer's customised clone also carries member_id, so
+  // ownership alone cannot tell the two apart — and only the member's own are
+  // theirs to edit or delete.
+  (db) => ensureColumn(db, 'workout_plans', 'member_created', 'INTEGER NOT NULL DEFAULT 0'),
+  // Which of their own plans the member has switched to; NULL follows the
+  // trainer. A pointer rather than an assignment row on purpose: the trainer's
+  // assignment stays live underneath, so a member can never archive their
+  // trainer's programming, and switching back is one tap.
+  (db) => ensureColumn(db, 'members', 'own_workout_plan_id', 'INTEGER REFERENCES workout_plans(id) ON DELETE SET NULL'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

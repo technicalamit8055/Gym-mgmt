@@ -493,6 +493,15 @@ export const api = {
     personalRecords: () => request('GET', '/portal/workouts/prs', undefined, { member: true }),
     exercises: (params) => request('GET', `/portal/workouts/exercises${query(params)}`, undefined, { member: true }),
     exerciseHistory: (name) => request('GET', `/portal/workouts/exercise-history${query({ name })}`, undefined, { member: true }),
+    // The member's own plans, and which plan (theirs or the trainer's) the
+    // Workout tab follows. setActivePlan(null) goes back to the trainer's.
+    routines: () => request('GET', '/portal/workouts/routines', undefined, { member: true }),
+    routine: (id) => request('GET', `/portal/workouts/routines/${id}`, undefined, { member: true }),
+    createRoutine: (payload) => request('POST', '/portal/workouts/routines', payload, { member: true }),
+    copyRoutine: (payload) => request('POST', '/portal/workouts/routines/copy', payload, { member: true }),
+    updateRoutine: (id, payload) => request('PUT', `/portal/workouts/routines/${id}`, payload, { member: true }),
+    deleteRoutine: (id) => request('DELETE', `/portal/workouts/routines/${id}`, undefined, { member: true }),
+    setActivePlan: (planId) => request('PUT', '/portal/workouts/active', { plan_id: planId }, { member: true }),
     currentDiet: () => request('GET', '/portal/diets/current', undefined, { member: true }),
     dietDay: (date) => request('GET', `/portal/diets/daily${query({ date })}`, undefined, { member: true }),
     addFoodEntry: (payload) => request('POST', '/portal/diets/entries', payload, { member: true }),

@@ -42,7 +42,7 @@ const PLAN_FIELDS = {
  * client can point at ("days.2.exercises.0.exercise_name"), which is what lets
  * the builder highlight the offending row instead of just toasting.
  */
-function parseDays(raw) {
+export function parseDays(raw) {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) throw badRequest('A routine needs a list of days', { days: 'must be a list' });
   if (raw.length > 7) throw badRequest('A week has seven days', { days: 'at most 7' });
@@ -106,7 +106,7 @@ function parseDays(raw) {
 /** Writes the whole tree under `planId`, replacing whatever was there. Days
  * are cheap and a routine is edited as a whole document in the builder, so
  * delete-and-reinsert beats diffing rows the client never identified. */
-function writeDays(planId, days) {
+export function writeDays(planId, days) {
   run('DELETE FROM workout_plan_days WHERE plan_id = ?', [planId]);
   days.forEach((day, dayIndex) => {
     const dayId = run(
@@ -278,6 +278,10 @@ workoutRoutes.post('/assign', (req, res) => {
       "UPDATE member_workout_assignments SET status = 'archived' WHERE member_id = ? AND status = 'active'",
       [body.member_id],
     );
+    // A fresh assignment is the trainer deliberately changing the programme, so
+    // it takes over from any plan the member had switched to. Their own plans
+    // are kept, and switching back is one tap in the portal.
+    run('UPDATE members SET own_workout_plan_id = NULL WHERE id = ?', [body.member_id]);
     return run(
       `INSERT INTO member_workout_assignments (member_id, plan_id, assigned_by, start_date, end_date, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -318,8 +322,18 @@ workoutRoutes.get('/members/:memberId', (req, res) => {
     [memberId, Math.min(toInt(req.query.limit, 20), 100)],
   );
 
+  // The plan the member switched to themselves, if any — a trainer reading
+  // this card needs to know their routine is not the one being trained.
+  const ownPlan = get(
+    `SELECT wp.id, wp.name, wp.days_per_week, wp.updated_at
+     FROM members m JOIN workout_plans wp ON wp.id = m.own_workout_plan_id
+     WHERE m.id = ? AND wp.member_id = m.id AND wp.member_created = 1`,
+    [memberId],
+  );
+
   res.json({
     assignment: assignment ? { ...assignment, plan: workoutPlanTree(assignment.plan_id, { withMedia: true }) } : null,
+    own_plan: ownPlan ?? null,
     logs,
     prs: all('SELECT * FROM exercise_prs WHERE member_id = ? ORDER BY est_1rm_kg DESC', [memberId]),
     stats: get(

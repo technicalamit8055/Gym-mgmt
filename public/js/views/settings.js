@@ -118,12 +118,12 @@ function appQrCard(poster) {
   });
 
   const print = () => printAppPoster(poster);
-  const preview = () =>
+  const preview = async () =>
     openModal({
       title: `${t('member')} app poster`,
       subtitle: `What ${t('members').toLowerCase()} will see on your desk.`,
       icon: 'qrCode',
-      body: h('div', { class: 'app-poster-preview' }, appPosterNode(poster)),
+      body: h('div', { class: 'app-poster-preview' }, await appPosterNode(poster)),
       footer: h('button', { class: 'btn primary', type: 'button', onclick: print }, renderIcon('print', { size: 17 }), 'Print'),
     });
 
@@ -387,6 +387,14 @@ export async function renderSettings({ reload }) {
   const profileForm = buildForm(
     [
       { name: 'gym_name', label: `${Noun} name`, required: true, value: tenant.gym_name, full: true, hint: 'Shown in the sidebar, on printed ID cards and on your staff sign-in page.' },
+      {
+        name: 'tagline',
+        label: 'Tagline',
+        value: tenant.tagline || '',
+        full: true,
+        placeholder: isLibrary() ? 'e.g. Focus. Study. Succeed.' : 'e.g. Train Harder. Be Stronger.',
+        hint: `Optional. Shown under your name on the ${t('member').toLowerCase()} app QR poster.`,
+      },
       { name: 'currency', label: 'Currency', type: 'select', value: tenant.currency, options: CURRENCIES },
       {
         name: 'timezone',
@@ -431,6 +439,7 @@ export async function renderSettings({ reload }) {
   const currencyLead = h('span', { class: 'stg-lead-text' }, currencySymbol());
   const decor = {
     gym_name: { chip: 'idCard', tone: 'blue', lead: renderIcon('building', { size: 18 }) },
+    tagline: { chip: 'sparkle', tone: 'violet', lead: renderIcon('edit', { size: 18 }) },
     currency: { chip: 'edit', tone: 'green', lead: currencyLead },
     timezone: { chip: 'clock', tone: 'violet', lead: renderIcon('globe', { size: 18 }) },
   };

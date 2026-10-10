@@ -572,6 +572,16 @@ function fitnessSection(member, { reload }) {
         h('div', { class: 'spacer' }),
         assignment ? h('span', { class: 'badge blue' }, `${assignment.plan.days.length}-day split`) : null,
       ),
+      // The member switched to a plan they built in the app, so the routine
+      // below (if any) is not the one being trained right now.
+      workouts.own_plan
+        ? h(
+            'p',
+            { class: 'md-meta', style: 'margin:0 0 8px' },
+            h('span', { class: 'badge amber' }, 'Own plan'),
+            ` ${member.first_name} is training with a plan they built: ${workouts.own_plan.name} (${workouts.own_plan.days_per_week}-day)`,
+          )
+        : null,
       assignment
         ? h(
             'div',

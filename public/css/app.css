@@ -1705,6 +1705,15 @@ body[data-vertical='library'] .stat.accent,
 .app-poster-url strong { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 500; color: #374151; }
 
 .app-poster-preview { display: flex; justify-content: center; }
+
+/* The illustrated gym poster (gymPoster.js) is one SVG in the artwork's own
+   2:3 proportions; only its outer size changes between preview and paper. */
+.gym-poster-wrap { line-height: 0; }
+.gym-poster-wrap .gym-poster { display: block; width: 100%; height: auto; }
+.app-poster-preview .gym-poster-wrap {
+  width: min(100%, 440px); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.45);
+}
 .app-poster-preview .app-poster { zoom: 0.72; border-radius: 12px; box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.45); }
 @media (max-width: 560px) { .app-poster-preview .app-poster { zoom: 0.46; } }
 
@@ -1756,6 +1765,9 @@ body[data-vertical='library'] .stat.accent,
   /* The desk poster is one full sheet; the card sheet's padding would push
      it onto a second page on US Letter. */
   body.printing > #print-root:has(.app-poster-page) { padding: 0; }
+  /* 10in tall fits the printable area of both A4 and US Letter; the width
+     follows from the artwork's 2:3 shape. */
+  .app-poster-page .gym-poster-wrap .gym-poster { width: auto; height: 10in; max-width: 100%; }
   .id-card { border: 1px dashed #9ca3af; box-shadow: none; }
   .receipt { border: 1px solid #9ca3af; box-shadow: none; width: 3.2in; }
 
@@ -4433,6 +4445,116 @@ button.portal-set-prev:hover { color: var(--brand); }
   transition: background 0.15s ease;
 }
 .portal-add-ex:hover { background: color-mix(in srgb, var(--brand) 11%, var(--surface)); }
+
+/* --------------------------------------------- Member-built plans (Hevy) --- */
+
+/* "Switch" on the routine card, and the line saying whose plan it is. */
+.portal-routine-hero.has-switch .portal-routine-kicker { max-width: calc(100% - 104px); }
+.portal-routine-kicker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-routine-switch {
+  position: absolute; z-index: 2; top: 14px; right: 14px;
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700;
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+  background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--brand);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: var(--shadow-sm);
+}
+.portal-routine-switch:hover { background: var(--surface); }
+.portal-routine-source { position: relative; margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* My plans: one row per plan, the live one tinted. */
+.portal-myplans { display: flex; flex-direction: column; gap: 10px; }
+.portal-myplan-list { display: flex; flex-direction: column; gap: 8px; }
+.portal-myplan, .portal-myplan-create {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 12px 12px 13px;
+  border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  box-shadow: inset 0 1px 0 var(--hairline); text-align: left; font: inherit;
+}
+.portal-myplan.is-active { border-color: color-mix(in srgb, var(--tone) 45%, var(--border)); background: color-mix(in srgb, var(--tone) 6%, var(--surface)); }
+.portal-myplan-ico {
+  flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+  color: var(--tone, var(--brand)); background: color-mix(in srgb, var(--tone, var(--brand)) 13%, transparent);
+}
+.portal-myplan-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.portal-myplan-text strong { font-size: 14.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-myplan-text small { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.portal-myplan-active {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+.portal-myplan-use {
+  flex: none; height: 30px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+}
+.portal-myplan-use:hover { border-color: var(--brand); color: var(--brand); }
+.portal-myplan .portal-ex-menu { margin-right: -4px; }
+.portal-myplan-create {
+  cursor: pointer; border: 1.5px dashed color-mix(in srgb, var(--brand) 35%, var(--border));
+  background: color-mix(in srgb, var(--brand) 5%, var(--surface));
+}
+.portal-myplan-create:hover { background: color-mix(in srgb, var(--brand) 9%, var(--surface)); }
+.portal-myplan-create .portal-myplan-text small { white-space: normal; }
+
+/* The plan editor. */
+.portal-pe { gap: 14px; }
+.portal-pe-title { font-size: 16px; font-weight: 750; letter-spacing: -0.015em; }
+.portal-pe-head { display: flex; flex-direction: column; gap: 8px; }
+.portal-pe-name { font-size: 17px; font-weight: 700; }
+.portal-pe-notes { resize: vertical; min-height: 44px; font: inherit; font-size: 14px; }
+.portal-pe-day {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  border-radius: 20px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--brand) 3%, var(--surface));
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-pe-day-head { display: flex; align-items: center; gap: 10px; }
+.portal-pe-day-num {
+  flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--brand); color: #fff; font-size: 14px; font-weight: 800;
+}
+.portal-pe-day-name {
+  flex: 1; min-width: 0; padding: 6px 8px; margin-left: -4px; border-radius: 8px;
+  border: 1px solid transparent; background: none; color: var(--text);
+  font: inherit; font-size: 17px; font-weight: 750; letter-spacing: -0.015em;
+}
+.portal-pe-day-name:hover { border-color: var(--border); }
+.portal-pe-day-name:focus { outline: none; border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); background: var(--bg); }
+.portal-pe-empty { margin: 0; padding: 4px 2px; font-size: 13px; color: var(--muted); }
+.portal-pe-ex {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  border-radius: 16px; border: 1px solid var(--border); background: var(--surface);
+}
+.portal-pe-ex-head { display: flex; align-items: center; gap: 12px; }
+.portal-pe-ex-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.portal-pe-targets { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 8px; }
+.portal-pe-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.portal-pe-field > span { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.portal-pe-input {
+  width: 100%; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.portal-pe-input:focus { outline: none; border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); box-shadow: var(--ring); }
+.portal-pe-stepper {
+  display: flex; align-items: center; justify-content: space-between; height: 36px;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+}
+.portal-pe-stepper button {
+  flex: none; width: 34px; height: 100%; border: none; background: none; cursor: pointer;
+  color: var(--brand); font: inherit; font-size: 18px; font-weight: 700;
+}
+.portal-pe-stepper button:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.portal-pe-sets-value { font-size: 15px; font-variant-numeric: tabular-nums; }
+.portal-pe-add-day { margin-top: 0; }
+.portal-routine-sheet .portal-pe-add-day { margin-top: 10px; }
+.portal-pe-toggle {
+  display: flex; align-items: center; gap: 14px; padding: 14px;
+  border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface);
+}
+.portal-pe-toggle > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.portal-pe-toggle strong { font-size: 14.5px; }
+.portal-pe-toggle small { font-size: 12.5px; color: var(--muted); line-height: 1.35; }
 
 /* Option sheets opened from the ⋯ and ⋮ buttons. */
 .portal-action-sheet { display: flex; flex-direction: column; gap: 4px; }

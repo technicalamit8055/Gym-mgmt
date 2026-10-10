@@ -79,6 +79,8 @@ function publicTenant(tenant) {
     // member portal paint in the gym's palette before anyone signs in. A stored
     // value from the other vertical's set falls back to this one's default.
     theme: vertical.themes.includes(tenant.theme) ? tenant.theme : vertical.themes[0],
+    // The gym's own motto, not vertical.tagline above (the product's).
+    tagline: tenant.tagline || null,
     logo_url: hasTenantLogo(tenant) ? tenantLogoUrl(tenant.slug, version) : null,
     // What the browser tab and an iOS home screen should show. The purpose-
     // built icon when there is one; otherwise the logo itself, which still
@@ -260,6 +262,8 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     currency: { type: 'string', min: 1, max: 8 },
     timezone: { type: 'string', max: 64 },
     theme: { type: 'enum', values: verticalFor(req.tenant.business_type).themes },
+    // Sent empty to clear it: COALESCE keeps '' rather than the old value.
+    tagline: { type: 'string', max: 60 },
     clear_logo: { type: 'boolean' },
   });
 
@@ -298,6 +302,7 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     currency: body.currency ? body.currency.toUpperCase() : undefined,
     timezone: body.timezone,
     theme: body.theme,
+    tagline: body.tagline,
     logoMime,
     logoBytes,
     iconMime,
