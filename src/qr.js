@@ -97,3 +97,23 @@ export function qrPngDataUrl(token) {
     width: 512,
   });
 }
+
+/* ── Member-app poster ────────────────────────────────────────────────── */
+
+/**
+ * A QR for a plain link — the "scan to get the app" poster on the desk. No
+ * GB1 prefix: this one is read by a phone's own camera, which only offers to
+ * open what looks like a URL.
+ *
+ * 'Q' rather than the cards' 'M': a sheet taped to a reception counter gets
+ * scuffed, creased and glared on, and the link is short enough that the extra
+ * redundancy costs nothing in scan distance.
+ */
+export function linkQrSvg(url) {
+  return QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'Q', margin: 1, width: 320 });
+}
+
+/** Large enough to stay crisp when the downloaded poster is printed at A4. */
+export function linkQrPngDataUrl(url) {
+  return QRCode.toDataURL(url, { errorCorrectionLevel: 'Q', margin: 2, width: 1024 });
+}

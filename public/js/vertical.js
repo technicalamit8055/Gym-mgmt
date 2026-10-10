@@ -14,12 +14,18 @@ let currentLibraryTheme = localStorage.getItem('library_theme') || 'emerald';
 let currentGymTheme = localStorage.getItem('gym_theme') || 'flame';
 let currentMode = localStorage.getItem('app_mode') || 'dark';
 
-export function setVertical(type) {
+/**
+ * `theme` is the palette the owner saved on the gym (see publicTenant in
+ * src/routes/platform.js), so every device — staff app and member portal —
+ * paints the same. localStorage only caches it for the next first paint; it
+ * is used on its own only when the server sent none (no gym, or offline).
+ */
+export function setVertical(type, theme) {
   vertical = type === 'library' ? 'library' : 'gym';
   document.body.dataset.vertical = vertical;
-  const activeTheme = vertical === 'library' ? currentLibraryTheme : currentGymTheme;
-  document.body.dataset.theme = activeTheme;
   document.body.dataset.mode = currentMode;
+  if (theme) setAppTheme(theme);
+  else document.body.dataset.theme = getAppTheme();
 }
 
 export function setAppMode(mode) {

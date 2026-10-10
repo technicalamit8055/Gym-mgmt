@@ -318,6 +318,8 @@ export const api = {
   qrReissue: (memberId) => request('POST', `/qr/member/${memberId}/reissue`),
   qrCards: (ids) => request('GET', `/qr/cards${query({ ids: ids.join(',') })}`),
   qrLookup: (code) => request('POST', '/qr/lookup', { code }),
+  // The desk poster that opens the member app — see routes/qr.js.
+  appQr: () => request('GET', '/qr/app'),
   qrCheckIn: (code) => request('POST', '/qr/check-in', { code }),
 
   classes: (params) => request('GET', `/classes${query(params)}`),

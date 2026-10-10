@@ -1,6 +1,7 @@
 import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
-import { buildForm, date, h, isFullscreen, relativeDays, renderIcon, setCurrency, toast, toggleFullscreen } from '../ui.js';
+import { buildForm, date, h, isFullscreen, openModal, relativeDays, renderIcon, setCurrency, toast, toggleFullscreen } from '../ui.js';
 import { cropAndResizeImage, makeAppIcon } from '../photo.js';
+import { appPosterNode, downloadAppPosterPng, printAppPoster } from '../qrcard.js';
 import { getAppMode, getAppTheme, isLibrary, setAppMode, setAppTheme, t, tl } from '../vertical.js';
 import { customDomainCard } from './customDomains.js';
 
@@ -81,6 +82,74 @@ async function copyText(text, done = 'Link copied') {
   } catch {
     toast('Could not copy — select the link and copy it manually', 'error');
   }
+}
+
+/**
+ * The QR an owner prints for the front desk: scanning it opens the member
+ * app, which installs to the phone's home screen — there is no store listing
+ * to send anyone to.
+ */
+function appQrCard(poster) {
+  const head = cardHead(
+    'qrCode',
+    'brand',
+    `${t('member')} app QR code`,
+    `Print it and stick it on your desk. ${t('members')} scan it with their phone camera to open and install your app — no app store needed.`,
+  );
+  if (!poster) {
+    return h(
+      'div',
+      { class: 'card stg-card' },
+      head,
+      h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, 'The QR code could not be loaded right now. Refresh the page to try again.'),
+    );
+  }
+
+  const download = h('button', { class: 'btn stg-outline stg-logo-btn', type: 'button' }, renderIcon('download', { size: 17 }), 'Download image');
+  download.addEventListener('click', async () => {
+    download.disabled = true;
+    try {
+      await downloadAppPosterPng(poster);
+    } catch (err) {
+      toast(err.message || 'Could not create the image', 'error');
+    } finally {
+      download.disabled = false;
+    }
+  });
+
+  const print = () => printAppPoster(poster);
+  const preview = () =>
+    openModal({
+      title: `${t('member')} app poster`,
+      subtitle: `What ${t('members').toLowerCase()} will see on your desk.`,
+      icon: 'qrCode',
+      body: h('div', { class: 'app-poster-preview' }, appPosterNode(poster)),
+      footer: h('button', { class: 'btn primary', type: 'button', onclick: print }, renderIcon('print', { size: 17 }), 'Print'),
+    });
+
+  return h(
+    'div',
+    { class: 'card stg-card' },
+    head,
+    h(
+      'div',
+      { class: 'stg-appqr' },
+      h('button', { class: 'stg-appqr-img', type: 'button', title: 'Preview poster', 'aria-label': 'Preview poster', onclick: preview, html: poster.svg }),
+      h(
+        'div',
+        { class: 'stg-appqr-text' },
+        h('span', { class: 'muted' }, 'Opens'),
+        h('code', {}, poster.url),
+        h(
+          'div',
+          { class: 'row stg-logo-actions' },
+          h('button', { class: 'btn primary stg-logo-btn', type: 'button', onclick: print }, renderIcon('print', { size: 17 }), 'Print poster'),
+          download,
+          h('button', { class: 'btn sm ghost stg-link-btn', type: 'button', onclick: preview }, renderIcon('maximize', { size: 16 }), 'Preview'),
+        ),
+      ),
+    ),
+  );
 }
 
 function subscriptionCard(tenant, billing, reload) {
@@ -184,12 +253,16 @@ export async function renderSettings({ reload }) {
   // Billing status is admin-only server-side; managers still get the page.
   // Domains are best-effort too: a failure there must not cost the owner the
   // rest of their settings.
-  const [billing, domains] = await Promise.all([
+  const [billing, domains, appQr] = await Promise.all([
     api.billingStatus().catch((err) => {
       if (!(err instanceof ApiError)) throw err;
       return null;
     }),
     api.customDomains().catch((err) => {
+      if (!(err instanceof ApiError)) throw err;
+      return null;
+    }),
+    api.appQr().catch((err) => {
       if (!(err instanceof ApiError)) throw err;
       return null;
     }),
@@ -455,7 +528,15 @@ export async function renderSettings({ reload }) {
       h(
         'div',
         { class: 'card stg-card' },
-        cardHead('palette', 'brand', 'Aesthetic Theme Palette', `Pick a custom color palette for your ${noun} interface.`),
+        cardHead(
+          'palette',
+          'brand',
+          'Aesthetic Theme Palette',
+          `Pick a color palette for your ${noun}. It applies on every device, including the ${t('member').toLowerCase()} app.`,
+        ),
+        isAdmin
+          ? null
+          : h('p', { class: 'muted', style: 'margin:0 0 12px;font-size:13px' }, 'Only an admin can change this.'),
         h(
           'div',
           { class: 'stg-swatches' },
@@ -471,9 +552,21 @@ export async function renderSettings({ reload }) {
                 type: 'button',
                 style: `--swatch:${t.color}`,
                 'aria-pressed': String(active),
+                disabled: !isAdmin,
                 onclick: async () => {
-                  setAppTheme(t.id);
-                  toast(`Switched to ${t.name} theme`);
+                  if (active) return;
+                  // Saved on the gym, not this browser: every other device
+                  // picks it up on its next open (see setVertical()).
+                  let updated;
+                  try {
+                    ({ tenant: updated } = await api.updateGym({ theme: t.id }));
+                  } catch (err) {
+                    toast(err.message || 'Could not change the theme', 'error');
+                    return;
+                  }
+                  setAppTheme(updated.theme);
+                  window.dispatchEvent(new CustomEvent('gymbook:gym-updated', { detail: updated }));
+                  toast(`Switched to ${t.name} theme for everyone`);
                   await reload();
                 },
               },
@@ -511,6 +604,7 @@ export async function renderSettings({ reload }) {
           ['database', 'Data', 'Its own database file'],
         ]),
       ),
+      appQrCard(appQr),
       h(
         'div',
         { class: 'card stg-card' },

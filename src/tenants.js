@@ -95,6 +95,10 @@ const MIGRATIONS = [
     "TEXT NOT NULL DEFAULT 'gym' CHECK (business_type IN ('gym', 'library'))",
   ),
   (db) => db.exec('CREATE INDEX IF NOT EXISTS idx_tenants_business_type ON tenants(business_type)'),
+  // The colour palette the owner picked in settings, applied on every device
+  // that opens this gym — staff app and member portal alike. NULL means the
+  // vertical's default palette (see `themes` in verticals.js).
+  (db) => ensureColumn(db, 'tenants', 'theme', 'TEXT'),
 ];
 
 let registryDb;
@@ -219,15 +223,16 @@ export function setTenantBusinessType(slug, businessType) {
  */
 export function updateTenantProfile(
   slug,
-  { gymName, currency, timezone, logoMime, logoBytes, iconMime, iconBytes, clearLogo } = {},
+  { gymName, currency, timezone, theme, logoMime, logoBytes, iconMime, iconBytes, clearLogo } = {},
 ) {
   const sets = [
     'gym_name     = COALESCE(?, gym_name)',
     'display_name = COALESCE(?, display_name)',
     'currency     = COALESCE(?, currency)',
     'timezone     = COALESCE(?, timezone)',
+    'theme        = COALESCE(?, theme)',
   ];
-  const params = [gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null];
+  const params = [gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, theme ?? null];
 
   // The logo and the app icon drawn from it are one fact, written and cleared
   // together: leaving a stale icon behind would keep installing the old brand.

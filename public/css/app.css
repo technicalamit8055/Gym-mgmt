@@ -1670,6 +1670,44 @@ body[data-vertical='library'] .stat.accent,
 
 #print-root { display: none; }
 
+/* Member-app desk poster (qrcard.js). Sized in inches so the printed sheet
+   fits one page of A4 or US Letter; the settings preview zooms it down. */
+.app-poster {
+  box-sizing: border-box; width: 6.6in; margin: 0 auto; padding: 0.4in 0.5in 0.35in;
+  background: #fff; color: #111827; text-align: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  border-top: 0.12in solid var(--poster-accent, #111827);
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.app-poster-brand { display: flex; align-items: center; justify-content: center; gap: 0.14in; }
+.app-poster-logo { width: 0.6in; height: 0.6in; border-radius: 0.12in; object-fit: cover; flex: none; }
+.app-poster-gym { font-size: 0.3in; font-weight: 700; letter-spacing: -0.01em; }
+.app-poster-headline { margin-top: 0.28in; font-size: 0.52in; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; }
+.app-poster-sub { margin-top: 0.1in; font-size: 0.16in; color: #4b5563; line-height: 1.4; text-wrap: balance; }
+.app-poster-qr {
+  box-sizing: border-box; width: 3.2in; height: 3.2in; margin: 0.3in auto 0; padding: 0.1in;
+  border: 0.03in solid var(--poster-accent, #111827); border-radius: 0.2in;
+}
+.app-poster-qr svg { width: 100%; height: 100%; display: block; }
+.app-poster-caption { margin-top: 0.22in; font-size: 0.2in; font-weight: 700; }
+.app-poster-steps { max-width: 5.4in; margin: 0.24in auto 0; padding: 0; list-style: none; counter-reset: step; text-align: left; }
+.app-poster-steps li {
+  position: relative; counter-increment: step; margin-bottom: 0.12in; padding-left: 0.42in;
+  font-size: 0.15in; line-height: 1.45; color: #374151;
+}
+.app-poster-steps li::before {
+  content: counter(step); position: absolute; left: 0; top: -0.01in;
+  box-sizing: border-box; width: 0.26in; height: 0.26in; border-radius: 50%;
+  border: 0.02in solid var(--poster-accent, #111827);
+  display: grid; place-items: center; font-size: 0.13in; font-weight: 700; color: #111827;
+}
+.app-poster-url { margin-top: 0.22in; font-size: 0.13in; color: #6b7280; overflow-wrap: anywhere; }
+.app-poster-url strong { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 500; color: #374151; }
+
+.app-poster-preview { display: flex; justify-content: center; }
+.app-poster-preview .app-poster { zoom: 0.72; border-radius: 12px; box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.45); }
+@media (max-width: 560px) { .app-poster-preview .app-poster { zoom: 0.46; } }
+
 .receipt {
   width: 3.4in;
   margin: 0 auto;
@@ -1714,7 +1752,10 @@ body[data-vertical='library'] .stat.accent,
   }
 
   /* Never split a card or receipt across a page break. */
-  .id-card-slot, .receipt-page { break-inside: avoid; page-break-inside: avoid; }
+  .id-card-slot, .receipt-page, .app-poster-page { break-inside: avoid; page-break-inside: avoid; }
+  /* The desk poster is one full sheet; the card sheet's padding would push
+     it onto a second page on US Letter. */
+  body.printing > #print-root:has(.app-poster-page) { padding: 0; }
   .id-card { border: 1px dashed #9ca3af; box-shadow: none; }
   .receipt { border: 1px solid #9ca3af; box-shadow: none; width: 3.2in; }
 
@@ -3538,6 +3579,208 @@ button.portal-notif:active { transform: scale(0.99); }
 }
 .portal-notif-empty strong { color: var(--text); font-size: 15px; }
 .portal-notif-empty p { margin: 0; font-size: 13px; }
+
+/* ------------------------------------------------------ invoices & payments */
+
+/* Scoped under .portal-pay. Shares the Profile tab's section label and status
+   pill (.portal-prof-label, .portal-prof-status), so it defines the same
+   --p-* card tokens and tone-* colours they read. The /images/billing art is
+   optional — every rule here leaves a clean layout when an <img> is absent. */
+.portal-pay {
+  gap: 16px;
+  --p-card: var(--surface);
+  --p-border: var(--border);
+  --p-shadow: var(--shadow-sm);
+}
+body[data-mode='light'] .portal-pay {
+  --p-border: color-mix(in srgb, var(--border) 70%, transparent);
+  --p-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -10px rgba(15, 23, 42, 0.1);
+}
+body:not([data-mode='light']) .portal-pay {
+  --p-card: color-mix(in srgb, var(--surface) 82%, var(--bg));
+  --p-shadow: 0 10px 30px -14px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--hairline);
+}
+.portal-pay .tone-orange { --t: #f97316; }
+.portal-pay .tone-blue { --t: #3b82f6; }
+.portal-pay .tone-green { --t: #10b981; }
+
+/* Header, with the athlete art tucked behind the title on the right */
+.portal-pay-head { position: relative; min-height: 96px; }
+.portal-pay-head > h2, .portal-pay-head > p { position: relative; z-index: 1; }
+.portal-pay-head > p { max-width: 78%; }
+.portal-pay-head-art {
+  position: absolute; z-index: 0; right: -18px; top: -30px; width: min(46%, 230px); height: auto; pointer-events: none;
+}
+
+/* Current plan */
+.portal-pay-plan {
+  overflow: hidden; border-radius: 22px; background: var(--p-card); box-shadow: var(--p-shadow);
+  border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent);
+}
+.portal-pay-plan-top {
+  position: relative; display: flex; align-items: center; gap: 16px; padding: 22px 18px; min-height: 128px;
+  background:
+    radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, var(--brand) 26%, transparent), transparent 70%),
+    linear-gradient(135deg, color-mix(in srgb, var(--brand) 8%, var(--p-card)), color-mix(in srgb, var(--brand) 16%, var(--p-card)));
+}
+.portal-pay-plan-art {
+  position: absolute; right: 0; bottom: 0; height: 100%; max-width: 50%; object-fit: contain; object-position: right bottom;
+  pointer-events: none;
+}
+.portal-pay-plan-ico {
+  position: relative; flex: none; width: 66px; height: 66px; border-radius: 18px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 78%, #fff), var(--brand));
+  box-shadow: 0 10px 22px -10px color-mix(in srgb, var(--brand) 85%, transparent);
+}
+.portal-pay-plan-who { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.portal-pay-plan-who strong { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.portal-pay-plan-who small { margin-top: 3px; font-size: 14px; color: var(--muted); }
+.portal-pay-plan-who .portal-prof-status { margin-top: 10px; }
+.portal-pay-plan.is-empty .portal-pay-plan-ico { background: color-mix(in srgb, var(--text) 18%, transparent); box-shadow: none; }
+
+.portal-pay-plan-facts {
+  container-type: inline-size; display: grid; grid-template-columns: auto minmax(0, 1fr);
+  padding: 14px 16px; border-top: 1px solid color-mix(in srgb, var(--brand) 18%, transparent);
+}
+.portal-pay-fact { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.portal-pay-fact + .portal-pay-fact { margin-left: 16px; padding-left: 16px; border-left: 1px solid var(--p-border); }
+.portal-pay-fact-ico {
+  flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+  color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+.portal-pay-currency { font-size: 24px; font-weight: 700; line-height: 1; }
+.portal-pay-fact > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.portal-pay-fact small { font-size: 13.5px; color: var(--muted); }
+.portal-pay-fact strong { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.portal-pay-fact em { font-style: normal; font-size: 11.5px; color: var(--muted); }
+/* A phone can't fit both dates beside the price: let the facts stack. */
+@container (max-width: 400px) {
+  .portal-pay-fact { gap: 10px; }
+  .portal-pay-fact-ico { width: 40px; height: 40px; border-radius: 12px; }
+  .portal-pay-fact strong { font-size: 16px; }
+  .portal-pay-fact + .portal-pay-fact { margin-left: 12px; padding-left: 12px; }
+}
+
+/* Section heads */
+.portal-pay-section-head { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+.portal-pay-section-head .portal-prof-label { flex: 1; margin: 0; }
+.portal-pay-section-head.is-stacked { flex-direction: column; gap: 4px; }
+.portal-pay-section-head.is-stacked p { margin: 0; font-size: 14.5px; color: var(--muted); }
+.portal-pay-count { font-size: 14px; color: var(--muted); }
+.portal-pay-seeall {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 600; color: var(--brand);
+}
+.portal-pay-seeall[hidden] { display: none; }
+
+/* Payment rows */
+.portal-pay-list { display: flex; flex-direction: column; gap: 12px; margin-top: -4px; }
+.portal-pay-row {
+  container-type: inline-size; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto 46px; align-items: center; gap: 14px;
+  padding: 16px; border-radius: 20px; border: 1px solid var(--p-border); background: var(--p-card); box-shadow: var(--p-shadow);
+}
+.portal-pay-row-ico {
+  width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center;
+  color: var(--brand); background: color-mix(in srgb, var(--brand) 11%, transparent);
+}
+.portal-pay-row-meta { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.portal-pay-row-meta strong { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.portal-pay-row-meta small { font-size: 14px; color: var(--muted); }
+.portal-pay-row-amount { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.portal-pay-row-dl {
+  width: 46px; height: 46px; padding: 0; border-radius: 13px; display: grid; place-items: center; cursor: pointer; color: var(--text);
+  border: 1px solid var(--p-border); background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.portal-pay-row-dl:disabled { opacity: 0.5; cursor: progress; }
+.portal-pay-row-dl:active:not(:disabled) { transform: scale(0.92); }
+@media (max-width: 380px) {
+  .portal-pay-row { grid-template-columns: 44px minmax(0, 1fr) auto 40px; gap: 10px; padding: 14px 12px; }
+  .portal-pay-row-ico { width: 44px; height: 44px; border-radius: 13px; }
+  .portal-pay-row-dl { width: 40px; height: 40px; }
+  .portal-pay-row-amount { font-size: 17px; }
+}
+.portal-pay-empty {
+  padding: 22px 16px; border-radius: 20px; text-align: center; font-size: 13.5px; color: var(--muted);
+  border: 1.5px dashed var(--p-border); background: var(--p-card);
+}
+
+/* Renewal tiles: two to a row; an odd last one takes the full width */
+.portal-pay-plans { container-type: inline-size; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: -4px; }
+.portal-pay-plans.is-odd > .portal-pay-tile:last-child { grid-column: 1 / -1; min-height: 180px; padding-bottom: 18px; }
+.portal-pay-tile {
+  position: relative; overflow: hidden; min-height: 196px; padding: 16px 14px 64px; border-radius: 20px;
+  display: flex; flex-direction: column; gap: 14px; text-align: left; cursor: pointer;
+  font: inherit; color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--t) 24%, transparent);
+  background:
+    radial-gradient(70% 80% at 100% 30%, color-mix(in srgb, var(--t) 20%, transparent), transparent 70%),
+    linear-gradient(145deg, color-mix(in srgb, var(--t) 9%, var(--p-card)), color-mix(in srgb, var(--t) 4%, var(--p-card)));
+  box-shadow: var(--p-shadow); transition: transform 0.15s ease;
+}
+.portal-pay-tile:active { transform: scale(0.98); }
+.portal-pay-tile-top, .portal-pay-tile .portal-pay-perks { position: relative; z-index: 1; }
+.portal-pay-tile-art {
+  position: absolute; z-index: 0; right: 0; bottom: 0; height: 88%; max-width: 58%; object-fit: contain; object-position: right bottom;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 30%);
+  mask-image: linear-gradient(to right, transparent, #000 30%);
+}
+.portal-pay-tile-top { display: flex; align-items: flex-start; gap: 12px; }
+.portal-pay-tile-ico {
+  flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--t); background: color-mix(in srgb, var(--t) 12%, var(--p-card));
+}
+.portal-pay-tile-price { min-width: 0; display: flex; flex-direction: column; }
+.portal-pay-tile-price strong { font-size: 16.5px; font-weight: 700; }
+.portal-pay-tile-price b {
+  font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--t) 88%, var(--text));
+}
+.portal-pay-tile-price small { font-size: 14px; color: var(--muted); }
+.portal-pay-tile-current {
+  align-self: flex-start; margin-top: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  color: #fff; background: var(--t);
+}
+.portal-pay-perks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.portal-pay-perks li { display: flex; align-items: center; gap: 8px; font-size: 13.5px; line-height: 1.3; }
+.portal-pay-perks li .svg-icon {
+  flex: none; width: 18px; height: 18px; padding: 3.5px; border-radius: 50%; color: #fff; background: var(--t, var(--brand));
+}
+.portal-pay-tile-go {
+  position: absolute; z-index: 1; right: 14px; bottom: 14px; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+  color: #fff; background: var(--t); border: 3px solid color-mix(in srgb, #fff 70%, transparent);
+  box-shadow: 0 10px 20px -8px color-mix(in srgb, var(--t) 90%, transparent);
+}
+/* Half-width tiles on a phone: smaller icon and price, and the artwork
+   fades back so the perks stay legible over it. */
+@container (max-width: 560px) {
+  .portal-pay-tile-top { gap: 10px; }
+  .portal-pay-tile-ico { width: 42px; height: 42px; }
+  .portal-pay-tile-ico .svg-icon { width: 22px; height: 22px; }
+  .portal-pay-tile-price b { font-size: 22px; }
+  .portal-pay-tile-price small { font-size: 13px; }
+  .portal-pay-perks li { font-size: 12.5px; }
+  .portal-pay-plans:not(.is-odd) .portal-pay-tile-art,
+  .portal-pay-plans.is-odd > .portal-pay-tile:not(:last-child) .portal-pay-tile-art { opacity: 0.35; max-width: 80%; }
+}
+
+/* Front-desk note */
+.portal-pay-note {
+  position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; padding: 16px;
+  border-radius: 18px; font-size: 14.5px;
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 6%, var(--p-card)), color-mix(in srgb, var(--brand) 12%, var(--p-card)));
+}
+.portal-pay-note > span:nth-child(2) { position: relative; flex: 1; }
+.portal-pay-note-ico {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--brand);
+}
+.portal-pay-note-mark { position: absolute; right: -4px; bottom: -22px; color: var(--brand); opacity: 0.14; transform: rotate(-28deg); pointer-events: none; }
+
+.portal-pay-plan-modal > p:first-child { margin: 0 0 12px; }
+.portal-pay-plan-modal .portal-pay-perks { margin-bottom: 14px; }
+.portal-pay-plan-modal .portal-pay-perks li { font-size: 14px; }
+.portal-pay-plan-modal > p.muted { margin: 0; font-size: 13px; line-height: 1.45; }
 
 /* ------------------------------------------------------------------ login */
 
@@ -5548,6 +5791,17 @@ body:not([data-mode='light']) .stg-logo-btn.danger { color: var(--red); }
 }
 .stg-url-copy:hover { background: color-mix(in srgb, var(--brand) 7%, transparent); }
 
+/* Member-app QR */
+.stg-appqr { display: flex; align-items: center; gap: 20px; }
+.stg-appqr-img {
+  flex: none; width: 132px; height: 132px; padding: 8px; border-radius: 12px; cursor: zoom-in;
+  background: #fff; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+.stg-appqr-img svg { width: 100%; height: 100%; display: block; }
+.stg-appqr-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; }
+.stg-appqr-text code { padding: 0; font-size: 13px; color: var(--brand); background: none; border: 0; overflow-wrap: anywhere; }
+.stg-appqr .stg-logo-actions { flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+
 /* Kiosk */
 .stg-kiosk-btn { min-height: 46px; padding: 0 24px; gap: 14px; font-size: 14.5px; border-radius: 9px; }
 .stg-card:has(.stg-art-kiosk) .stg-head-text p { padding-right: 70px; }
@@ -5571,6 +5825,7 @@ body:not([data-theme='cyber']):not([data-theme='mocha']) .stg-page .btn.primary:
   .stg-art { opacity: 0.35 !important; }
   .stg-body-narrow { max-width: none; }
   .stg-logo { flex-direction: column; }
+  .stg-appqr { flex-direction: column; align-items: flex-start; }
   .stg-domain-off { padding-right: 18px; padding-bottom: 96px; }
   .stg-domain-text { margin-left: 0; }
   .stg-art-domain { width: 190px; }

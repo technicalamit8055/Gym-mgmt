@@ -6,6 +6,7 @@ import {
   clear,
   closeModal,
   confirmDialog,
+  currencyInfo,
   date,
   exerciseMedia,
   h,
@@ -599,6 +600,50 @@ function scheduleCard(c, index, { onBook, onCancel }) {
       action,
     ),
   );
+}
+
+/**
+ * The illustrations on the Invoices & Payments tab, from /images/billing.
+ * Decorative and optional: a missing file removes its own <img>, so the
+ * layout never shows a broken-image box while the artwork is not in yet.
+ */
+const payArt = (name, className) =>
+  h('img', {
+    class: className,
+    src: `/images/billing/${name}.png`,
+    alt: '',
+    decoding: 'async',
+    onerror: (event) => event.currentTarget.remove(),
+  });
+
+/** Renewal tiles take these in turn — orange, blue, green — like the mockup. */
+const RENEWAL_LOOKS = [
+  { tone: 'orange', icon: 'barbell', art: 'plan-monthly' },
+  { tone: 'blue', icon: 'calendar', art: 'plan-quarterly' },
+  { tone: 'green', icon: 'crown', art: 'plan-annual' },
+];
+
+/**
+ * Three short selling points for a renewal tile. The gym's own description
+ * wins, split into phrases; otherwise a line about the length, and — when the
+ * plan is cheaper per day than the shortest one — how much it saves, so the
+ * tile never claims a saving the prices do not back up.
+ */
+function planPerks(p, savePct, base) {
+  const fromDescription = String(p.description || '')
+    .split(/\r?\n|•|;|\.\s+|,\s+/)
+    .map((s) => s.trim().replace(/\.$/, ''))
+    .filter((s) => s && s.length <= 40);
+  const months = Math.round(p.duration_days / 30);
+  const length =
+    p.duration_days >= 360 ? 'Full year access' : months > 1 ? `${months} months access` : p.duration_days >= 28 ? 'Full month access' : `${p.duration_days} days access`;
+  const perks = fromDescription.length ? fromDescription.slice(0, 3) : [length, isLibrary() ? 'All reading halls' : 'All fitness equipment'];
+  if (perks.length < 3) {
+    if (savePct >= 5) perks.push(`Save ${savePct}% vs ${base.name}`);
+    else if (p.id === base.id) perks.push(p.duration_days <= 31 ? 'Renew every month' : 'Shortest commitment');
+    else perks.push(isLibrary() ? 'Your seat, held for you' : 'Full gym access');
+  }
+  return perks.slice(0, 3);
 }
 
 function openFullscreenPass(pass, member) {
@@ -2326,88 +2371,216 @@ function renderPortalApp(ctx, initialMe) {
   async function renderPayTab() {
     const [paymentsRes, plansRes] = await Promise.all([api.portal.payments(), api.portal.plans()]);
     const sub = me.subscription;
-    const body = h('div', { class: 'portal-tab-body' }, h('h2', { class: 'portal-tab-title' }, isLibrary() ? 'Passes & Payments' : 'Invoices & Payments'));
+    const payments = paymentsRes.items;
+    const body = h(
+      'div',
+      { class: 'portal-tab-body portal-pay' },
+      h(
+        'div',
+        { class: 'portal-page-head portal-pay-head' },
+        payArt('header-athlete', 'portal-pay-head-art'),
+        h('h2', {}, isLibrary() ? 'Passes & Payments' : 'Invoices & Payments'),
+        h('p', {}, `View your ${t('plan').toLowerCase()} details, invoices and payment history.`),
+      ),
+    );
 
-    if (sub) {
+    /* Current plan */
+    const { symbol } = currencyInfo();
+    body.append(
+      h(
+        'section',
+        { class: `portal-pay-plan${sub ? '' : ' is-empty'}` },
+        h(
+          'div',
+          { class: 'portal-pay-plan-top' },
+          payArt('plan-hero', 'portal-pay-plan-art'),
+          h('span', { class: 'portal-pay-plan-ico' }, renderIcon('crown', { size: 34, stroke: 2 })),
+          h(
+            'div',
+            { class: 'portal-pay-plan-who' },
+            h('strong', {}, sub ? sub.plan_name : `No active ${t('plan').toLowerCase()}`),
+            h('small', {}, sub ? `Current ${isLibrary() ? 'pass' : 'membership plan'}` : 'Pick one below and renew at the front desk'),
+            sub ? h('span', { class: 'portal-prof-status tone-green' }, h('i'), 'Active') : null,
+          ),
+        ),
+        sub
+          ? h(
+              'div',
+              { class: 'portal-pay-plan-facts' },
+              h(
+                'div',
+                { class: 'portal-pay-fact' },
+                h('span', { class: 'portal-pay-fact-ico portal-pay-currency' }, symbol),
+                h(
+                  'div',
+                  {},
+                  h('small', {}, 'Price'),
+                  h('strong', {}, money(sub.price - (sub.discount || 0))),
+                  sub.discount ? h('em', {}, `${money(sub.discount)} off ${money(sub.price)}`) : null,
+                ),
+              ),
+              h(
+                'div',
+                { class: 'portal-pay-fact' },
+                h('span', { class: 'portal-pay-fact-ico' }, renderIcon('calendar', { size: 22 })),
+                h('div', {}, h('small', {}, 'Valid till'), h('strong', {}, `${date(sub.start_date)} – ${date(sub.end_date)}`)),
+              ),
+            )
+          : null,
+      ),
+    );
+    if (sub && sub.due > 0) {
+      body.append(
+        h('div', { class: 'portal-due-banner' }, renderIcon('outgoing', { size: 16 }), ` ${money(sub.due)} due — pay at the front desk`),
+      );
+    }
+
+    /* Payment history: the latest three, "See all" opens the rest in place */
+    const PREVIEW = 3;
+    const historyList = h('div', { class: 'portal-pay-list' });
+    let showAll = false;
+    const seeAll = h('button', { class: 'portal-pay-seeall', type: 'button' });
+    const paintHistory = () => {
+      const rows = showAll ? payments : payments.slice(0, PREVIEW);
+      clear(historyList).append(
+        ...(rows.length ? rows.map(paymentRow) : [h('div', { class: 'portal-pay-empty' }, 'No payments yet — they show up here once the desk records one.')]),
+      );
+      clear(seeAll).append(showAll ? 'Show less' : 'See all', renderIcon(showAll ? 'chevronUp' : 'chevronRight', { size: 16 }));
+      seeAll.hidden = payments.length <= PREVIEW;
+    };
+    seeAll.addEventListener('click', () => {
+      showAll = !showAll;
+      paintHistory();
+    });
+    paintHistory();
+    body.append(
+      h(
+        'div',
+        { class: 'portal-pay-section-head' },
+        h('h3', { class: 'portal-prof-label' }, 'Payment history'),
+        h('span', { class: 'portal-pay-count' }, `${payments.length} payment${payments.length === 1 ? '' : 's'}`),
+        seeAll,
+      ),
+      historyList,
+    );
+
+    /* Renewal plans */
+    const plans = plansRes.items;
+    if (plans.length) {
+      const perDay = (p) => p.price / Math.max(1, p.duration_days);
+      const base = plans.reduce((a, b) => (b.duration_days < a.duration_days ? b : a));
       body.append(
         h(
           'div',
-          { class: 'portal-plan-card' },
-          h('div', { class: 'portal-plan-name' }, sub.plan_name),
-          h('div', { class: 'portal-plan-row' }, h('span', {}, 'Price'), h('span', {}, money(sub.price))),
-          sub.discount ? h('div', { class: 'portal-plan-row' }, h('span', {}, 'Discount'), h('span', {}, `-${money(sub.discount)}`)) : null,
-          h('div', { class: 'portal-plan-row' }, h('span', {}, 'Valid'), h('span', {}, `${date(sub.start_date)} – ${date(sub.end_date)}`)),
+          { class: 'portal-pay-section-head is-stacked' },
+          h('h3', { class: 'portal-prof-label' }, 'Renewal plans'),
+          h('p', {}, `Choose a ${t('plan').toLowerCase()} that fits your ${isLibrary() ? 'study routine' : 'fitness journey'}.`),
+        ),
+        h(
+          'div',
+          { class: `portal-pay-plans${plans.length % 2 ? ' is-odd' : ''}` },
+          ...plans.map((p, i) => {
+            const look = RENEWAL_LOOKS[i % RENEWAL_LOOKS.length];
+            const savePct = p.id !== base.id ? Math.round((1 - perDay(p) / perDay(base)) * 100) : 0;
+            return renewalTile(p, look, {
+              perks: planPerks(p, savePct, base),
+              current: sub && sub.plan_id === p.id,
+            });
+          }),
         ),
       );
-      if (sub.due > 0) {
-        body.append(
-          h('div', { class: 'portal-due-banner' }, renderIcon('outgoing', { size: 16 }), ` ${money(sub.due)} due — pay at the front desk`),
-        );
-      }
     }
 
-    body.append(h('h3', { class: 'portal-section-title' }, 'Payment history'));
     body.append(
-      paymentsRes.items.length
-        ? h(
-            'div',
-            { class: 'portal-section' },
-            ...paymentsRes.items.map((p) =>
-              h(
-                'div',
-                { class: 'portal-payment-row' },
-                h('div', { class: 'portal-payment-icon' }, renderIcon('revenue', { size: 16 })),
-                h(
-                  'div',
-                  { class: 'portal-payment-meta' },
-                  h('div', {}, p.plan_name || 'Payment'),
-                  h('div', { class: 'muted' }, `${date(p.paid_on)} · ${p.method.toUpperCase()}`),
-                ),
-                h('div', { class: 'portal-payment-amount' }, money(p.amount)),
-                h(
-                  'button',
-                  {
-                    class: 'icon-btn',
-                    type: 'button',
-                    title: 'Download PDF receipt',
-                    onclick: async (event) => {
-                      event.currentTarget.disabled = true;
-                      try {
-                        await api.portal.downloadReceipt(p.id);
-                      } catch (err) {
-                        toast(err.message || 'Could not download receipt', 'error');
-                      } finally {
-                        event.currentTarget.disabled = false;
-                      }
-                    },
-                  },
-                  renderIcon('download', { size: 16 }),
-                ),
-              ),
-            ),
-          )
-        : h('div', { class: 'portal-empty' }, 'No payments yet.'),
-    );
-
-    body.append(
-      h('h3', { class: 'portal-section-title' }, 'Renewal plans'),
       h(
         'div',
-        { class: 'portal-plan-grid' },
-        ...plansRes.items.map((p) =>
-          h(
-            'div',
-            { class: 'portal-plan-tile' },
-            h('div', { class: 'portal-plan-tile-name' }, p.name),
-            h('div', { class: 'portal-plan-tile-price' }, money(p.price)),
-            h('div', { class: 'muted' }, `${p.duration_days} days${p.sessions ? ` · ${p.sessions} sessions` : ''}`),
-          ),
-        ),
+        { class: 'portal-pay-note' },
+        h('span', { class: 'portal-pay-note-ico' }, renderIcon('info', { size: 18, stroke: 2.4 })),
+        h('span', {}, `Ask the front desk to renew or switch your ${t('plan').toLowerCase()}.`),
+        h('span', { class: 'portal-pay-note-mark', 'aria-hidden': 'true' }, renderIcon('barbell', { size: 64, stroke: 1.6 })),
       ),
-      h('p', { class: 'muted portal-renew-hint' }, `Ask the front desk to renew or switch your ${t('plan').toLowerCase()}.`),
     );
 
     return body;
+  }
+
+  function paymentRow(p) {
+    const cash = String(p.method).toLowerCase() === 'cash';
+    return h(
+      'div',
+      { class: 'portal-pay-row' },
+      h('span', { class: 'portal-pay-row-ico' }, renderIcon(cash ? 'revenue' : 'fileText', { size: 24 })),
+      h(
+        'div',
+        { class: 'portal-pay-row-meta' },
+        h('strong', {}, p.plan_name ? `${p.plan_name} ${isLibrary() ? 'Pass' : 'Membership'}` : 'Payment'),
+        h('small', {}, `${date(p.paid_on)} · ${String(p.method || '').toUpperCase()}`),
+      ),
+      h('div', { class: 'portal-pay-row-amount' }, money(p.amount)),
+      h(
+        'button',
+        {
+          class: 'portal-pay-row-dl',
+          type: 'button',
+          title: 'Download PDF receipt',
+          'aria-label': 'Download PDF receipt',
+          onclick: async (event) => {
+            const btn = event.currentTarget;
+            btn.disabled = true;
+            try {
+              await api.portal.downloadReceipt(p.id);
+            } catch (err) {
+              toast(err.message || 'Could not download receipt', 'error');
+            } finally {
+              btn.disabled = false;
+            }
+          },
+        },
+        renderIcon('download', { size: 20 }),
+      ),
+    );
+  }
+
+  function renewalTile(p, look, { perks, current }) {
+    const open = () =>
+      openModal({
+        title: p.name,
+        subtitle: `${money(p.price)} · ${p.duration_days} days`,
+        icon: look.icon,
+        body: h(
+          'div',
+          { class: 'portal-pay-plan-modal' },
+          p.description ? h('p', {}, p.description) : null,
+          h('ul', { class: 'portal-pay-perks' }, ...perks.map((perk) => h('li', {}, renderIcon('check', { size: 12, stroke: 3 }), perk))),
+          h(
+            'p',
+            { class: 'muted' },
+            current
+              ? `This is your current ${t('plan').toLowerCase()}. Renew it at the front desk before it runs out.`
+              : `Renewals and switches are done at the front desk — show them this screen and they'll set it up.`,
+          ),
+        ),
+      });
+    return h(
+      'button',
+      { class: `portal-pay-tile tone-${look.tone}`, type: 'button', onclick: open },
+      payArt(look.art, 'portal-pay-tile-art'),
+      h(
+        'div',
+        { class: 'portal-pay-tile-top' },
+        h('span', { class: 'portal-pay-tile-ico' }, renderIcon(look.icon, { size: 26, stroke: 2 })),
+        h(
+          'div',
+          { class: 'portal-pay-tile-price' },
+          h('strong', {}, p.name),
+          h('b', {}, money(p.price)),
+          h('small', {}, `${p.duration_days} days${p.sessions ? ` · ${p.sessions} sessions` : ''}`),
+          current ? h('span', { class: 'portal-pay-tile-current' }, 'Your plan') : null,
+        ),
+      ),
+      h('ul', { class: 'portal-pay-perks' }, ...perks.map((perk) => h('li', {}, renderIcon('check', { size: 11, stroke: 3.2 }), perk))),
+      h('span', { class: 'portal-pay-tile-go' }, renderIcon('arrowRight', { size: 20, stroke: 2.4 })),
+    );
   }
 
   /* ----------------------------------------------------------- Workout tab */

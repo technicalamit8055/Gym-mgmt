@@ -75,6 +75,10 @@ function publicTenant(tenant) {
       modules: [...vertical.modules],
     },
     trial_ends_on: tenant.trial_ends_on ?? null,
+    // Public for the same reason as business_type: the login screen and the
+    // member portal paint in the gym's palette before anyone signs in. A stored
+    // value from the other vertical's set falls back to this one's default.
+    theme: vertical.themes.includes(tenant.theme) ? tenant.theme : vertical.themes[0],
     logo_url: hasTenantLogo(tenant) ? tenantLogoUrl(tenant.slug, version) : null,
     // What the browser tab and an iOS home screen should show. The purpose-
     // built icon when there is one; otherwise the logo itself, which still
@@ -255,6 +259,7 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     gym_name: { type: 'string', min: 2, max: 120 },
     currency: { type: 'string', min: 1, max: 8 },
     timezone: { type: 'string', max: 64 },
+    theme: { type: 'enum', values: verticalFor(req.tenant.business_type).themes },
     clear_logo: { type: 'boolean' },
   });
 
@@ -292,6 +297,7 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     gymName: body.gym_name,
     currency: body.currency ? body.currency.toUpperCase() : undefined,
     timezone: body.timezone,
+    theme: body.theme,
     logoMime,
     logoBytes,
     iconMime,

@@ -37,6 +37,9 @@ export const VERTICALS = {
      * existed. nextMemberCode() binds the offset off this length. */
     memberCodePrefix: 'GM',
     iconDir: '/icons',
+    /** Colour palettes the owner can pick in settings; the first is the
+     * default. Each id has a matching body[data-theme] block in app.css. */
+    themes: ['flame', 'crimson', 'cyber', 'ultramarine'],
     vocabulary: {
       org: 'gym',
       member: 'member',
@@ -69,6 +72,7 @@ export const VERTICALS = {
     tagline: 'Study Hall Management',
     memberCodePrefix: 'ST',
     iconDir: '/icons/library',
+    themes: ['emerald', 'sapphire', 'violet', 'mocha'],
     vocabulary: {
       org: 'library',
       member: 'student',

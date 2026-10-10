@@ -13,7 +13,7 @@ import {
   onFullscreenChange,
 } from './ui.js';
 import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
-import { getAppMode, isLibrary, setVertical, t, toggleAppMode } from './vertical.js';
+import { getAppMode, getAppTheme, isLibrary, setAppTheme, setVertical, t, toggleAppMode } from './vertical.js';
 import { renderLanding } from './views/landing.js';
 import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderSignup } from './views/signup.js';
@@ -872,7 +872,7 @@ async function boot() {
     setCurrency(platform.tenant?.currency);
     // Decides every label in the sidebar and every route title below — must
     // run before buildNav()/buildRoutes(), and before anything reads t().
-    setVertical(platform.tenant?.business_type);
+    setVertical(platform.tenant?.business_type, platform.tenant?.theme);
     NAV = buildNav();
     ROUTES = buildRoutes();
     document.title = `${gymName()} — ${isLibrary() ? 'Study Hall Management' : 'Gym Management'}`;
@@ -896,6 +896,23 @@ window.addEventListener('hashchange', () => {
 
 window.addEventListener('online', () => {
   if (awaitingReconnect) boot();
+});
+
+/* An installed app can sit in the background for days without reloading, so
+ * a palette the owner changed on another device would never reach it. Ask
+ * again whenever it comes back into view — one small public call — and
+ * repaint only if the theme actually moved. */
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !platform.tenant) return;
+  try {
+    const { tenant } = await api.tenantContext();
+    if (tenant?.theme && tenant.theme !== getAppTheme()) {
+      platform = { ...platform, tenant: { ...platform.tenant, theme: tenant.theme } };
+      setAppTheme(tenant.theme);
+    }
+  } catch {
+    // Offline or a blip: keep the current palette, try again next time.
+  }
 });
 
 /** Drops the session and shows whatever this address offers signed-out
@@ -932,6 +949,7 @@ window.addEventListener('gymbook:member-signed-out', () => {
 // element beats rebuilding the shell and losing scroll position.
 window.addEventListener('gymbook:gym-updated', (event) => {
   platform = { ...platform, tenant: event.detail };
+  if (event.detail?.theme) setAppTheme(event.detail.theme);
   document.title = `${gymName()} — Gym Management`;
   applyGymIcons(platform.tenant?.app_icon_url, gymName());
   const brand = shell?.nav.querySelector('.brand');

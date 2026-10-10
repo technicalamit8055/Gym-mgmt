@@ -321,3 +321,39 @@ describe('QR card check-in', () => {
     assert.equal(res.status, 404);
   });
 });
+
+describe('Member-app poster QR', () => {
+  let token;
+
+  before(async () => {
+    await call('POST', '/api/platform/signup', {
+      slug: 'pulse-fit',
+      gym_name: 'Pulse Fit',
+      admin_name: 'Owner',
+      admin_email: 'owner@pulse.test',
+      admin_password: 'ownerpass123',
+    });
+    token = (
+      await call('POST', '/api/auth/login', { email: 'owner@pulse.test', password: 'ownerpass123' }, { tenant: 'pulse-fit' })
+    ).body.token;
+  });
+
+  it('requires staff auth', async () => {
+    const res = await call('GET', '/api/qr/app', null, { tenant: 'pulse-fit' });
+    assert.equal(res.status, 401);
+  });
+
+  it("points at the gym's own member portal, not the staff app", async () => {
+    const res = await call('GET', '/g/pulse-fit/api/qr/app', null, { token });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.url, `${base}/g/pulse-fit/#/portal`);
+    assert.equal(res.body.gym_name, 'Pulse Fit');
+    assert.match(res.body.svg, /^<svg/);
+    assert.match(res.body.png, /^data:image\/png;base64,/);
+  });
+
+  it('encodes a plain link a phone camera opens, without the member-card prefix', async () => {
+    const res = await call('GET', '/g/pulse-fit/api/qr/app', null, { token });
+    assert.ok(!res.body.url.startsWith(`${QR_PREFIX}:`));
+  });
+});

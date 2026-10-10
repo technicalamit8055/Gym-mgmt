@@ -1,5 +1,6 @@
 import { clear, date, fullName, h } from './ui.js';
 import { getGymLogoUrl } from './receipt.js';
+import { isLibrary, t } from './vertical.js';
 
 /**
  * Member QR ID cards: on-screen preview, printing, and a downloadable image
@@ -235,4 +236,222 @@ export async function downloadCardPng(card) {
   link.download = `${member.code}-gym-card.png`;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+/* ── Member-app poster ────────────────────────────────────────────────── */
+
+/**
+ * The "scan to get the app" sheet an owner sticks on the front desk. Built
+ * from GET /api/qr/app: the QR opens the gym's member portal, which the phone
+ * then installs to its home screen like an app.
+ *
+ * The same copy feeds the printed sheet and the downloadable PNG, so the two
+ * never drift apart.
+ */
+function posterCopy(poster) {
+  const member = t('member').toLowerCase();
+  return {
+    headline: 'Get our app',
+    sub: isLibrary()
+      ? 'Your seat pass, fees and attendance — right on your phone.'
+      : 'Your membership pass, classes, payments and check-ins — right on your phone.',
+    caption: 'Scan with your phone camera',
+    steps: [
+      'Point your camera at the code and tap the link that appears.',
+      `Sign in with your ${member} ID or phone number and your PIN. No PIN yet? Ask at the front desk.`,
+      'Add it to your home screen. Android: tap Install. iPhone: in Safari, tap Share, then Add to Home Screen.',
+    ],
+    url: poster.url,
+  };
+}
+
+/** Read off the live theme so the poster carries the gym's own colour. */
+function brandColor() {
+  const value = getComputedStyle(document.body).getPropertyValue('--brand').trim();
+  return /^#[0-9a-f]{3,8}$/i.test(value) ? value : '#111827';
+}
+
+export function appPosterNode(poster) {
+  const copy = posterCopy(poster);
+  const logoUrl = poster.logo_url || getGymLogoUrl();
+  return h(
+    'div',
+    { class: 'app-poster', style: `--poster-accent:${brandColor()}` },
+    h(
+      'div',
+      { class: 'app-poster-brand' },
+      logoUrl ? h('img', { class: 'app-poster-logo', src: logoUrl, alt: '' }) : null,
+      h('div', { class: 'app-poster-gym' }, poster.gym_name),
+    ),
+    h('div', { class: 'app-poster-headline' }, copy.headline),
+    h('div', { class: 'app-poster-sub' }, copy.sub),
+    // Server-rendered SVG: sharp at whatever size the printer draws it.
+    h('div', { class: 'app-poster-qr', html: poster.svg }),
+    h('div', { class: 'app-poster-caption' }, copy.caption),
+    h('ol', { class: 'app-poster-steps' }, ...copy.steps.map((step) => h('li', {}, step))),
+    h('div', { class: 'app-poster-url' }, 'Or type ', h('strong', {}, copy.url)),
+  );
+}
+
+/** Same #print-root mechanism as printCards() — see there for why. */
+export function printAppPoster(poster) {
+  const root = document.getElementById('print-root');
+  if (!root) return;
+
+  clear(root).append(h('div', { class: 'app-poster-page' }, appPosterNode(poster)));
+  document.body.classList.add('printing');
+
+  const cleanup = () => {
+    document.body.classList.remove('printing');
+    clear(root);
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+
+  requestAnimationFrame(() => {
+    window.print();
+    setTimeout(cleanup, 1000);
+  });
+}
+
+/** Greedy word wrap for canvas text; returns the lines that fit maxWidth. */
+function wrapLines(ctx, text, maxWidth) {
+  const lines = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/**
+ * The poster as an A4 PNG (150 dpi) — for a print shop, or for printing from
+ * a phone, which has no print dialog worth the name.
+ */
+export async function downloadAppPosterPng(poster) {
+  const copy = posterCopy(poster);
+  const accent = brandColor();
+  const width = 1240;
+  const height = 1754;
+  const margin = 110;
+  const textWidth = width - margin * 2;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, 0, width, 22);
+
+  // Brand row: logo (if it loads) and the gym name, centred together.
+  let y = 110;
+  const logoSize = 110;
+  const logoUrl = poster.logo_url || getGymLogoUrl();
+  let logo = null;
+  if (logoUrl) {
+    try {
+      logo = await loadImage(logoUrl);
+    } catch {
+      // A logo that fails to load leaves just the name, not a failed download.
+    }
+  }
+  ctx.font = '700 54px system-ui, sans-serif';
+  const nameWidth = Math.min(ctx.measureText(poster.gym_name).width, textWidth - (logo ? logoSize + 28 : 0));
+  let x = (width - (logo ? logoSize + 28 + nameWidth : nameWidth)) / 2;
+  if (logo) {
+    ctx.save();
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, logoSize, logoSize, 22);
+    else ctx.rect(x, y, logoSize, logoSize);
+    ctx.clip();
+    ctx.drawImage(logo, x, y, logoSize, logoSize);
+    ctx.restore();
+    x += logoSize + 28;
+  }
+  ctx.fillStyle = '#111827';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(poster.gym_name, x, y + logoSize / 2, nameWidth);
+  y += logoSize + 70;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = '800 100px system-ui, sans-serif';
+  ctx.fillText(copy.headline, width / 2, y, textWidth);
+  y += 124;
+
+  ctx.fillStyle = '#4b5563';
+  ctx.font = '400 34px system-ui, sans-serif';
+  for (const line of wrapLines(ctx, copy.sub, textWidth)) {
+    ctx.fillText(line, width / 2, y);
+    y += 46;
+  }
+  y += 40;
+
+  const qr = await loadImage(poster.png);
+  const qrSize = 640;
+  const qrX = (width - qrSize) / 2;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(qrX - 24, y - 24, qrSize + 48, qrSize + 48, 36);
+  else ctx.rect(qrX - 24, y - 24, qrSize + 48, qrSize + 48);
+  ctx.stroke();
+  ctx.drawImage(qr, qrX, y, qrSize, qrSize);
+  y += qrSize + 54;
+
+  ctx.fillStyle = '#111827';
+  ctx.font = '700 38px system-ui, sans-serif';
+  ctx.fillText(copy.caption, width / 2, y, textWidth);
+  y += 84;
+
+  // Numbered steps, each wrapped beside its own outlined number.
+  const badge = 25;
+  const stepX = margin + badge * 2 + 24;
+  for (const [index, step] of copy.steps.entries()) {
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(margin + badge, y + 20, badge, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#111827';
+    ctx.font = '700 28px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(index + 1), margin + badge, y + 21);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#374151';
+    ctx.font = '400 30px system-ui, sans-serif';
+    for (const line of wrapLines(ctx, step, width - margin - stepX)) {
+      ctx.fillText(line, stepX, y);
+      y += 40;
+    }
+    y += 22;
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '400 26px ui-monospace, monospace';
+  ctx.fillText(`Or type ${copy.url}`, width / 2, height - 60, textWidth);
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const slug = poster.gym_name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'gym';
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${slug}-app-qr.png`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }

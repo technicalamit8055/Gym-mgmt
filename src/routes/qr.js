@@ -1,13 +1,23 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
 import { openVisitFor, performCheckIn } from '../checkin.js';
-import { config } from '../config.js';
+import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { get } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
-import { ensureQrToken, findMemberByScan, issueQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
+import {
+  ensureQrToken,
+  findMemberByScan,
+  issueQrToken,
+  linkQrPngDataUrl,
+  linkQrSvg,
+  qrPayload,
+  qrPngDataUrl,
+  qrSvg,
+} from '../qr.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { tenantLogoUrl } from './platform.js';
+import { tenantUrl } from '../tenant.js';
 import { parse, today, toInt } from '../validate.js';
 
 /**
@@ -78,6 +88,36 @@ qrRoutes.post('/member/:memberId/reissue', async (req, res) => {
 
   issueQrToken(memberId);
   res.json(await buildCard(req, memberId));
+});
+
+/* ── Member-app poster ────────────────────────────────────────────────── */
+
+/**
+ * The "scan to get the app" QR an owner prints and sticks on the desk. It
+ * opens this gym's member portal, which installs as its own home-screen app
+ * (see the portal manifest in routes/pwa.js) — there is no store listing to
+ * point at.
+ *
+ * The address is worked out here rather than sent by the browser: it should
+ * be the one members can always reach — the live custom domain if there is
+ * one, else the platform address — not whichever host the owner happens to be
+ * signed in on (a LAN IP or localhost would print a dead poster).
+ */
+qrRoutes.get('/app', async (req, res) => {
+  const slug = req.tenant?.slug;
+  const base =
+    slug && slug !== DEFAULT_TENANT_SLUG ? tenantUrl(req, slug) : `${req.protocol}://${req.get('host')}`;
+  const url = `${base}/#/portal`;
+  const [svg, png] = await Promise.all([linkQrSvg(url), linkQrPngDataUrl(url)]);
+
+  const hasLogo = Boolean(req.tenant?.logo_bytes && req.tenant?.logo_mime);
+  res.json({
+    url,
+    gym_name: gymNameFor(req),
+    logo_url: hasLogo ? tenantLogoUrl(req.tenant.slug, req.tenant.logo_version || 1) : null,
+    svg,
+    png,
+  });
 });
 
 /* ── Front-desk scanning ──────────────────────────────────────────────── */

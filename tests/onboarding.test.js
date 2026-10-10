@@ -317,8 +317,37 @@ describe('gym settings', () => {
     assert.ok(res.body.details.timezone);
   });
 
+  it('starts on the default palette', async () => {
+    const context = await call('GET', '/g/iron-house/api/platform/tenant');
+    assert.equal(context.body.tenant.theme, 'flame');
+  });
+
+  it('saves the palette on the gym so every device and the member portal see it', async () => {
+    const res = await call('PATCH', '/g/iron-house/api/platform/tenant', { theme: 'crimson' }, { token: adminToken });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.tenant.theme, 'crimson');
+
+    // Signed out, as the member portal and a fresh device load it.
+    const context = await call('GET', '/g/iron-house/api/platform/tenant');
+    assert.equal(context.body.tenant.theme, 'crimson');
+
+    const rename = await call('PATCH', '/g/iron-house/api/platform/tenant', { gym_name: 'Iron House' }, { token: adminToken });
+    assert.equal(rename.body.tenant.theme, 'crimson', 'other saves leave the palette alone');
+  });
+
+  it("refuses a palette that is not this product's", async () => {
+    const res = await call('PATCH', '/g/iron-house/api/platform/tenant', { theme: 'emerald' }, { token: adminToken });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.details.theme);
+  });
+
   it('is closed to non-admin staff', async () => {
     const res = await call('PATCH', '/g/iron-house/api/platform/tenant', { gym_name: 'Nope' }, { token: staffToken });
+    assert.equal(res.status, 403);
+  });
+
+  it('will not let non-admin staff change the palette', async () => {
+    const res = await call('PATCH', '/g/iron-house/api/platform/tenant', { theme: 'cyber' }, { token: staffToken });
     assert.equal(res.status, 403);
   });
 
