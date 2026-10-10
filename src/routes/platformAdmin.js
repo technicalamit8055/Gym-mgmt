@@ -29,6 +29,15 @@ import {
   updateCatalogExercise,
 } from '../exerciseCatalog.js';
 import { EQUIPMENT_TYPES, MUSCLE_GROUPS } from '../fitness.js';
+import {
+  FOOD_CATEGORIES,
+  bulkUpdateCatalog,
+  createCatalogFood,
+  deleteCatalogFood,
+  importFoodCatalog,
+  listFoodCatalog,
+  updateCatalogFood,
+} from '../foodCatalog.js';
 import { all, closeDb, get, tenantStorage } from '../db.js';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests, unauthorized } from '../errors.js';
 import { issuePasswordReset } from '../passwordReset.js';
@@ -624,4 +633,45 @@ platformAdminRoutes.put(
 
 platformAdminRoutes.delete('/catalog/exercises/:id/media', (req, res) => {
   res.json(clearCatalogMedia(Number(req.params.id)));
+});
+
+/* ── Food catalogue ────────────────────────────────────────────────────── */
+
+/**
+ * The platform-wide food database: every gym's library is a synced copy, and
+ * the blue tick set here is what members see. See src/foodCatalog.js.
+ */
+
+platformAdminRoutes.get('/catalog/foods', (req, res) => {
+  res.json({
+    ...listFoodCatalog({
+      q: req.query.q ? String(req.query.q).trim() : undefined,
+      category: req.query.category,
+      verified: req.query.verified,
+    }),
+    categories: FOOD_CATEGORIES,
+  });
+});
+
+platformAdminRoutes.post('/catalog/foods', (req, res) => {
+  res.status(201).json(createCatalogFood(req.body));
+});
+
+/** Bulk create-or-update by name. CSV and JSON are both parsed in the
+ * browser; this takes plain rows. */
+platformAdminRoutes.post('/catalog/foods/import', (req, res) => {
+  res.json(importFoodCatalog(req.body?.rows, { verified: req.body?.verified === true }));
+});
+
+platformAdminRoutes.post('/catalog/foods/bulk', (req, res) => {
+  res.json(bulkUpdateCatalog({ ids: req.body?.ids, action: req.body?.action }));
+});
+
+platformAdminRoutes.patch('/catalog/foods/:id', (req, res) => {
+  res.json(updateCatalogFood(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/catalog/foods/:id', (req, res) => {
+  deleteCatalogFood(Number(req.params.id));
+  res.json({ ok: true });
 });

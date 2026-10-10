@@ -187,6 +187,12 @@ function triggerHaptic(pattern) {
   }
 }
 
+/** The faint tick of a tab-bar tap — haptic only, since a sound on every
+ * navigation would wear thin fast. */
+export function tapHaptic() {
+  triggerHaptic(8);
+}
+
 /* --------------------------------------------------------- domain sounds */
 
 export function playSetComplete() {

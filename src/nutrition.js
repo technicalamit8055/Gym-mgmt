@@ -127,7 +127,7 @@ export function suggestTargets({
   training_intensity = 'moderate',
   goal = 'maintain',
   goal_rate_kg = 0.5,
-  exercise_addback_pct = 100,
+  exercise_addback_pct = 0,
 }) {
   const sexOffset = sex === 'male' ? 5 : sex === 'female' ? -161 : -78;
   const bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + sexOffset;
@@ -223,7 +223,7 @@ export function nutritionProfile(memberId) {
     target_fiber_g: null,
     target_sugar_g: null,
     target_water_ml: null,
-    exercise_addback_pct: 100,
+    exercise_addback_pct: 0,
     height_cm: null,
     activity_level: 'light',
     training_days: 4,

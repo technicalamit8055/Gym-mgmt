@@ -95,7 +95,7 @@ export const EXERCISES = [
 ];
 
 /** [name, category, serving_unit, calories, protein_g, carbs_g, fats_g] */
-const FOODS = [
+export const FOODS = [
   // protein
   ['Chicken Breast (grilled)', 'protein', '100g', 165, 31, 0, 3.6],
   ['Chicken Thigh', 'protein', '100g', 209, 26, 0, 10.9],
@@ -174,7 +174,7 @@ const FOODS = [
  * from FOODS because those columns arrived later: the backfill below has to
  * fill them in on libraries that were seeded before they existed.
  */
-const FOOD_FIBER_SUGAR = {
+export const FOOD_FIBER_SUGAR = {
   'Whole Egg': [0, 0.2],
   'Egg White': [0, 0.2],
   Paneer: [0, 1.2],

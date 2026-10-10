@@ -272,6 +272,20 @@ export const api = {
   platformImportExercises: (rows) =>
     request('POST', '/platform/admin/catalog/import', { rows }, { token: platformSession.token }),
 
+  // Platform-wide food catalogue, synced into every gym's food library.
+  platformFoods: (params) =>
+    request('GET', `/platform/admin/catalog/foods${query(params)}`, undefined, { token: platformSession.token }),
+  platformCreateFood: (payload) =>
+    request('POST', '/platform/admin/catalog/foods', payload, { token: platformSession.token }),
+  platformUpdateFood: (id, payload) =>
+    request('PATCH', `/platform/admin/catalog/foods/${id}`, payload, { token: platformSession.token }),
+  platformDeleteFood: (id) =>
+    request('DELETE', `/platform/admin/catalog/foods/${id}`, undefined, { token: platformSession.token }),
+  platformImportFoods: (rows, { verified = false } = {}) =>
+    request('POST', '/platform/admin/catalog/foods/import', { rows, verified }, { token: platformSession.token }),
+  platformBulkFoods: (ids, action) =>
+    request('POST', '/platform/admin/catalog/foods/bulk', { ids, action }, { token: platformSession.token }),
+
   dashboard: () => request('GET', '/dashboard'),
 
   members: (params) => request('GET', `/members${query(params)}`),
@@ -511,6 +525,8 @@ export const api = {
     foods: (params) => request('GET', `/portal/diets/foods${query(params)}`, undefined, { member: true }),
     barcodeFood: (code) => request('GET', `/portal/diets/barcode/${encodeURIComponent(code)}`, undefined, { member: true }),
     addBarcodeFood: (payload) => request('POST', '/portal/diets/barcode-foods', payload, { member: true }),
+    addFavoriteFood: (payload) => request('POST', '/portal/diets/favorites', payload, { member: true }),
+    removeFavoriteFood: (id) => request('DELETE', `/portal/diets/favorites/${id}`, undefined, { member: true }),
     // Own targets, the calculator, weigh-ins and activities outside the logger.
     nutrition: () => request('GET', '/portal/nutrition', undefined, { member: true }),
     saveNutrition: (payload) => request('PUT', '/portal/nutrition', payload, { member: true }),

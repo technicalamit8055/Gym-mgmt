@@ -16,6 +16,7 @@ import {
   summariseSets,
 } from '../fitness.js';
 import { insertBarcodeFood, libraryFoodByBarcode, lookupBarcode, normaliseBarcode } from '../foodBarcode.js';
+import { syncFoodCatalog } from '../foodCatalog.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
 import {
   ACTIVITY_KEYS,
@@ -1124,11 +1125,12 @@ portalRoutes.post('/diets/entries', requireMemberAuth, requireModule('fitness'),
   const log = ensureDietLog(req.member.id, body.log_date);
   const info = run(
     `INSERT INTO diet_log_entries
-       (diet_log_id, meal_type, food_name, quantity, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (diet_log_id, meal_type, food_id, food_name, quantity, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       log.id,
       body.meal_type,
+      body.food_id ?? null,
       name,
       body.quantity,
       unit,
@@ -1186,6 +1188,7 @@ portalRoutes.post('/diets/water', requireMemberAuth, requireModule('fitness'), r
 });
 
 portalRoutes.get('/diets/foods', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  syncFoodCatalog();
   const where = [];
   const params = [];
   if (req.query.category) {
@@ -1197,20 +1200,97 @@ portalRoutes.get('/diets/foods', requireMemberAuth, requireModule('fitness'), re
     params.push(`%${String(req.query.q)}%`);
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // What this member logged lately, newest first, one row per food: the
+  // figures are that last entry's (SQLite takes bare columns from the MAX
+  // row), so a one-tap re-log repeats exactly what they had last time.
+  const recent = all(
+    `SELECT e.food_id, e.food_name, e.quantity, e.serving_unit, e.calories, e.protein_g, e.carbs_g, e.fats_g,
+            e.fiber_g, e.sugar_g, e.meal_type, MAX(e.logged_at) AS last_logged
+     FROM diet_log_entries e JOIN diet_logs l ON l.id = e.diet_log_id
+     WHERE l.member_id = ?
+     GROUP BY e.food_name COLLATE NOCASE
+     ORDER BY last_logged DESC LIMIT 30`,
+    [req.member.id],
+  );
+  const favorites = memberFavorites(req.member.id);
+  const library = libraryFoodsById([...recent, ...favorites].map((row) => row.food_id));
+  const withFood = (row) => ({ ...row, food: library.get(row.food_id) ?? null });
   res.json({
     items: all(`SELECT * FROM food_library ${clause} ORDER BY category, name LIMIT 300`, params),
-    // What this member logs most, so the search box opens on their own food
-    // rather than on whatever happens to sort first alphabetically.
-    recent: all(
-      `SELECT e.food_name, e.serving_unit, e.calories, e.protein_g, e.carbs_g, e.fats_g, e.fiber_g, e.sugar_g,
-              MAX(e.logged_at) AS last_logged
-       FROM diet_log_entries e JOIN diet_logs l ON l.id = e.diet_log_id
-       WHERE l.member_id = ?
-       GROUP BY e.food_name COLLATE NOCASE
-       ORDER BY last_logged DESC LIMIT 12`,
-      [req.member.id],
-    ),
+    recent: recent.map(withFood),
+    favorites: favorites.map(withFood),
   });
+});
+
+/* ── Favourite foods ──────────────────────────────────────────────────── */
+
+const memberFavorites = (memberId) =>
+  all(
+    `SELECT id AS favorite_id, food_id, food_name, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g, created_at
+     FROM member_food_favorites WHERE member_id = ? ORDER BY created_at DESC, id DESC`,
+    [memberId],
+  );
+
+/** The library rows behind a list of (possibly null, possibly deleted) ids. */
+function libraryFoodsById(ids) {
+  const wanted = [...new Set(ids.filter(Boolean))];
+  if (!wanted.length) return new Map();
+  const rows = all(`SELECT * FROM food_library WHERE id IN (${wanted.map(() => '?').join(', ')})`, wanted);
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+/**
+ * Stars a food: a library one by `food_id`, or a hand-typed one by name with
+ * its figures for one `serving_unit`. Starring twice is a no-op that returns
+ * the existing favourite, so a double tap cannot fail.
+ */
+portalRoutes.post('/diets/favorites', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const body = parse(req.body, {
+    food_id: { type: 'int', min: 1 },
+    food_name: { type: 'string', max: 120 },
+    serving_unit: { type: 'string', max: 60, default: 'serving' },
+    calories: { type: 'int', min: 0, max: 20000, default: 0 },
+    protein_g: { type: 'number', min: 0, max: 2000, default: 0 },
+    carbs_g: { type: 'number', min: 0, max: 2000, default: 0 },
+    fats_g: { type: 'number', min: 0, max: 2000, default: 0 },
+    fiber_g: { type: 'number', min: 0, max: 500, default: 0 },
+    sugar_g: { type: 'number', min: 0, max: 2000, default: 0 },
+  });
+  const memberId = req.member.id;
+  const find = (id) => memberFavorites(memberId).find((f) => f.favorite_id === id);
+
+  if (body.food_id) {
+    const food = get('SELECT * FROM food_library WHERE id = ?', [body.food_id]);
+    if (!food) throw notFound('That food is not in the library');
+    const existing = get('SELECT id FROM member_food_favorites WHERE member_id = ? AND food_id = ?', [memberId, food.id]);
+    if (existing) return res.json({ ...find(existing.id), food });
+    const info = run(
+      `INSERT INTO member_food_favorites (member_id, food_id, food_name, serving_unit) VALUES (?, ?, ?, ?)`,
+      [memberId, food.id, food.name, food.serving_unit],
+    );
+    return res.status(201).json({ ...find(Number(info.lastInsertRowid)), food });
+  }
+
+  const name = body.food_name?.trim();
+  if (!name) throw badRequest('Pick a food or name the one to save', { food_name: 'is required' });
+  const existing = get(
+    'SELECT id FROM member_food_favorites WHERE member_id = ? AND food_id IS NULL AND food_name = ? COLLATE NOCASE',
+    [memberId, name],
+  );
+  if (existing) return res.json({ ...find(existing.id), food: null });
+  const info = run(
+    `INSERT INTO member_food_favorites
+       (member_id, food_name, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [memberId, name, body.serving_unit, body.calories, body.protein_g, body.carbs_g, body.fats_g, body.fiber_g, body.sugar_g],
+  );
+  return res.status(201).json({ ...find(Number(info.lastInsertRowid)), food: null });
+});
+
+portalRoutes.delete('/diets/favorites/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const info = run('DELETE FROM member_food_favorites WHERE id = ? AND member_id = ?', [Number(req.params.id), req.member.id]);
+  if (!info.changes) throw notFound('That food is not in your favourites');
+  res.json({ ok: true });
 });
 
 /* ── Own nutrition targets ────────────────────────────────────────────── */
@@ -1369,7 +1449,9 @@ portalRoutes.put('/nutrition', ...fitnessGate, (req, res) => {
   }
 
   tx(() => {
-    run('INSERT OR IGNORE INTO member_nutrition_profiles (member_id) VALUES (?)', [memberId]);
+    // Explicit rather than the column default: a database created while the
+    // default was still 100 must not hand new members a different setting.
+    run('INSERT OR IGNORE INTO member_nutrition_profiles (member_id, exercise_addback_pct) VALUES (?, 0)', [memberId]);
     const keys = Object.keys(columns);
     if (keys.length) {
       run(

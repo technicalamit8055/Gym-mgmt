@@ -12,6 +12,7 @@ import {
   renderIcon,
   table,
   toast,
+  verifiedTick,
 } from '../ui.js';
 
 /**
@@ -1160,7 +1161,14 @@ async function renderFoodLibrary(reload) {
         // Scanned packs say where their numbers came from, so a trainer can
         // check the ones a member typed in off a label.
         render: (r) =>
-          r.barcode
+          r.catalog_id
+            ? h(
+                'div',
+                {},
+                h('strong', { class: 'food-name-tick' }, r.name, r.verified ? verifiedTick() : null),
+                h('div', { class: 'muted', style: 'font-size:12px' }, 'Platform food library'),
+              )
+            : r.barcode
             ? h(
                 'div',
                 {},

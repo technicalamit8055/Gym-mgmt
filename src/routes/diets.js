@@ -3,6 +3,7 @@ import { requireAuth } from '../auth.js';
 import { all, get, run, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { DIET_GOALS } from '../fitness.js';
+import { syncFoodCatalog } from '../foodCatalog.js';
 import { effectiveDietTargets, exerciseForDay, nutritionProfile } from '../nutrition.js';
 import { parse, today, toInt } from '../validate.js';
 import { requireModule } from '../verticals.js';
@@ -387,6 +388,7 @@ dietRoutes.get('/members/:memberId/day', (req, res) => {
 /* ── Food library ──────────────────────────────────────────────────────── */
 
 dietRoutes.get('/foods', (req, res) => {
+  syncFoodCatalog();
   const where = [];
   const params = [];
   if (req.query.category) {

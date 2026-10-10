@@ -181,6 +181,7 @@ const ICONS = {
     'M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z',
     'M3.2 12h4.3l1.5-3 2 6 1.5-3h8.3',
   ],
+  heart: ['M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z'],
   history: ['M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8', 'M3 3v5h5', 'M12 7v5l4 2'],
   bank: ['M3 21h18', 'M6 21V11', 'M10 21V11', 'M14 21V11', 'M18 21V11', 'm2 11 10-6 10 6z'],
   globe: [
@@ -222,6 +223,11 @@ const ICONS = {
     { tag: 'circle', cx: 16.5, cy: 7.5, r: 1.25, fill: 'currentColor', stroke: 'none' },
   ],
   plus: ['M5 12h14', 'M12 5v14'],
+  minus: ['M5 12h14'],
+  verified: [
+    'M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z',
+    'm9 12 2 2 4-4',
+  ],
   search: [{ tag: 'circle', cx: 11, cy: 11, r: 8 }, 'm21 21-4.3-4.3'],
   refresh: ['M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5'],
   check: ['M20 6 9 17l-5-5'],
@@ -386,6 +392,13 @@ const ICONS = {
   arrowUp: ['m5 12 7-7 7 7', 'M12 19V5'],
   arrowDown: ['M12 5v14', 'm19 12-7 7-7-7'],
   bag: ['M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z', 'M3 6h18', 'M16 10a4 4 0 0 1-8 0'],
+  store: [
+    'm2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7',
+    'M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8',
+    'M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4',
+    'M2 7h20',
+    'M22 7v3a2 2 0 0 1-2 2 2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7',
+  ],
   edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z'],
   home: ['m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M9 22V12h6v10'],
   unlock: [{ tag: 'rect', x: 3, y: 11, width: 18, height: 11, rx: 2 }, 'M7 11V7a5 5 0 0 1 9.9-1'],
@@ -557,6 +570,11 @@ export function renderIcon(name, { size = 18, class: className, stroke = 1.75, t
   );
 }
 
+/** The blue tick on a food whose numbers the platform operator has checked —
+ * the same badge in the console, the staff library and the member app. */
+export const verifiedTick = ({ size = 15 } = {}) =>
+  h('span', { class: 'verified-tick', title: 'Verified nutrition info' }, renderIcon('verified', { size, stroke: 2, title: 'Verified' }));
+
 /** An icon name, a ready-made node, or plain text — whichever it is, something
  * appendable comes back. Lets a builder like stat() take `icon: 'members'`
  * without every caller having to import renderIcon. */
@@ -654,27 +672,7 @@ const displayToIso = (display) => {
 };
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-function calendarGrid(viewYear, viewMonth, selectedIso, onPick) {
-  const firstOfMonth = new Date(viewYear, viewMonth, 1);
-  const startOffset = (firstOfMonth.getDay() + 6) % 7; // week starts Monday
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const todayIso = today();
-
-  const cells = [];
-  for (let i = 0; i < startOffset; i++) cells.push(h('span', { class: 'date-cell empty' }));
-  for (let day = 1; day <= daysInMonth; day++) {
-    const iso = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const classes = ['date-cell'];
-    if (iso === selectedIso) classes.push('selected');
-    if (iso === todayIso) classes.push('today');
-    cells.push(
-      h('button', { type: 'button', class: classes.join(' '), onclick: () => onPick(iso) }, String(day)),
-    );
-  }
-
-  return h('div', { class: 'date-grid' }, ...cells);
-}
+const YEARS_PER_PAGE = 12;
 
 /**
  * A text field that always shows and accepts DD/MM/YYYY, backed by a real
@@ -683,15 +681,34 @@ function calendarGrid(viewYear, viewMonth, selectedIso, onPick) {
  * working exactly as it did with a native `<input type="date">`. The native
  * picker's on-screen format follows OS/browser locale and can't be forced to
  * DD/MM/YYYY from app code, so this replaces it outright rather than fighting it.
+ *
+ * The calendar works like a desktop date picker: the month and year in its
+ * header are buttons into a month grid and a year grid, so a date decades away
+ * (a date of birth) is three taps instead of hundreds of ‹ presses.
+ *
+ *   min / max     ISO bounds; dates outside them are shown but disabled
+ *   startView     'days' (default) | 'months' | 'years' — where an empty
+ *                 field's calendar opens; a filled one always opens on its day
+ *   defaultDate   the ISO date an empty field's calendar opens around
  */
-export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchange, class: className } = {}) {
+export function dateField({
+  name,
+  value = '',
+  placeholder = 'DD/MM/YYYY',
+  onchange,
+  class: className,
+  min,
+  max,
+  startView = 'days',
+  defaultDate,
+} = {}) {
   let isoValue = value || '';
   const listeners = new Set();
   if (typeof onchange === 'function') listeners.add(onchange);
 
   const text = h('input', { type: 'text', inputmode: 'numeric', placeholder, autocomplete: 'off' });
   const toggle = h('button', { type: 'button', class: 'date-toggle', 'aria-label': 'Open calendar' }, renderIcon('calendar', { size: 16 }));
-  const panel = h('div', { class: 'date-panel', style: 'display:none' });
+  const panel = h('div', { class: 'date-panel', style: 'display:none', role: 'dialog', 'aria-label': 'Choose a date' });
   const wrap = h('div', { class: `date-field${className ? ` ${className}` : ''}` }, text, toggle, panel);
 
   const fireChange = () => {
@@ -704,25 +721,174 @@ export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchan
     if (!silent) fireChange();
   };
 
-  let view = (() => {
-    const base = isoValue ? new Date(`${isoValue}T00:00:00`) : new Date(`${today()}T00:00:00`);
-    return { year: base.getFullYear(), month: base.getMonth() };
-  })();
+  const pad = (n) => String(n).padStart(2, '0');
+  const isoOf = (year, month, day) => `${year}-${pad(month + 1)}-${pad(day)}`;
+  const inRange = (iso) => (!min || iso >= min) && (!max || iso <= max);
+  // A month or year is selectable when any day of it is.
+  const monthInRange = (year, month) =>
+    (!min || isoOf(year, month, new Date(year, month + 1, 0).getDate()) >= min) && (!max || isoOf(year, month, 1) <= max);
+  const yearInRange = (year) => (!min || `${year}-12-31` >= min) && (!max || `${year}-01-01` <= max);
 
-  function renderPanel() {
+  let view = { year: 0, month: 0, mode: 'days' };
+
+  const navButton = (label, ariaLabel, onClick, disabled = false) =>
+    h('button', { type: 'button', class: 'icon-btn date-nav', 'aria-label': ariaLabel, disabled, onclick: onClick }, label);
+  const headButton = (label, ariaLabel, onClick) =>
+    h('button', { type: 'button', class: 'date-head-btn', 'aria-label': ariaLabel, onclick: onClick }, label, renderIcon('chevronDown', { size: 13 }));
+
+  function daysView() {
+    const { year, month } = view;
+    const prev = month === 0 ? { year: year - 1, month: 11 } : { year, month: month - 1 };
+    const next = month === 11 ? { year: year + 1, month: 0 } : { year, month: month + 1 };
     const header = h(
       'div',
       { class: 'date-panel-head' },
-      h('button', { type: 'button', class: 'icon-btn', onclick: () => { view = view.month === 0 ? { year: view.year - 1, month: 11 } : { ...view, month: view.month - 1 }; renderPanel(); } }, '‹'),
-      h('span', {}, `${MONTH_NAMES[view.month]} ${view.year}`),
-      h('button', { type: 'button', class: 'icon-btn', onclick: () => { view = view.month === 11 ? { year: view.year + 1, month: 0 } : { ...view, month: view.month + 1 }; renderPanel(); } }, '›'),
+      navButton('‹', 'Previous month', () => go({ ...prev, mode: 'days' }), !monthInRange(prev.year, prev.month)),
+      h(
+        'div',
+        { class: 'date-head-picks' },
+        headButton(MONTH_NAMES[month], 'Choose month', () => go({ ...view, mode: 'months' })),
+        headButton(String(year), 'Choose year', () => go({ ...view, mode: 'years' })),
+      ),
+      navButton('›', 'Next month', () => go({ ...next, mode: 'days' }), !monthInRange(next.year, next.month)),
     );
-    const weekdays = h('div', { class: 'date-grid date-weekdays' }, ...['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => h('span', {}, d)));
-    const grid = calendarGrid(view.year, view.month, isoValue, (iso) => {
-      setIso(iso);
-      closePanel();
-    });
-    clear(panel).append(header, weekdays, grid);
+
+    const startOffset = (new Date(year, month, 1).getDay() + 6) % 7; // week starts Monday
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const todayIso = today();
+    const cells = [];
+    for (let i = 0; i < startOffset; i++) cells.push(h('span', { class: 'date-cell empty' }));
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = isoOf(year, month, day);
+      const classes = ['date-cell'];
+      if (iso === isoValue) classes.push('selected');
+      if (iso === todayIso) classes.push('today');
+      cells.push(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: classes.join(' '),
+            disabled: !inRange(iso),
+            'aria-pressed': iso === isoValue ? 'true' : 'false',
+            onclick: () => {
+              setIso(iso);
+              closePanel();
+            },
+          },
+          String(day),
+        ),
+      );
+    }
+    return [
+      header,
+      h('div', { class: 'date-grid date-weekdays' }, ...['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => h('span', {}, d))),
+      h('div', { class: 'date-grid' }, ...cells),
+    ];
+  }
+
+  function monthsView() {
+    const { year } = view;
+    const selected = isoValue ? { year: Number(isoValue.slice(0, 4)), month: Number(isoValue.slice(5, 7)) - 1 } : null;
+    return [
+      h(
+        'div',
+        { class: 'date-panel-head' },
+        navButton('‹', 'Previous year', () => go({ ...view, year: year - 1 }), !yearInRange(year - 1)),
+        h('div', { class: 'date-head-picks' }, headButton(String(year), 'Choose year', () => go({ ...view, mode: 'years' }))),
+        navButton('›', 'Next year', () => go({ ...view, year: year + 1 }), !yearInRange(year + 1)),
+      ),
+      h(
+        'div',
+        { class: 'date-grid date-grid-wide' },
+        ...MONTH_NAMES.map((label, month) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: `date-cell${selected?.year === year && selected.month === month ? ' selected' : ''}`,
+              disabled: !monthInRange(year, month),
+              onclick: () => go({ year, month, mode: 'days' }),
+            },
+            label.slice(0, 3),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  function yearsView() {
+    const first = view.year - (((view.year % YEARS_PER_PAGE) + YEARS_PER_PAGE) % YEARS_PER_PAGE);
+    const last = first + YEARS_PER_PAGE - 1;
+    const selectedYear = isoValue ? Number(isoValue.slice(0, 4)) : null;
+    const thisYear = Number(today().slice(0, 4));
+    return [
+      h(
+        'div',
+        { class: 'date-panel-head' },
+        navButton('‹', 'Earlier years', () => go({ ...view, year: view.year - YEARS_PER_PAGE }), !yearInRange(first - 1)),
+        h('span', { class: 'date-head-range' }, `${first} – ${last}`),
+        navButton('›', 'Later years', () => go({ ...view, year: view.year + YEARS_PER_PAGE }), !yearInRange(last + 1)),
+      ),
+      h(
+        'div',
+        { class: 'date-grid date-grid-wide' },
+        ...Array.from({ length: YEARS_PER_PAGE }, (_, i) => first + i).map((year) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: `date-cell${year === selectedYear ? ' selected' : ''}${year === thisYear ? ' today' : ''}`,
+              disabled: !yearInRange(year),
+              onclick: () => go({ ...view, year, mode: 'months' }),
+            },
+            String(year),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  function renderPanel() {
+    const body = view.mode === 'years' ? yearsView() : view.mode === 'months' ? monthsView() : daysView();
+    const todayIso = today();
+    const foot = h(
+      'div',
+      { class: 'date-panel-foot' },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'date-foot-btn',
+          onclick: () => {
+            setIso('');
+            closePanel();
+          },
+        },
+        'Clear',
+      ),
+      inRange(todayIso)
+        ? h(
+            'button',
+            {
+              type: 'button',
+              class: 'date-foot-btn primary',
+              onclick: () => {
+                setIso(todayIso);
+                closePanel();
+              },
+            },
+            'Today',
+          )
+        : null,
+    );
+    clear(panel).append(...body, foot);
+  }
+
+  function go(next) {
+    view = next;
+    renderPanel();
+    placePanel();
   }
 
   // Fixed-position + JS placement (rather than absolute + CSS anchoring) so the
@@ -745,19 +911,44 @@ export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchan
 
     panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
+    // position: fixed is relative to the viewport only when no ancestor has a
+    // transform, filter or backdrop-filter — and the modal backdrop blurs, so
+    // inside a scrolled sheet the panel would land off-screen. Measure where
+    // it actually went and correct by the difference.
+    const actual = panel.getBoundingClientRect();
+    const dx = actual.left - left;
+    const dy = actual.top - top;
+    if (dx || dy) {
+      panel.style.left = `${left - dx}px`;
+      panel.style.top = `${top - dy}px`;
+    }
   }
 
   function onReposition() {
     if (panel.style.display !== 'none') placePanel();
   }
 
+  function onKey(event) {
+    if (event.key === 'Escape') {
+      // Close the calendar, not the modal the field may sit in.
+      event.stopPropagation();
+      closePanel();
+      toggle.focus();
+    }
+  }
+
   function openPanel() {
-    const base = isoValue ? new Date(`${isoValue}T00:00:00`) : new Date(`${today()}T00:00:00`);
-    view = { year: base.getFullYear(), month: base.getMonth() };
+    let base = isoValue || defaultDate || today();
+    if (!isoValue && max && base > max) base = max;
+    if (!isoValue && min && base < min) base = min;
+    const d = new Date(`${base}T00:00:00`);
+    view = { year: d.getFullYear(), month: d.getMonth(), mode: isoValue ? 'days' : startView };
     renderPanel();
     panel.style.display = 'block';
     placePanel();
     document.addEventListener('mousedown', onOutsideClick, true);
+    document.addEventListener('touchstart', onOutsideClick, true);
+    document.addEventListener('keydown', onKey, true);
     window.addEventListener('scroll', onReposition, true);
     window.addEventListener('resize', onReposition);
   }
@@ -765,6 +956,8 @@ export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchan
   function closePanel() {
     panel.style.display = 'none';
     document.removeEventListener('mousedown', onOutsideClick, true);
+    document.removeEventListener('touchstart', onOutsideClick, true);
+    document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('scroll', onReposition, true);
     window.removeEventListener('resize', onReposition);
   }
@@ -784,8 +977,8 @@ export function dateField({ name, value = '', placeholder = 'DD/MM/YYYY', onchan
       return;
     }
     const iso = displayToIso(text.value);
-    if (iso) setIso(iso);
-    else text.value = isoToDisplay(isoValue); // invalid typed text: revert to last good value
+    if (iso && inRange(iso)) setIso(iso);
+    else text.value = isoToDisplay(isoValue); // invalid or out-of-range typed text: revert to last good value
   });
 
   setIso(isoValue, { silent: true });

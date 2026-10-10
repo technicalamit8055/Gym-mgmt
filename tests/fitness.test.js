@@ -1105,6 +1105,64 @@ describe('Lifesum-style diet logging in the portal', () => {
     const res = await call('GET', '/api/portal/diets/foods', undefined, { token: memberToken });
     assert.ok(res.body.recent.length > 0);
     assert.ok(res.body.recent.some((f) => f.food_name === 'Gym cafe protein shake'));
+
+    // A library food comes back with the food itself and the last portion, so
+    // the sheet can reopen it with its units or re-log the same amount.
+    const chicken = res.body.recent.find((f) => f.food_name.startsWith('Chicken Breast'));
+    assert.ok(chicken.food_id);
+    assert.equal(chicken.food.id, chicken.food_id);
+    assert.equal(chicken.quantity, 1.5);
+    const shake = res.body.recent.find((f) => f.food_name === 'Gym cafe protein shake');
+    assert.equal(shake.food_id, null);
+    assert.equal(shake.food, null);
+  });
+
+  it('keeps favourite foods, library and hand-typed alike, each once', async () => {
+    const chicken = (await call('GET', '/api/portal/diets/foods?q=Chicken Breast', undefined, { token: memberToken }))
+      .body.items.find((f) => f.name.startsWith('Chicken Breast'));
+
+    const lib = await call('POST', '/api/portal/diets/favorites', { food_id: chicken.id }, { token: memberToken });
+    assert.equal(lib.status, 201);
+    assert.equal(lib.body.food_id, chicken.id);
+    assert.equal(lib.body.food.calories, 165);
+    // A double tap is not an error, and does not star it twice.
+    const again = await call('POST', '/api/portal/diets/favorites', { food_id: chicken.id }, { token: memberToken });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.favorite_id, lib.body.favorite_id);
+
+    const custom = await call(
+      'POST',
+      '/api/portal/diets/favorites',
+      { food_name: 'Gym cafe protein shake', serving_unit: 'serving', calories: 250, protein_g: 30 },
+      { token: memberToken },
+    );
+    assert.equal(custom.status, 201);
+    assert.equal(custom.body.food, null);
+    assert.equal(custom.body.calories, 250);
+    const sameName = await call('POST', '/api/portal/diets/favorites', { food_name: 'GYM CAFE PROTEIN SHAKE' }, { token: memberToken });
+    assert.equal(sameName.body.favorite_id, custom.body.favorite_id);
+
+    assert.equal((await call('POST', '/api/portal/diets/favorites', {}, { token: memberToken })).status, 400);
+    assert.equal((await call('POST', '/api/portal/diets/favorites', { food_id: 999999 }, { token: memberToken })).status, 404);
+
+    const list = await call('GET', '/api/portal/diets/foods', undefined, { token: memberToken });
+    assert.equal(list.body.favorites.length, 2);
+    assert.equal(list.body.favorites.find((f) => f.food_id === chicken.id).food.name, chicken.name);
+
+    // Another member cannot unstar them.
+    const other = await call('POST', '/api/members', { first_name: 'Fav', phone: '9876504444' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
+    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '4444' })).body.token;
+    assert.ok(otherToken);
+    assert.equal(
+      (await call('DELETE', `/api/portal/diets/favorites/${custom.body.favorite_id}`, undefined, { token: otherToken })).status,
+      404,
+    );
+    assert.equal((await call('GET', '/api/portal/diets/foods', undefined, { token: otherToken })).body.favorites.length, 0);
+
+    assert.equal((await call('DELETE', `/api/portal/diets/favorites/${custom.body.favorite_id}`, undefined, { token: memberToken })).status, 200);
+    const after = await call('GET', '/api/portal/diets/foods', undefined, { token: memberToken });
+    assert.deepEqual(after.body.favorites.map((f) => f.food_id), [chicken.id]);
   });
 
   it('gives the trainer an adherence view of what was actually eaten', async () => {
@@ -1125,7 +1183,11 @@ describe('Lifesum-style diet logging in the portal', () => {
 });
 
 describe('the target calculator', () => {
-  const base = { weight_kg: 80, height_cm: 180, age: 30, sex: 'male', activity_level: 'light', training_days: 4, training_intensity: 'moderate' };
+  // The member will add every logged workout back, so training is left out of the base.
+  const base = {
+    weight_kg: 80, height_cm: 180, age: 30, sex: 'male', activity_level: 'light', training_days: 4, training_intensity: 'moderate',
+    exercise_addback_pct: 100,
+  };
 
   it('builds maintenance from Mifflin-St Jeor and splits the macros', () => {
     const res = suggestTargets({ ...base, goal: 'maintain' });
@@ -1144,6 +1206,11 @@ describe('the target calculator', () => {
     // Four moderate hours a week at (5 − 1) METs × 80 kg, spread over seven days.
     assert.equal(res.training_built_in, 183);
     assert.equal(res.targets.target_calories, 2630);
+  });
+
+  it('adds nothing back unless asked to', () => {
+    const { exercise_addback_pct: _, ...stats } = base;
+    assert.equal(suggestTargets({ ...stats, goal: 'maintain' }).targets.target_calories, 2630);
   });
 
   it('takes a deficit off and lifts protein while cutting', () => {
@@ -1181,7 +1248,8 @@ describe('own nutrition targets in the portal', () => {
     assert.equal(res.body.effective.source, 'trainer');
     assert.equal(res.body.trainer_plan.target_calories, 1800);
     assert.equal(res.body.profile.use_own_targets, 0);
-    assert.equal(res.body.profile.exercise_addback_pct, 100);
+    // Exercise is not eaten back until the member chooses to.
+    assert.equal(res.body.profile.exercise_addback_pct, 0);
   });
 
   it('refuses to switch to own targets that do not exist yet', async () => {

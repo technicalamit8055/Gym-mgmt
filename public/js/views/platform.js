@@ -16,6 +16,7 @@ import {
 } from '../ui.js';
 import { checkSummary, dnsRecordsTable, domainStatusBadge } from './customDomains.js';
 import { renderCatalogSection } from './exerciseCatalog.js';
+import { renderFoodCatalogSection } from './foodCatalog.js';
 
 /**
  * Operator console — the view for whoever runs the platform, listing every
@@ -858,7 +859,7 @@ function consoleHeader(rerender) {
     'header',
     { class: 'landing-top' },
     h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('wrench', { size: 18 })), 'Operator console'),
-    h('div', { class: 'row', style: 'gap:6px;margin-left:16px' }, tab('gyms', 'Gyms'), tab('domains', 'Domains'), tab('catalog', 'Exercise library')),
+    h('div', { class: 'row', style: 'gap:6px;margin-left:16px' }, tab('gyms', 'Gyms'), tab('domains', 'Domains'), tab('catalog', 'Exercise library'), tab('foods', 'Food library')),
     h('div', { class: 'spacer' }),
     h('a', { class: 'btn sm ghost', href: '#/' }, 'Site'),
     h(
@@ -905,6 +906,24 @@ export async function renderPlatformConsole({ context, rerender }) {
         'div',
         { class: 'console-body' },
         renderCatalogSection({
+          onExpired: async () => {
+            platformSession.clear();
+            await rerender();
+          },
+        }),
+      ),
+    );
+  }
+
+  if (consoleSection === 'foods') {
+    return h(
+      'div',
+      { class: 'console' },
+      consoleHeader(rerender),
+      h(
+        'div',
+        { class: 'console-body' },
+        renderFoodCatalogSection({
           onExpired: async () => {
             platformSession.clear();
             await rerender();

@@ -1123,7 +1123,7 @@ const MIGRATIONS = [
         target_fiber_g       INTEGER,
         target_sugar_g       INTEGER,
         target_water_ml      INTEGER,
-        exercise_addback_pct INTEGER NOT NULL DEFAULT 100 CHECK (exercise_addback_pct IN (0, 50, 100)),
+        exercise_addback_pct INTEGER NOT NULL DEFAULT 0 CHECK (exercise_addback_pct IN (0, 50, 100)),
         height_cm            REAL,
         sex                  TEXT CHECK (sex IN ('male', 'female', 'other') OR sex IS NULL),
         birth_date           TEXT,
@@ -1193,6 +1193,48 @@ const MIGRATIONS = [
   (db) => ensureColumn(db, 'food_library', 'serving_label', 'TEXT'),
   (db) => ensureColumn(db, 'food_library', 'source', 'TEXT'),
   (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_food_library_barcode ON food_library(barcode) WHERE barcode IS NOT NULL'),
+
+  /* ------------------------------------------- Recent & favourite foods --- */
+  // Which library food an entry came from, so "Recent" can reopen the real
+  // food with its portion choices. NULL for hand-typed entries and for
+  // everything logged before this existed; no FK, because staff deleting a
+  // library food must not touch a member's history.
+  (db) => ensureColumn(db, 'diet_log_entries', 'food_id', 'INTEGER'),
+  // A member's starred foods. Either a library food (food_id, macros read live
+  // from the library) or a hand-typed one kept as a snapshot: food_name,
+  // serving_unit and the macros for one of that serving.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_food_favorites (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id    INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        food_id      INTEGER REFERENCES food_library(id) ON DELETE CASCADE,
+        food_name    TEXT NOT NULL,
+        serving_unit TEXT NOT NULL DEFAULT 'serving',
+        calories     INTEGER NOT NULL DEFAULT 0,
+        protein_g    REAL NOT NULL DEFAULT 0,
+        carbs_g      REAL NOT NULL DEFAULT 0,
+        fats_g       REAL NOT NULL DEFAULT 0,
+        fiber_g      REAL NOT NULL DEFAULT 0,
+        sugar_g      REAL NOT NULL DEFAULT 0,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_food_fav_library ON member_food_favorites(member_id, food_id) WHERE food_id IS NOT NULL',
+    );
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_food_fav_custom ON member_food_favorites(member_id, food_name COLLATE NOCASE) WHERE food_id IS NULL',
+    );
+  },
+
+  /* ------------------------------------------------ Platform food catalogue --- */
+  // Foods copied in from the operator's catalogue (src/foodCatalog.js), by its
+  // id, so a rename or a corrected number there reaches this row; `verified`
+  // is the operator's blue tick and is only ever set by that sync.
+  (db) => ensureColumn(db, 'food_library', 'catalog_id', 'INTEGER'),
+  (db) => ensureColumn(db, 'food_library', 'verified', 'INTEGER NOT NULL DEFAULT 0'),
+  (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_food_library_catalog ON food_library(catalog_id) WHERE catalog_id IS NOT NULL'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

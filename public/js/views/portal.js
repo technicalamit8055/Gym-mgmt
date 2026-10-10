@@ -20,6 +20,7 @@ import {
   time,
   toast,
   today,
+  verifiedTick,
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { cropAndResizeImage } from '../photo.js';
@@ -258,20 +259,124 @@ function openExerciseDemo(exercise) {
   openModal({ title: exercise.exercise_name ?? exercise.name, body: exerciseDemoBody(exercise) });
 }
 
+/** An exercise's demo at any size: the operator's upload, then the bundled
+ * picture, or null when it has neither. */
+function demoMedia(exercise, className) {
+  const thumb = EXERCISE_THUMBS[String(exercise.exercise_name ?? exercise.name).trim().toLowerCase()];
+  return (
+    exerciseMedia(exercise, { className }) ??
+    (thumb ? h('img', { class: className, src: `/images/workout/ex-${thumb}.png`, alt: '' }) : null)
+  );
+}
+
+/** Hevy's big demo: tap it to watch full screen, and a clip gets a pause
+ * button in the corner. Null when the exercise has no demo at all. */
+function demoStage(exercise) {
+  const media = demoMedia(exercise, 'portal-demo-media');
+  if (!media) return null;
+  const name = exercise.exercise_name ?? exercise.name;
+  const isClip = media.tagName === 'VIDEO';
+
+  const pause = isClip
+    ? h('button', {
+        class: 'portal-demo-pause',
+        type: 'button',
+        'aria-label': 'Pause demo',
+        onclick: (event) => {
+          event.stopPropagation();
+          if (media.paused) media.play().catch(() => {});
+          else media.pause();
+        },
+      })
+    : null;
+  const paintPause = () => {
+    if (!pause) return;
+    clear(pause).append(renderIcon(media.paused ? 'play' : 'pause', { size: 16 }));
+    pause.setAttribute('aria-label', media.paused ? 'Play demo' : 'Pause demo');
+  };
+  if (isClip) {
+    media.addEventListener('play', paintPause);
+    media.addEventListener('pause', paintPause);
+    paintPause();
+  }
+
+  return h(
+    'div',
+    {
+      class: 'portal-demo-stage',
+      role: 'button',
+      tabindex: '0',
+      'aria-label': `Watch ${name} full screen`,
+      onclick: () => openDemoFullscreen(exercise),
+      onkeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openDemoFullscreen(exercise);
+        }
+      },
+    },
+    media,
+    h('span', { class: 'portal-demo-expand', 'aria-hidden': 'true' }, renderIcon('maximize', { size: 15 })),
+    pause,
+  );
+}
+
+/** The demo on a black screen of its own, sized to fit, over everything —
+ * the sheet underneath stays open for when it closes. */
+function openDemoFullscreen(exercise) {
+  const media = demoMedia(exercise, 'portal-demo-full-media');
+  if (!media) return;
+  const name = exercise.exercise_name ?? exercise.name;
+  const muscles = [exercise.muscle_group, ...(exercise.secondary_muscles ?? [])].filter(Boolean).map((m) => capitalise(muscleLabel(m)));
+
+  let overlay;
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+    document.body.classList.remove('portal-demo-open');
+  };
+  function onKey(event) {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      close();
+    }
+  }
+  overlay = h(
+    'div',
+    {
+      class: 'portal-demo-full',
+      role: 'dialog',
+      'aria-modal': 'true',
+      'aria-label': `${name} demo`,
+      onclick: (event) => {
+        if (event.target === overlay) close();
+      },
+    },
+    h('button', { class: 'portal-demo-full-close', type: 'button', onclick: close, 'aria-label': 'Close' }, renderIcon('close', { size: 22 })),
+    media,
+    h(
+      'div',
+      { class: 'portal-demo-full-caption' },
+      h('strong', {}, name),
+      muscles.length ? h('span', {}, `Primary: ${muscles[0]}${muscles.length > 1 ? ` · Secondary: ${muscles.slice(1).join(', ')}` : ''}`) : null,
+    ),
+  );
+  document.body.append(overlay);
+  document.body.classList.add('portal-demo-open');
+  document.addEventListener('keydown', onKey, true);
+  overlay.querySelector('.portal-demo-full-close').focus();
+}
+
 /** The demo, what it works and how to do it — the demo sheet's body, and the
  * "How to" tab of the progress sheet. */
 function exerciseDemoBody(exercise) {
   const name = exercise.exercise_name ?? exercise.name;
-  const thumb = EXERCISE_THUMBS[String(name).trim().toLowerCase()];
-  const demo =
-    exerciseMedia(exercise, { className: 'portal-demo-media' }) ??
-    (thumb ? h('img', { class: 'portal-demo-media', src: `/images/workout/ex-${thumb}.png`, alt: '' }) : null);
   const blurb = exercise.instructions || EXERCISE_BLURBS[String(name).trim().toLowerCase()] || MUSCLE_BLURBS[exercise.muscle_group] || '';
 
   return h(
     'div',
     { class: 'portal-demo' },
-    demo,
+    demoStage(exercise),
     h(
       'div',
       { class: 'portal-demo-badges' },
@@ -1080,6 +1185,35 @@ const weightUnit = {
   },
 };
 
+/** Height is stored in centimetres; feet and inches are a display choice,
+ * remembered on the device like the weight unit. Until one is picked it
+ * follows the weight unit — someone weighing in pounds usually measures in feet. */
+const HEIGHT_UNIT_KEY = 'gymbook.portal.heightUnit';
+const heightUnit = {
+  get() {
+    try {
+      const saved = localStorage.getItem(HEIGHT_UNIT_KEY);
+      if (saved === 'cm' || saved === 'ft') return saved;
+    } catch {
+      // Storage blocked: fall through to the weight unit's lead.
+    }
+    return weightUnit.get() === 'lb' ? 'ft' : 'cm';
+  },
+  set(unit) {
+    try {
+      localStorage.setItem(HEIGHT_UNIT_KEY, unit === 'ft' ? 'ft' : 'cm');
+    } catch {
+      // A private window simply forgets the choice.
+    }
+  },
+};
+
+/** Centimetres → whole feet and inches, carrying a rounded-up 12 inches. */
+function cmToFeetInches(cm) {
+  const total = Math.round(cm / 2.54);
+  return { ft: Math.floor(total / 12), inch: total % 12 };
+}
+
 const toDisplayWeight = (kg) => (weightUnit.get() === 'lb' ? Math.round(kg * LB_PER_KG * 10) / 10 : kg);
 const toKg = (value) => (weightUnit.get() === 'lb' ? Math.round((value / LB_PER_KG) * 100) / 100 : Number(value) || 0);
 const weightLabel = (kg) => `${toDisplayWeight(kg)} ${weightUnit.get()}`;
@@ -1480,6 +1614,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   function paint() {
     paintTabs();
     clear(panel);
+    if (active === 'summary' && summaryDemo) panel.append(summaryDemo);
     if (active === 'howto') {
       panel.append(exerciseDemoBody(item));
       return;
@@ -1499,12 +1634,16 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
     panel.append(active === 'summary' ? summaryPanel() : historyPanel());
   }
 
+  // Built once and moved between paints, so tapping a metric or a range
+  // doesn't restart the clip.
+  const summaryDemo = demoStage(item);
+
   const subtitle = [item.muscle_group, item.equipment].filter(Boolean).map((part) => capitalise(muscleLabel(part))).join(' · ');
   body.append(
     h(
       'div',
       { class: 'portal-exd-hero' },
-      pickerThumb(item),
+      summaryDemo ? null : pickerThumb(item),
       h('div', { class: 'portal-pick-text' }, h('span', { class: 'portal-pick-sub' }, subtitle), h('span', { class: 'portal-exd-hint' }, 'Tap the chart to see any session')),
     ),
     tabs,
@@ -1714,7 +1853,7 @@ function macroBar(label, eaten, target, tone, icon = null) {
   return h('div', { class: `portal-macro${icon ? ' has-icon' : ''}` }, icon ? portalIcon(icon, 'portal-macro-icon') : null, body);
 }
 
-/* ── Food search sheet ─────────────────────────────────────────────────── */
+/* ── Quick track sheet ─────────────────────────────────────────────────── */
 
 /** "150 g" for 1.5 × a per-100 g food — how scanned packs are logged — and
  * "2 × 1 egg (50g)" for anything counted in servings. */
@@ -1724,303 +1863,709 @@ function portionLabel(entry) {
   return `${entry.quantity === 1 ? '' : `${entry.quantity} × `}${entry.serving_unit}`;
 }
 
+/** The meal a new entry most likely belongs to, by the clock — what Quick
+ * track opens on. One tap on the meal row changes it. */
+function mealForNow(now = new Date()) {
+  const hour = now.getHours();
+  if (hour < 11) return 'breakfast';
+  if (hour < 15) return 'lunch';
+  if (hour < 18) return 'snack';
+  return 'dinner';
+}
+
+const round1 = (n) => Math.round(n * 10) / 10;
+
+/** A library food's figures for `q` × its serving_unit — the same arithmetic
+ * the entries POST does, for the live preview. */
+const scaleFood = (food, q) => ({
+  calories: Math.round(food.calories * q),
+  protein_g: round1(food.protein_g * q),
+  carbs_g: round1(food.carbs_g * q),
+  fats_g: round1(food.fats_g * q),
+  fiber_g: round1((food.fiber_g || 0) * q),
+  sugar_g: round1((food.sugar_g || 0) * q),
+});
+
+const macrosOf = (row) => ({
+  calories: row.calories || 0,
+  protein_g: row.protein_g || 0,
+  carbs_g: row.carbs_g || 0,
+  fats_g: row.fats_g || 0,
+  fiber_g: row.fiber_g || 0,
+  sugar_g: row.sugar_g || 0,
+});
+
 /**
- * The add-food sheet: search the library, or type a packet's numbers in.
- *
- * Serving arithmetic is previewed live but recomputed on the server (see the
- * entries POST) — the preview is a courtesy, not the source of truth.
+ * How an amount can be entered for `food`, each turned into a multiple of its
+ * serving_unit (what the server scales by). A per-100 g food — every scanned
+ * pack, and much of the library — is entered in grams, or in the pack's own
+ * servings when the label gives one; anything else in servings.
  */
-function openFoodSearch({ mealType, mealLabel, logDate, onAdded, startOn = 'search' }) {
+function unitsFor(food) {
+  const per100 = /^100\s?(g|ml)$/i.exec(food.serving_unit || '');
+  if (!per100) {
+    return [{ key: 'serving', label: 'Servings', hint: `× ${food.serving_unit}`, start: 1, step: 0.25, nudge: 0.5, toQty: (n) => n }];
+  }
+  const measure = per100[1].toLowerCase();
+  const units = [];
+  if (food.serving_size_g) {
+    units.push({
+      key: 'pack',
+      label: 'Servings',
+      hint: `× ${food.serving_label || `${food.serving_size_g} ${measure}`}`,
+      start: 1,
+      step: 0.5,
+      nudge: 0.5,
+      toQty: (n) => (n * food.serving_size_g) / 100,
+    });
+  }
+  units.push({
+    key: 'amount',
+    label: measure === 'ml' ? 'Millilitres' : 'Grams',
+    hint: measure,
+    start: 100,
+    step: 5,
+    nudge: 10,
+    toQty: (n) => n / 100,
+  });
+  return units;
+}
+
+const QUICK_TRACK_TABS = [
+  { key: 'recent', label: 'Recent' },
+  { key: 'favorites', label: 'Favourites' },
+  { key: 'all', label: 'All foods' },
+];
+
+/**
+ * Quick track: the one sheet every food goes in through — recents and
+ * favourites for one-tap logging, the library, a barcode, or numbers typed
+ * off a packet. Opened from the Diet tab's floating button, on the meal the
+ * clock suggests.
+ *
+ * The sheet stays open after each add, so a whole plate goes in one visit;
+ * the Diet tab repaints once, when it closes. Serving arithmetic is previewed
+ * live but recomputed on the server (see the entries POST) — the preview is a
+ * courtesy, not the source of truth.
+ */
+function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = 'list' }) {
   let foods = [];
   let recent = [];
-  let selected = null;
-  let quantity = 1;
-  let unitKey = null;
-  let amount = 1;
+  let favorites = [];
+  let loaded = false;
+  let meal = MEAL_SLOTS.find((slot) => slot.key === mealType) ?? MEAL_SLOTS[0];
+  let tab = 'recent';
+  let query = '';
+  /** Where the detail view's back arrow goes: the list or the scanner. */
+  let detailFrom = 'list';
+  /** Repaints the open detail view's button when the meal changes. */
+  let onMealChange = null;
+  /** What this visit logged, newest last, so it can be reviewed and taken
+   * back out before Done. `changed` stays set once anything was logged, so
+   * the Diet tab repaints even if every item was removed again. */
+  const tracked = { items: [], changed: false, open: false };
+  const trackedTotal = (key) => Math.round(tracked.items.reduce((sum, item) => sum + item[key], 0) * 10) / 10;
 
-  const results = h('div', { class: 'portal-food-results' }, h('div', { class: 'portal-loading' }, 'Loading foods…'));
-  const detail = h('div', {});
+  /* ── Favourites ── */
 
-  /**
-   * How an amount can be entered for `food`, each turned into a multiple of
-   * its serving_unit (what the server scales by). A per-100 g food — every
-   * scanned pack, and much of the library — is entered in grams, or in the
-   * pack's own servings when the label gives one; anything else in servings.
-   */
-  function unitsFor(food) {
-    const per100 = /^100\s?(g|ml)$/i.exec(food.serving_unit || '');
-    if (!per100) {
-      return [{ key: 'serving', label: 'Servings', hint: `× ${food.serving_unit}`, start: 1, step: 0.25, toQty: (n) => n }];
+  const keyOf = (food) => (food.id ? `lib:${food.id}` : `name:${food.name.toLowerCase()}`);
+  const favoriteFor = (food) =>
+    food.id
+      ? favorites.find((f) => f.food_id === food.id)
+      : favorites.find((f) => !f.food_id && f.food_name.toLowerCase() === food.name.toLowerCase());
+  const favButtons = new Map();
+
+  /** Every heart on screen for `food` follows its state, list and detail alike. */
+  function paintHearts() {
+    for (const [button, food] of favButtons) {
+      if (!button.isConnected) {
+        favButtons.delete(button);
+        continue;
+      }
+      const on = Boolean(favoriteFor(food));
+      button.classList.toggle('on', on);
+      button.setAttribute('aria-pressed', String(on));
+      button.setAttribute('aria-label', on ? `Remove ${food.name} from favourites` : `Add ${food.name} to favourites`);
     }
-    const measure = per100[1].toLowerCase();
-    const units = [];
-    if (food.serving_size_g) {
-      units.push({
-        key: 'pack',
-        label: 'Servings',
-        hint: `× ${food.serving_label || `${food.serving_size_g} ${measure}`}`,
-        start: 1,
-        step: 0.5,
-        toQty: (n) => (n * food.serving_size_g) / 100,
+  }
+
+  function heartButton(food, className = 'qt-fav') {
+    const button = h(
+      'button',
+      { class: className, type: 'button', onclick: () => toggleFavorite(food) },
+      renderIcon('heart', { size: 19, stroke: 2 }),
+    );
+    favButtons.set(button, food);
+    const on = Boolean(favoriteFor(food));
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+    button.setAttribute('aria-label', on ? `Remove ${food.name} from favourites` : `Add ${food.name} to favourites`);
+    return button;
+  }
+
+  async function toggleFavorite(food) {
+    const existing = favoriteFor(food);
+    if (existing) {
+      favorites = favorites.filter((f) => f !== existing);
+      paintHearts();
+      if (tab === 'favorites') paintList();
+      try {
+        await api.portal.removeFavoriteFood(existing.favorite_id);
+      } catch (err) {
+        favorites = [existing, ...favorites];
+        paintHearts();
+        if (tab === 'favorites') paintList();
+        toast(err.message || 'Could not update your favourites', 'error');
+      }
+      return;
+    }
+    try {
+      const saved = await api.portal.addFavoriteFood(
+        food.id
+          ? { food_id: food.id }
+          : { food_name: food.name, serving_unit: food.serving_unit, ...macrosOf(food) },
+      );
+      favorites = [saved, ...favorites.filter((f) => f.favorite_id !== saved.favorite_id)];
+      paintHearts();
+      if (tab === 'favorites') paintList();
+      toast(`${food.name} saved to favourites`);
+    } catch (err) {
+      toast(err.message || 'Could not update your favourites', 'error');
+    }
+  }
+
+  /* ── Rows: every list item is a food to open, plus a one-tap add ── */
+
+  const snapshotFood = (row) => ({
+    id: null,
+    name: row.food_name,
+    serving_unit: portionLabel({ quantity: row.quantity ?? 1, serving_unit: row.serving_unit }),
+    ...macrosOf(row),
+  });
+  const libraryByName = (name) => foods.find((f) => f.name.toLowerCase() === name.toLowerCase());
+
+  /** A library food at its first unit's starting amount — what opening it
+   * and pressing Add would log. */
+  function libraryItem(food) {
+    const [unit] = unitsFor(food);
+    const q = unit.toQty(unit.start);
+    const scaled = scaleFood(food, q);
+    return {
+      food,
+      name: food.name,
+      // "1 dosa (180g)" reads better than "180 g" when the food names its portion.
+      meta: [food.brand, unit.key === 'pack' && food.serving_label ? food.serving_label : portionLabel({ quantity: q, serving_unit: food.serving_unit })]
+        .filter(Boolean)
+        .join(' · '),
+      kcal: scaled.calories,
+      payload: { food_id: food.id, quantity: Math.round(q * 1000) / 1000 },
+      scaled,
+    };
+  }
+
+  /** A recent entry, re-logged exactly as it was last time. Hand-typed ones
+   * (and entries from before food_id was stored) re-send their own figures. */
+  function recentItem(row) {
+    if (row.food) {
+      const scaled = scaleFood(row.food, row.quantity);
+      return {
+        food: row.food,
+        name: row.food.name,
+        meta: portionLabel({ quantity: row.quantity, serving_unit: row.food.serving_unit }),
+        kcal: scaled.calories,
+        payload: { food_id: row.food.id, quantity: row.quantity },
+        scaled,
+      };
+    }
+    const scaled = macrosOf(row);
+    return {
+      food: libraryByName(row.food_name) ?? snapshotFood(row),
+      name: row.food_name,
+      meta: portionLabel(row),
+      kcal: scaled.calories,
+      payload: { food_name: row.food_name, serving_unit: row.serving_unit, quantity: row.quantity, ...scaled },
+      scaled,
+    };
+  }
+
+  function favoriteItem(fav) {
+    if (fav.food) return libraryItem(fav.food);
+    const scaled = macrosOf(fav);
+    return {
+      food: snapshotFood({ ...fav, quantity: 1 }),
+      name: fav.food_name,
+      meta: portionLabel({ quantity: 1, serving_unit: fav.serving_unit }),
+      kcal: scaled.calories,
+      payload: { food_name: fav.food_name, serving_unit: fav.serving_unit, quantity: 1, ...scaled },
+      scaled,
+    };
+  }
+
+  /** Logs one entry to the chosen meal and keeps the sheet open. */
+  async function track(food, payload, scaled) {
+    const entry = await api.portal.addFoodEntry({ meal_type: meal.key, log_date: logDate, ...payload });
+    sound.playFoodLogged();
+    tracked.changed = true;
+    tracked.items.push({
+      id: entry.id,
+      name: food.name,
+      meal: meal.label,
+      portion: portionLabel(entry),
+      calories: scaled.calories,
+      protein_g: scaled.protein_g,
+    });
+    // Newest first in Recent, without a refetch.
+    const row = payload.food_id
+      ? { food_id: food.id, food_name: food.name, quantity: payload.quantity, serving_unit: food.serving_unit, ...scaled, food }
+      : { food_id: null, food_name: payload.food_name, quantity: payload.quantity, serving_unit: payload.serving_unit, ...scaled, food: null };
+    recent = [row, ...recent.filter((r) => r.food_name.toLowerCase() !== row.food_name.toLowerCase())];
+    paintTrackedBar();
+  }
+
+  async function quickAdd(item, button) {
+    button.disabled = true;
+    try {
+      await track(item.food, item.payload, item.scaled);
+      // A tick in place of the plus, rather than a repaint that would
+      // reorder the list under the member's thumb.
+      button.classList.add('done');
+      clear(button).append(renderIcon('check', { size: 18, stroke: 2.6 }));
+      setTimeout(() => {
+        if (!button.isConnected) return;
+        button.classList.remove('done');
+        clear(button).append(renderIcon('plus', { size: 18, stroke: 2.4 }));
+        button.disabled = false;
+      }, 1400);
+    } catch (err) {
+      toast(err.message || 'Could not log that', 'error');
+      button.disabled = false;
+    }
+  }
+
+  function row(item) {
+    return h(
+      'div',
+      { class: 'qt-row' },
+      h(
+        'button',
+        { class: 'qt-row-main', type: 'button', onclick: () => openDetail(item.food, 'list') },
+        h(
+          'span',
+          { class: 'qt-row-text' },
+          h('span', { class: 'qt-row-name' }, h('span', {}, item.name), item.food.verified ? verifiedTick({ size: 15 }) : null),
+          h('span', { class: 'qt-row-meta' }, item.meta),
+        ),
+        h('span', { class: 'qt-row-kcal' }, String(item.kcal), h('small', {}, 'kcal')),
+      ),
+      heartButton(item.food),
+      h(
+        'button',
+        {
+          class: 'qt-add',
+          type: 'button',
+          'aria-label': `Add ${item.name}`,
+          onclick: (event) => quickAdd(item, event.currentTarget),
+        },
+        renderIcon('plus', { size: 18, stroke: 2.4 }),
+      ),
+    );
+  }
+
+  /* ── Header: meal picker ── */
+
+  const mealRow = h('div', { class: 'qt-meals', role: 'radiogroup', 'aria-label': 'Meal' });
+  function paintMeals() {
+    clear(mealRow).append(
+      ...MEAL_SLOTS.map((slot) =>
+        h(
+          'button',
+          {
+            class: `qt-meal${slot.key === meal.key ? ' active' : ''}`,
+            type: 'button',
+            role: 'radio',
+            'aria-checked': String(slot.key === meal.key),
+            onclick: () => {
+              meal = slot;
+              paintMeals();
+              onMealChange?.();
+            },
+          },
+          renderIcon(slot.icon, { size: 15, stroke: 2 }),
+          slot.label,
+        ),
+      ),
+    );
+  }
+  paintMeals();
+
+  /* ── List view ── */
+
+  const searchInput = h('input', {
+    class: 'qt-search-input',
+    type: 'search',
+    placeholder: 'Search foods',
+    autocomplete: 'off',
+    enterkeyhint: 'search',
+    'aria-label': 'Search foods',
+  });
+  const clearSearch = h(
+    'button',
+    { class: 'qt-search-clear hidden', type: 'button', 'aria-label': 'Clear search' },
+    renderIcon('close', { size: 14, stroke: 2.4 }),
+  );
+  const searchBox = h(
+    'div',
+    { class: 'qt-search' },
+    renderIcon('search', { size: 18 }),
+    searchInput,
+    clearSearch,
+    h(
+      'button',
+      { class: 'qt-search-scan', type: 'button', 'aria-label': 'Scan a barcode', title: 'Scan a barcode', onclick: () => show('scan') },
+      renderIcon('scan', { size: 19 }),
+    ),
+  );
+
+  const tabRow = h('div', { class: 'qt-tabs', role: 'tablist' });
+  function paintTabs() {
+    clear(tabRow).append(
+      ...QUICK_TRACK_TABS.map((t) =>
+        h(
+          'button',
+          {
+            class: `qt-tab${t.key === tab ? ' active' : ''}`,
+            type: 'button',
+            role: 'tab',
+            'aria-selected': String(t.key === tab),
+            onclick: () => {
+              tab = t.key;
+              paintList();
+              listBody.scrollTop = 0;
+            },
+          },
+          t.label,
+          t.key === 'favorites' && favorites.length ? h('span', { class: 'qt-tab-count' }, String(favorites.length)) : null,
+        ),
+      ),
+    );
+  }
+
+  const listBody = h('div', { class: 'qt-list' });
+  const section = (label) => h('div', { class: 'qt-section' }, label);
+  const emptyState = (icon, title, text) =>
+    h(
+      'div',
+      { class: 'qt-empty' },
+      h('span', { class: 'qt-empty-ico' }, renderIcon(icon, { size: 24, stroke: 1.8 })),
+      h('strong', {}, title),
+      h('p', {}, text),
+    );
+  const listFooter = () =>
+    h(
+      'div',
+      { class: 'qt-list-foot' },
+      h('span', {}, query.trim() ? `Can't find “${query.trim()}”?` : 'Not in the list?'),
+      h(
+        'div',
+        { class: 'qt-list-foot-actions' },
+        h('button', { class: 'qt-chip-btn', type: 'button', onclick: () => show('custom') }, renderIcon('edit', { size: 15 }), 'Custom food'),
+        h('button', { class: 'qt-chip-btn', type: 'button', onclick: () => show('scan') }, renderIcon('scan', { size: 15 }), 'Scan barcode'),
+      ),
+    );
+  const prettyCategory = (c) => (c || 'Other').replace(/[_-]+/g, ' ').replace(/^./, (ch) => ch.toUpperCase());
+
+  function paintList() {
+    const needle = query.trim().toLowerCase();
+    tabRow.classList.toggle('hidden', Boolean(needle));
+    paintTabs();
+    clear(listBody);
+
+    if (!loaded) {
+      listBody.append(...Array.from({ length: 6 }, () => h('div', { class: 'qt-skel' }, h('i'), h('i'))));
+      return;
+    }
+
+    if (needle) {
+      // Their own foods first — a search for "shake" should find the cafe
+      // shake they log daily before the library's generic one.
+      const seen = new Set();
+      const mine = [...favorites.map(favoriteItem), ...recent.map(recentItem)].filter((item) => {
+        const key = keyOf(item.food);
+        if (seen.has(key) || !item.name.toLowerCase().includes(needle)) return false;
+        seen.add(key);
+        return true;
       });
+      const library = foods
+        .filter((f) => f.name.toLowerCase().includes(needle) && !seen.has(keyOf(f)))
+        .slice(0, 80)
+        .map(libraryItem);
+      if (mine.length) listBody.append(section('Your foods'), ...mine.map(row));
+      if (library.length) listBody.append(section('Food library'), ...library.map(row));
+      if (!mine.length && !library.length) {
+        listBody.append(emptyState('search', 'No matches', 'Check the spelling, scan the pack, or add it as a custom food.'));
+      }
+    } else if (tab === 'recent') {
+      if (recent.length) listBody.append(section('Recently tracked'), ...recent.map(recentItem).map(row));
+      else listBody.append(emptyState('history', 'Nothing tracked yet', 'Foods you log show up here, ready to add again in one tap.'));
+    } else if (tab === 'favorites') {
+      if (favorites.length) listBody.append(...favorites.map(favoriteItem).map(row));
+      else listBody.append(emptyState('heart', 'No favourites yet', 'Tap the heart on any food to keep it here for quick tracking.'));
+    } else {
+      let category = null;
+      for (const food of foods.slice(0, 200)) {
+        if (food.category !== category) {
+          category = food.category;
+          listBody.append(section(prettyCategory(category)));
+        }
+        listBody.append(row(libraryItem(food)));
+      }
+      if (!foods.length) listBody.append(emptyState('apple', 'The food library is empty', 'Add what you ate as a custom food instead.'));
     }
-    units.push({ key: 'amount', label: measure === 'ml' ? 'Millilitres' : 'Grams', hint: measure, start: 100, step: 5, toQty: (n) => n / 100 });
-    return units;
+    listBody.append(listFooter());
   }
 
-  function selectFood(food) {
-    selected = food;
-    const [first] = unitsFor(food);
-    unitKey = first.key;
-    amount = first.start;
-    quantity = first.toQty(amount);
-    paintResults();
-    paintDetail();
-  }
+  // The first 300 library foods come with the sheet; a search also asks the
+  // server, so a gym whose library has grown past that still finds the rest.
+  let searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    query = searchInput.value;
+    clearSearch.classList.toggle('hidden', !query);
+    paintList();
+    listBody.scrollTop = 0;
+    clearTimeout(searchTimer);
+    const asked = query.trim();
+    if (asked.length < 2) return;
+    searchTimer = setTimeout(async () => {
+      try {
+        const res = await api.portal.foods({ q: asked });
+        const known = new Set(foods.map((f) => f.id));
+        const fresh = res.items.filter((f) => !known.has(f.id));
+        if (!fresh.length) return;
+        foods = [...foods, ...fresh];
+        if (query.trim() === asked) paintList();
+      } catch {
+        // The local results already on screen stand.
+      }
+    }, 280);
+  });
+  clearSearch.addEventListener('click', () => {
+    searchInput.value = '';
+    searchInput.dispatchEvent(new Event('input'));
+    searchInput.focus();
+  });
 
-  function paintDetail() {
-    clear(detail);
-    if (!selected) return;
-    const units = unitsFor(selected);
-    const unit = units.find((u) => u.key === unitKey) ?? units[0];
+  const listPane = h('div', { class: 'qt-pane qt-pane-list' }, searchBox, tabRow, listBody);
+
+  /* ── Detail view ── */
+
+  const detailPane = h('div', { class: 'qt-pane hidden' });
+
+  function openDetail(food, from) {
+    detailFrom = from;
+    const units = unitsFor(food);
+    let unit = units[0];
+    let amount = unit.start;
+    const qty = () => unit.toQty(amount);
+
+    const kcalValue = h('strong', {});
+    const macroCells = {
+      protein_g: h('strong', {}),
+      carbs_g: h('strong', {}),
+      fats_g: h('strong', {}),
+    };
+    const splitBar = h('div', { class: 'qt-split', 'aria-hidden': 'true' });
+    const extra = h('div', { class: 'qt-extra' });
 
     // Only the numbers repaint as the member types: rebuilding the input on
     // every keystroke would drop its focus between "1" and "1.5".
-    const macros = h('div', {});
-    const scaledFor = (q) => ({
-      calories: Math.round(selected.calories * q),
-      protein_g: Math.round(selected.protein_g * q * 10) / 10,
-      carbs_g: Math.round(selected.carbs_g * q * 10) / 10,
-      fats_g: Math.round(selected.fats_g * q * 10) / 10,
-      fiber_g: Math.round((selected.fiber_g || 0) * q * 10) / 10,
-      sugar_g: Math.round((selected.sugar_g || 0) * q * 10) / 10,
-    });
-    const paintMacros = () => {
-      const scaled = scaledFor(quantity || 0);
-      clear(macros).append(
-        h(
-          'div',
-          { class: 'portal-food-macros' },
-          h('div', {}, h('strong', {}, String(scaled.calories)), h('span', {}, 'kcal')),
-          h('div', {}, h('strong', {}, `${scaled.protein_g}g`), h('span', {}, 'protein')),
-          h('div', {}, h('strong', {}, `${scaled.carbs_g}g`), h('span', {}, 'carbs')),
-          h('div', {}, h('strong', {}, `${scaled.fats_g}g`), h('span', {}, 'fats')),
-        ),
-        h('div', { class: 'portal-food-extra' }, `Fibre ${scaled.fiber_g}g · Sugar ${scaled.sugar_g}g`),
+    const paintNumbers = () => {
+      const scaled = scaleFood(food, qty() || 0);
+      kcalValue.textContent = String(scaled.calories);
+      macroCells.protein_g.textContent = `${scaled.protein_g} g`;
+      macroCells.carbs_g.textContent = `${scaled.carbs_g} g`;
+      macroCells.fats_g.textContent = `${scaled.fats_g} g`;
+      extra.textContent = `Fibre ${scaled.fiber_g} g · Sugar ${scaled.sugar_g} g`;
+      // Where the energy comes from, as a share of the calories in the macros.
+      const energy = [scaled.protein_g * 4, scaled.carbs_g * 4, scaled.fats_g * 9];
+      const total = energy.reduce((a, b) => a + b, 0) || 1;
+      clear(splitBar).append(
+        ...['protein', 'carbs', 'fats'].map((tone, i) => h('i', { class: tone, style: `flex-grow:${energy[i] / total}` })),
       );
     };
 
     const qtyInput = h('input', {
-      class: 'portal-input portal-qty',
+      class: 'qt-qty-input',
       type: 'number',
       inputmode: 'decimal',
-      min: unit.step,
-      step: unit.step,
-      value: amount,
+      'aria-label': 'Amount',
       oninput: (event) => {
         amount = Number(event.target.value) || 0;
-        quantity = unit.toQty(amount);
-        paintMacros();
+        paintNumbers();
       },
     });
+    const qtyHint = h('span', { class: 'qt-qty-hint' });
+    const nudge = (dir) => {
+      const next = Math.round((amount + dir * unit.nudge) * 100) / 100;
+      amount = Math.max(unit.step, next);
+      qtyInput.value = String(amount);
+      paintNumbers();
+    };
+    const unitRow = h('div', { class: 'qt-units' });
+    const setUnit = (u) => {
+      unit = u;
+      amount = u.start;
+      qtyInput.min = String(u.step);
+      qtyInput.step = String(u.step);
+      qtyInput.value = String(amount);
+      qtyHint.textContent = u.hint;
+      clear(unitRow).append(
+        ...units.map((other) =>
+          h(
+            'button',
+            { class: `qt-unit${other.key === u.key ? ' active' : ''}`, type: 'button', onclick: () => setUnit(other) },
+            other.label,
+          ),
+        ),
+      );
+      paintNumbers();
+    };
 
-    const addBtn = h('button', { class: 'btn primary block', type: 'button' }, `Add to ${mealLabel}`);
-    addBtn.addEventListener('click', async () => {
-      if (!(quantity >= 0.05)) {
+    const cta = h('button', { class: 'btn primary block qt-cta', type: 'button' });
+    onMealChange = () => {
+      clear(cta).append(renderIcon('plus', { size: 17, stroke: 2.4 }), `Add to ${meal.label}`);
+    };
+    onMealChange();
+    cta.addEventListener('click', async () => {
+      const q = qty();
+      if (!(q >= 0.05)) {
         toast(unit.key === 'amount' ? `Enter at least 5 ${unit.hint}` : 'Enter how much you had', 'error');
         return;
       }
-      addBtn.disabled = true;
+      const quantity = Math.round(q * 1000) / 1000;
+      const scaled = scaleFood(food, quantity);
+      const payload = food.id
+        ? { food_id: food.id, quantity }
+        : { food_name: food.name, serving_unit: food.serving_unit, quantity, ...scaled };
+      cta.disabled = true;
       try {
-        const scaled = scaledFor(quantity);
-        await api.portal.addFoodEntry({
-          meal_type: mealType,
-          food_id: selected.id,
-          quantity: Math.round(quantity * 1000) / 1000,
-          log_date: logDate,
-        });
-        closeModal();
-        toast(`${selected.name} added`);
-        sound.playFoodLogged();
-        await onAdded({ calories: scaled.calories, protein_g: scaled.protein_g });
+        await track(food, payload, scaled);
+        show('list');
       } catch (err) {
         toast(err.message || 'Could not log that', 'error');
-        addBtn.disabled = false;
+        cta.disabled = false;
       }
     });
 
-    const sourceNote = selected.source === 'openfoodfacts'
+    const sourceNote = food.source === 'openfoodfacts'
       ? 'From Open Food Facts'
-      : selected.source === 'member'
+      : food.source === 'member'
         ? 'Added by a member from the label'
         : null;
+    const sub = [food.brand, sourceNote].filter(Boolean).join(' · ');
 
-    paintMacros();
-    append(detail, [
+    clear(detailPane).append(
       h(
         'div',
-        { class: 'portal-food-detail' },
+        { class: 'qt-subhead' },
+        h(
+          'button',
+          { class: 'qt-back', type: 'button', 'aria-label': 'Back', onclick: () => show(detailFrom) },
+          renderIcon('arrowLeft', { size: 19 }),
+        ),
+        h('span', { class: 'qt-subhead-title' }, 'Food details'),
+        heartButton(food, 'qt-fav qt-fav-lg'),
+      ),
+      h(
+        'div',
+        { class: 'qt-detail-head' },
+        h('h3', {}, food.name, food.verified ? verifiedTick({ size: 20 }) : null),
+        food.verified ? h('p', { class: 'qt-verified-note' }, 'Verified nutrition info') : null,
+        sub ? h('p', {}, food.source ? renderIcon('scan', { size: 12 }) : null, sub) : null,
+      ),
+      h(
+        'div',
+        { class: 'qt-hero' },
+        h('div', { class: 'qt-kcal' }, kcalValue, h('span', {}, 'kcal')),
+        splitBar,
         h(
           'div',
-          {},
-          h('div', { class: 'portal-food-detail-name' }, selected.name),
-          sourceNote ? h('div', { class: 'portal-food-source' }, renderIcon('scan', { size: 12 }), sourceNote) : null,
+          { class: 'qt-macros' },
+          ...[
+            ['protein', 'Protein', macroCells.protein_g],
+            ['carbs', 'Carbs', macroCells.carbs_g],
+            ['fats', 'Fat', macroCells.fats_g],
+          ].map(([tone, label, value]) => h('div', { class: `qt-macro ${tone}` }, h('span', {}, h('i'), label), value)),
         ),
-        units.length > 1
-          ? h(
-              'div',
-              { class: 'portal-segmented portal-seg-full' },
-              ...units.map((u) =>
-                h(
-                  'button',
-                  {
-                    class: `portal-segment${u.key === unit.key ? ' active' : ''}`,
-                    type: 'button',
-                    onclick: () => {
-                      unitKey = u.key;
-                      amount = u.start;
-                      quantity = u.toQty(amount);
-                      paintDetail();
-                    },
-                  },
-                  u.label,
-                ),
-              ),
-            )
-          : null,
-        h('div', { class: 'portal-food-qty-row' }, h('span', { class: 'muted' }, unit.hint), qtyInput),
-        macros,
-        addBtn,
+        extra,
       ),
-    ]);
-  }
-
-  function foodRow(food) {
-    return h(
-      'button',
-      {
-        class: `portal-food-row${selected?.id === food.id ? ' active' : ''}`,
-        type: 'button',
-        onclick: () => selectFood(food),
-      },
       h(
         'div',
-        {},
-        h('div', { class: 'portal-food-name' }, food.name),
-        h('div', { class: 'muted' }, `${food.brand ? `${food.brand} · ` : ''}${food.serving_unit} · P ${food.protein_g}g · C ${food.carbs_g}g · F ${food.fats_g}g`),
+        { class: 'qt-amount' },
+        h('div', { class: 'qt-amount-label' }, 'Amount'),
+        units.length > 1 ? unitRow : null,
+        h(
+          'div',
+          { class: 'qt-stepper' },
+          h('button', { class: 'qt-step', type: 'button', 'aria-label': 'Less', onclick: () => nudge(-1) }, renderIcon('minus', { size: 18, stroke: 2.4 })),
+          h('div', { class: 'qt-qty' }, qtyInput, qtyHint),
+          h('button', { class: 'qt-step', type: 'button', 'aria-label': 'More', onclick: () => nudge(1) }, renderIcon('plus', { size: 18, stroke: 2.4 })),
+        ),
       ),
-      h('div', { class: 'portal-food-kcal' }, `${food.calories}`),
+      cta,
+    );
+    setUnit(unit);
+    show('detail');
+  }
+
+  /* ── Custom view ── */
+
+  const customBody = h('div', {});
+  const customPane = h(
+    'div',
+    { class: 'qt-pane hidden' },
+    h(
+      'div',
+      { class: 'qt-subhead' },
+      h('button', { class: 'qt-back', type: 'button', 'aria-label': 'Back', onclick: () => show('list') }, renderIcon('arrowLeft', { size: 19 })),
+      h('span', { class: 'qt-subhead-title' }, 'Custom food'),
+    ),
+    h('p', { class: 'qt-pane-note' }, 'Type the numbers for what you actually ate — the whole portion, not per 100 g.'),
+    customBody,
+  );
+  function paintCustom() {
+    clear(customBody).append(
+      buildForm(
+        [
+          { name: 'food_name', label: 'What did you eat?', required: true, full: true, placeholder: 'e.g. Cafe protein shake', value: query.trim() },
+          { name: 'calories', label: 'Calories', type: 'number', required: true, min: 0 },
+          { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'fats_g', label: 'Fats (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'fiber_g', label: 'Fibre (g)', type: 'number', min: 0, step: '0.1' },
+          { name: 'sugar_g', label: 'Sugar (g)', type: 'number', min: 0, step: '0.1' },
+        ],
+        {
+          submitLabel: 'Track food',
+          onSubmit: async (values) => {
+            const scaled = {
+              calories: Number(values.calories || 0),
+              protein_g: Number(values.protein_g || 0),
+              carbs_g: Number(values.carbs_g || 0),
+              fats_g: Number(values.fats_g || 0),
+              fiber_g: Number(values.fiber_g || 0),
+              sugar_g: Number(values.sugar_g || 0),
+            };
+            const payload = { food_name: values.food_name, serving_unit: 'serving', quantity: 1, ...scaled };
+            await track({ id: null, name: values.food_name }, payload, scaled);
+            show('list');
+          },
+        },
+      ),
     );
   }
 
-  let query = '';
+  /* ── Scan view: camera or typed digits → the library food, or "add it" ── */
 
-  function paintResults() {
-    const needle = query.trim().toLowerCase();
-    const matches = needle ? foods.filter((f) => f.name.toLowerCase().includes(needle)) : foods;
-    clear(results);
-
-    if (!needle && recent.length) {
-      results.append(h('div', { class: 'portal-food-section' }, 'Your recent foods'));
-      // Recent rows come from the member's own log, so they carry no library id
-      // — logging one re-sends its stored macros as a hand-typed entry.
-      for (const item of recent.slice(0, 6)) {
-        results.append(
-          h(
-            'button',
-            {
-              class: 'portal-food-row',
-              type: 'button',
-              onclick: async (event) => {
-                event.currentTarget.disabled = true;
-                try {
-                  await api.portal.addFoodEntry({
-                    meal_type: mealType,
-                    food_name: item.food_name,
-                    serving_unit: item.serving_unit,
-                    calories: item.calories,
-                    protein_g: item.protein_g,
-                    carbs_g: item.carbs_g,
-                    fats_g: item.fats_g,
-                    fiber_g: item.fiber_g,
-                    sugar_g: item.sugar_g,
-                    log_date: logDate,
-                  });
-                  closeModal();
-                  toast(`${item.food_name} added`);
-                  sound.playFoodLogged();
-                  await onAdded({ calories: item.calories, protein_g: item.protein_g });
-                } catch (err) {
-                  toast(err.message || 'Could not log that', 'error');
-                  event.currentTarget.disabled = false;
-                }
-              },
-            },
-            h(
-              'div',
-              {},
-              h('div', { class: 'portal-food-name' }, item.food_name),
-              h('div', { class: 'muted' }, `${item.serving_unit} · one tap to log again`),
-            ),
-            h('div', { class: 'portal-food-kcal' }, `${item.calories}`),
-          ),
-        );
-      }
-      results.append(h('div', { class: 'portal-food-section' }, 'Food library'));
-    }
-
-    if (!matches.length) {
-      results.append(h('div', { class: 'portal-empty' }, 'Nothing matches — try the Custom tab.'));
-      return;
-    }
-    for (const food of matches.slice(0, 60)) results.append(foodRow(food));
-  }
-
-  const search = h('input', {
-    class: 'portal-input',
-    type: 'search',
-    placeholder: 'Search foods…',
-    oninput: (event) => {
-      query = event.target.value;
-      paintResults();
-    },
-  });
-
-  const customForm = buildForm(
-    [
-      { name: 'food_name', label: 'What did you eat?', required: true, full: true, placeholder: 'e.g. Cafe protein shake' },
-      { name: 'calories', label: 'Calories', type: 'number', required: true, min: 0 },
-      { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1' },
-      { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1' },
-      { name: 'fats_g', label: 'Fats (g)', type: 'number', min: 0, step: '0.1' },
-      { name: 'fiber_g', label: 'Fibre (g)', type: 'number', min: 0, step: '0.1' },
-      { name: 'sugar_g', label: 'Sugar (g)', type: 'number', min: 0, step: '0.1' },
-    ],
-    {
-      submitLabel: `Add to ${mealLabel}`,
-      onSubmit: async (values) => {
-        const calories = Number(values.calories || 0);
-        const protein_g = Number(values.protein_g || 0);
-        await api.portal.addFoodEntry({
-          meal_type: mealType,
-          food_name: values.food_name,
-          calories,
-          protein_g,
-          carbs_g: Number(values.carbs_g || 0),
-          fats_g: Number(values.fats_g || 0),
-          fiber_g: Number(values.fiber_g || 0),
-          sugar_g: Number(values.sugar_g || 0),
-          log_date: logDate,
-        });
-        closeModal();
-        toast('Logged');
-        sound.playFoodLogged();
-        await onAdded({ calories, protein_g });
-      },
-    },
-  );
-
-  /* Scan: camera or typed digits → the library food, or "add it" */
   const cameraIssue = cameraProblem();
   const scanVideo = h('video', { class: 'portal-scan-video', playsinline: '', muted: '', 'aria-label': 'Camera view' });
   const scanStage = h(
@@ -2062,7 +2607,7 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded, startOn = 'sear
         : err?.message || 'Could not start the camera — type the digits below instead.';
       return;
     }
-    // The member may have switched tabs or closed the sheet while the
+    // The member may have left the scanner or closed the sheet while the
     // camera was starting; it must not keep running behind their back.
     if (scanPane.classList.contains('hidden') || !scanVideo.isConnected) {
       stopScan();
@@ -2073,12 +2618,10 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded, startOn = 'sear
   }
   scanAgain.addEventListener('click', startScan);
 
-  /** Shows a found food on the Search pane, ready to log. */
+  /** A found food, opened ready to log. */
   function showFood(food) {
     if (!foods.some((f) => f.id === food.id)) foods = [food, ...foods];
-    showPane(libraryPane);
-    selectFood(food);
-    detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    openDetail(food, 'scan');
   }
 
   async function lookupBarcode(code) {
@@ -2181,7 +2724,13 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded, startOn = 'sear
 
   scanPane = h(
     'div',
-    { class: 'portal-scan-pane hidden' },
+    { class: 'qt-pane portal-scan-pane hidden' },
+    h(
+      'div',
+      { class: 'qt-subhead' },
+      h('button', { class: 'qt-back', type: 'button', 'aria-label': 'Back', onclick: () => show('list') }, renderIcon('arrowLeft', { size: 19 })),
+      h('span', { class: 'qt-subhead-title' }, 'Scan barcode'),
+    ),
     cameraIssue ? h('div', { class: 'portal-scan-status' }, cameraIssue) : scanStage,
     cameraIssue ? null : scanStatus,
     scanAgain,
@@ -2195,49 +2744,158 @@ function openFoodSearch({ mealType, mealLabel, logDate, onAdded, startOn = 'sear
     scanResult,
   );
 
-  const libraryPane = h('div', {}, search, results, detail);
-  const customPane = h('div', { class: 'hidden' }, customForm);
-  const panes = [
-    ['Search', libraryPane],
-    ['Scan', scanPane],
-    ['Custom', customPane],
-  ];
-  const switcher = h('div', { class: 'portal-sheet-switch' });
+  /* ── Views, and the running tally ── */
 
-  function showPane(pane) {
-    for (const [, p] of panes) p.classList.toggle('hidden', p !== pane);
-    panes.forEach(([, p], index) => switcher.children[index].classList.toggle('active', p === pane));
-    if (pane === scanPane) startScan();
-    else stopScan();
+  const panes = { list: listPane, detail: detailPane, scan: scanPane, custom: customPane };
+  let currentView = 'list';
+  function show(view) {
+    currentView = view;
+    for (const [key, pane] of Object.entries(panes)) pane.classList.toggle('hidden', key !== view);
+    paintTrackedBar();
+    if (view !== 'detail') onMealChange = null;
+    if (view === 'list') paintList();
+    if (view === 'custom') paintCustom();
+    if (view === 'scan') {
+      clear(scanResult);
+      digits.value = '';
+      startScan();
+    } else {
+      stopScan();
+    }
+    sheet.closest('.modal-backdrop')?.scrollTo?.({ top: 0 });
   }
 
-  switcher.append(
-    ...panes.map(([label, pane], index) =>
+  const trackedBar = h('div', { class: 'qt-tracked hidden', role: 'status' });
+  /** Takes one of this visit's entries back out of the log. */
+  async function untrack(item, button) {
+    button.disabled = true;
+    try {
+      await api.portal.deleteFoodEntry(item.id);
+      tracked.items = tracked.items.filter((other) => other !== item);
+      sound.playFoodRemoved();
+      if (!tracked.items.length) tracked.open = false;
+      paintTrackedBar();
+    } catch (err) {
+      toast(err.message || 'Could not remove that', 'error');
+      button.disabled = false;
+    }
+  }
+
+  /** The tally and its Done button, on the list only — the other views have
+   * their own button in the same spot. Tapping the tally opens what this
+   * visit added, each with a remove button. */
+  function paintTrackedBar() {
+    const { items } = tracked;
+    trackedBar.classList.toggle('hidden', !items.length || currentView !== 'list');
+    trackedBar.classList.toggle('open', tracked.open);
+    if (!items.length) return;
+    const last = items[items.length - 1];
+    const count = `${items.length} ${items.length === 1 ? 'item' : 'items'} · ${trackedTotal('calories')} kcal`;
+
+    clear(trackedBar).append(
+      ...(tracked.open
+        ? [
+            h(
+              'div',
+              { class: 'qt-tracked-list' },
+              h('div', { class: 'qt-tracked-head' }, 'Added this visit'),
+              ...[...items].reverse().map((item) => {
+                const remove = h(
+                  'button',
+                  {
+                    class: 'qt-tracked-remove',
+                    type: 'button',
+                    'aria-label': `Remove ${item.name} from ${item.meal}`,
+                    title: 'Remove',
+                    onclick: (event) => untrack(item, event.currentTarget),
+                  },
+                  renderIcon('trash', { size: 16 }),
+                );
+                return h(
+                  'div',
+                  { class: 'qt-tracked-row' },
+                  h(
+                    'span',
+                    { class: 'qt-tracked-row-text' },
+                    h('strong', {}, item.name),
+                    h('small', {}, `${item.meal} · ${item.portion} · ${item.calories} kcal`),
+                  ),
+                  remove,
+                );
+              }),
+            ),
+          ]
+        : []),
       h(
-        'button',
-        { class: `portal-sheet-tab${index === 0 ? ' active' : ''}`, type: 'button', onclick: () => showPane(pane) },
-        label === 'Scan' ? [renderIcon('scan', { size: 14 }), ' Scan'] : label,
+        'div',
+        { class: 'qt-tracked-main' },
+        h(
+          'button',
+          {
+            class: 'qt-tracked-toggle',
+            type: 'button',
+            'aria-expanded': String(tracked.open),
+            onclick: () => {
+              tracked.open = !tracked.open;
+              paintTrackedBar();
+            },
+          },
+          h('span', { class: 'qt-tracked-ico' }, renderIcon('check', { size: 15, stroke: 2.8 })),
+          h(
+            'span',
+            { class: 'qt-tracked-text' },
+            h('strong', {}, tracked.open ? 'Review or remove' : `${last.name} added to ${last.meal}`),
+            h('small', {}, count),
+          ),
+          renderIcon(tracked.open ? 'chevronDown' : 'chevronUp', { size: 18 }),
+        ),
+        h('button', { class: 'btn primary', type: 'button', onclick: closeModal }, 'Done'),
       ),
-    ),
-  );
+    );
+  }
+
+  const sheet = h('div', { class: 'qt-sheet' }, mealRow, listPane, detailPane, scanPane, customPane, trackedBar);
 
   openModal({
-    title: `Add to ${mealLabel}`,
-    body: h('div', { class: 'portal-food-sheet' }, switcher, libraryPane, scanPane, customPane),
-    onClose: stopScan,
+    title: 'Track food',
+    subtitle: logDate === today() ? 'Today' : longDate(logDate),
+    className: 'qt-modal',
+    body: sheet,
+    onClose: () => {
+      stopScan();
+      clearTimeout(searchTimer);
+      if (tracked.changed) onAdded({ calories: trackedTotal('calories'), protein_g: trackedTotal('protein_g') });
+    },
   });
-  if (startOn === 'scan') showPane(scanPane);
+  // openModal focuses the first input; on a phone that is the keyboard
+  // sliding up over the recents the sheet opened to show.
+  if (window.matchMedia?.('(pointer: coarse)').matches) searchInput.blur();
+  // An evening snack or a post-workout meal sits past the phone's edge;
+  // centre whichever the clock chose so the member sees where it will go.
+  requestAnimationFrame(() => {
+    const chip = mealRow.querySelector('.qt-meal.active');
+    if (!chip) return;
+    const row = mealRow.getBoundingClientRect();
+    const box = chip.getBoundingClientRect();
+    mealRow.scrollLeft += box.left - row.left - (row.width - box.width) / 2;
+  });
+
+  if (startOn === 'scan') show('scan');
+  else paintList();
 
   api.portal
     .foods()
     .then((res) => {
       foods = res.items;
       recent = res.recent ?? [];
-      paintResults();
-      search.focus();
+      favorites = res.favorites ?? [];
+      loaded = true;
+      // Nothing tracked yet: open on the library instead of an empty tab.
+      if (!recent.length) tab = favorites.length ? 'favorites' : 'all';
+      paintList();
     })
     .catch((err) => {
-      clear(results).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load the food library'));
+      clear(listBody).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load the food library'));
     });
 }
 
@@ -2494,10 +3152,77 @@ async function openNutritionSettings({ onSaved } = {}) {
     step: 0.1,
     placeholder: 'Optional',
   });
-  const totalInches = profile.height_cm ? profile.height_cm / 2.54 : null;
-  const heightCm = numberInput(profile.height_cm ?? '', { step: 0.5, placeholder: 'cm' });
-  const heightFt = numberInput(totalInches ? Math.floor(totalInches / 12) : '', { placeholder: 'ft' });
-  const heightIn = numberInput(totalInches ? Math.round(totalInches % 12) : '', { placeholder: 'in' });
+  // Height: centimetres or feet + inches, switchable in place. Switching
+  // converts whatever is typed, so nothing has to be re-entered.
+  let heightMode = heightUnit.get();
+  const startFtIn = profile.height_cm ? cmToFeetInches(profile.height_cm) : null;
+  const heightCm = numberInput(profile.height_cm ?? '', { step: 0.5, placeholder: 'e.g. 175' });
+  const heightFt = numberInput(startFtIn?.ft ?? '', { min: 3, placeholder: 'e.g. 5' });
+  const heightIn = numberInput(startFtIn?.inch ?? '', { min: 0, placeholder: 'e.g. 9' });
+  heightFt.max = 8;
+  heightIn.max = 11;
+  const suffixed = (input, unit) => h('div', { class: 'portal-nutri-suffix' }, input, h('b', {}, unit));
+  const heightInputs = h('div', {});
+  // Inches are coarser than centimetres, so 182 cm shown as 6 ft 0 in would
+  // come back as 183. Each side converts only when it was actually edited;
+  // otherwise the other side's exact value stands.
+  let feetEdited = false;
+  let cmEdited = false;
+  heightFt.addEventListener('input', () => (feetEdited = true));
+  heightIn.addEventListener('input', () => (feetEdited = true));
+  heightCm.addEventListener('input', () => (cmEdited = true));
+  const feetToCm = () => ((Number(heightFt.value) || 0) * 12 + (Number(heightIn.value) || 0)) * 2.54;
+  const readHeightCm = () =>
+    heightMode === 'ft' && (feetEdited || !heightCm.value) ? feetToCm() : Number(heightCm.value) || 0;
+  const paintHeight = () => {
+    clear(heightInputs).append(
+      heightMode === 'ft'
+        ? h('div', { class: 'portal-nutri-pair' }, suffixed(heightFt, 'ft'), suffixed(heightIn, 'in'))
+        : suffixed(heightCm, 'cm'),
+    );
+  };
+  const heightToggle = h('div', { class: 'portal-unit-toggle', role: 'group', 'aria-label': 'Height unit' });
+  const paintHeightToggle = () => {
+    clear(heightToggle).append(
+      ...[
+        ['cm', 'cm'],
+        ['ft', 'ft · in'],
+      ].map(([unit, label]) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            class: unit === heightMode ? 'active' : '',
+            'aria-pressed': unit === heightMode ? 'true' : 'false',
+            onclick: () => {
+              if (unit === heightMode) return;
+              if (unit === 'ft' && (cmEdited || !heightFt.value) && Number(heightCm.value)) {
+                const { ft, inch } = cmToFeetInches(Number(heightCm.value));
+                heightFt.value = ft;
+                heightIn.value = inch;
+              }
+              if (unit === 'cm' && feetEdited) heightCm.value = Math.round(feetToCm());
+              feetEdited = false;
+              cmEdited = false;
+              heightMode = unit;
+              heightUnit.set(unit);
+              paintHeightToggle();
+              paintHeight();
+            },
+          },
+          label,
+        ),
+      ),
+    );
+  };
+  paintHeightToggle();
+  paintHeight();
+  const heightField = h(
+    'div',
+    { class: 'portal-nutri-field' },
+    h('div', { class: 'portal-nutri-field-head' }, h('span', {}, 'Height'), heightToggle),
+    heightInputs,
+  );
   const sexSelect = h(
     'select',
     { class: 'portal-input' },
@@ -2508,7 +3233,18 @@ async function openNutritionSettings({ onSaved } = {}) {
       ['other', 'Prefer not to say'],
     ].map(([value, label]) => h('option', { value, selected: profile.sex === value }, label)),
   );
-  const birthIn = dateField({ value: profile.birth_date ?? '', class: 'portal-date' });
+  // Ages 13 to 100, the same bounds the server checks. An empty field's
+  // calendar opens on the year grid around 25 years ago: three taps to a
+  // birthday instead of scrolling back through hundreds of months.
+  const yearsAgo = (n) => `${Number(today().slice(0, 4)) - n}${today().slice(4)}`;
+  const birthIn = dateField({
+    value: profile.birth_date ?? '',
+    class: 'portal-date',
+    min: yearsAgo(100),
+    max: yearsAgo(13),
+    startView: 'years',
+    defaultDate: yearsAgo(25),
+  });
   const activitySelect = h(
     'select',
     { class: 'portal-input' },
@@ -2547,9 +3283,7 @@ async function openNutritionSettings({ onSaved } = {}) {
     };
     if (weightIn.value) out.weight_kg = toKg(Number(weightIn.value));
     if (goalWeightIn.value) out.goal_weight_kg = toKg(Number(goalWeightIn.value));
-    const cm = lb
-      ? ((Number(heightFt.value) || 0) * 12 + (Number(heightIn.value) || 0)) * 2.54
-      : Number(heightCm.value);
+    const cm = readHeightCm();
     if (cm) out.height_cm = Math.round(cm * 10) / 10;
     if (sexSelect.value) out.sex = sexSelect.value;
     if (birthIn.value) out.birth_date = birthIn.value;
@@ -2724,9 +3458,7 @@ async function openNutritionSettings({ onSaved } = {}) {
           'div',
           { class: 'portal-nutri-grid' },
           nutriField(`Weight (${lb ? 'lb' : 'kg'})`, weightIn),
-          lb
-            ? nutriField('Height', h('div', { class: 'portal-nutri-pair' }, heightFt, heightIn))
-            : nutriField('Height (cm)', heightCm),
+          heightField,
           nutriField('Sex', sexSelect, 'For the BMR formula'),
           nutriField('Date of birth', birthIn),
         ),
@@ -3140,7 +3872,7 @@ async function openActivitySheet({ logDate, onAdded }) {
 function openWeightSheet({ latest, onSaved }) {
   const unit = weightUnit.get();
   const input = numberInput(latest ? toDisplayWeight(latest.weight_kg) : '', { step: 0.1, placeholder: unit });
-  const dateIn = dateField({ value: today(), class: 'portal-date' });
+  const dateIn = dateField({ value: today(), class: 'portal-date', max: today() });
   const saveBtn = h('button', { class: 'btn primary block', type: 'button' }, 'Save weigh-in');
   saveBtn.addEventListener('click', async () => {
     const value = Number(input.value);
@@ -3189,23 +3921,140 @@ function openWeightSheet({ latest, onSaved }) {
  * the topbar QR button and Home's quick actions / Profile hub rather than
  * from a bottom slot, so a gym with Workout and Diet on top of the base set
  * never has to squeeze seven labels into a thumb-width strip.
+ *
+ * A gym's Schedule is not a bottom slot either: Home already carries today's
+ * classes with "View all" and a Book Class quick action, so the slot goes to
+ * the Store (a coming-soon screen for now). TAB_HOME_OF maps such off-bar
+ * screens to the tab that should stay lit while one is showing.
  */
 function buildTabs() {
   if (isLibrary()) {
     return [
-      { key: 'home', label: 'Home', icon: 'dashboard' },
+      { key: 'home', label: 'Home', icon: 'home' },
       { key: 'pass', label: 'Pass', icon: 'idCard' },
-      { key: 'schedule', label: 'Shift', icon: 'seats' },
-      { key: 'profile', label: 'Profile', icon: 'member' },
+      { key: 'schedule', label: 'Shift', icon: 'seat' },
+      { key: 'profile', label: 'Profile', icon: 'person' },
     ];
   }
   return [
     { key: 'home', label: 'Home', icon: 'home' },
-    { key: 'workout', label: 'Workout', icon: 'weight' },
-    { key: 'diet', label: 'Diet', icon: 'apple' },
-    { key: 'schedule', label: 'Schedule', icon: 'classes' },
-    { key: 'profile', label: 'Profile', icon: 'member' },
+    { key: 'workout', label: 'Workout', icon: 'dumbbell' },
+    { key: 'diet', label: 'Diet', icon: 'leaf' },
+    { key: 'store', label: 'Store', icon: 'bag', badge: 'Soon' },
+    { key: 'profile', label: 'Profile', icon: 'person' },
   ];
+}
+
+const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile' };
+
+/**
+ * The tab bar's own icons, apart from the app-wide set in ui.js because each
+ * is drawn twice: `line` is the idle outline, and the active state is a solid,
+ * brand-gradient version built from `body` (filled), `stroke` (gradient
+ * strokes) and `cut` (white detail on top of the fill, like the bag's smile).
+ * Both layers sit in one <svg> so the tab can cross-fade between them.
+ */
+const NAV_ICONS = {
+  home: {
+    line: ['M4 10.2 12 3.6l8 6.6V19a2 2 0 0 1-2 2h-3.5v-4.5a2.5 2.5 0 0 0-5 0V21H6a2 2 0 0 1-2-2z'],
+    body: ['M4 10.2 12 3.6l8 6.6V19a2 2 0 0 1-2 2h-3.5v-4.5a2.5 2.5 0 0 0-5 0V21H6a2 2 0 0 1-2-2z'],
+  },
+  dumbbell: {
+    thick: true,
+    line: ['M2.8 9.8v4.4', 'M7.2 6.2v11.6', { tag: 'path', d: 'M7.2 12h9.6', 'stroke-width': 2.2 }, 'M16.8 6.2v11.6', 'M21.2 9.8v4.4'],
+    stroke: ['M2.8 9.8v4.4', 'M7.2 6.2v11.6', { tag: 'path', d: 'M7.2 12h9.6', 'stroke-width': 2.2 }, 'M16.8 6.2v11.6', 'M21.2 9.8v4.4'],
+  },
+  leaf: {
+    line: [
+      'M12.2 18.4C11.2 12 14.6 6.3 21 5.3c.4 7.1-3.5 12.3-8.8 13.1z',
+      'M10.2 17.6C6.3 17.3 3.6 14.3 3.1 10.6c3.4-.2 6.3 1.9 7.4 5.2',
+      'M11.4 21.4c.1-4.8 2.3-9.2 5.8-12.2',
+    ],
+    body: ['M12.2 18.4C11.2 12 14.6 6.3 21 5.3c.4 7.1-3.5 12.3-8.8 13.1z', 'M10.2 17.6C6.3 17.3 3.6 14.3 3.1 10.6c3.4-.2 6.3 1.9 7.4 5.2z'],
+    stroke: ['M11.4 21.4c.1-2 .5-3.9 1.2-5.6'],
+    cut: ['M12.9 15.4c1-2.4 2.4-4.4 4.3-6.2'],
+  },
+  bag: {
+    line: [
+      'M5.6 8h12.8a1.5 1.5 0 0 1 1.5 1.4l.8 9.9a2.5 2.5 0 0 1-2.5 2.7H5.8a2.5 2.5 0 0 1-2.5-2.7l.8-9.9A1.5 1.5 0 0 1 5.6 8z',
+      'M8.5 8V6.8a3.5 3.5 0 0 1 7 0V8',
+      'M9 12.5a3 3 0 0 0 6 0',
+    ],
+    body: ['M5.6 8h12.8a1.5 1.5 0 0 1 1.5 1.4l.8 9.9a2.5 2.5 0 0 1-2.5 2.7H5.8a2.5 2.5 0 0 1-2.5-2.7l.8-9.9A1.5 1.5 0 0 1 5.6 8z'],
+    stroke: ['M8.5 8V6.8a3.5 3.5 0 0 1 7 0V8'],
+    cut: ['M9 12.5a3 3 0 0 0 6 0'],
+  },
+  person: {
+    line: [{ tag: 'circle', cx: 12, cy: 7.5, r: 4 }, 'M4.5 20.5a7.5 7.5 0 0 1 15 0'],
+    body: [{ tag: 'circle', cx: 12, cy: 7.5, r: 4 }, 'M4.5 20.5a7.5 7.5 0 0 1 15 0z'],
+  },
+  idCard: {
+    line: [
+      { tag: 'rect', x: 3, y: 4.5, width: 18, height: 15, rx: 3 },
+      { tag: 'circle', cx: 9, cy: 10.6, r: 2.1 },
+      'M5.9 16.2a3.3 3.3 0 0 1 6.2 0',
+      'M14.5 10h3.5',
+      'M14.5 13.5h2.5',
+    ],
+    body: [{ tag: 'rect', x: 3, y: 4.5, width: 18, height: 15, rx: 3 }],
+    cut: [{ tag: 'circle', cx: 9, cy: 10.6, r: 2.1 }, 'M5.9 16.2a3.3 3.3 0 0 1 6.2 0', 'M14.5 10h3.5', 'M14.5 13.5h2.5'],
+  },
+  seat: {
+    line: [
+      'M18.5 9V6a2 2 0 0 0-2-2h-9a2 2 0 0 0-2 2v3',
+      'M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z',
+      'M5.5 18v2.5',
+      'M18.5 18v2.5',
+    ],
+    body: [
+      'M18.5 9V6a2 2 0 0 0-2-2h-9a2 2 0 0 0-2 2v3z',
+      'M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z',
+    ],
+    stroke: ['M5.5 18v2.5', 'M18.5 18v2.5'],
+  },
+};
+
+function navIcon(name, key) {
+  const def = NAV_ICONS[name];
+  // userSpaceOnUse, not the default bounding box: a straight line (the
+  // dumbbell's bar) has a zero-height box and would not paint at all.
+  const gradId = `pnav-grad-${key}`;
+  const paint = `url(#${gradId})`;
+  const shape = (spec, attrs) =>
+    typeof spec === 'string' ? svg('path', { d: spec, ...attrs }) : svg(spec.tag, { ...spec, tag: undefined, ...attrs });
+  return svg(
+    'svg',
+    {
+      class: 'pnav-svg',
+      viewBox: '0 0 24 24',
+      width: 28,
+      height: 28,
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': def.thick ? 3.2 : 2,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true',
+    },
+    svg(
+      'defs',
+      {},
+      svg(
+        'linearGradient',
+        { id: gradId, gradientUnits: 'userSpaceOnUse', x1: 6, y1: 2, x2: 18, y2: 22 },
+        svg('stop', { class: 'pnav-stop-a', offset: '0' }),
+        svg('stop', { class: 'pnav-stop-b', offset: '1' }),
+      ),
+    ),
+    svg('g', { class: 'pnav-line' }, (def.line ?? []).map((s) => shape(s))),
+    svg(
+      'g',
+      { class: 'pnav-fill' },
+      (def.body ?? []).map((s) => shape(s, { fill: paint, stroke: paint })),
+      (def.stroke ?? []).map((s) => shape(s, { stroke: paint })),
+      (def.cut ?? []).map((s) => shape(s, { stroke: '#fff', 'stroke-width': 1.9 })),
+    ),
+  );
 }
 
 function renderPortalApp(ctx, initialMe) {
@@ -3243,17 +4092,54 @@ function renderPortalApp(ctx, initialMe) {
   const TOPBAR_SUBTITLES = { workout: 'Workout tracking', diet: 'Diet tracking' };
   const topbarSub = h('div', { class: 'portal-topbar-sub' });
 
-  function paintTabbar() {
-    clear(tabbar).append(
-      ...TABS.map((tabDef) =>
-        h(
-          'button',
-          { class: `portal-tab${active === tabDef.key ? ' active' : ''}`, type: 'button', onclick: () => switchTab(tabDef.key) },
-          renderIcon(tabDef.icon, { size: 22 }),
-          h('span', {}, tabDef.label),
-        ),
+  /**
+   * Tapping a tab: a press-in squeeze, a ripple out of the pill, a haptic
+   * tick, then the pill springs open and the filled icon pops in. Tapping the
+   * tab already open goes back to its top (or out of a pushed screen) instead
+   * of reloading it, the way native apps behave.
+   */
+  function onTabTap(tabDef, button) {
+    sound.tapHaptic();
+    const pill = button.querySelector('.portal-tab-icon');
+    const ripple = h('span', { class: 'portal-tab-ripple' });
+    ripple.addEventListener('animationend', () => ripple.remove());
+    pill.append(ripple);
+    if (tabDef.key === active && !screenOpen) {
+      content.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    switchTab(tabDef.key);
+  }
+
+  // Built once and then only re-classed, so the CSS transitions between the
+  // idle and active states actually play instead of being swapped for new
+  // nodes mid-animation.
+  const tabButtons = TABS.map((tabDef) => {
+    const button = h(
+      'button',
+      { class: 'portal-tab', type: 'button', 'aria-label': tabDef.label },
+      h(
+        'span',
+        { class: 'portal-tab-icon' },
+        navIcon(tabDef.icon, tabDef.key),
+        tabDef.badge ? h('span', { class: 'portal-tab-badge' }, tabDef.badge) : null,
       ),
+      h('span', { class: 'portal-tab-label' }, tabDef.label),
     );
+    button.addEventListener('click', () => onTabTap(tabDef, button));
+    return button;
+  });
+  tabbar.append(...tabButtons);
+
+  function paintTabbar() {
+    const lit = TABS.some((tabDef) => tabDef.key === active) ? active : TAB_HOME_OF[active];
+    TABS.forEach((tabDef, i) => {
+      const isActive = lit === tabDef.key;
+      tabButtons[i].classList.toggle('active', isActive);
+      if (isActive) tabButtons[i].setAttribute('aria-current', 'page');
+      else tabButtons[i].removeAttribute('aria-current');
+    });
   }
 
   /**
@@ -3302,6 +4188,7 @@ function renderPortalApp(ctx, initialMe) {
       ),
       h('div', { class: 'portal-screen-title' }, h('h2', {}, title), subtitle ? h('p', {}, subtitle) : null),
     );
+    content.classList.remove('is-refresh');
     clear(content).append(h('div', { class: 'portal-tab-body portal-screen' }, head, h('div', { class: 'portal-loading' }, 'Loading…')));
     content.scrollTop = 0;
     try {
@@ -3339,6 +4226,7 @@ function renderPortalApp(ctx, initialMe) {
     active = key;
     paintTabbar();
     topbarSub.textContent = TOPBAR_SUBTITLES[key] ?? '';
+    content.classList.remove('is-refresh');
     clear(content).append(h('div', { class: 'portal-loading' }, 'Loading…'));
     try {
       const node = await TAB_RENDERERS[key]();
@@ -3353,6 +4241,24 @@ function renderPortalApp(ctx, initialMe) {
           h('button', { class: 'btn', type: 'button', onclick: () => switchTab(key) }, 'Try again'),
         ),
       );
+    }
+  }
+
+  /** Re-renders the open tab in place after an edit made on it: the old view
+   * stays up while the new one loads and the scroll position is kept, so a
+   * water tap or a removed food doesn't flash "Loading…" and jump to the top.
+   * A pushed screen shares `content`, so that case takes the full switch. */
+  async function refreshTab(key) {
+    if (screenOpen || active !== key) return switchTab(key);
+    const scroll = content.scrollTop;
+    try {
+      const node = await TAB_RENDERERS[key]();
+      if (screenOpen || active !== key) return; // The member moved on meanwhile.
+      content.classList.add('is-refresh'); // Same page, so skip the fade-in.
+      clear(content).append(node);
+      content.scrollTop = scroll;
+    } catch (err) {
+      toast(err.message || 'Could not refresh this page', 'error');
     }
   }
 
@@ -3817,6 +4723,39 @@ function renderPortalApp(ctx, initialMe) {
       h('div', { class: 'portal-sched-week' }, prevBtn, strip, nextBtn),
       h('div', { class: 'portal-sched-dayhead' }, dayTitle, viewBtn),
       listWrap,
+    );
+  }
+
+  /* ------------------------------------------------------------- Store tab */
+
+  /** Holds the Store's slot until the shop itself ships: what is coming, and
+   * nothing that can be tapped into a dead end. */
+  function renderStoreTab() {
+    const teaser = (icon, tone, title, sub) =>
+      h(
+        'div',
+        { class: `portal-store-item tone-${tone}` },
+        h('span', { class: 'portal-store-item-icon' }, renderIcon(icon, { size: 20 })),
+        h('div', {}, h('strong', {}, title), h('span', {}, sub)),
+      );
+    return h(
+      'div',
+      { class: 'portal-tab-body portal-store' },
+      h(
+        'div',
+        { class: 'portal-store-hero' },
+        h('span', { class: 'portal-store-hero-icon' }, renderIcon('store', { size: 34 })),
+        h('span', { class: 'portal-store-chip' }, 'Coming soon'),
+        h('h2', {}, 'The gym store is on its way'),
+        h('p', {}, 'Soon you can shop supplements, gear and merchandise from your gym — right here in the app.'),
+      ),
+      h(
+        'div',
+        { class: 'portal-store-list' },
+        teaser('zap', 'orange', 'Supplements', 'Protein, pre-workout and more'),
+        teaser('bag', 'purple', 'Gear & apparel', 'Gym wear, shakers and accessories'),
+        teaser('cart', 'green', 'Pick up at the desk', 'Order in the app, collect at your gym'),
+      ),
     );
   }
 
@@ -5616,7 +6555,7 @@ function renderPortalApp(ctx, initialMe) {
         if (crossedCalories || crossedProtein) sound.playTargetReached();
       }
       dietDate = logDate;
-      await switchTab('diet');
+      await refreshTab('diet');
     };
 
     const body = h('div', { class: 'portal-tab-body portal-diet' });
@@ -6062,43 +7001,68 @@ function renderPortalApp(ctx, initialMe) {
                 : null,
               !planned.length ? loggedBox : null,
               !planned.length && !entries.length
-                ? h('div', { class: 'portal-trainer-box empty' }, 'Nothing logged yet.', h('br'), 'Tap Add food to start.')
+                ? h('div', { class: 'portal-trainer-box empty' }, 'Nothing logged yet.', h('br'), 'Tap + to track food.')
                 : null,
             ),
           ),
           planned.length ? loggedBox : null,
-          h(
-            'div',
-            { class: 'portal-add-row' },
-            h(
-              'button',
-              {
-                class: 'portal-add-food',
-                type: 'button',
-                onclick: () =>
-                  openFoodSearch({ mealType: slot.key, mealLabel: slot.label, logDate, onAdded: reload }),
-              },
-              h('span', { class: 'portal-add-ico' }, renderIcon('plus', { size: 13, stroke: 2.4 })),
-              'Add food',
-            ),
-            h(
-              'button',
-              {
-                class: 'portal-add-food portal-add-scan',
-                type: 'button',
-                'aria-label': `Scan a barcode for ${slot.label}`,
-                title: 'Scan a barcode',
-                onclick: () =>
-                  openFoodSearch({ mealType: slot.key, mealLabel: slot.label, logDate, onAdded: reload, startOn: 'scan' }),
-              },
-              renderIcon('scan', { size: 19 }),
-            ),
-          ),
         ),
       );
     }
 
-    return body;
+    // A sibling of the tab body rather than inside it: the body's entry
+    // animation transforms it, and a transformed ancestor would pin the
+    // fixed-position button to the body instead of the screen.
+    return h('div', { class: 'portal-diet-wrap' }, body, dietFab({ logDate, onAdded: reload }));
+  }
+
+  /**
+   * The Diet tab's floating + : every way food goes in starts here, on the
+   * meal the clock suggests. Quick track is the slot a typed or spoken "what
+   * did you eat" will live in once that exists.
+   */
+  function dietFab({ logDate, onAdded }) {
+    const fab = h(
+      'button',
+      { class: 'diet-fab', type: 'button', 'aria-label': 'Track food', 'aria-expanded': 'false', 'aria-haspopup': 'menu' },
+      renderIcon('plus', { size: 26, stroke: 2.4 }),
+    );
+    const onKey = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    const item = (icon, title, note, onclick) =>
+      h(
+        'button',
+        {
+          class: 'diet-fab-item',
+          type: 'button',
+          role: 'menuitem',
+          onclick: () => {
+            setOpen(false);
+            onclick();
+          },
+        },
+        h('span', { class: 'diet-fab-ico' }, renderIcon(icon, { size: 20, stroke: 2 })),
+        h('span', { class: 'diet-fab-text' }, h('strong', {}, title), h('small', {}, note)),
+      );
+    const menu = h(
+      'div',
+      { class: 'diet-fab-menu', role: 'menu', 'aria-label': 'Track food' },
+      item('search', 'Quick track', 'Search, recents & favourites', () => openFoodSearch({ logDate, onAdded })),
+      item('scan', 'Scan barcode', 'Packaged food from its label', () => openFoodSearch({ logDate, onAdded, startOn: 'scan' })),
+    );
+    const layer = h('div', { class: 'diet-fab-layer', onclick: (event) => event.target === layer && setOpen(false) }, menu);
+
+    function setOpen(open) {
+      layer.classList.toggle('open', open);
+      fab.classList.toggle('open', open);
+      fab.setAttribute('aria-expanded', String(open));
+      if (open) document.addEventListener('keydown', onKey);
+      else document.removeEventListener('keydown', onKey);
+    }
+    fab.addEventListener('click', () => setOpen(!fab.classList.contains('open')));
+
+    return h('div', {}, layer, fab);
   }
 
   /* --------------------------------------------------------- Notifications */
@@ -6211,7 +7175,7 @@ function renderPortalApp(ctx, initialMe) {
       return;
     }
 
-    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay']);
+    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
     clear(list).append(
       ...items.map((item) => {
         const style = NOTIFICATION_STYLE[item.category] ?? NOTIFICATION_STYLE.announcement;
@@ -6829,6 +7793,7 @@ function renderPortalApp(ctx, initialMe) {
     workout: renderWorkoutTab,
     diet: renderDietTab,
     pay: renderPayTab,
+    store: renderStoreTab,
     profile: renderProfileTab,
   };
 
@@ -6873,7 +7838,7 @@ function renderPortalApp(ctx, initialMe) {
   // reload would otherwise reopen the notification's screen forever after.
   const requested = window.location.hash.replace(/^#\/portal\/?/, '').split(/[/?]/)[0];
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
-  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay']);
+  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
   switchTab(reachable.has(requested) ? requested : 'home');
   if (requested === 'notifications') openNotificationCenter();
 
