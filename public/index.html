@@ -31,8 +31,12 @@
   <body>
     <script>
       // Set before first paint so the boot sequence (which awaits network
-      // calls before setVertical() runs) never flashes the wrong mode.
-      document.body.dataset.mode = localStorage.getItem('app_mode') === 'light' ? 'light' : 'dark';
+      // calls before setVertical() runs) never flashes the wrong mode. The
+      // member app defaults to light, the staff app to dark (see vertical.js).
+      var memberApp = location.hash.indexOf('#/portal') === 0;
+      var savedMode = localStorage.getItem(memberApp ? 'member_app_mode' : 'app_mode');
+      document.body.dataset.mode =
+        savedMode === 'light' || savedMode === 'dark' ? savedMode : memberApp ? 'light' : 'dark';
     </script>
     <div id="app" class="app-loading">Loading…</div>
     <div id="toasts" class="toasts"></div>

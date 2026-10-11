@@ -88,6 +88,17 @@ export function getWhatsAppStatus(slug = currentSlug()) {
   return publicStatus(sessionFor(slug));
 }
 
+/** WHATSAPP_TRANSPORT=memory: sends land in `sentInMemory` instead of going
+ * out, and the gym counts as linked. Read per call, so a test can switch it
+ * on for just the cases that need a working WhatsApp. */
+const memoryMode = () => process.env.WHATSAPP_TRANSPORT === 'memory';
+export const sentInMemory = [];
+
+/** Whether a send right now has a linked WhatsApp to go out from. */
+export function whatsappReady(slug = currentSlug()) {
+  return memoryMode() || sessionFor(slug).state === 'CONNECTED';
+}
+
 /** Detaches listeners and closes the websocket without triggering the
  * reconnect path — used before replacing a socket and on logout. */
 function teardown(session) {
@@ -302,8 +313,11 @@ function logDelivery(store, row) {
  * Sends are queued per gym and spaced by MESSAGE_GAP_MS. Callers get a promise
  * that settles when their own message has actually gone out, so a failure is
  * still reportable even though the send may have waited behind others.
+ *
+ * `logMessage` replaces the text written to the delivery log, for a message
+ * carrying something the log must not keep (a temporary password).
  */
-export async function sendWhatsAppMessage({ phone, message, document = null, image = null, type = 'custom', memberId = null, slug = currentSlug() }) {
+export async function sendWhatsAppMessage({ phone, message, logMessage = message, document = null, image = null, type = 'custom', memberId = null, slug = currentSlug() }) {
   const session = sessionFor(slug);
   // Captured now, while we are still inside the caller's request context.
   const store = tenantStorage.getStore();
@@ -313,13 +327,18 @@ export async function sendWhatsAppMessage({ phone, message, document = null, ima
    * here (unlinked, no number, not on WhatsApp) is something the caller can
    * fix, so it must not surface as a 500 with a stack trace. */
   const fail = (reason) => {
-    logDelivery(store, { phone: String(phone ?? ''), memberId, type, message, status: 'failed', error: reason });
+    logDelivery(store, { phone: String(phone ?? ''), memberId, type, message: logMessage, status: 'failed', error: reason });
     throw badRequest(reason);
   };
 
   if (!phone) fail('No phone number on file for this member');
   if (!jid) fail(`"${phone}" is not a valid phone number`);
   if (!message && !document && !image) fail('Message is empty');
+  if (memoryMode()) {
+    sentInMemory.push({ phone: String(phone), jid, message, type, memberId, slug });
+    logDelivery(store, { phone: String(phone), memberId, type, message: logMessage, status: 'sent', error: null });
+    return { ok: true };
+  }
   if (session.state !== 'CONNECTED' || !session.sock) {
     fail('WhatsApp is not connected. Scan the QR code on the WhatsApp page first.');
   }
@@ -361,7 +380,7 @@ export async function sendWhatsAppMessage({ phone, message, document = null, ima
       fail(err.message || 'WhatsApp rejected the message');
     }
 
-    logDelivery(store, { phone: String(phone), memberId, type, message, status: 'sent', error: null });
+    logDelivery(store, { phone: String(phone), memberId, type, message: logMessage, status: 'sent', error: null });
     return { ok: true };
   };
 

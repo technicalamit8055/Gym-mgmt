@@ -625,11 +625,9 @@ const MIGRATIONS = [
   (db) => ensureColumn(db, 'library_settings', 'auto_close_shift_visits', 'INTEGER NOT NULL DEFAULT 0'),
 
   /* ------------------------------------------------------- Member portal --- */
-  // A member's own PIN for the self-service portal, scrypt-hashed the same as
-  // a staff password (see hashPassword in auth.js). NULL means the member has
-  // never set one — the portal login route accepts the last 4 digits of their
-  // phone (or member code) as a one-time bootstrap PIN in that case, and
-  // prompts them to set a real one, which is what actually populates this.
+  // The member-app PIN, since replaced by a password: the migration that adds
+  // portal_password_hash (at the end of this list) moves any PIN across and
+  // clears this column. Kept so older databases still migrate in order.
   (db) => ensureColumn(db, 'members', 'portal_pin_hash', 'TEXT'),
   (db) => ensureColumn(db, 'members', 'last_portal_login', 'TEXT'),
 
@@ -1335,6 +1333,78 @@ const MIGRATIONS = [
       )
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_gym_product_sales_date ON gym_product_sales(sold_on)');
+  },
+  // What the member app keeps on the phone for speed — the store cart, a
+  // workout in progress, own exercises — mirrored here so signing in on
+  // another phone picks it up (see public/js/memberSync.js). `value` is the
+  // app's own JSON; a cleared value stays as 'null' so another device can tell
+  // "emptied" from "never synced".
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_app_state (
+        member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        key        TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (member_id, key)
+      )
+    `);
+  },
+  // One row per member-app sign-in: the token carries `sid`, and a token whose
+  // row is gone stops working before its own expiry. This is what the Profile's
+  // Devices screen lists and signs out (see requireMemberAuth in auth.js).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_sessions (
+        id           TEXT PRIMARY KEY,
+        member_id    INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        user_agent   TEXT,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at   TEXT NOT NULL
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions(member_id)');
+  },
+  // The sign-in that registered a phone for push, so signing that device out
+  // from another one also stops its reminders. Not a foreign key: a session
+  // that merely expires leaves the phone's reminders running, as before.
+  (db) => ensureColumn(db, 'push_subscriptions', 'session_id', 'TEXT'),
+  // Member-app passwords, replacing the 4-6 digit PIN (portal_pin_hash above)
+  // and its last-4-of-phone bootstrap. `portal_password_temp` = 1 means the
+  // member has to choose their own before going further: set when the front
+  // desk issues one, and for every PIN carried over here — a member who set a
+  // PIN can still sign in with it once, rather than being locked out.
+  (db) => {
+    ensureColumn(db, 'members', 'portal_password_hash', 'TEXT');
+    ensureColumn(db, 'members', 'portal_password_temp', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(db, 'members', 'portal_password_set_at', 'TEXT');
+    db.exec(`
+      UPDATE members
+      SET portal_password_hash = portal_pin_hash, portal_password_temp = 1, portal_pin_hash = NULL
+      WHERE portal_pin_hash IS NOT NULL AND portal_password_hash IS NULL
+    `);
+    // The "email me a code" setup: at most one live code per member, digested
+    // (see memberPasswords.js), with a wrong-guess counter.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_password_codes (
+        member_id  INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        code_hash  TEXT NOT NULL,
+        attempts   INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at TEXT NOT NULL
+      )
+    `);
+  },
+  // "Forgot password? Get it on WhatsApp": a temporary password sent from the
+  // gym's linked WhatsApp, held beside the member's real one rather than
+  // replacing it — anyone who knows a member ID can ask, so asking must not
+  // lock the real member out. Signing in with it is what swaps it in.
+  // `portal_reset_sent_at` enforces one self-service send a day.
+  (db) => {
+    ensureColumn(db, 'members', 'portal_reset_hash', 'TEXT');
+    ensureColumn(db, 'members', 'portal_reset_expires_at', 'TEXT');
+    ensureColumn(db, 'members', 'portal_reset_sent_at', 'TEXT');
   },
 ];
 

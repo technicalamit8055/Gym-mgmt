@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -220,7 +221,7 @@ before(async () => {
   adminToken = (await call('POST', '/api/auth/login', { email: 'owner@searchgym.test', password: 'ownerpass123' }, { token: null })).body.token;
   const member = (await call('POST', '/api/members', { first_name: 'Ravi', phone: '9876505555' }, { token: adminToken })).body;
   await call('POST', '/api/fitness-addons/subscribe', { member_id: member.id }, { token: adminToken });
-  memberToken = (await call('POST', '/api/portal/login', { identifier: member.code, pin: '5555' }, { token: null })).body.token;
+  memberToken = await signInMember(call, { staffToken: adminToken, memberId: member.id });
 });
 
 beforeEach(() => {

@@ -23,9 +23,10 @@ import {
   verifiedTick,
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
+import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { cropAndResizeImage } from '../photo.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
-import { createOrdersNav, orderCard, orderClosed, renderLiveStore } from './portalStore.js';
+import { createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
@@ -39,11 +40,6 @@ import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
  * routes — so the whole shell is one view that manages its own repaints.
  */
 
-/** Set right after a bootstrap-PIN login, consumed once by the Profile tab to
- * nudge the member into setting a real PIN. Module-level because the login
- * view and the app shell are two separate calls into this module with no
- * other channel between them. */
-let pendingPinPrompt = false;
 
 const gymDisplayName = (ctx) => ctx.context?.tenant?.gym_name || (isLibrary() ? 'SeatBook' : 'GymBook');
 
@@ -474,50 +470,37 @@ const EQUIPMENT_ICONS = {
   other: 'more',
 };
 
-/** Exercises the member made with the picker's Create button. Kept on this
- * device, like the recents: a member's own variation is theirs, not a row in
- * the gym's library that every trainer then sees. */
-const CUSTOM_EXERCISES_KEY = 'gymbook.portal.customExercises';
+/** Exercises the member made with the picker's Create button. Kept with the
+ * member's own account, not the gym's library: a member's own variation is
+ * theirs, not a row that every trainer then sees. */
+const syncedCustomExercises = memberSynced('custom_exercises', 'portal.customExercises', {
+  legacyKey: 'gymbook.portal.customExercises',
+});
 const customExercises = {
   read() {
-    try {
-      const list = JSON.parse(localStorage.getItem(CUSTOM_EXERCISES_KEY) || '[]');
-      return Array.isArray(list)
-        ? list.filter((e) => e && typeof e.name === 'string' && typeof e.muscle_group === 'string')
-        : [];
-    } catch {
-      return [];
-    }
+    const list = syncedCustomExercises.read();
+    return Array.isArray(list)
+      ? list.filter((e) => e && typeof e.name === 'string' && typeof e.muscle_group === 'string')
+      : [];
   },
   add(exercise) {
     const next = [exercise, ...this.read().filter((e) => e.name.toLowerCase() !== exercise.name.toLowerCase())].slice(0, 100);
-    try {
-      localStorage.setItem(CUSTOM_EXERCISES_KEY, JSON.stringify(next));
-    } catch {
-      // Storage blocked: the exercise is still added to this workout.
-    }
+    syncedCustomExercises.write(next);
   },
 };
 
-/** The exercises this member last added from the picker, newest first, kept
- * on the device like the weight unit. */
-const RECENT_EXERCISES_KEY = 'gymbook.portal.recentExercises';
+/** The exercises this member last added from the picker, newest first. */
+const syncedRecentExercises = memberSynced('recent_exercises', 'portal.recentExercises', {
+  legacyKey: 'gymbook.portal.recentExercises',
+});
 const recentExercises = {
   read() {
-    try {
-      const list = JSON.parse(localStorage.getItem(RECENT_EXERCISES_KEY) || '[]');
-      return Array.isArray(list) ? list.filter((name) => typeof name === 'string') : [];
-    } catch {
-      return [];
-    }
+    const list = syncedRecentExercises.read();
+    return Array.isArray(list) ? list.filter((name) => typeof name === 'string') : [];
   },
   add(name) {
     const next = [name, ...this.read().filter((n) => n.toLowerCase() !== name.toLowerCase())].slice(0, 10);
-    try {
-      localStorage.setItem(RECENT_EXERCISES_KEY, JSON.stringify(next));
-    } catch {
-      // Storage blocked: the picker simply shows no recents.
-    }
+    syncedRecentExercises.write(next);
   },
 };
 
@@ -1221,7 +1204,7 @@ function openSupportModal() {
         {},
         `For membership questions, payments or anything else, reach out to the ${isLibrary() ? 'hall' : 'gym'} front desk directly — they can see your account and sort it out on the spot.`,
       ),
-      h('p', { class: 'muted' }, 'You can also change your PIN from the Profile tab.'),
+      h('p', { class: 'muted' }, 'You can also change your password from the Profile tab.'),
     ),
   });
 }
@@ -1233,144 +1216,448 @@ function renderPortalLogin(ctx) {
   const logoUrl = ctx.context?.tenant?.logo_url;
   const memberWord = isLibrary() ? 'student' : 'member';
 
+  // identifier → password → app, with two side routes: setup/code (email a
+  // 6-digit code, pick a password) and choose (replace a temporary password
+  // from the front desk), plus whatsapp/sent (a temporary password sent from
+  // the gym's WhatsApp, once a day). `desk` is the dead end — "ask at the desk".
   let step = 'identifier';
   let identifier = '';
-  let pin = '';
+  let password = '';
+  let code = '';
   let busy = false;
   let error = '';
+  let setupReason = 'forgot'; // 'new' when the member never had a password
+  let whatsappReason = 'no_email'; // why email didn't work: 'no_email' | 'email_unavailable'
+  let deskReason = 'whatsapp_unavailable'; // 'no_phone' | 'whatsapp_unavailable'
+  let emailHint = '';
+  let phoneHint = '';
+  let resendAt = 0;
+  let resendTimer = null;
+  /** A temporary-password sign-in, held until the member picks their own
+   * password — not saved on the device before then, so leaving here means
+   * signing in again rather than carrying on with the desk's password. */
+  let pending = null;
 
   const card = h('div', { class: 'portal-login-card' });
 
-  function paintIdentifier() {
+  function go(next) {
+    step = next;
+    error = '';
+    busy = false;
+    password = '';
+    paint();
+  }
+
+  function paint() {
+    clearInterval(resendTimer);
     clear(card);
+    const painters = {
+      identifier: paintIdentifier,
+      password: paintPassword,
+      setup: paintSetup,
+      code: paintCode,
+      choose: paintChoose,
+      whatsapp: paintWhatsApp,
+      sent: paintSent,
+      desk: paintDesk,
+    };
+    painters[step]();
+  }
+
+  /** Runs one request with the card in its busy state; a failure lands as the
+   * card's error line. Steps that move on call go(), which clears busy. */
+  async function attempt(work) {
+    if (busy) return;
+    busy = true;
+    error = '';
+    paint();
+    try {
+      await work();
+    } catch (err) {
+      busy = false;
+      error = err.message || 'Something went wrong';
+      paint();
+    }
+  }
+
+  const fail = (message) => {
+    error = message;
+    paint();
+  };
+
+  const avatar = (icon) => h('div', { class: 'portal-login-avatar' }, renderIcon(icon, { size: 28, stroke: 1.6 }));
+  const title = (text) => h('h2', { class: 'portal-login-title' }, text);
+  const sub = (text) => h('p', { class: 'portal-login-sub' }, text);
+  const errorLine = () => (error ? h('p', { class: 'portal-login-error', role: 'alert' }, error) : null);
+  const backTo = (target, label = '‹ Back') =>
+    h('button', { class: 'portal-back-link', type: 'button', onclick: () => go(target) }, label);
+  const link = (label, onclick) => h('button', { class: 'portal-login-link', type: 'button', onclick }, label);
+  const cta = (label, onclick) =>
+    h(
+      'button',
+      { class: 'portal-login-cta', type: 'button', disabled: busy, onclick },
+      h('span', {}, busy ? 'Please wait…' : label),
+      busy ? null : renderIcon('arrowRight', { size: 22, stroke: 2 }),
+    );
+  const onEnter = (input, fn) =>
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        fn();
+      }
+    });
+
+  /** Who this sign-in is for, tappable to go back and change it. */
+  const whoChip = () =>
+    h(
+      'button',
+      { class: 'portal-login-who', type: 'button', onclick: () => go('identifier') },
+      renderIcon('member', { size: 15 }),
+      h('span', {}, identifier.trim()),
+      h('em', {}, 'Change'),
+    );
+
+  /** A password box with a show/hide eye; its value lives in `password`. */
+  function passwordField({ placeholder, autocomplete, onSubmit }) {
+    const input = h('input', {
+      class: 'portal-input',
+      type: 'password',
+      placeholder,
+      autocomplete,
+      autocapitalize: 'none',
+      value: password,
+      'aria-label': placeholder,
+    });
+    input.addEventListener('input', (event) => { password = event.target.value; });
+    onEnter(input, onSubmit);
+    const eye = h(
+      'button',
+      {
+        class: 'portal-login-eye',
+        type: 'button',
+        'aria-label': 'Show password',
+        onclick: () => {
+          const showing = input.type === 'text';
+          input.type = showing ? 'password' : 'text';
+          eye.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+          eye.replaceChildren(renderIcon(showing ? 'eye' : 'eyeOff', { size: 20 }));
+          input.focus();
+        },
+      },
+      renderIcon('eye', { size: 20 }),
+    );
+    return { input, field: h('label', { class: 'portal-field portal-login-field' }, renderIcon('lock', { size: 20 }), input, eye) };
+  }
+
+  /* ── 1. Member ID or phone ── */
+
+  function paintIdentifier() {
     const input = h('input', {
       class: 'portal-input',
       type: 'text',
       autocapitalize: 'none',
       autocorrect: 'off',
+      autocomplete: 'username',
       placeholder: isLibrary() ? 'Student ID or phone number' : 'Member ID or phone number',
+      'aria-label': `Your ${memberWord} ID or phone number`,
       value: identifier,
     });
     input.addEventListener('input', (event) => { identifier = event.target.value; });
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        goPin();
-      }
-    });
+    onEnter(input, toPassword);
 
     append(card, [
-      h('h1', { class: 'portal-login-title' }, 'Welcome back'),
-      h('p', { class: 'portal-login-sub' }, `Sign in with your ${memberWord} ID or phone number.`),
-      h('label', { class: 'portal-field' }, input),
-      error ? h('p', { class: 'portal-login-error' }, error) : null,
-      h('button', { class: 'btn primary block', type: 'button', onclick: goPin }, 'Continue'),
-      h('p', { class: 'portal-login-foot' }, h('a', { href: '#/' }, renderIcon('arrowLeft', { size: 16 }), 'Back to the site')),
+      h('div', { class: 'portal-login-avatar' }, renderIcon('member', { size: 30, stroke: 1.6 })),
+      h('label', { class: 'portal-field portal-login-field' }, renderIcon('member', { size: 20 }), input),
+      errorLine(),
+      h(
+        'button',
+        { class: 'portal-login-cta', type: 'button', onclick: toPassword },
+        h('span', {}, 'Continue'),
+        renderIcon('arrowRight', { size: 22, stroke: 2 }),
+      ),
     ]);
     input.focus();
   }
 
-  function goPin() {
-    error = '';
-    if (!identifier.trim()) {
-      error = `Enter your ${memberWord} ID or phone number`;
-      paintIdentifier();
-      return;
-    }
-    step = 'pin';
-    pin = '';
-    paintPin();
+  function toPassword() {
+    if (!identifier.trim()) return fail(`Enter your ${memberWord} ID or phone number`);
+    return go('password');
   }
 
-  function paintPin() {
-    clear(card);
-    const dots = h(
-      'div',
-      { class: 'portal-pin-dots' },
-      ...Array.from({ length: 6 }, (_, i) => h('span', { class: `portal-pin-dot${i < pin.length ? ' filled' : ''}` })),
-    );
-    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'back'];
-    const keypad = h(
-      'div',
-      { class: 'portal-keypad' },
-      ...keys.map((k) => {
-        if (k === '') return h('span', { class: 'portal-key portal-key-empty' });
-        if (k === 'back') {
-          return h(
-            'button',
-            {
-              class: 'portal-key portal-key-action',
-              type: 'button',
-              'aria-label': 'Delete digit',
-              onclick: () => { pin = pin.slice(0, -1); paintPin(); },
-            },
-            renderIcon('close', { size: 18 }),
-          );
-        }
-        return h(
-          'button',
-          {
-            class: 'portal-key',
-            type: 'button',
-            onclick: () => {
-              if (pin.length < 6) pin += k;
-              paintPin();
-            },
-          },
-          k,
-        );
-      }),
-    );
+  /* ── 2. Password ── */
 
+  function paintPassword() {
+    const { field, input } = passwordField({ placeholder: 'Password', autocomplete: 'current-password', onSubmit: signIn });
     append(card, [
-      h('button', { class: 'portal-back-link', type: 'button', onclick: () => { step = 'identifier'; error = ''; paintIdentifier(); } }, '‹ Back'),
-      h('h1', { class: 'portal-login-title' }, 'Enter your PIN'),
-      h('p', { class: 'portal-login-sub' }, 'First time here? Use the last 4 digits of your phone number.'),
-      dots,
-      error ? h('p', { class: 'portal-login-error' }, error) : null,
-      keypad,
-      h(
-        'button',
-        { class: 'btn primary block', type: 'button', disabled: pin.length < 4 || busy, onclick: submit },
-        busy ? 'Signing in…' : 'Sign in',
+      avatar('lock'),
+      title('Welcome back'),
+      whoChip(),
+      field,
+      errorLine(),
+      h('div', { class: 'portal-login-row' }, link('Forgot password?', () => { setupReason = 'forgot'; go('setup'); })),
+      cta('Sign in', signIn),
+    ]);
+    input.focus();
+  }
+
+  function signIn() {
+    if (!password) return fail('Enter your password');
+    const typed = password;
+    return attempt(async () => {
+      try {
+        await finish(await api.portal.login(identifier.trim(), typed), typed);
+      } catch (err) {
+        if (err.details?.reason !== 'no_password') throw err;
+        setupReason = 'new';
+        go('setup');
+      }
+    });
+  }
+
+  /** Into the app — unless that was a temporary password, which gets
+   * replaced first. */
+  async function finish(res, typedPassword) {
+    if (res.must_change_password) {
+      pending = { ...res, currentPassword: typedPassword };
+      go('choose');
+      return;
+    }
+    memberSession.save(res.token, res.member);
+    toast(`Welcome, ${res.member.first_name}`);
+    await ctx.rerender();
+  }
+
+  /* ── Email a setup code ── */
+
+  function paintSetup() {
+    const fresh = setupReason === 'new';
+    append(card, [
+      backTo('password'),
+      avatar('key'),
+      title(fresh ? 'Set up your password' : 'Forgot your password?'),
+      sub(
+        fresh
+          ? "You don't have a password yet. We'll email a 6-digit code to the address on your account so you can create one."
+          : "We'll email a 6-digit code to the address on your account so you can choose a new password.",
       ),
+      whoChip(),
+      errorLine(),
+      cta('Email me a code', sendCode),
+      h('p', { class: 'portal-login-note' }, 'No email on your account? ', link('Get it on WhatsApp', sendWhatsApp)),
     ]);
   }
 
-  async function submit() {
-    if (pin.length < 4 || busy) return;
-    busy = true;
-    error = '';
-    paintPin();
-    try {
-      const res = await api.portal.login(identifier.trim(), pin);
-      memberSession.save(res.token, res.member);
-      pendingPinPrompt = Boolean(res.must_set_pin);
-      toast(`Welcome, ${res.member.first_name}`);
-      await ctx.rerender();
-    } catch (err) {
-      busy = false;
-      error = err.message || 'Could not sign in';
-      pin = '';
-      paintPin();
-    }
+  function sendCode() {
+    return attempt(async () => {
+      try {
+        const res = await api.portal.forgotPassword(identifier.trim());
+        emailHint = res.email_hint;
+        resendAt = Date.now() + 60_000;
+        code = '';
+        go('code');
+      } catch (err) {
+        const reason = err.details?.reason;
+        if (reason !== 'no_email' && reason !== 'email_unavailable') throw err;
+        whatsappReason = reason;
+        go('whatsapp');
+      }
+    });
   }
 
-  paintIdentifier();
+  function paintCode() {
+    const codeInput = h('input', {
+      class: 'portal-input portal-login-code',
+      type: 'text',
+      inputmode: 'numeric',
+      autocomplete: 'one-time-code',
+      maxlength: '6',
+      placeholder: '6-digit code',
+      'aria-label': '6-digit code from the email',
+      value: code,
+    });
+    codeInput.addEventListener('input', (event) => {
+      code = event.target.value.replace(/\D/g, '').slice(0, 6);
+      event.target.value = code;
+    });
+    const { field, input } = passwordField({ placeholder: 'New password', autocomplete: 'new-password', onSubmit: resetWithCode });
+    onEnter(codeInput, () => input.focus());
+
+    const resend = link('Resend code', sendCode);
+    const tick = () => {
+      const left = Math.ceil((resendAt - Date.now()) / 1000);
+      resend.disabled = left > 0;
+      resend.textContent = left > 0 ? `Resend code in ${left}s` : 'Resend code';
+      if (left <= 0) clearInterval(resendTimer);
+    };
+    tick();
+    resendTimer = setInterval(tick, 1000);
+
+    append(card, [
+      backTo('setup'),
+      avatar('mail'),
+      title('Check your email'),
+      sub(`We sent a 6-digit code to ${emailHint}. It works for 15 minutes.`),
+      h('label', { class: 'portal-field portal-login-field' }, renderIcon('key', { size: 20 }), codeInput),
+      field,
+      h('p', { class: 'portal-login-hint' }, 'At least 8 characters — not your member ID or phone number.'),
+      errorLine(),
+      cta('Set password & sign in', resetWithCode),
+      h('p', { class: 'portal-login-note' }, resend),
+    ]);
+    (code.length === 6 ? input : codeInput).focus();
+  }
+
+  function resetWithCode() {
+    if (code.length !== 6) return fail('Enter the 6-digit code from the email');
+    if (password.length < 8) return fail('Use at least 8 characters for your password');
+    const chosen = password;
+    return attempt(async () => {
+      await finish(await api.portal.resetPassword({ identifier: identifier.trim(), code, new_password: chosen }));
+    });
+  }
+
+  /* ── Replace a temporary password ── */
+
+  function paintChoose() {
+    const { field, input } = passwordField({ placeholder: 'New password', autocomplete: 'new-password', onSubmit: choose });
+    append(card, [
+      backTo('identifier', '‹ Cancel'),
+      avatar('key'),
+      title('Choose your password'),
+      sub(`Hi ${pending.member.first_name}, you signed in with a temporary password. Pick your own to keep your account safe.`),
+      field,
+      h('p', { class: 'portal-login-hint' }, 'At least 8 characters — not your member ID or phone number.'),
+      errorLine(),
+      cta('Save and continue', choose),
+    ]);
+    input.focus();
+  }
+
+  function choose() {
+    if (password.length < 8) return fail('Use at least 8 characters for your password');
+    const chosen = password;
+    return attempt(async () => {
+      await api.portal.changePassword({ current_password: pending.currentPassword, new_password: chosen }, { token: pending.token });
+      memberSession.save(pending.token, pending.member);
+      pending = null;
+      toast('Password saved — welcome!');
+      await ctx.rerender();
+    });
+  }
+
+  /* ── Get it on WhatsApp ── */
+
+  /** Offered when email can't work for this member. */
+  function paintWhatsApp() {
+    append(card, [
+      backTo('setup'),
+      avatar('whatsapp'),
+      title('Get it on WhatsApp'),
+      sub(
+        whatsappReason === 'no_email'
+          ? "There's no email on your account. We can send your login details to the WhatsApp number on your account instead."
+          : "Email codes aren't available right now. We can send your login details to the WhatsApp number on your account instead.",
+      ),
+      whoChip(),
+      errorLine(),
+      cta('Send on WhatsApp', sendWhatsApp),
+    ]);
+  }
+
+  /** Sends the member's ID and a temporary password from the gym's linked
+   * WhatsApp. The server allows one a day; asking again too soon lands as the
+   * card's error line, with how long to wait. */
+  function sendWhatsApp() {
+    return attempt(async () => {
+      try {
+        const res = await api.portal.whatsappLogin(identifier.trim());
+        phoneHint = res.phone_hint;
+        go('sent');
+      } catch (err) {
+        const reason = err.details?.reason;
+        if (reason !== 'no_phone' && reason !== 'whatsapp_unavailable') throw err;
+        deskReason = reason;
+        go('desk');
+      }
+    });
+  }
+
+  function paintSent() {
+    append(card, [
+      avatar('whatsapp'),
+      title('Check your WhatsApp'),
+      sub(
+        `We sent your login details to ${phoneHint}. Sign in with the temporary password in the message — it works for 24 hours, then you'll choose your own.`,
+      ),
+      cta('Sign in', () => go('password')),
+      h('p', { class: 'portal-login-note' }, "Didn't get it? You can ask again in 24 hours, or ask at the front desk."),
+    ]);
+  }
+
+  /* ── Ask the front desk ── */
+
+  function paintDesk() {
+    const copy = {
+      no_phone: "There's no phone number on your account, so we can't send it on WhatsApp. Ask at the front desk to set up your login.",
+      whatsapp_unavailable: "WhatsApp messages can't be sent right now. Ask at the front desk, or try again later.",
+    };
+    append(card, [
+      backTo('password'),
+      avatar('member'),
+      title('Ask the front desk'),
+      sub(copy[deskReason]),
+      cta('Back to sign in', () => go('password')),
+    ]);
+  }
+
+  paint();
+
+  // The gym photo and the 3D dumbbell are gym art; a study hall keeps the
+  // same card on the plain gold-glow backdrop.
+  const showArt = !isLibrary();
 
   return h(
     'div',
-    { class: 'portal-login' },
+    { class: `portal-login${showArt ? ' has-art' : ''}` },
     h(
       'div',
-      { class: 'portal-login-brand' },
-      logoUrl
-        ? h('img', { class: 'portal-login-logo-img', src: logoUrl, alt: gymName })
-        : h('div', { class: 'portal-login-logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 26 })),
-      h('div', { class: 'portal-login-gymname' }, gymName),
+      { class: 'portal-login-stage' },
+      h('span', { class: 'portal-login-stripe portal-login-stripe-tl', 'aria-hidden': 'true' }),
+      h('span', { class: 'portal-login-stripe portal-login-stripe-r', 'aria-hidden': 'true' }),
+      h(
+        'div',
+        { class: 'portal-login-brand' },
+        logoUrl
+          ? h('img', { class: 'portal-login-logo-img', src: logoUrl, alt: '' })
+          : h('div', { class: 'portal-login-logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 30 })),
+        h('h1', { class: 'portal-login-gymname' }, ...loginHeadline(gymName)),
+      ),
+      h(
+        'div',
+        { class: 'portal-login-card-wrap' },
+        showArt
+          ? h('img', {
+            class: 'portal-login-dumbbell',
+            src: '/images/portal/login-dumbbell.webp',
+            alt: '',
+            onerror: (event) => event.currentTarget.remove(),
+          })
+          : null,
+        card,
+      ),
     ),
-    card,
   );
+}
+
+/**
+ * The gym name with one word picked out in the accent colour, the way the
+ * login art reads: "The <gold's> standard fitness gym". That is the first
+ * word that is not a leading "The"; a one-word name is highlighted whole.
+ */
+function loginHeadline(name) {
+  const words = String(name).trim().split(/\s+/);
+  const pick = words.length > 1 && /^the$/i.test(words[0]) ? 1 : 0;
+  return words.flatMap((word, i) => [i ? ' ' : null, i === pick ? h('em', {}, word) : word]);
 }
 
 /* ══════════════════════════════════════════════ Diet & workout tracking ══ */
@@ -2376,37 +2663,27 @@ function restTimer() {
 
 /* ── Active workout session ────────────────────────────────────────────── */
 
-const SESSION_KEY = 'gymbook.portal.activeWorkout';
-
-/** A session in progress, kept on the device.
+/** A session in progress, kept on the device and mirrored to the account.
  *
- * The server only ever sees a finished workout (see the POST in
+ * Workout history only takes a finished workout (see the POST in
  * routes/portal.js), so a closed tab or a dropped connection mid-session would
  * otherwise lose an hour of logging. Restoring it is what makes leaving the tab
- * to check a plan safe. */
+ * to check a plan safe, and the account copy is what lets a session started on
+ * one phone carry on from another. The longer delay batches the burst of
+ * writes a set's weight and reps make as they are typed. */
+const syncedSession = memberSynced('active_workout', 'portal.activeWorkout', {
+  delay: 1500,
+  legacyKey: 'gymbook.portal.activeWorkout',
+});
 const activeSession = {
   read() {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
+    const state = syncedSession.read();
+    return state && Array.isArray(state.exercises) ? state : null;
   },
-  write(state) {
-    try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(state));
-    } catch {
-      // Storage blocked: the session lives in memory for as long as the tab does.
-    }
-  },
-  clear() {
-    try {
-      localStorage.removeItem(SESSION_KEY);
-    } catch {
-      // Nothing to clear.
-    }
-  },
+  write: (state) => syncedSession.write(state),
+  clear: () => syncedSession.write(null),
+  /** Picks up a session started, changed or finished on another device. */
+  pull: () => syncedSession.pull(),
 };
 
 
@@ -5183,13 +5460,13 @@ function renderPortalApp(ctx, initialMe) {
 
   async function renderTodaysFocus() {
     if (isLibrary()) return null;
-    const running = activeSession.read();
     let status = null;
     try {
-      status = await api.portal.fitnessStatus();
+      [status] = await Promise.all([api.portal.fitnessStatus(), activeSession.pull()]);
     } catch {
       // Fall through: a session already on the device still gets its card.
     }
+    const running = activeSession.read();
     // The add-on was switched off: the Workout tab is a paywall now, so a
     // session left on the device has nowhere to resume to. The device copy is
     // kept, so re-activating the add-on brings it back.
@@ -5629,7 +5906,7 @@ function renderPortalApp(ctx, initialMe) {
   async function renderStoreTab() {
     let store = null;
     try {
-      store = await api.portal.store();
+      [store] = await Promise.all([api.portal.store(), pullStoreState()]);
     } catch (err) {
       // Offline with a store that was live: say so and offer a retry. One that
       // was never live can keep showing its placeholder, as it always has.
@@ -7395,11 +7672,18 @@ function renderPortalApp(ctx, initialMe) {
   }
 
   async function renderWorkoutTab() {
-    const status = await api.portal.fitnessStatus();
+    // The account's copies first, so a session or exercise from another phone
+    // is here before anything reads them. pull() never rejects.
+    const [status] = await Promise.all([
+      api.portal.fitnessStatus(),
+      activeSession.pull(),
+      syncedCustomExercises.pull(),
+      syncedRecentExercises.pull(),
+    ]);
     if (!status.has_access) return upgradeSheet(status, { onRefresh: () => switchTab('workout') });
 
-    // A session interrupted by a locked phone or a closed tab resumes exactly
-    // where it was, which is the whole reason it is mirrored to localStorage.
+    // A session interrupted by a locked phone, a closed tab or a switch to
+    // another device resumes exactly where it was.
     const resumed = activeSession.read();
     if (resumed) {
       // Re-reported on resume: the start may never have reached the server
@@ -8899,23 +9183,136 @@ function renderPortalApp(ctx, initialMe) {
 
   /* ----------------------------------------------------------- Profile tab */
 
-  function openChangePinModal() {
+  function openChangePasswordModal() {
     openModal({
-      title: 'Change your PIN',
+      title: 'Change your password',
       body: buildForm(
         [
-          { name: 'current_pin', label: 'Current PIN', type: 'password', required: true, full: true },
-          { name: 'new_pin', label: 'New PIN (4-6 digits)', type: 'password', required: true, full: true },
+          { name: 'current_password', label: 'Current password', type: 'password', required: true, full: true },
+          {
+            name: 'new_password',
+            label: 'New password',
+            type: 'password',
+            required: true,
+            full: true,
+            hint: 'At least 8 characters — not your member ID or phone number.',
+          },
+          { name: 'confirm_password', label: 'Confirm new password', type: 'password', required: true, full: true },
         ],
         {
-          submitLabel: 'Update PIN',
-          onSubmit: async (values) => {
-            await api.portal.setPin(values);
-            toast('PIN updated');
+          submitLabel: 'Update password',
+          onSubmit: async ({ confirm_password: confirm, ...values }) => {
+            if (confirm !== values.new_password) {
+              throw new ApiError(400, 'The passwords do not match', { confirm_password: 'Does not match the new password' });
+            }
+            await api.portal.changePassword(values);
+            toast('Password updated — your other devices were signed out');
             closeModal();
           },
         },
       ),
+    });
+  }
+
+  /** Signs this device out — on the server too, so it drops off the Devices
+   * list everywhere else. */
+  async function signOut() {
+    // Before the token goes: the next person to sign in on this phone must not
+    // receive this member's reminders.
+    await push.disablePush().catch(() => {});
+    // Unsent cart or workout changes go up while the token still works.
+    await flushMemberSync();
+    await api.portal.endSession('current').catch(() => {});
+    detachPushListener?.();
+    detachPushListener = null;
+    memberSession.clear();
+    ctx.navigate('/portal/login');
+  }
+
+  /**
+   * Profile → Devices: every phone and browser signed in to this account,
+   * this one first. Signing one out locks it at its next request and stops its
+   * reminders — what a member needs after losing a phone or signing in on a
+   * friend's.
+   */
+  function openDevicesScreen() {
+    const wrap = h('div', { class: 'portal-prof portal-prof-screen' });
+
+    const signOutDevice = (session) =>
+      confirmDialog({
+        title: 'Sign out this device?',
+        message: `${session.device} will need your password to get back in, and stops getting your reminders.`,
+        confirmLabel: 'Sign out',
+        danger: true,
+        onConfirm: async () => {
+          await api.portal.endSession(session.id);
+          toast('Device signed out');
+          await paint();
+        },
+      });
+
+    const signOutOthers = (count) =>
+      confirmDialog({
+        title: 'Sign out of all other devices?',
+        message: `${count === 1 ? 'The other device' : `All ${count} other devices`} will need your password to get back in. You stay signed in here.`,
+        confirmLabel: 'Sign out all',
+        danger: true,
+        onConfirm: async () => {
+          const res = await api.portal.endOtherSessions();
+          toast(`Signed out of ${res.signed_out} device${res.signed_out === 1 ? '' : 's'}`);
+          await paint();
+        },
+      });
+
+    const deviceRow = (session) =>
+      profileRow({
+        icon: session.mobile ? 'smartphone' : 'monitor',
+        tone: session.current ? 'green' : 'blue',
+        title: session.device,
+        sub: session.current
+          ? `Signed in ${relativeTime(session.signed_in_at).toLowerCase()}`
+          : `Last active ${relativeTime(session.last_seen_at).toLowerCase()}`,
+        control: session.current
+          ? h('span', { class: 'portal-device-current' }, 'This device')
+          : h('button', { class: 'btn sm danger', type: 'button', onclick: () => signOutDevice(session) }, 'Sign out'),
+      });
+
+    async function paint() {
+      const { sessions } = await api.portal.sessions();
+      const current = sessions.filter((s) => s.current);
+      const others = sessions.filter((s) => !s.current);
+      // filter: the DOM's replaceChildren would print a null child as "null".
+      const parts = [
+        h('h3', { class: 'portal-prof-label' }, 'This device'),
+        h('div', { class: 'portal-prof-card' }, ...current.map(deviceRow)),
+        h('h3', { class: 'portal-prof-label' }, 'Other devices'),
+        others.length
+          ? h('div', { class: 'portal-prof-card' }, ...others.map(deviceRow))
+          : h('p', { class: 'portal-devices-empty muted' }, 'You are not signed in anywhere else.'),
+        others.length
+          ? h(
+              'button',
+              { class: 'portal-prof-signout', type: 'button', onclick: () => signOutOthers(others.length) },
+              renderIcon('logout', { size: 20 }),
+              'Sign out of all other devices',
+            )
+          : null,
+        h(
+          'p',
+          { class: 'portal-devices-note muted' },
+          "Don't recognise a device? Sign it out, then change your password so it can't sign in again.",
+        ),
+      ];
+      wrap.replaceChildren(...parts.filter(Boolean));
+    }
+
+    openScreen({
+      title: 'Devices',
+      subtitle: 'Where you are signed in',
+      render: async () => {
+        await paint();
+        return wrap;
+      },
     });
   }
 
@@ -9028,18 +9425,6 @@ function renderPortalApp(ctx, initialMe) {
       { class: 'portal-tab-body portal-prof' },
       h('div', { class: 'portal-page-head' }, h('h2', {}, 'Profile'), h('p', {}, 'Manage your account and preferences.')),
     );
-
-    if (pendingPinPrompt) {
-      pendingPinPrompt = false;
-      body.append(
-        h(
-          'div',
-          { class: 'portal-pin-banner' },
-          h('div', {}, renderIcon('key', { size: 16 }), ' Using a temporary PIN — set your own for next time.'),
-          h('button', { class: 'btn sm primary', type: 'button', onclick: openChangePinModal }, 'Set PIN'),
-        ),
-      );
-    }
 
     /* Hero: photo (tap the camera to replace it), name, code, status */
     const photoInput = h('input', { type: 'file', accept: 'image/*', hidden: true });
@@ -9178,7 +9563,11 @@ function renderPortalApp(ctx, initialMe) {
               onclick: openDietSettings,
             })
           : null,
-        profileRow({ icon: 'key', tone: 'rose', title: 'Change PIN', sub: 'Update your app PIN for security', onclick: openChangePinModal }),
+        profileRow({ icon: 'key', tone: 'rose', title: 'Change password', sub: 'Update your app password for security', onclick: openChangePasswordModal }),
+        profileRow({
+          icon: 'smartphone', tone: 'blue', title: 'Devices', sub: 'See where you are signed in and sign devices out',
+          onclick: openDevicesScreen,
+        }),
         profileRow({
           icon: 'moon', tone: 'purple', title: dark ? 'Dark Mode' : 'Switch to Dark Mode', sub: 'Change app appearance',
           control: settingsSwitch(dark, 'Dark mode', () => {
@@ -9193,15 +9582,7 @@ function renderPortalApp(ctx, initialMe) {
         {
           class: 'portal-prof-signout',
           type: 'button',
-          onclick: async () => {
-            // Before the token goes: the next person to sign in on this phone
-            // must not receive this member's reminders.
-            await push.disablePush().catch(() => {});
-            detachPushListener?.();
-            detachPushListener = null;
-            memberSession.clear();
-            ctx.navigate('/portal/login');
-          },
+          onclick: signOut,
         },
         renderIcon('logout', { size: 20 }),
         'Sign out',

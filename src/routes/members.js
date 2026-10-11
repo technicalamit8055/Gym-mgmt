@@ -3,6 +3,7 @@ import { MANAGES_BILLING, requireAuth, requireRole } from '../auth.js';
 import { all, get, run, tx } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
+import { generateTemporaryPassword, sendLoginOnWhatsApp, setMemberPassword } from '../memberPasswords.js';
 import { PHOTO_JOIN, PHOTO_PRESENT_COL, parsePhotoDataUrl, setMemberPhoto, withPhotoUrl } from '../photo.js';
 import { addDays, parse, today, toInt } from '../validate.js';
 import { currentVertical } from '../verticals.js';
@@ -111,8 +112,22 @@ const optional = (fields) =>
  */
 export function publicMember(row) {
   if (!row) return row;
-  const { qr_token, ...rest } = row;
-  return { ...withPhotoUrl(rest), has_qr: Boolean(qr_token) };
+  const {
+    qr_token,
+    portal_pin_hash,
+    portal_password_hash,
+    portal_password_temp,
+    portal_reset_hash,
+    portal_reset_expires_at,
+    portal_reset_sent_at,
+    ...rest
+  } = row;
+  return {
+    ...withPhotoUrl(rest),
+    has_qr: Boolean(qr_token),
+    // Never the hash itself — only whether, and how, the member can sign in.
+    portal_access: !portal_password_hash ? 'none' : portal_password_temp ? 'temporary' : 'active',
+  };
 }
 
 /**
@@ -307,6 +322,36 @@ memberRoutes.patch('/:id', (req, res) => {
   if (photo) setMemberPhoto(id, req.body.photo);
 
   res.json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [id])));
+});
+
+/**
+ * Gives a member a temporary app password, which they must replace the first
+ * time they sign in. `deliver: 'whatsapp'` sends the app link, their member ID
+ * and the password from the gym's linked WhatsApp; `'show'` hands it back
+ * once for the desk to pass on another way. Either replaces any password the
+ * member had and signs out their devices.
+ *
+ * The WhatsApp send happens first: if it fails, the member's existing
+ * password is left alone rather than swapped for one nobody received.
+ */
+memberRoutes.post('/:id/app-login', requireRole(...MANAGES_BILLING), async (req, res) => {
+  const id = Number(req.params.id);
+  const member = get('SELECT * FROM members WHERE id = ?', [id]);
+  if (!member) throw notFound('Member not found');
+  const { deliver } = parse(req.body, { deliver: { type: 'enum', values: ['whatsapp', 'show'], required: true } });
+
+  const password = generateTemporaryPassword();
+  if (deliver === 'whatsapp') {
+    if (!member.phone) throw badRequest('Add a phone number for this member first');
+    await sendLoginOnWhatsApp(req, member, password);
+  }
+
+  setMemberPassword(id, password, { temporary: true });
+  res.json({
+    delivered: deliver,
+    ...(deliver === 'show' ? { password } : {}),
+    member: publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [id])),
+  });
 });
 
 memberRoutes.delete('/:id', requireRole(...MANAGES_BILLING), (req, res) => {

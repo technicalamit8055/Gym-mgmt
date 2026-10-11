@@ -10,7 +10,23 @@
  */
 
 let vertical = 'gym';
-let currentMode = localStorage.getItem('app_mode') || 'dark';
+
+/**
+ * Light/dark is remembered per app: the staff app defaults to dark, the
+ * member app to light. Separate keys so a member's choice never repaints the
+ * desk on a shared device, and vice versa. index.html's pre-paint script reads
+ * the same keys — keep the two in step.
+ */
+const MODE_KEY = { staff: 'app_mode', member: 'member_app_mode' };
+const DEFAULT_MODE = { staff: 'dark', member: 'light' };
+let modeScope = window.location.hash.startsWith('#/portal') ? 'member' : 'staff';
+
+function storedMode() {
+  const saved = localStorage.getItem(MODE_KEY[modeScope]);
+  return saved === 'light' || saved === 'dark' ? saved : DEFAULT_MODE[modeScope];
+}
+
+let currentMode = storedMode();
 
 const DEFAULT_THEME = { gym: 'flame', library: 'emerald' };
 
@@ -45,9 +61,17 @@ export function usePlatformTheme(on) {
   paintTheme();
 }
 
+/** Called by the router on every page change: the member portal and the
+ * staff app each wear their own saved mode. */
+export function useMemberMode(on) {
+  modeScope = on ? 'member' : 'staff';
+  currentMode = storedMode();
+  document.body.dataset.mode = currentMode;
+}
+
 export function setAppMode(mode) {
   currentMode = mode === 'light' ? 'light' : 'dark';
-  localStorage.setItem('app_mode', currentMode);
+  localStorage.setItem(MODE_KEY[modeScope], currentMode);
   document.body.dataset.mode = currentMode;
 }
 

@@ -261,7 +261,7 @@ function posterCopy(poster) {
     caption: 'Scan with your phone camera',
     steps: [
       'Point your camera at the code and tap the link that appears.',
-      `Sign in with your ${member} ID or phone number and your PIN. No PIN yet? Ask at the front desk.`,
+      `Sign in with your ${member} ID or phone number and your password. No password yet? Tap "Forgot password?" or ask at the front desk.`,
       'Add it to your home screen. Android: tap Install. iPhone: in Safari, tap Share, then Add to Home Screen.',
     ],
     url: poster.url,

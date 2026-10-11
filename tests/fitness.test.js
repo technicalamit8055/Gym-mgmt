@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -83,9 +84,7 @@ before(async () => {
   planId = (await call('GET', '/api/plans', undefined, { token: adminToken })).body.items[0].id;
   await call('POST', '/api/subscriptions', { member_id: memberId, plan_id: planId }, { token: adminToken });
 
-  const login = await call('POST', '/api/portal/login', { identifier: memberCode, pin: '0011' });
-  assert.equal(login.status, 200);
-  memberToken = login.body.token;
+  memberToken = await signInMember(call, { staffToken: adminToken, memberId });
 });
 
 after(() => {
@@ -731,7 +730,7 @@ describe('Heavy-style workout logging in the portal', () => {
     // A second member, entitled but with no logs of their own.
     const other = await call('POST', '/api/members', { first_name: 'Nosy', phone: '9876501111' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
-    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '1111' })).body.token;
+    const otherToken = await signInMember(call, { staffToken: adminToken, memberId: other.body.id });
 
     const peek = await call('GET', `/api/portal/workouts/logs/${mine.id}`, undefined, { token: otherToken });
     assert.equal(peek.status, 404, 'not 403 — whether that id exists is not theirs to learn');
@@ -794,7 +793,7 @@ describe('Heavy-style workout logging in the portal', () => {
   it('keeps exercise history to its owner and needs a name', async () => {
     const other = await call('POST', '/api/members', { first_name: 'Curious', phone: '9876503333' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
-    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '3333' })).body.token;
+    const otherToken = await signInMember(call, { staffToken: adminToken, memberId: other.body.id });
 
     const theirs = await call('GET', '/api/portal/workouts/exercise-history?name=Barbell%20Bench%20Press', undefined, { token: otherToken });
     assert.equal(theirs.status, 200);
@@ -808,7 +807,7 @@ describe('Heavy-style workout logging in the portal', () => {
   it('logs a plank as a time and a treadmill run as a distance and time', async () => {
     const runner = await call('POST', '/api/members', { first_name: 'Cardio', phone: '9876504444' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: runner.body.id }, { token: adminToken });
-    const token = (await call('POST', '/api/portal/login', { identifier: runner.body.code, pin: '4444' })).body.token;
+    const token = await signInMember(call, { staffToken: adminToken, memberId: runner.body.id });
 
     const saved = await call(
       'POST',
@@ -1004,7 +1003,7 @@ describe('Hevy-style plans a member builds for themselves', () => {
 
     const other = await call('POST', '/api/members', { first_name: 'Nosy', phone: '9876504444' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
-    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '4444' })).body.token;
+    const otherToken = await signInMember(call, { staffToken: adminToken, memberId: other.body.id });
 
     for (const [method, url, body] of [
       ['GET', `/api/portal/workouts/routines/${ownPlan.id}`],
@@ -1072,8 +1071,7 @@ describe('sharing a plan with another member', () => {
     const created = await call('POST', '/api/members', { first_name: firstName, last_name: lastName, phone }, { token: adminToken });
     assert.equal(created.status, 201);
     await call('POST', '/api/fitness-addons/subscribe', { member_id: created.body.id }, { token: adminToken });
-    const login = await call('POST', '/api/portal/login', { identifier: created.body.code, pin: phone.slice(-4) });
-    return { ...created.body, token: login.body.token };
+    return { ...created.body, token: await signInMember(call, { staffToken: adminToken, memberId: created.body.id }) };
   };
 
   before(async () => {
@@ -1212,7 +1210,7 @@ describe('Lifesum-style diet logging in the portal', () => {
   it('falls back to sane targets for a member no trainer has reached yet', async () => {
     const fresh = await call('POST', '/api/members', { first_name: 'Unassigned', phone: '9876502222' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: fresh.body.id }, { token: adminToken });
-    const token = (await call('POST', '/api/portal/login', { identifier: fresh.body.code, pin: '2222' })).body.token;
+    const token = await signInMember(call, { staffToken: adminToken, memberId: fresh.body.id });
 
     const res = await call('GET', '/api/portal/diets/current', undefined, { token });
     assert.equal(res.body.using_default_targets, true);
@@ -1307,7 +1305,7 @@ describe('Lifesum-style diet logging in the portal', () => {
 
     const other = await call('POST', '/api/members', { first_name: 'Other', phone: '9876503333' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
-    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '3333' })).body.token;
+    const otherToken = await signInMember(call, { staffToken: adminToken, memberId: other.body.id });
     const stillThere = after.body.meals.lunch[0];
     assert.equal((await call('DELETE', `/api/portal/diets/entries/${stillThere.id}`, undefined, { token: otherToken })).status, 404);
   });
@@ -1374,7 +1372,7 @@ describe('Lifesum-style diet logging in the portal', () => {
     // Another member cannot unstar them.
     const other = await call('POST', '/api/members', { first_name: 'Fav', phone: '9876504444' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
-    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '4444' })).body.token;
+    const otherToken = await signInMember(call, { staffToken: adminToken, memberId: other.body.id });
     assert.ok(otherToken);
     assert.equal(
       (await call('DELETE', `/api/portal/diets/favorites/${custom.body.favorite_id}`, undefined, { token: otherToken })).status,
@@ -1579,7 +1577,7 @@ describe('own nutrition targets in the portal', () => {
 
     const other = await call('POST', '/api/members', { first_name: 'Other', phone: '9876503333' }, { token: adminToken });
     await call('POST', '/api/fitness-addons/subscribe', { member_id: other.body.id }, { token: adminToken });
-    const otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '3333' })).body.token;
+    const otherToken = await signInMember(call, { staffToken: adminToken, memberId: other.body.id });
     assert.equal((await call('DELETE', `/api/portal/activities/${typed.body.id}`, undefined, { token: otherToken })).status, 404);
     assert.equal((await call('DELETE', `/api/portal/activities/${typed.body.id}`, undefined, { token: memberToken })).status, 200);
   });

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { hashPassword, issueMemberToken, requireMemberAuth, verifyPassword } from '../auth.js';
+import { issueMemberToken, requireMemberAuth } from '../auth.js';
 import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { ATTENDANCE_SELECT, publicVisit } from '../checkin.js';
 import { all, get, getBusinessType, run, tx } from '../db.js';
-import { badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
+import { HttpError, badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
 import { listMuscleGroups } from '../exerciseCatalog.js';
 import {
   EQUIPMENT_TYPES,
@@ -38,6 +38,25 @@ import {
   weightOn,
   workoutCalories,
 } from '../nutrition.js';
+import { emailEnabled, sendEmail } from '../mailer.js';
+import {
+  assertGoodPassword,
+  assertSetupCode,
+  checkPassword,
+  checkResetPassword,
+  claimWhatsAppReset,
+  generateTemporaryPassword,
+  hasPassword,
+  issueSetupCode,
+  maskEmail,
+  maskPhone,
+  releaseWhatsAppReset,
+  sendLoginOnWhatsApp,
+  setMemberPassword,
+  storeResetPassword,
+  waitPhrase,
+} from '../memberPasswords.js';
+import { whatsappReady } from '../whatsapp.js';
 import { notifyMember } from '../notifications.js';
 import { setMemberPhoto } from '../photo.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
@@ -80,17 +99,40 @@ const portalLoginLimiter = createLimiter({
   lockoutMs: config.loginLockoutMs,
 });
 
-/**
- * The one-time bootstrap PIN a member who has never set a real one can sign
- * in with: the last 4 digits of their phone, or the last 4 characters of
- * their member code when there's no phone (or too few digits) on file.
- * Never stored anywhere — checked fresh against the live member row every
- * time, so editing a member's phone number changes their bootstrap PIN too.
- */
-function defaultPin(member) {
-  const phoneDigits = String(member.phone || '').replace(/\D/g, '');
-  const source = phoneDigits.length >= 4 ? phoneDigits : member.code;
-  return source.slice(-4).toUpperCase();
+/** Asking for an email code or a WhatsApp login: per IP, so one device can't
+ * walk the member list or spam inboxes. Roomy enough for a gym's shared Wi-Fi,
+ * where every member behind it is one IP. */
+const setupCodeLimiter = createLimiter({
+  maxAttempts: 20,
+  windowMs: config.loginWindowMs,
+  lockoutMs: config.loginLockoutMs,
+});
+
+/** The member a sign-in or setup request names: member ID first, then phone. */
+function findMemberByIdentifier(identifier) {
+  return (
+    get('SELECT * FROM members WHERE code = ? COLLATE NOCASE', [identifier]) ??
+    get('SELECT * FROM members WHERE phone = ?', [identifier])
+  );
+}
+
+function guardLimiter(limiter, key, res, message) {
+  const gate = limiter.check(key);
+  if (gate.locked) {
+    res.set('Retry-After', String(gate.retryAfterSeconds));
+    throw tooManyRequests(message);
+  }
+}
+
+function signedInResponse(req, member) {
+  const tenantSlug = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
+  run("UPDATE members SET last_portal_login = datetime('now') WHERE id = ?", [member.id]);
+  const fresh = get('SELECT portal_password_temp FROM members WHERE id = ?', [member.id]);
+  return {
+    token: issueMemberToken(member, tenantSlug, { userAgent: req.get('user-agent') }),
+    member: publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [member.id])),
+    must_change_password: Boolean(fresh.portal_password_temp),
+  };
 }
 
 /** Consecutive gym-local days (ending today or yesterday) with at least one
@@ -114,68 +156,188 @@ function attendanceStreak(memberId) {
 
 /* ── Sign in ───────────────────────────────────────────────────────────── */
 
+/**
+ * Member ID (or phone) + password. A member with no password yet gets a 401
+ * with `details.reason = 'no_password'`, so the app can offer the email code
+ * or point them at the front desk instead of saying "wrong password" to
+ * someone who never had one.
+ */
 portalRoutes.post('/login', (req, res) => {
   const tenantSlug = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
   const body = parse(req.body, {
     identifier: { type: 'string', required: true, max: 60 },
-    pin: { type: 'string', required: true, max: 10 },
+    password: { type: 'string', required: true, max: 200 },
   });
 
   const limiterKey = `${tenantSlug}:${req.ip}:${body.identifier.toLowerCase()}`;
-  const gate = portalLoginLimiter.check(limiterKey);
-  if (gate.locked) {
-    res.set('Retry-After', String(gate.retryAfterSeconds));
-    throw tooManyRequests('Too many failed attempts. Try again later.');
-  }
+  guardLimiter(portalLoginLimiter, limiterKey, res, 'Too many failed attempts. Try again later.');
 
-  const member =
-    get('SELECT * FROM members WHERE code = ? COLLATE NOCASE', [body.identifier]) ??
-    get('SELECT * FROM members WHERE phone = ?', [body.identifier]);
-
+  const member = findMemberByIdentifier(body.identifier);
   if (!member) {
     portalLoginLimiter.recordAttempt(limiterKey);
     throw unauthorized('We could not find a member with that phone number or member ID');
   }
-
-  const usingBootstrapPin = !member.portal_pin_hash;
-  const valid = usingBootstrapPin
-    ? body.pin.toUpperCase() === defaultPin(member)
-    : verifyPassword(body.pin, member.portal_pin_hash);
-
-  if (!valid) {
+  const matched = checkPassword(member, body.password);
+  // The password from "Get it on WhatsApp" only takes over once it's used:
+  // it becomes a temporary password, which the app has them replace now.
+  if (!matched && checkResetPassword(member, body.password)) {
+    setMemberPassword(member.id, body.password, { temporary: true });
+  } else if (!hasPassword(member)) {
+    throw new HttpError(401, "You haven't set a password yet", { reason: 'no_password' });
+  } else if (!matched) {
     portalLoginLimiter.recordAttempt(limiterKey);
-    throw unauthorized('Incorrect PIN');
+    throw unauthorized('Incorrect password');
   }
 
   portalLoginLimiter.recordSuccess(limiterKey);
-  run("UPDATE members SET last_portal_login = datetime('now') WHERE id = ?", [member.id]);
-
-  res.json({
-    token: issueMemberToken(member, tenantSlug),
-    member: publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [member.id])),
-    must_set_pin: usingBootstrapPin,
-  });
+  res.json(signedInResponse(req, member));
 });
 
-portalRoutes.post('/pin', requireMemberAuth, (req, res) => {
-  const body = parse(req.body, {
-    current_pin: { type: 'string', max: 10 },
-    new_pin: { type: 'string', required: true, min: 4, max: 6 },
-  });
-  if (!/^\d{4,6}$/.test(body.new_pin)) {
-    throw badRequest('PIN must be 4 to 6 digits', { new_pin: 'must be 4-6 digits' });
+/**
+ * "Forgot password? Get it on WhatsApp": sends the member their login with a
+ * temporary password from the gym's linked WhatsApp — no one at the desk has
+ * to approve it. The message only ever goes to the number on the account, and
+ * their current password keeps working until they sign in with the new one,
+ * so a stranger pressing the button can't lock anyone out. One send per
+ * member per day; a send that fails doesn't use it up.
+ */
+portalRoutes.post('/password/whatsapp', async (req, res) => {
+  const tenantSlug = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
+  const body = parse(req.body, { identifier: { type: 'string', required: true, max: 60 } });
+
+  const limiterKey = `${tenantSlug}:${req.ip}`;
+  guardLimiter(setupCodeLimiter, limiterKey, res, 'Too many requests. Try again later.');
+  setupCodeLimiter.recordAttempt(limiterKey);
+
+  const member = findMemberByIdentifier(body.identifier);
+  if (!member) throw notFound('We could not find a member with that phone number or member ID');
+  if (!member.phone) {
+    throw badRequest('There is no phone number on your account', { reason: 'no_phone' });
+  }
+  if (!whatsappReady()) {
+    throw badRequest("WhatsApp messages can't be sent right now", { reason: 'whatsapp_unavailable' });
   }
 
-  const member = req.member;
-  const usingBootstrapPin = !member.portal_pin_hash;
-  const currentValid = usingBootstrapPin
-    ? String(body.current_pin || '').toUpperCase() === defaultPin(member)
-    : Boolean(body.current_pin) && verifyPassword(body.current_pin, member.portal_pin_hash);
-  if (!currentValid) throw badRequest('Current PIN is incorrect', { current_pin: 'does not match' });
+  const claim = claimWhatsAppReset(member.id);
+  if (claim.wait) {
+    res.set('Retry-After', String(claim.wait));
+    throw tooManyRequests(
+      `We already sent your login details on WhatsApp. You can ask again ${waitPhrase(claim.wait)}.`,
+      { reason: 'cooldown', retry_after_seconds: claim.wait },
+    );
+  }
 
-  run('UPDATE members SET portal_pin_hash = ? WHERE id = ?', [hashPassword(body.new_pin), member.id]);
+  const password = generateTemporaryPassword();
+  try {
+    await sendLoginOnWhatsApp(req, member, password, { reason: 'reset' });
+  } catch {
+    releaseWhatsAppReset(member.id, claim.previous);
+    throw badRequest("We couldn't send it on WhatsApp right now", { reason: 'whatsapp_unavailable' });
+  }
+  storeResetPassword(member.id, password);
+  res.json({ sent: true, phone_hint: maskPhone(member.phone) });
+});
+
+/**
+ * Step one of "email me a code": sends a 6-digit code to the email on the
+ * member's account. Answers with a masked address so they know where to look,
+ * or a 400 whose `details.reason` says why it can't (no email on file, or no
+ * mail server) — both of which the app turns into "ask the front desk".
+ */
+portalRoutes.post('/password/forgot', async (req, res) => {
+  const tenantSlug = req.tenant?.slug ?? DEFAULT_TENANT_SLUG;
+  const body = parse(req.body, { identifier: { type: 'string', required: true, max: 60 } });
+
+  const limiterKey = `${tenantSlug}:${req.ip}`;
+  guardLimiter(setupCodeLimiter, limiterKey, res, 'Too many requests. Try again later.');
+  setupCodeLimiter.recordAttempt(limiterKey);
+
+  const member = findMemberByIdentifier(body.identifier);
+  if (!member) throw notFound('We could not find a member with that phone number or member ID');
+  if (!member.email) {
+    throw badRequest('There is no email address on your account', { reason: 'no_email' });
+  }
+  if (!emailEnabled()) {
+    throw badRequest('Email codes are not available right now', { reason: 'email_unavailable' });
+  }
+
+  const gymName = req.tenant?.gym_name || config.gymName || 'GymBook';
+  const { code, expires_in_minutes: minutes } = issueSetupCode(member.id);
+  try {
+    await sendEmail({
+      to: member.email,
+      fromName: gymName,
+      subject: `${code} is your ${gymName} app code`,
+      text: [
+        `Hi ${member.first_name},`,
+        '',
+        `Your code to set your ${gymName} app password is ${code}.`,
+        `It works for ${minutes} minutes. If you didn't ask for it, you can ignore this email.`,
+      ].join('\n'),
+      html: setupCodeEmailHtml({ name: member.first_name, gymName, code, minutes }),
+    });
+  } catch (err) {
+    // A code nobody received must not block asking again for a minute.
+    run('DELETE FROM member_password_codes WHERE member_id = ?', [member.id]);
+    throw err;
+  }
+
+  res.json({ sent: true, email_hint: maskEmail(member.email), expires_in_minutes: minutes });
+});
+
+/** Step two: the emailed code plus a new password. Signs the member in. */
+portalRoutes.post('/password/reset', (req, res) => {
+  const body = parse(req.body, {
+    identifier: { type: 'string', required: true, max: 60 },
+    code: { type: 'string', required: true, max: 12 },
+    new_password: { type: 'string', required: true, max: 200 },
+  });
+  const member = findMemberByIdentifier(body.identifier);
+  if (!member) throw notFound('We could not find a member with that phone number or member ID');
+
+  assertSetupCode(member.id, body.code);
+  assertGoodPassword(body.new_password, member);
+  setMemberPassword(member.id, body.new_password);
+  res.json(signedInResponse(req, member));
+});
+
+/**
+ * Change password from inside the app — also how a temporary password from
+ * the front desk gets replaced. Other devices are signed out; this one stays.
+ */
+portalRoutes.post('/password', requireMemberAuth, (req, res) => {
+  const body = parse(req.body, {
+    current_password: { type: 'string', required: true, max: 200 },
+    new_password: { type: 'string', required: true, max: 200 },
+  });
+  const member = req.member;
+  if (!checkPassword(member, body.current_password)) {
+    throw badRequest('Current password is incorrect', { current_password: 'does not match' });
+  }
+  if (body.new_password === body.current_password) {
+    throw badRequest('Choose a different password from the current one', { new_password: 'same as current' });
+  }
+  assertGoodPassword(body.new_password, member);
+  setMemberPassword(member.id, body.new_password, { keepSessionId: req.memberSessionId });
   res.json({ ok: true });
 });
+
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+function setupCodeEmailHtml({ name, gymName, code, minutes }) {
+  return `<!doctype html><html><body style="margin:0;background:#0b0b0c;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:#161618;border:1px solid #c99a12;border-radius:18px;padding:32px 28px;color:#f2f2f2">
+      <tr><td style="font-size:18px;font-weight:700;padding-bottom:18px">${escapeHtml(gymName)}</td></tr>
+      <tr><td style="font-size:15px;line-height:1.5;color:#cfcfd3">Hi ${escapeHtml(name)}, use this code to set your app password:</td></tr>
+      <tr><td align="center" style="padding:26px 0">
+        <div style="display:inline-block;font-size:34px;font-weight:800;letter-spacing:10px;color:#111;background:#ffc51f;border-radius:12px;padding:14px 22px">${code}</div>
+      </td></tr>
+      <tr><td style="font-size:13px;line-height:1.5;color:#9a9aa0">It works for ${minutes} minutes. If you didn't ask for it, you can ignore this email — your account is unchanged.</td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+}
 
 /* ── Home / profile ───────────────────────────────────────────────────── */
 
@@ -206,6 +368,116 @@ portalRoutes.put('/photo', requireMemberAuth, (req, res) => {
   }
   setMemberPhoto(req.member.id, req.body.photo);
   res.json(publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [req.member.id])));
+});
+
+/**
+ * The app's device-side state, mirrored to the member's account so it follows
+ * them to another phone (see public/js/memberSync.js). The server stores the
+ * JSON as-is: the app already validates what it reads back, and none of it is
+ * trusted for anything that costs money — checkout re-prices the cart, and a
+ * workout is only checked when it is finished and posted to /workouts/logs.
+ */
+const APP_STATE_KEYS = new Set(['cart', 'wishlist', 'active_workout', 'custom_exercises', 'recent_exercises']);
+const MAX_APP_STATE_BYTES = 256 * 1024;
+
+const appStateKey = (key) => {
+  if (!APP_STATE_KEYS.has(key)) throw notFound('Unknown app state');
+  return key;
+};
+
+/** `updated_at` is null when this key was never synced — the app's cue to
+ * upload what it already has on the device rather than drop it. */
+portalRoutes.get('/state/:key', requireMemberAuth, (req, res) => {
+  const row = get('SELECT value, updated_at FROM member_app_state WHERE member_id = ? AND key = ?', [
+    req.member.id,
+    appStateKey(req.params.key),
+  ]);
+  res.json({ value: row ? JSON.parse(row.value) : null, updated_at: row?.updated_at ?? null });
+});
+
+portalRoutes.put('/state/:key', requireMemberAuth, (req, res) => {
+  const key = appStateKey(req.params.key);
+  if (!req.body || typeof req.body !== 'object' || !('value' in req.body)) {
+    throw badRequest('A value is required', { value: 'is required' });
+  }
+  const value = JSON.stringify(req.body.value ?? null);
+  if (Buffer.byteLength(value) > MAX_APP_STATE_BYTES) throw badRequest('That is too much to save', { value: 'is too large' });
+  run(
+    `INSERT INTO member_app_state (member_id, key, value) VALUES (?, ?, ?)
+     ON CONFLICT (member_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    [req.member.id, key, value],
+  );
+  res.json({ ok: true });
+});
+
+/* ── Signed-in devices ─────────────────────────────────────────────────── */
+
+/** "Chrome on Android" from a user-agent string — enough for a member to
+ * recognise their own phone, which is all the Devices screen needs. Order
+ * matters: Edge and Samsung Internet also say "Chrome", and Chrome "Safari". */
+function describeDevice(ua = '') {
+  const browser =
+    [
+      [/EdgA?\/|Edg\//, 'Edge'],
+      [/OPR\/|Opera/, 'Opera'],
+      [/SamsungBrowser/, 'Samsung Internet'],
+      [/FxiOS|Firefox/, 'Firefox'],
+      [/CriOS|Chrome/, 'Chrome'],
+      [/Safari/, 'Safari'],
+    ].find(([re]) => re.test(ua))?.[1] ?? 'Browser';
+  const [os, mobile] =
+    [
+      [/iPhone/, 'iPhone', true],
+      [/iPad/, 'iPad', true],
+      [/Android/, 'Android', true],
+      [/Windows/, 'Windows', false],
+      [/Mac OS X|Macintosh/, 'Mac', false],
+      [/CrOS/, 'Chromebook', false],
+      [/Linux/, 'Linux', false],
+    ]
+      .find(([re]) => re.test(ua))
+      ?.slice(1) ?? ['unknown device', false];
+  return { device: `${browser} on ${os}`, mobile };
+}
+
+portalRoutes.get('/sessions', requireMemberAuth, (req, res) => {
+  const rows = all(
+    `SELECT id, user_agent, created_at, last_seen_at FROM member_sessions
+     WHERE member_id = ? AND expires_at > datetime('now') ORDER BY last_seen_at DESC`,
+    [req.member.id],
+  );
+  const sessions = rows.map((row) => ({
+    id: row.id,
+    ...describeDevice(row.user_agent ?? ''),
+    signed_in_at: row.created_at,
+    last_seen_at: row.last_seen_at,
+    current: row.id === req.memberSessionId,
+  }));
+  // This device first, then most recently used.
+  sessions.sort((a, b) => Number(b.current) - Number(a.current));
+  res.json({ sessions });
+});
+
+/** Signs out every device but the one asking — and stops their reminders,
+ * including phones registered for push before sign-ins were recorded. */
+portalRoutes.post('/sessions/sign-out-others', requireMemberAuth, (req, res) => {
+  const signedOut = tx(() => {
+    run('DELETE FROM push_subscriptions WHERE member_id = ? AND session_id IS NOT ?', [req.member.id, req.memberSessionId]);
+    return run('DELETE FROM member_sessions WHERE member_id = ? AND id != ?', [req.member.id, req.memberSessionId]).changes;
+  });
+  res.json({ signed_out: signedOut });
+});
+
+/** `current` is this device — the app's own Sign out. A lost phone signed
+ * out from another one stops getting this member's reminders too. */
+portalRoutes.delete('/sessions/:id', requireMemberAuth, (req, res) => {
+  const id = req.params.id === 'current' ? req.memberSessionId : req.params.id;
+  const changes = tx(() => {
+    run('DELETE FROM push_subscriptions WHERE member_id = ? AND session_id = ?', [req.member.id, id]);
+    return run('DELETE FROM member_sessions WHERE id = ? AND member_id = ?', [id, req.member.id]).changes;
+  });
+  if (!changes) throw notFound('That device is already signed out');
+  res.json({ ok: true, current: id === req.memberSessionId });
 });
 
 portalRoutes.get('/me', requireMemberAuth, (req, res) => {

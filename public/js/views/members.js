@@ -1042,6 +1042,93 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
   }
 
   const muted = (text) => h('span', { class: 'muted' }, text);
+
+  /**
+   * Member-app login: a temporary password, sent on WhatsApp with the app link
+   * and member ID, or shown here once to pass on by hand. The member picks
+   * their own at first sign-in.
+   */
+  function openAppLoginForm() {
+    const body = h('div', { class: 'app-login-body' });
+    const status = {
+      none: `${member.first_name} hasn't set up the app yet.`,
+      temporary: `${member.first_name} has a temporary password that hasn't been replaced yet.`,
+      active: `${member.first_name} signs in with their own password.`,
+    }[member.portal_access];
+
+    const issue = async (deliver, button) => {
+      button.disabled = true;
+      try {
+        const res = await api.issueAppLogin(member.id, deliver);
+        if (deliver === 'whatsapp') {
+          closeModal();
+          toast(`Login sent to ${member.first_name} on WhatsApp`);
+        } else {
+          showPassword(res.password);
+        }
+        reload();
+      } catch (err) {
+        toast(err.message, 'error');
+        button.disabled = false;
+      }
+    };
+
+    function showPassword(password) {
+      clear(body);
+      append(body, [
+        h('p', {}, `Temporary password for ${member.first_name} (${member.code}). It's shown only this once:`),
+        h('div', { class: 'app-login-secret' }, password),
+        h('p', { class: 'muted' }, 'They sign in with their member ID or phone number and this password, then choose their own.'),
+      ]);
+      clear(footer);
+      append(footer, [
+        h(
+          'button',
+          {
+            class: 'btn',
+            onclick: async () => {
+              try {
+                await navigator.clipboard.writeText(password);
+                toast('Copied');
+              } catch {
+                toast('Could not copy — select it instead', 'error');
+              }
+            },
+          },
+          renderIcon('copy', { size: 15 }), 'Copy',
+        ),
+        h('button', { class: 'btn primary', onclick: closeModal }, 'Done'),
+      ]);
+    }
+
+    const sendBtn = h(
+      'button',
+      { class: 'btn primary', disabled: !member.phone, onclick: () => issue('whatsapp', sendBtn) },
+      renderIcon('whatsapp', { size: 16 }), 'Send on WhatsApp',
+    );
+    const showBtn = h('button', { class: 'btn ghost', onclick: () => issue('show', showBtn) }, 'Show password instead');
+    const footer = h('div', { class: 'app-login-footer' }, showBtn, sendBtn);
+
+    append(body, [
+      h('p', {}, status),
+      h(
+        'p',
+        { class: 'muted' },
+        member.phone
+          ? `Sends ${member.first_name} the app link, their ${t('member').toLowerCase()} ID and a temporary password on WhatsApp (${member.phone}). They choose their own password when they sign in. Any password they had stops working, and their devices are signed out.`
+          : `Add a phone number to send this on WhatsApp — or show a temporary password here and share it in person.`,
+      ),
+    ]);
+
+    openModal({ title: `${isLibrary() ? 'Student' : 'Member'} app login · ${fullName(member)}`, body, footer });
+  }
+
+  const appLoginStatus = {
+    none: muted('Not set up'),
+    temporary: h('span', { class: 'badge amber' }, 'Temporary password'),
+    active: member.last_portal_login ? `Active · last sign-in ${date(member.last_portal_login)}` : 'Active',
+  };
+
   const detailRow = (icon, label, value) => [
     h('dt', {}, renderIcon(icon, { size: 15, stroke: 1.9 }), label),
     h('dd', {}, value),
@@ -1082,6 +1169,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       ),
       ...detailRow('heartPulse', 'Health notes', member.health_notes || '—'),
       ...detailRow('key', 'Device PIN', member.device_pin ?? muted('Not enrolled')),
+      ...detailRow('lock', 'App login', appLoginStatus[member.portal_access]),
       ...detailRow(
         isLibrary() ? 'clock' : 'weight',
         t('shiftCap'),
@@ -1111,6 +1199,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
           )
         : null,
       h('button', { class: 'btn sm', onclick: openPhotoForm }, renderIcon('camera', { size: 15 }), 'Photo'),
+      session.managesBilling
+        ? h('button', { class: 'btn sm', onclick: openAppLoginForm }, renderIcon('key', { size: 15 }), 'App login')
+        : null,
       session.managesBilling
         ? h(
             'button',

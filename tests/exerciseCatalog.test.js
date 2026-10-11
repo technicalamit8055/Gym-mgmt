@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -86,7 +87,7 @@ before(async () => {
   await call('POST', '/api/subscriptions', { member_id: member.body.id, plan_id: plans.body.items[0].id }, { token: adminToken, tenant: TENANT });
   await call('PUT', '/api/fitness-addons/settings', { monthly_price: 599, trial_days: 0 }, { token: adminToken, tenant: TENANT });
   await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id, months: 1, method: 'upi', reference: 'UPI-1' }, { token: adminToken, tenant: TENANT });
-  memberToken = (await call('POST', '/api/portal/login', { identifier: member.body.code, pin: '0011' }, { tenant: TENANT })).body.token;
+  memberToken = await signInMember(call, { staffToken: adminToken, memberId: member.body.id, tenant: TENANT });
 });
 
 after(() => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -155,11 +156,11 @@ describe('member push notifications', () => {
     const member = await call('POST', '/api/members', { first_name: 'Rahul', phone: '9876543210' }, { token: staffToken });
     assert.equal(member.status, 201);
     memberId = member.body.id;
-    memberToken = (await call('POST', '/api/portal/login', { identifier: member.body.code, pin: '3210' })).body.token;
+    memberToken = await signInMember(call, { staffToken: staffToken, memberId: member.body.id });
     assert.ok(memberToken);
 
     const other = await call('POST', '/api/members', { first_name: 'Priya', phone: '9123456789' }, { token: staffToken });
-    otherToken = (await call('POST', '/api/portal/login', { identifier: other.body.code, pin: '6789' })).body.token;
+    otherToken = await signInMember(call, { staffToken: staffToken, memberId: other.body.id });
     assert.ok(otherToken);
 
     // Tracker free for everyone, so the habit nudges apply.

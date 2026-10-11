@@ -4836,14 +4836,17 @@ button.portal-prof-row { cursor: pointer; }
 }
 .portal-prof-signout:active { transform: scale(0.98); }
 
+/* Profile → Devices */
+.portal-prof-row > .portal-device-current, .portal-prof-row > .btn { grid-area: value; }
+.portal-device-current {
+  padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap;
+  color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.portal-devices-empty { margin: 0; padding: 14px 4px; font-size: 13.5px; }
+.portal-devices-note { margin: 4px 4px 0; font-size: 12.5px; line-height: 1.45; }
+
 .portal-edit-profile > p { margin: 0 0 14px; font-size: 13px; line-height: 1.45; }
 
-.portal-pin-banner {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-  padding: 12px 14px; border-radius: 14px; font-size: 12.5px; font-weight: 600;
-  background: rgba(251, 191, 36, 0.12); color: var(--amber); border: 1px solid rgba(251, 191, 36, 0.28);
-}
-.portal-pin-banner > div:first-child { display: flex; align-items: center; gap: 6px; }
 .portal-settings-btn { justify-content: flex-start; gap: 10px; padding: 12px 14px; }
 .portal-support-body p { margin: 0 0 10px; }
 
@@ -5138,37 +5141,179 @@ body:not([data-mode='light']) .portal-pay {
 
 /* ------------------------------------------------------------------ login */
 
+/*
+ * A fixed dark-and-gold poster rather than a themed surface: the photo behind
+ * it is dark, so the screen keeps these colours in light mode too. The art
+ * (login-bg.webp, login-dumbbell.webp) is optional — without it the stage
+ * falls back to the gold glow underneath, and a study hall never loads it.
+ */
 .portal-login {
+  --lg-gold: #ffc51f;
+  --lg-gold-hi: #ffdb4d;
+  --lg-gold-lo: #f2ad0a;
+  --lg-ink: #0a0a0b;
+  --lg-text: #fff;
+  --lg-muted: rgba(255, 255, 255, 0.62);
   min-height: 100vh; min-height: 100dvh;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px;
-  padding: calc(28px + var(--safe-top)) calc(24px + var(--safe-right)) calc(28px + var(--safe-bottom)) calc(24px + var(--safe-left));
-  background: radial-gradient(1000px 600px at 50% -10%, var(--brand-glow), transparent 60%), var(--bg);
+  display: flex; justify-content: center;
+  background: var(--lg-ink); color: var(--lg-text);
 }
-.portal-login-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.portal-login-logo, .portal-login-logo-img { width: 52px; height: 52px; border-radius: 16px; }
-.portal-login-logo {
-  display: grid; place-items: center; background: var(--brand-soft); color: var(--brand);
-  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
-  box-shadow: inset 0 1px 0 var(--hairline);
+.portal-login-stage {
+  position: relative; overflow: hidden; isolation: isolate;
+  width: min(100%, 520px); min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  padding:
+    calc(clamp(150px, 30dvh, 330px) + var(--safe-top)) calc(20px + var(--safe-right))
+    calc(clamp(72px, 16dvh, 190px) + var(--safe-bottom)) calc(20px + var(--safe-left));
+  background:
+    radial-gradient(520px 420px at 50% 8%, rgba(255, 186, 20, 0.22), transparent 70%),
+    radial-gradient(420px 320px at 50% 100%, rgba(255, 170, 0, 0.12), transparent 70%),
+    var(--lg-ink);
 }
-.portal-login-logo-img { object-fit: cover; border: 1px solid var(--border); }
-.portal-login-gymname { font-weight: 700; font-size: 17px; }
+.portal-login.has-art .portal-login-stage {
+  background:
+    linear-gradient(180deg, transparent 26%, rgba(8, 8, 9, 0.5) 44%, rgba(8, 8, 9, 0.62) 72%, rgba(8, 8, 9, 0.1) 92%),
+    url('/images/portal/login-bg.webp') center top / cover no-repeat,
+    radial-gradient(520px 420px at 50% 8%, rgba(255, 186, 20, 0.22), transparent 70%),
+    var(--lg-ink);
+}
+@media (min-width: 560px) {
+  .portal-login-stage { box-shadow: 0 0 80px rgba(0, 0, 0, 0.9); }
+}
 
-.portal-login-card {
-  width: min(360px, 100%);
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  padding: 28px 24px; box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
-  display: flex; flex-direction: column; gap: 14px;
+/* Gold diagonal bands — top-left corner and the right edge behind the card */
+.portal-login-stripe {
+  position: absolute; z-index: -1; pointer-events: none;
+  width: 40px; height: 520px; transform: rotate(33deg);
+  background: linear-gradient(180deg, var(--lg-gold-hi), var(--lg-gold-lo));
+  box-shadow: 0 0 34px rgba(255, 190, 20, 0.35);
 }
-.portal-login-title { margin: 0; font-size: 21px; }
-.portal-login-sub { margin: -8px 0 0; color: var(--muted); font-size: 13px; }
-.portal-login-error { margin: 0; color: var(--red); font-size: 13px; }
-.portal-login-foot { margin: 4px 0 0; text-align: center; font-size: 13px; }
+.portal-login-stripe::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -24px; width: 12px;
+  background: inherit; opacity: 0.75;
+}
+.portal-login-stripe-tl { top: -250px; left: 18px; }
+.portal-login-stripe-r { top: 28%; right: -34px; height: 380px; opacity: 0.9; }
+
+.portal-login-brand { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.portal-login-logo, .portal-login-logo-img {
+  width: 78px; height: 78px; border-radius: 20px;
+  border: 2.5px solid var(--lg-gold);
+  box-shadow: 0 0 26px rgba(255, 190, 20, 0.45), 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+.portal-login-logo { display: grid; place-items: center; background: #151515; color: var(--lg-gold); }
+.portal-login-logo-img { object-fit: cover; background: #151515; }
+.portal-login-gymname {
+  margin: 0; max-width: 30ch;
+  font-size: clamp(18px, 5.1vw, 25px); font-weight: 700; line-height: 1.2; letter-spacing: -0.01em;
+  color: var(--lg-text); text-shadow: 0 2px 14px rgba(0, 0, 0, 0.75);
+}
+.portal-login-gymname em { font-style: normal; color: var(--lg-gold); }
+
+.portal-login-card-wrap { position: relative; width: min(400px, 100%); }
+.portal-login-dumbbell {
+  position: absolute; z-index: 2; top: 8px; right: 6px;
+  width: 32%; max-width: 136px; height: auto;
+  pointer-events: none; filter: drop-shadow(0 14px 16px rgba(0, 0, 0, 0.6));
+}
+.portal-login-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 30px 22px 36px; border-radius: 26px;
+  border: 1.5px solid rgba(255, 197, 31, 0.78);
+  background: linear-gradient(165deg, rgba(34, 34, 36, 0.86), rgba(12, 12, 13, 0.9));
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow:
+    0 0 32px rgba(255, 180, 0, 0.22), 0 26px 60px rgba(0, 0, 0, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+/* The card's own corner stripes */
+.portal-login-card::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 150px; height: 150px; pointer-events: none;
+  background: linear-gradient(135deg,
+    transparent 0 24%, rgba(255, 197, 31, 0.92) 24% 31%, transparent 31% 35%,
+    rgba(255, 197, 31, 0.55) 35% 39%, transparent 39%);
+}
+.portal-login-card > * { position: relative; }
+
+.portal-login-avatar {
+  align-self: center; width: 84px; height: 84px; margin-bottom: 8px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--lg-gold);
+  border: 1.5px solid rgba(255, 197, 31, 0.6);
+  background: radial-gradient(circle at 50% 40%, #1f1f20, #0e0e0f 70%);
+  box-shadow: 0 0 24px rgba(255, 190, 20, 0.32), inset 0 0 18px rgba(255, 190, 20, 0.14);
+}
+
+.portal-login-field {
+  align-items: center; gap: 14px; height: 60px; padding: 0 18px; border-radius: 14px;
+  color: #cfcfd3; background: rgba(40, 40, 43, 0.92); border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.portal-login-field svg { flex: none; }
+.portal-login-field:focus-within { border-color: var(--lg-gold); box-shadow: 0 0 0 3px rgba(255, 197, 31, 0.18); }
+.portal-login-field .portal-input,
+.portal-login-field .portal-input:focus {
+  flex: 1; min-width: 0; padding: 0; border: none; border-radius: 0; box-shadow: none;
+  background: transparent; color: var(--lg-text); font-size: 17px;
+}
+.portal-login-field .portal-input::placeholder { color: rgba(255, 255, 255, 0.55); }
+
+.portal-login-cta {
+  position: relative; width: 100%; height: 60px; border: none; border-radius: 14px; cursor: pointer;
+  display: grid; place-items: center;
+  font: inherit; font-size: 18px; font-weight: 700; color: #111;
+  background: linear-gradient(180deg, var(--lg-gold-hi), var(--lg-gold-lo));
+  box-shadow: 0 10px 30px rgba(255, 186, 20, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: transform 0.1s ease, filter 0.15s ease, opacity 0.15s ease;
+}
+.portal-login-cta svg { position: absolute; right: 22px; top: 50%; translate: 0 -50%; }
+.portal-login-cta:hover { filter: brightness(1.05); }
+.portal-login-cta:active { transform: translateY(1px) scale(0.99); }
+.portal-login-cta:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.portal-login-cta:disabled { cursor: default; opacity: 0.45; box-shadow: none; transform: none; filter: none; }
+
+.portal-login-title { margin: 0; font-size: 21px; text-align: center; color: var(--lg-text); }
+.portal-login-sub { margin: -8px 0 0; color: var(--lg-muted); font-size: 13px; text-align: center; }
+.portal-login-error { margin: 0; color: #ff7a7a; font-size: 13px; text-align: center; }
 .portal-back-link {
   align-self: flex-start; border: none; background: none; color: var(--muted); cursor: pointer;
   font-size: 13px; padding: 0; margin-bottom: -4px;
 }
 .portal-back-link:hover { color: var(--text); }
+.portal-login-card .portal-back-link {
+  position: absolute; top: 16px; left: 16px; z-index: 1; padding: 5px 11px; border-radius: 999px;
+  color: var(--lg-text); background: rgba(10, 10, 11, 0.72); border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.portal-login-card .portal-back-link:hover { color: var(--lg-text); }
+
+/* Password steps: show/hide eye, "signing in as" chip, links and hints */
+.portal-login-eye {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin-right: -8px;
+  border: none; border-radius: 10px; background: none; color: var(--lg-muted); cursor: pointer;
+}
+.portal-login-eye:hover, .portal-login-eye:focus-visible { color: var(--lg-text); background: rgba(255, 255, 255, 0.06); outline: none; }
+.portal-login-who {
+  align-self: center; display: inline-flex; align-items: center; gap: 7px; max-width: 100%;
+  margin-top: -6px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13.5px; color: var(--lg-text);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.portal-login-who svg { color: var(--lg-gold); flex: none; }
+.portal-login-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.portal-login-who em { font-style: normal; color: var(--lg-gold); font-size: 12.5px; }
+.portal-login-who:hover { border-color: rgba(255, 197, 31, 0.5); }
+.portal-login-row { display: flex; justify-content: flex-end; margin: -6px 0 -2px; }
+.portal-login-link {
+  border: none; background: none; padding: 2px 0; cursor: pointer;
+  font: inherit; font-size: 13.5px; font-weight: 600; color: var(--lg-gold);
+}
+.portal-login-link:hover { text-decoration: underline; }
+.portal-login-link:disabled { color: var(--lg-muted); cursor: default; text-decoration: none; font-weight: 500; }
+.portal-login-note { margin: 0; text-align: center; font-size: 13px; color: var(--lg-muted); }
+.portal-login-hint { margin: -8px 2px 0; font-size: 12.5px; color: var(--lg-muted); }
+.portal-login-field .portal-login-code:not(:placeholder-shown) { letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
+/* Room for the Back pill above the avatar on the side steps */
+.portal-login-card:has(> .portal-back-link) { padding-top: 54px; }
 
 .portal-field { display: flex; }
 .portal-input {
@@ -5176,25 +5321,6 @@ body:not([data-mode='light']) .portal-pay {
   background: var(--bg); color: var(--text); font-size: 15px;
 }
 .portal-input:focus { outline: none; border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); box-shadow: var(--ring); }
-
-.portal-pin-dots { display: flex; justify-content: center; gap: 12px; padding: 6px 0; }
-.portal-pin-dot {
-  width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--border); background: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.portal-pin-dot.filled { background: var(--brand); border-color: var(--brand); }
-
-.portal-keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.portal-key {
-  padding: 14px 0; border-radius: 16px; border: 1px solid var(--border); background: var(--surface-2);
-  color: var(--text); font-size: 19px; font-weight: 600; cursor: pointer;
-  display: grid; place-items: center;
-  box-shadow: inset 0 1px 0 var(--hairline);
-  transition: background 0.12s ease, transform 0.1s ease;
-}
-.portal-key:active { transform: translateY(1px) scale(0.97); background: color-mix(in srgb, var(--brand) 10%, var(--surface-2)); }
-.portal-key-empty { visibility: hidden; }
-.portal-key-action { color: var(--muted); }
 
 /* ------------------------------------------------------------- responsive */
 
@@ -7490,8 +7616,6 @@ body[data-mode='light'] .portal-insights { --i-carbs: #f59e0b; }
 .cat-form-fields .field { margin: 0; }
 .cat-form-fields textarea { width: 100%; resize: vertical; }
 .cat-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.cat-import textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; margin-bottom: 8px; }
-.cat-errors { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--red); }
 
 .cat-match-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: 320px; overflow-y: auto; }
 .cat-match {
@@ -8121,6 +8245,16 @@ body.portal-demo-open { overflow: hidden; }
 .md-plan-name { font-size: 17px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
 .md-plan-name.lg { font-size: 21px; }
 .md-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+/* Member app login dialog */
+.app-login-body p { margin: 0 0 10px; line-height: 1.5; }
+.app-login-body p.muted { font-size: 13px; }
+.app-login-footer { display: contents; }
+.app-login-secret {
+  margin: 4px 0 14px; padding: 16px; border-radius: var(--radius-sm); text-align: center;
+  font: 700 26px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em;
+  background: var(--surface-2); border: 1px dashed var(--border); user-select: all;
+}
 
 .md-link {
   display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none;

@@ -1,5 +1,6 @@
 import { api, pathSlug } from '../api.js';
 import { append, clear, closeModal, date, h, money, openModal, renderIcon, toast } from '../ui.js';
+import { memberSynced } from '../memberSync.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
 
 /**
@@ -90,6 +91,15 @@ function saveJson(key, value) {
   }
 }
 
+// The cart and wishlist follow the member to another phone; the delivery
+// method, address and recent searches stay with this one.
+const syncedCart = memberSynced('cart', 'store.cart');
+const syncedWish = memberSynced('wishlist', 'store.wish');
+
+/** Brings the cart and wishlist up to date with the member's other devices —
+ * awaited alongside the store itself, so the shop opens already current. */
+export const pullStoreState = () => Promise.all([syncedCart.pull(), syncedWish.pull()]);
+
 const priceOf = (product, variant) => ({
   price: variant ? variant.effective_price : product.price,
   mrp: variant ? variant.effective_mrp : product.mrp,
@@ -112,17 +122,16 @@ function unitLabel(product) {
   return `${product.flavors.length} flavours`;
 }
 
-function createCart(memberId, products) {
-  const key = `gymbook.store.cart${scope(memberId)}`;
+function createCart(products) {
   const byId = new Map(products.map((p) => [p.id, p]));
   const listeners = new Set();
-  let lines = loadJson(key, []).filter(
+  let lines = (syncedCart.read() ?? []).filter(
     (l) => l && byId.has(l.product_id) && Number.isInteger(l.quantity) && l.quantity > 0,
   );
 
   const same = (l, productId, variantId) => l.product_id === productId && (l.variant_id ?? null) === (variantId ?? null);
   const persist = () => {
-    saveJson(key, lines.length ? lines : null);
+    syncedCart.write(lines.length ? lines : null);
     for (const fn of listeners) fn();
   };
 
@@ -1685,7 +1694,6 @@ export function renderLiveStore({ store, memberId }) {
   const root = h('div', { class: 'portal-tab-body bk bk-home' });
   const methodKey = `gymbook.store.method${scope(memberId)}`;
   const addressKey = `gymbook.store.address${scope(memberId)}`;
-  const wishKey = `gymbook.store.wish${scope(memberId)}`;
   const defaults = store.shipping
     ? { name: store.shipping.name ?? '', phone: store.shipping.phone ?? '', address: store.shipping.address ?? '' }
     : {};
@@ -1696,11 +1704,11 @@ export function renderLiveStore({ store, memberId }) {
     store,
     products,
     memberId,
-    cart: createCart(memberId, products),
+    cart: createCart(products),
     pages: createPager(root),
     watchers: new Set(),
     onMethodChange: new Set(),
-    wish: new Set(loadJson(wishKey, []).filter((id) => products.some((p) => p.id === id))),
+    wish: new Set((syncedWish.read() ?? []).filter((id) => products.some((p) => p.id === id))),
     method: store.delivery.pickup_enabled && loadJson(methodKey, 'delivery') === 'pickup' ? 'pickup' : 'delivery',
     ship: { name: '', phone: '', address: '', city: '', state: '', pincode: '', ...defaults, ...(loadJson(addressKey, null) ?? {}) },
     etaShort() {
@@ -1726,7 +1734,7 @@ export function renderLiveStore({ store, memberId }) {
       const on = !this.wish.has(id);
       if (on) this.wish.add(id);
       else this.wish.delete(id);
-      saveJson(wishKey, [...this.wish]);
+      syncedWish.write([...this.wish]);
       for (const btn of document.querySelectorAll(`.bk-heart[data-product="${id}"]`)) {
         btn.classList.toggle('on', on);
         btn.setAttribute('aria-pressed', String(on));

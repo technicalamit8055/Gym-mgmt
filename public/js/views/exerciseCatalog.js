@@ -8,6 +8,10 @@ import { clear, closeModal, confirmDialog, exerciseMedia, h, openModal, renderIc
  * Lives in the operator console rather than in a gym's own staff screens
  * because a demo of a deadlift is the same for everyone — upload it once here
  * and every gym's pickers, routines and members' logger show it.
+ *
+ * New exercises come in one at a time, or in bulk from a CSV or JSON sheet —
+ * and the AI prompt builder writes the instructions that get an AI tool to
+ * produce exactly that sheet, columns and all.
  */
 
 const label = (value) => String(value ?? '').replace(/_/g, ' ');
@@ -26,6 +30,7 @@ const MUSCLE_ALIASES = {
   abs: 'abdominals', core: 'abdominals', obliques: 'abdominals',
   quads: 'quadriceps', hams: 'hamstrings', calf: 'calves',
   delts: 'shoulders', deltoids: 'shoulders', pecs: 'chest', pectorals: 'chest',
+  'front delts': 'shoulders', 'side delts': 'shoulders', 'rear delts': 'shoulders', 'rotator cuff': 'shoulders',
   glute: 'glutes', hips: 'glutes', bicep: 'biceps', tricep: 'triceps', forearm: 'forearms',
   trap: 'traps', trapezius: 'traps', lat: 'lats', 'latissimus dorsi': 'lats',
   'erector spinae': 'lower_back', 'full body': 'full_body',
@@ -74,30 +79,107 @@ export function parseCsv(text) {
   return rows;
 }
 
-/** Header-keyed rows from CSV text. Header names are matched loosely
- * ("Muscle Group" = muscle_group) so a sheet from anywhere works. */
-export function csvToExercises(text) {
-  const [header, ...body] = parseCsv(text);
-  if (!header) return [];
-  const keys = header.map((cell) => normalise(cell).replace(/ /g, '_'));
-  return body.map((cells) => {
-    const row = {};
-    keys.forEach((key, i) => {
-      if (key && cells[i] !== undefined) row[key] = cells[i].trim();
-    });
-    if (row.muscle) row.muscle_group ??= row.muscle;
-    if (row.primary_muscle) row.muscle_group ??= row.primary_muscle;
-    if (row.muscle_group) row.muscle_group = row.muscle_group.toLowerCase().replace(/[\s-]+/g, '_');
-    if (row.equipment) row.equipment = row.equipment.toLowerCase().replace(/[\s-]+/g, '_');
-    return row;
-  });
+/** The sheet inside a ```csv / ```json fence, as AI tools like to reply. */
+export const unfence = (text) => {
+  const fenced = /```[a-z]*\s*\n([\s\S]*?)```/i.exec(text);
+  return (fenced ? fenced[1] : text).trim();
+};
+
+const csvCell = (value) => {
+  const text = value === null || value === undefined ? '' : Array.isArray(value) ? value.join(', ') : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+export const toCsv = (rows, columns) => [columns.join(','), ...rows.map((row) => columns.map((c) => csvCell(row[c])).join(','))].join('\n');
+
+export function download(filename, text, type = 'text/csv') {
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
+  const link = h('a', { href: url, download: filename });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const CSV_TEMPLATE = [
-  'name,muscle_group,equipment,secondary_muscles,tags,instructions',
-  '"Landmine Press",shoulders,barbell,"chest, triceps",unilateral,"Press the bar up and slightly forward."',
-  '"Incline Dumbbell Curl",arms,dumbbell,,isolation,"Keep the elbows back behind the torso."',
-].join('\n');
+export async function copyText(text, fallbackInput) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied to the clipboard');
+  } catch {
+    fallbackInput?.select();
+    toast('Select all and copy it from the box', 'error');
+  }
+}
+
+/** The columns, in the order the template, the export and the AI prompt use. */
+const COLUMNS = ['name', 'muscle_group', 'equipment', 'secondary_muscles', 'tags', 'instructions'];
+
+/** What other sheets and AI tools call the columns. */
+const KEY_ALIASES = {
+  exercise: 'name', exercise_name: 'name', title: 'name',
+  muscle: 'muscle_group', primary_muscle: 'muscle_group', primary_muscle_group: 'muscle_group', target: 'muscle_group', target_muscle: 'muscle_group', body_part: 'muscle_group',
+  secondary: 'secondary_muscles', secondary_muscle: 'secondary_muscles', secondary_muscle_groups: 'secondary_muscles', other_muscles: 'secondary_muscles', synergists: 'secondary_muscles',
+  equipment_type: 'equipment', gear: 'equipment',
+  tag: 'tags', keywords: 'tags', labels: 'tags',
+  how_to: 'instructions', description: 'instructions', steps: 'instructions', cues: 'instructions',
+};
+
+/** Everyday names for the equipment types. */
+const EQUIPMENT_ALIASES = {
+  barbells: 'barbell', ez_bar: 'barbell', trap_bar: 'barbell',
+  dumbbells: 'dumbbell', kettlebells: 'kettlebell',
+  cables: 'cable', cable_machine: 'cable', machines: 'machine', smith: 'smith_machine',
+  bands: 'band', resistance_band: 'band', resistance_bands: 'band',
+  body_weight: 'bodyweight', none: 'bodyweight', no_equipment: 'bodyweight',
+};
+
+const asKey = (text) => normalise(text).replace(/ /g, '_');
+/** "Lower Back" → lower_back, "quads" → quadriceps. Unknown values pass
+ * through for the server to report against its row. */
+const muscleKey = (text) => MUSCLE_ALIASES[normalise(text)] ?? asKey(text);
+const asList = (value) => (Array.isArray(value) ? value : String(value).split(/[,;|]/)).map((v) => String(v).trim()).filter(Boolean);
+
+/** Raw sheet values → what the import endpoint takes. Empty columns are
+ * dropped, so importing over an existing exercise leaves them alone. */
+function cleanRow(raw) {
+  const row = {};
+  for (const [rawKey, value] of Object.entries(raw ?? {})) {
+    if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) continue;
+    const key = KEY_ALIASES[asKey(rawKey)] ?? asKey(rawKey);
+    if (key && row[key] === undefined) row[key] = typeof value === 'string' ? value.trim() : value;
+  }
+  if (row.muscle_group !== undefined) row.muscle_group = muscleKey(row.muscle_group);
+  if (row.equipment !== undefined) row.equipment = EQUIPMENT_ALIASES[asKey(row.equipment)] ?? asKey(row.equipment);
+  if (row.secondary_muscles !== undefined) row.secondary_muscles = [...new Set(asList(row.secondary_muscles).map(muscleKey))];
+  if (row.tags !== undefined) row.tags = asList(row.tags).map((t) => t.toLowerCase());
+  if (Array.isArray(row.instructions)) row.instructions = row.instructions.join(' ');
+  for (const key of ['secondary_muscles', 'tags']) if (row[key]?.length === 0) delete row[key];
+  return row;
+}
+
+/** CSV or JSON text — or an AI tool's whole reply — → rows with the API's
+ * keys. JSON is anything that starts like an array or object; everything else
+ * is read as CSV with a header row. Header names are matched loosely
+ * ("Muscle Group" = muscle_group) so a sheet from anywhere works. */
+export function textToExercises(text) {
+  const body = unfence(String(text ?? ''));
+  if (!body) return [];
+  if (body.startsWith('[') || body.startsWith('{')) {
+    const parsed = JSON.parse(body);
+    const list = Array.isArray(parsed) ? parsed : parsed.exercises ?? parsed.items ?? parsed.data ?? [];
+    return Array.isArray(list) ? list.map(cleanRow) : [];
+  }
+  const [header, ...lines] = parseCsv(body);
+  if (!header) return [];
+  return lines.map((cells) => cleanRow(Object.fromEntries(header.map((key, i) => [key, cells[i]]))));
+}
+
+const CSV_TEMPLATE = toCsv(
+  [
+    { name: 'Landmine Press', muscle_group: 'shoulders', equipment: 'barbell', secondary_muscles: ['chest', 'triceps'], tags: ['unilateral', 'compound'], instructions: 'Hold the end of the bar at shoulder height. Press it up and slightly forward until the arm is straight, then lower under control.' },
+    { name: 'Incline Dumbbell Curl', muscle_group: 'biceps', equipment: 'dumbbell', secondary_muscles: ['forearms'], tags: ['isolation'], instructions: 'Sit back on a 45° bench with the arms hanging. Curl both dumbbells up, keeping the elbows back behind the torso.' },
+  ],
+  COLUMNS,
+);
 
 /* ── Pieces ───────────────────────────────────────────────────────────── */
 
@@ -418,24 +500,189 @@ function openExerciseModal(exercise, meta, onSaved) {
   modal.classList.add('cat-modal');
 }
 
+/* ── AI prompt ────────────────────────────────────────────────────────── */
+
+export function buildExerciseAiPrompt({ topic, count, format, muscleGroups, equipment, skipNames = [] }) {
+  const what = topic.trim() || 'common gym exercises across every muscle group';
+  const lines = [
+    `You are a careful strength and conditioning coach building the exercise library of a gym app. Create a list of ${count} exercises: ${what}.`,
+    '',
+    format === 'json'
+      ? `Return ONLY a JSON array inside one \`\`\`json code block. Each item is an object with exactly these keys: ${COLUMNS.join(', ')}. secondary_muscles and tags are arrays of strings; use [] when empty.`
+      : `Return ONLY a CSV inside one \`\`\`csv code block, with exactly this header row:\n${COLUMNS.join(',')}`,
+    '',
+    'Rules:',
+    '- One entry per exercise, no duplicates. Use the standard name lifters search for, in Title Case, with the equipment first where the same movement is done with different kit, e.g. "Barbell Bench Press", "Dumbbell Bench Press", "Cable Fly", "Pull-Up", "Romanian Deadlift".',
+    `- muscle_group is the ONE muscle the exercise mainly works, exactly one of: ${muscleGroups.join(', ')}. (cardio is for conditioning such as running, rowing or cycling; full_body for Olympic lifts and other whole-body moves; other only when nothing else fits.)`,
+    `- equipment is exactly one of: ${equipment.join(', ')}. (band is a resistance band; bodyweight needs no equipment beyond a bar or bench; cardio is a treadmill, bike, rower or other cardio machine; EZ-bar and trap-bar moves are barbell.)`,
+    '- secondary_muscles lists the other muscles that work hard, from the same muscle_group list, never repeating the primary one. Leave it empty if there are none.',
+    '- tags: up to 4 lowercase words, each 24 characters or fewer, e.g. compound, isolation, unilateral, push, pull, hinge, squat, plyometric, mobility.',
+    '- instructions: 2–4 short sentences a member can follow mid-workout — the setup, the movement, and one key form cue. Plain text with no numbering or line breaks, under 400 characters.',
+    '- Only real, well-established exercises. Leave out anything you are not sure about rather than invent one.',
+  ];
+  if (format !== 'json') lines.push('- Wrap any value that contains a comma in double quotes. secondary_muscles and tags hold several values separated by commas, e.g. "glutes, hamstrings".');
+  if (skipNames.length) {
+    lines.push('', `These exercises are already in the library — do not include them or near-duplicates of them:\n${skipNames.join('; ')}`);
+  }
+  return lines.join('\n');
+}
+
+function openAiPromptModal(existingNames, meta, onImport) {
+  const topic = h('textarea', {
+    rows: 3,
+    placeholder: 'e.g. glute-focused exercises · cable machine exercises · calisthenics and bodyweight progressions · mobility and stretching for lifters',
+  });
+  const count = h('input', { type: 'number', min: 5, max: 200, value: 40 });
+  const format = h('select', {}, h('option', { value: 'csv' }, 'CSV (recommended)'), h('option', { value: 'json' }, 'JSON'));
+  const skip = h('input', { type: 'checkbox', checked: existingNames.length > 0 && existingNames.length <= 1500 });
+  const output = h('textarea', { class: 'fc-prompt', rows: 14, readonly: '' });
+
+  const paint = () => {
+    output.value = buildExerciseAiPrompt({
+      topic: topic.value,
+      count: Math.min(200, Math.max(5, Number(count.value) || 40)),
+      format: format.value,
+      muscleGroups: meta.muscle_groups,
+      equipment: meta.equipment,
+      skipNames: skip.checked ? existingNames : [],
+    });
+  };
+  for (const el of [topic, count, format, skip]) {
+    el.addEventListener('input', paint);
+    el.addEventListener('change', paint);
+  }
+  paint();
+
+  openModal({
+    title: 'Generate exercises with an AI tool',
+    subtitle: 'Paste this into ChatGPT, Claude or Gemini, then import what it replies.',
+    icon: 'sparkle',
+    wide: true,
+    body: h(
+      'div',
+      { class: 'fc-ai' },
+      h('label', { class: 'field' }, h('span', {}, 'Which exercises?'), topic),
+      h(
+        'div',
+        { class: 'form-grid' },
+        h('label', { class: 'field' }, h('span', {}, 'How many'), count),
+        h('label', { class: 'field' }, h('span', {}, 'Reply format'), format),
+      ),
+      h('label', { class: 'fc-check' }, skip, h('span', {}, `Tell it to skip the ${existingNames.length} exercises already in the library`)),
+      h('div', { class: 'fc-ai-label' }, 'Your prompt'),
+      output,
+      h(
+        'ul',
+        { class: 'fc-ai-tips' },
+        h('li', {}, 'Ask for 30–60 exercises at a time; long replies get cut off.'),
+        h('li', {}, 'Members read the instructions and muscle groups, so skim them after importing.'),
+        h('li', {}, 'Existing names are updated, not duplicated, so re-importing a corrected sheet is safe.'),
+        h('li', {}, 'Demos are not part of the sheet — add them afterwards with "Bulk upload demos", matched by filename.'),
+      ),
+    ),
+    footer: [
+      h('button', { class: 'btn ghost', type: 'button', onclick: closeModal }, 'Close'),
+      h('button', { class: 'btn', type: 'button', onclick: () => copyText(output.value, output) }, renderIcon('copy', { size: 15 }), 'Copy prompt'),
+      h(
+        'button',
+        {
+          class: 'btn primary',
+          type: 'button',
+          onclick: () => {
+            closeModal();
+            onImport();
+          },
+        },
+        renderIcon('upload', { size: 15 }),
+        'Import the reply',
+      ),
+    ],
+  });
+}
+
 /* ── Bulk import ──────────────────────────────────────────────────────── */
 
-function openImportModal(onDone) {
-  const status = h('div', { class: 'muted', style: 'font-size:13px;min-height:20px' });
-  const paste = h('textarea', { rows: 8, placeholder: 'name,muscle_group,equipment,secondary_muscles,tags,instructions\n"Landmine Press",shoulders,barbell,"chest, triceps",unilateral,"Press up and forward."' });
+function openImportModal({ meta, onDone, onPrompt }) {
+  const paste = h('textarea', {
+    class: 'fc-paste',
+    rows: 9,
+    placeholder: `Paste CSV or JSON — or the AI tool's whole reply.\n\n${COLUMNS.join(',')}\nLandmine Press,shoulders,barbell,"chest, triceps",unilateral,"Press up and forward."`,
+  });
+  const status = h('div', { class: 'fc-status' });
+  const preview = h('div', {});
   const results = h('div', {});
   let rows = [];
 
+  const go = h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Import');
+  const plural = (n) => `${n} exercise${n === 1 ? '' : 's'}`;
+
   const read = () => {
-    rows = csvToExercises(paste.value);
-    status.textContent = rows.length ? `${rows.length} exercise${rows.length === 1 ? '' : 's'} ready to import` : 'Paste or choose a CSV with a header row.';
+    clear(results);
+    try {
+      rows = textToExercises(paste.value).filter((row) => Object.keys(row).length);
+      status.classList.remove('error');
+      status.textContent = rows.length
+        ? `${plural(rows.length)} ready to import`
+        : paste.value.trim()
+          ? 'No rows found — check the header row has a "name" column.'
+          : '';
+    } catch (err) {
+      rows = [];
+      status.classList.add('error');
+      status.textContent = `That JSON does not parse: ${err.message}`;
+    }
     go.disabled = !rows.length;
+    go.textContent = rows.length ? `Import ${plural(rows.length)}` : 'Import';
+
+    // A secondary muscle the app has no group for ("hip flexors") would sink
+    // the whole row on the server; keep the exercise and drop just that one.
+    const dropped = new Set();
+    for (const row of rows) {
+      if (!row.secondary_muscles) continue;
+      for (const m of row.secondary_muscles) if (!meta.muscle_groups.includes(m)) dropped.add(m);
+      row.secondary_muscles = row.secondary_muscles.filter((m) => meta.muscle_groups.includes(m));
+      if (!row.secondary_muscles.length) delete row.secondary_muscles;
+    }
+
+    clear(preview);
+    if (!rows.length) return;
+    const missing = rows.filter((r) => !r.name).length;
+    preview.append(
+      h(
+        'div',
+        { class: 'table-wrap fc-preview' },
+        h(
+          'table',
+          {},
+          h('thead', {}, h('tr', {}, ...['Name', 'Muscle', 'Equipment', 'Also works'].map((t) => h('th', {}, t)))),
+          h(
+            'tbody',
+            {},
+            ...rows.slice(0, 6).map((r) =>
+              h(
+                'tr',
+                {},
+                h('td', {}, r.name ?? h('em', { class: 'fc-missing' }, 'missing')),
+                h('td', {}, r.muscle_group ? capital(r.muscle_group) : ''),
+                h('td', {}, capital(r.equipment ?? 'barbell')),
+                h('td', {}, (r.secondary_muscles ?? []).map(capital).join(', ')),
+              ),
+            ),
+          ),
+        ),
+      ),
+      ...[
+        rows.length > 6 ? h('div', { class: 'fc-status' }, `…and ${rows.length - 6} more`) : null,
+        missing ? h('div', { class: 'fc-status error' }, `${missing} row${missing === 1 ? ' is' : 's are'} missing a name and will be skipped.`) : null,
+        dropped.size ? h('div', { class: 'fc-status' }, `Not muscle groups in the app, so left out of secondary muscles: ${[...dropped].map(label).join(', ')}.`) : null,
+      ].filter(Boolean),
+    );
   };
   paste.addEventListener('input', read);
 
   const picker = h('input', {
     type: 'file',
-    accept: '.csv,text/csv',
+    accept: '.csv,.json,.txt,text/csv,application/json,text/plain',
     style: 'display:none',
     onchange: async (e) => {
       const file = e.target.files?.[0];
@@ -446,57 +693,61 @@ function openImportModal(onDone) {
     },
   });
 
-  const go = h(
-    'button',
-    {
-      class: 'btn primary',
-      type: 'button',
-      disabled: true,
-      onclick: async () => {
-        go.disabled = true;
-        try {
-          const res = await api.platformImportExercises(rows);
-          clear(results).append(
-            h('div', { class: 'badge green', style: 'margin-top:12px' }, `${res.created} added · ${res.updated} updated`),
-            res.errors.length
-              ? h(
-                  'div',
-                  { style: 'margin-top:10px' },
-                  h('div', { style: 'font-weight:600;font-size:13px' }, `${res.errors.length} row${res.errors.length === 1 ? '' : 's'} skipped`),
-                  h('ul', { class: 'cat-errors' }, ...res.errors.map((e) => h('li', {}, `Row ${e.line}${e.name ? ` (${e.name})` : ''}: ${e.error}`))),
-                )
-              : null,
-          );
-          await onDone();
-        } catch (err) {
-          toast(err.message || 'Import failed', 'error');
-          go.disabled = false;
-        }
-      },
-    },
-    'Import',
-  );
-
-  const template = h(
-    'a',
-    {
-      class: 'btn sm ghost',
-      download: 'exercise-catalog-template.csv',
-      href: `data:text/csv;charset=utf-8,${encodeURIComponent(CSV_TEMPLATE)}`,
-    },
-    'Download template',
-  );
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    try {
+      const res = await api.platformImportExercises(rows);
+      clear(results).append(
+        ...[
+          h('div', { class: 'fc-done' }, renderIcon('checkCircle', { size: 18 }), `${res.created} added · ${res.updated} updated`),
+          res.errors.length
+            ? h(
+                'details',
+                { class: 'fc-report error', open: res.errors.length <= 8 ? '' : null },
+                h('summary', {}, `${res.errors.length} row${res.errors.length === 1 ? '' : 's'} skipped`),
+                h('ul', {}, ...res.errors.map((e) => h('li', {}, `Row ${e.line}${e.name ? ` · ${e.name}` : ''}: ${e.error}`))),
+              )
+            : null,
+        ].filter(Boolean),
+      );
+      await onDone();
+    } catch (err) {
+      toast(err.message || 'Import failed', 'error');
+      go.disabled = false;
+    }
+  });
 
   openModal({
-    title: 'Import exercises from CSV',
+    title: 'Import exercises',
+    subtitle: 'CSV or JSON. Exercises are matched by name: new ones are added, existing ones updated with the columns you give.',
+    icon: 'upload',
     wide: true,
     body: h(
       'div',
-      { class: 'cat-import' },
-      h('p', { class: 'muted', style: 'margin:0 0 10px;font-size:13px' }, 'Exercises are matched by name: new ones are added, existing ones are updated with the columns you provide (blank columns are left alone). Muscle groups: chest, back, legs, shoulders, arms, core, cardio, full_body.'),
-      h('div', { class: 'row', style: 'gap:8px;margin-bottom:10px' }, h('button', { class: 'btn sm', type: 'button', onclick: () => picker.click() }, renderIcon('upload', { size: 15 }), 'Choose CSV file'), template, picker),
+      { class: 'fc-import' },
+      h(
+        'div',
+        { class: 'row', style: 'gap:8px;flex-wrap:wrap' },
+        h('button', { class: 'btn sm', type: 'button', onclick: () => picker.click() }, renderIcon('upload', { size: 15 }), 'Choose file'),
+        h('button', { class: 'btn sm ghost', type: 'button', onclick: () => download('exercise-catalog-template.csv', CSV_TEMPLATE) }, renderIcon('download', { size: 15 }), 'CSV template'),
+        h(
+          'button',
+          {
+            class: 'btn sm ghost',
+            type: 'button',
+            onclick: () => {
+              closeModal();
+              onPrompt();
+            },
+          },
+          renderIcon('sparkle', { size: 15 }),
+          'Get an AI prompt',
+        ),
+        picker,
+      ),
       paste,
       status,
+      preview,
       results,
     ),
     footer: [h('button', { class: 'btn ghost', type: 'button', onclick: closeModal }, 'Close'), go],
@@ -785,7 +1036,7 @@ export function renderCatalogSection({ onExpired } = {}) {
     const withDemo = items.filter((i) => i.media_url).length;
     summary.textContent = `${items.length} exercise${items.length === 1 ? '' : 's'} · ${withDemo} with a demo`;
     clear(grid).append(...items.map((item) => card(item, (it) => openExerciseModal(it, meta, refresh))));
-    if (!items.length) grid.append(h('div', { class: 'empty', style: 'grid-column:1/-1' }, state.q || state.muscle_group || state.equipment || state.media ? 'No exercise matches that' : 'The library is empty — add an exercise or import a CSV'));
+    if (!items.length) grid.append(h('div', { class: 'empty', style: 'grid-column:1/-1' }, state.q || state.muscle_group || state.equipment || state.media ? 'No exercise matches that' : 'The library is empty — add an exercise, import a sheet or generate one with AI'));
   };
 
   const refresh = async () => {
@@ -819,6 +1070,21 @@ export function renderCatalogSection({ onExpired } = {}) {
   const equipmentSelect = h('select', { onchange: (e) => { state.equipment = e.target.value; refresh(); } }, h('option', { value: '' }, 'All equipment'));
   const mediaSelect = select('media', 'Any demo status', [['yes', 'Has a demo'], ['no', 'Missing a demo']]);
 
+  const openImport = () => openImportModal({ meta, onDone: refresh, onPrompt: openPrompt });
+  const openPrompt = async () => {
+    // The whole library's names, not just what the filters show, so the AI
+    // is told about everything that already exists.
+    let names = items.map((i) => i.name);
+    if (state.q || state.muscle_group || state.equipment || state.media) {
+      try {
+        names = (await api.platformCatalog({})).items.map((i) => i.name);
+      } catch {
+        // Fall back to what is on screen.
+      }
+    }
+    openAiPromptModal(names, meta, openImport);
+  };
+
   const toolbar = h(
     'div',
     { class: 'toolbar' },
@@ -829,7 +1095,19 @@ export function renderCatalogSection({ onExpired } = {}) {
     h('div', { class: 'spacer', style: 'flex:1' }),
     h('button', { class: 'btn sm', type: 'button', onclick: openMuscleMediaModal }, renderIcon('bicep', { size: 15 }), 'Muscle pictures'),
     h('button', { class: 'btn sm', type: 'button', onclick: () => openBulkMediaModal(items, meta, refresh) }, renderIcon('image', { size: 15 }), 'Bulk upload demos'),
-    h('button', { class: 'btn sm', type: 'button', onclick: () => openImportModal(refresh) }, renderIcon('upload', { size: 15 }), 'Import CSV'),
+    h('button', { class: 'btn sm', type: 'button', onclick: openPrompt }, renderIcon('sparkle', { size: 15 }), 'AI prompt'),
+    h('button', { class: 'btn sm', type: 'button', onclick: openImport }, renderIcon('upload', { size: 15 }), 'Import'),
+    h(
+      'button',
+      {
+        class: 'btn sm ghost',
+        type: 'button',
+        title: 'Download what is shown as CSV',
+        onclick: () => download('exercise-catalog.csv', toCsv(items, COLUMNS)),
+      },
+      renderIcon('download', { size: 15 }),
+      'Export',
+    ),
     h('button', { class: 'btn primary sm', type: 'button', onclick: () => openExerciseModal(null, meta, refresh) }, renderIcon('plus', { size: 15 }), 'Add exercise'),
   );
 

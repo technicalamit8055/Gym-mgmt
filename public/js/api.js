@@ -335,6 +335,8 @@ export const api = {
   createMember: (payload) => request('POST', '/members', payload),
   updateMember: (id, payload) => request('PATCH', `/members/${id}`, payload),
   deleteMember: (id) => request('DELETE', `/members/${id}`),
+  // A temporary member-app password: 'whatsapp' sends it, 'show' returns it once.
+  issueAppLogin: (id, deliver) => request('POST', `/members/${id}/app-login`, { deliver }),
 
   plans: (params) => request('GET', `/plans${query(params)}`),
   createPlan: (payload) => request('POST', '/plans', payload),
@@ -545,11 +547,25 @@ export const api = {
   // attempt into a 401 redirect loop. Every other call is `member: true`,
   // which reads memberSession.token instead of the staff session's.
   portal: {
-    login: (identifier, pin) => request('POST', '/portal/login', { identifier, pin }, { anonymous: true }),
-    setPin: (payload) => request('POST', '/portal/pin', payload, { member: true }),
+    login: (identifier, password) => request('POST', '/portal/login', { identifier, password }, { anonymous: true }),
+    // Email-code password setup / reset, before signing in.
+    forgotPassword: (identifier) => request('POST', '/portal/password/forgot', { identifier }, { anonymous: true }),
+    resetPassword: (payload) => request('POST', '/portal/password/reset', payload, { anonymous: true }),
+    // A temporary password sent from the gym's WhatsApp — once a day.
+    whatsappLogin: (identifier) => request('POST', '/portal/password/whatsapp', { identifier }, { anonymous: true }),
+    // `token` lets the sign-in screen replace a temporary password before the
+    // session is saved on this device.
+    changePassword: (payload, { token } = {}) => request('POST', '/portal/password', payload, token ? { token } : { member: true }),
     me: () => request('GET', '/portal/me', undefined, { member: true }),
     updateMe: (payload) => request('PATCH', '/portal/me', payload, { member: true }),
     setPhoto: (photo) => request('PUT', '/portal/photo', { photo }, { member: true }),
+    // Signed-in devices (Profile → Devices). `endSession('current')` is this one.
+    sessions: () => request('GET', '/portal/sessions', undefined, { member: true }),
+    endSession: (id) => request('DELETE', `/portal/sessions/${encodeURIComponent(id)}`, undefined, { member: true }),
+    endOtherSessions: () => request('POST', '/portal/sessions/sign-out-others', {}, { member: true }),
+    // Device-side state mirrored to the account (see memberSync.js).
+    appState: (key) => request('GET', `/portal/state/${key}`, undefined, { member: true }),
+    saveAppState: (key, value) => request('PUT', `/portal/state/${key}`, { value }, { member: true }),
     seat: () => request('GET', '/portal/seat', undefined, { member: true }),
     pass: () => request('GET', '/portal/pass', undefined, { member: true }),
     classes: (params) => request('GET', `/portal/classes${query(params)}`, undefined, { member: true }),

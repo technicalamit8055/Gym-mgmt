@@ -91,6 +91,7 @@ portalNotificationRoutes.post('/subscriptions', (req, res) => {
     platform: body.platform,
     userAgent: String(req.get('user-agent') || '').slice(0, 300),
     pathPrefix,
+    sessionId: req.memberSessionId,
   });
   res.status(201).json({ subscription, devices: deviceCount(req.member.id) });
 });

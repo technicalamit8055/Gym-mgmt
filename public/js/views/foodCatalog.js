@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { buildForm, clear, closeModal, confirmDialog, h, openModal, renderIcon, toast, verifiedTick } from '../ui.js';
-import { parseCsv } from './exerciseCatalog.js';
+import { copyText, download, parseCsv, toCsv, unfence } from './exerciseCatalog.js';
 
 /**
  * The operator's food database: one catalogue every gym's food library is
@@ -51,12 +51,6 @@ const normaliseKey = (key) => {
   return KEY_ALIASES[clean] ?? clean;
 };
 
-/** The sheet inside a ```csv / ```json fence, as AI tools like to reply. */
-const unfence = (text) => {
-  const fenced = /```[a-z]*\s*\n([\s\S]*?)```/i.exec(text);
-  return (fenced ? fenced[1] : text).trim();
-};
-
 /** CSV or JSON text → rows with the API's keys. JSON is anything that starts
  * like an array or object; everything else is read as CSV with a header row. */
 export function textToFoods(text) {
@@ -86,12 +80,6 @@ export function textToFoods(text) {
   });
 }
 
-const csvCell = (value) => {
-  const text = value === null || value === undefined ? '' : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-};
-const toCsv = (rows, columns) => [columns.join(','), ...rows.map((row) => columns.map((c) => csvCell(row[c])).join(','))].join('\n');
-
 const CSV_TEMPLATE = toCsv(
   [
     { name: 'Idli', category: 'carbs', serving_unit: '100g', calories: 97, protein_g: 3.3, carbs_g: 20, fats_g: 0.7, fiber_g: 1.5, sugar_g: 0.5, serving_size_g: 60, serving_label: '1 idli (60g)' },
@@ -99,25 +87,6 @@ const CSV_TEMPLATE = toCsv(
   ],
   COLUMNS,
 );
-
-function download(filename, text, type = 'text/csv') {
-  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
-  const link = h('a', { href: url, download: filename });
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-async function copyText(text, fallbackInput) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Copied to the clipboard');
-  } catch {
-    fallbackInput?.select();
-    toast('Select all and copy it from the box', 'error');
-  }
-}
 
 /* ── Add / edit ───────────────────────────────────────────────────────── */
 

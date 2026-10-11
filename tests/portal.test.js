@@ -3,16 +3,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gymbook-portal-test-'));
 process.env.DB_FILE = path.join(tmpDir, 'default.db');
 process.env.PLATFORM_DB_FILE = path.join(tmpDir, 'platform.db');
 process.env.TENANTS_DIR = path.join(tmpDir, 'tenants');
 process.env.AUTH_SECRET = 'test-secret';
+process.env.MAIL_TRANSPORT = 'memory';
 
 const { createApp } = await import('../src/app.js');
-const { closeDb } = await import('../src/db.js');
-const { closeRegistryDb } = await import('../src/tenants.js');
+const { closeDb, run, tenantStorage } = await import('../src/db.js');
+const { closeRegistryDb, tenantDbPath } = await import('../src/tenants.js');
+const { outbox } = await import('../src/mailer.js');
+const { sentInMemory } = await import('../src/whatsapp.js');
+
+const inGym = (fn) =>
+  tenantStorage.run({ slug: 'portalgym', dbFile: tenantDbPath('portalgym'), timezone: 'UTC', businessType: 'gym' }, fn);
 
 let base;
 let server;
@@ -104,39 +111,54 @@ describe('member self-service portal', () => {
     classId = klass.body.id;
   });
 
-  it('rejects login with the wrong bootstrap PIN', async () => {
-    const res = await call(
-      'POST',
-      '/api/portal/login',
-      { identifier: memberCode, pin: '0000' },
-      { tenant: 'portalgym' },
-    );
+  it('tells a member with no password yet to set one up, rather than "wrong password"', async () => {
+    const res = await call('POST', '/api/portal/login', { identifier: memberCode, password: '3210' }, { tenant: 'portalgym' });
+    assert.equal(res.status, 401);
+    assert.equal(res.body.details.reason, 'no_password');
+  });
+
+  it('no longer accepts the old last-4-digits-of-phone PIN', async () => {
+    const res = await call('POST', '/api/portal/login', { identifier: '9876543210', password: '3210' }, { tenant: 'portalgym' });
     assert.equal(res.status, 401);
   });
 
-  let memberToken;
+  it('never sends a password hash to staff or the member', async () => {
+    const res = await call('GET', `/api/members/${memberId}`, null, { token: staffToken, tenant: 'portalgym' });
+    assert.equal(res.body.portal_access, 'none');
+    assert.ok(!('portal_password_hash' in res.body) && !('portal_pin_hash' in res.body));
+  });
 
-  it('logs in with the member code and the bootstrap PIN (last 4 digits of phone)', async () => {
-    const res = await call(
-      'POST',
-      '/api/portal/login',
-      { identifier: memberCode, pin: '3210' },
-      { tenant: 'portalgym' },
-    );
+  let memberToken;
+  let tempPassword;
+
+  it('lets the desk issue a temporary password, shown once', async () => {
+    const res = await call('POST', `/api/members/${memberId}/app-login`, { deliver: 'show' }, { token: staffToken, tenant: 'portalgym' });
     assert.equal(res.status, 200);
-    assert.equal(res.body.must_set_pin, true);
+    assert.match(res.body.password, /^[a-z2-9]{4}-[a-z2-9]{4}$/);
+    assert.equal(res.body.member.portal_access, 'temporary');
+    tempPassword = res.body.password;
+  });
+
+  it('will not send a WhatsApp login while WhatsApp is not linked', async () => {
+    const res = await call('POST', `/api/members/${memberId}/app-login`, { deliver: 'whatsapp' }, { token: staffToken, tenant: 'portalgym' });
+    assert.equal(res.status, 400);
+    // The failed send left the temporary password from the desk working.
+    const login = await call('POST', '/api/portal/login', { identifier: memberCode, password: tempPassword }, { tenant: 'portalgym' });
+    assert.equal(login.status, 200);
+  });
+
+  it('signs in with the temporary password and asks for a new one', async () => {
+    const res = await call('POST', '/api/portal/login', { identifier: memberCode, password: tempPassword }, { tenant: 'portalgym' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.must_change_password, true);
     assert.equal(res.body.member.id, memberId);
     memberToken = res.body.token;
   });
 
-  it('also logs in by phone number', async () => {
-    const res = await call(
-      'POST',
-      '/api/portal/login',
-      { identifier: '9876543210', pin: '3210' },
-      { tenant: 'portalgym' },
-    );
-    assert.equal(res.status, 200);
+  it('rejects a wrong password', async () => {
+    const res = await call('POST', '/api/portal/login', { identifier: memberCode, password: 'nope-nope' }, { tenant: 'portalgym' });
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, 'Incorrect password');
   });
 
   it('rejects a member token on the staff API', async () => {
@@ -149,46 +171,176 @@ describe('member self-service portal', () => {
     assert.equal(res.status, 401);
   });
 
-  it('rejects setting a new PIN with the wrong current PIN', async () => {
-    const res = await call(
+  it('rejects a weak new password, or a wrong current one', async () => {
+    const weak = async (new_password) =>
+      call('POST', '/api/portal/password', { current_password: tempPassword, new_password }, { token: memberToken, tenant: 'portalgym' });
+    assert.equal((await weak('short')).status, 400);
+    assert.equal((await weak(memberCode)).status, 400);
+    assert.equal((await weak('9876543210')).status, 400);
+    const wrong = await call(
       'POST',
-      '/api/portal/pin',
-      { current_pin: '1111', new_pin: '4321' },
+      '/api/portal/password',
+      { current_password: 'not-it-at-all', new_password: 'strong-pass-1' },
       { token: memberToken, tenant: 'portalgym' },
     );
+    assert.equal(wrong.status, 400);
+  });
+
+  it('replaces the temporary password, keeping this device signed in', async () => {
+    const other = (await call('POST', '/api/portal/login', { identifier: memberCode, password: tempPassword }, { tenant: 'portalgym' })).body.token;
+    const res = await call(
+      'POST',
+      '/api/portal/password',
+      { current_password: tempPassword, new_password: 'strong-pass-1' },
+      { token: memberToken, tenant: 'portalgym' },
+    );
+    assert.equal(res.status, 200);
+    assert.equal((await call('GET', '/api/portal/me', null, { token: memberToken, tenant: 'portalgym' })).status, 200);
+    assert.equal((await call('GET', '/api/portal/me', null, { token: other, tenant: 'portalgym' })).status, 401, 'other devices are signed out');
+  });
+
+  it('signs in by member code or phone with the new password, no longer temporary', async () => {
+    const byCode = await call('POST', '/api/portal/login', { identifier: memberCode, password: 'strong-pass-1' }, { tenant: 'portalgym' });
+    assert.equal(byCode.status, 200);
+    assert.equal(byCode.body.must_change_password, false);
+    const byPhone = await call('POST', '/api/portal/login', { identifier: '9876543210', password: 'strong-pass-1' }, { tenant: 'portalgym' });
+    assert.equal(byPhone.status, 200);
+    assert.equal(
+      (await call('POST', '/api/portal/login', { identifier: memberCode, password: tempPassword }, { tenant: 'portalgym' })).status,
+      401,
+    );
+    memberToken = byCode.body.token;
+  });
+
+  it('says so when there is no email to send a setup code to', async () => {
+    const res = await call('POST', '/api/portal/password/forgot', { identifier: memberCode }, { tenant: 'portalgym' });
     assert.equal(res.status, 400);
+    assert.equal(res.body.details.reason, 'no_email');
   });
 
-  it('sets a custom PIN using the bootstrap PIN as proof of identity', async () => {
-    const res = await call(
-      'POST',
-      '/api/portal/pin',
-      { current_pin: '3210', new_pin: '4321' },
-      { token: memberToken, tenant: 'portalgym' },
-    );
-    assert.equal(res.status, 200);
-  });
+  it('resets a forgotten password with an emailed code', async () => {
+    await call('PATCH', `/api/members/${memberId}`, { email: 'rahul@example.test' }, { token: staffToken, tenant: 'portalgym' });
 
-  it('no longer accepts the bootstrap PIN once a custom PIN is set', async () => {
-    const res = await call(
+    const sent = await call('POST', '/api/portal/password/forgot', { identifier: '9876543210' }, { tenant: 'portalgym' });
+    assert.equal(sent.status, 200);
+    assert.equal(sent.body.email_hint, 'ra•••@example.test');
+    const mail = outbox.at(-1);
+    assert.equal(mail.to, 'rahul@example.test');
+    assert.equal(mail.from.name, 'Portal Gym');
+    const code = mail.subject.match(/^(\d{6}) /)[1];
+    assert.ok(mail.text.includes(code));
+
+    const again = await call('POST', '/api/portal/password/forgot', { identifier: memberCode }, { tenant: 'portalgym' });
+    assert.equal(again.status, 429, 'one code a minute');
+
+    const wrongCode = code === '000000' ? '111111' : '000000';
+    const bad = await call(
       'POST',
-      '/api/portal/login',
-      { identifier: memberCode, pin: '3210' },
+      '/api/portal/password/reset',
+      { identifier: memberCode, code: wrongCode, new_password: 'brand-new-pass' },
       { tenant: 'portalgym' },
     );
-    assert.equal(res.status, 401);
-  });
+    assert.equal(bad.status, 400);
 
-  it('logs in with the new custom PIN', async () => {
-    const res = await call(
+    const reset = await call(
       'POST',
-      '/api/portal/login',
-      { identifier: memberCode, pin: '4321' },
+      '/api/portal/password/reset',
+      { identifier: memberCode, code, new_password: 'brand-new-pass' },
       { tenant: 'portalgym' },
     );
-    assert.equal(res.status, 200);
-    assert.equal(res.body.must_set_pin, false);
-    memberToken = res.body.token;
+    assert.equal(reset.status, 200);
+    assert.ok(reset.body.token, 'a reset signs the member straight in');
+    assert.equal(reset.body.must_change_password, false);
+
+    const reused = await call(
+      'POST',
+      '/api/portal/password/reset',
+      { identifier: memberCode, code, new_password: 'another-pass-1' },
+      { tenant: 'portalgym' },
+    );
+    assert.equal(reused.status, 400, 'a code works once');
+    assert.equal((await call('GET', '/api/portal/me', null, { token: memberToken, tenant: 'portalgym' })).status, 401, 'old sessions end');
+    memberToken = reset.body.token;
+  });
+
+  it('burns a setup code after five wrong guesses', async () => {
+    const other = await call('POST', '/api/members', { first_name: 'Guess', phone: '9000000005', email: 'guess@example.test' }, { token: staffToken, tenant: 'portalgym' });
+    assert.equal((await call('POST', '/api/portal/password/forgot', { identifier: other.body.code }, { tenant: 'portalgym' })).status, 200);
+    const code = outbox.at(-1).subject.slice(0, 6);
+    const wrongCode = code === '000000' ? '111111' : '000000';
+    for (let i = 0; i < 5; i += 1) {
+      await call('POST', '/api/portal/password/reset', { identifier: other.body.code, code: wrongCode, new_password: 'brand-new-pass' }, { tenant: 'portalgym' });
+    }
+    const late = await call('POST', '/api/portal/password/reset', { identifier: other.body.code, code, new_password: 'brand-new-pass' }, { tenant: 'portalgym' });
+    assert.equal(late.status, 400, 'even the right code is dead now');
+  });
+
+  it('will not offer a WhatsApp reset while the gym has no WhatsApp linked, or the member no phone', async () => {
+    const off = await call('POST', '/api/portal/password/whatsapp', { identifier: memberCode }, { tenant: 'portalgym' });
+    assert.equal(off.status, 400);
+    assert.equal(off.body.details.reason, 'whatsapp_unavailable');
+
+    const noPhone = await call('POST', '/api/members', { first_name: 'Nophone' }, { token: staffToken, tenant: 'portalgym' });
+    const res = await call('POST', '/api/portal/password/whatsapp', { identifier: noPhone.body.code }, { tenant: 'portalgym' });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.details.reason, 'no_phone');
+  });
+
+  it('sends a forgotten login on WhatsApp once a day, without locking the member out', async () => {
+    process.env.WHATSAPP_TRANSPORT = 'memory';
+    try {
+      const sent = await call('POST', '/api/portal/password/whatsapp', { identifier: '9876543210' }, { tenant: 'portalgym' });
+      assert.equal(sent.status, 200);
+      assert.equal(sent.body.phone_hint, '••••••3210');
+
+      const message = sentInMemory.at(-1);
+      assert.equal(message.phone, '9876543210');
+      assert.ok(message.message.includes(memberCode) && message.message.includes('/#/portal'));
+      const waPassword = message.message.match(/Temporary password: (\S+)/)[1];
+
+      const logs = await call('GET', '/api/whatsapp/logs', null, { token: staffToken, tenant: 'portalgym' });
+      assert.ok(!logs.body.items[0].message.includes(waPassword), 'the delivery log masks the password');
+
+      // Asking doesn't change anything until the new password is used.
+      const stillMine = await call('POST', '/api/portal/login', { identifier: memberCode, password: 'brand-new-pass' }, { tenant: 'portalgym' });
+      assert.equal(stillMine.status, 200);
+
+      const again = await call('POST', '/api/portal/password/whatsapp', { identifier: memberCode }, { tenant: 'portalgym' });
+      assert.equal(again.status, 429);
+      assert.equal(again.body.details.reason, 'cooldown');
+      assert.match(again.body.error, /in 2[34] hours/);
+      assert.equal(sentInMemory.filter((m) => m.phone === '9876543210').length, 1, 'only one message went out');
+
+      const viaWhatsApp = await call('POST', '/api/portal/login', { identifier: memberCode, password: waPassword }, { tenant: 'portalgym' });
+      assert.equal(viaWhatsApp.status, 200);
+      assert.equal(viaWhatsApp.body.must_change_password, true, 'they pick their own straight away');
+      const old = await call('POST', '/api/portal/login', { identifier: memberCode, password: 'brand-new-pass' }, { tenant: 'portalgym' });
+      assert.equal(old.status, 401, 'using the WhatsApp password replaces the old one');
+      memberToken = viaWhatsApp.body.token;
+    } finally {
+      delete process.env.WHATSAPP_TRANSPORT;
+    }
+  });
+
+  it('lets the WhatsApp password lapse after a day unused', async () => {
+    process.env.WHATSAPP_TRANSPORT = 'memory';
+    try {
+      const other = await call('POST', '/api/members', { first_name: 'Late', phone: '9000000006' }, { token: staffToken, tenant: 'portalgym' });
+      assert.equal((await call('POST', '/api/portal/password/whatsapp', { identifier: other.body.code }, { tenant: 'portalgym' })).status, 200);
+      const waPassword = sentInMemory.at(-1).message.match(/Temporary password: (\S+)/)[1];
+      inGym(() => run("UPDATE members SET portal_reset_expires_at = datetime('now', '-1 minute') WHERE id = ?", [other.body.id]));
+      const late = await call('POST', '/api/portal/login', { identifier: other.body.code, password: waPassword }, { tenant: 'portalgym' });
+      assert.equal(late.status, 401);
+    } finally {
+      delete process.env.WHATSAPP_TRANSPORT;
+    }
+  });
+
+  it('limits issuing logins to admins and managers', async () => {
+    await call('POST', '/api/staff', { name: 'Desk', email: 'desk@portalgym.test', password: 'deskpass123', role: 'staff' }, { token: staffToken, tenant: 'portalgym' });
+    const desk = (await call('POST', '/api/auth/login', { email: 'desk@portalgym.test', password: 'deskpass123' }, { tenant: 'portalgym' })).body.token;
+    const res = await call('POST', `/api/members/${memberId}/app-login`, { deliver: 'show' }, { token: desk, tenant: 'portalgym' });
+    assert.equal(res.status, 403);
   });
 
   it('returns the member summary with the active plan and stats', async () => {
@@ -301,12 +453,7 @@ describe('member self-service portal', () => {
       { first_name: 'Other', phone: '9998887771' },
       { token: staffToken, tenant: 'portalgym' },
     );
-    const otherLogin = await call(
-      'POST',
-      '/api/portal/login',
-      { identifier: other.body.code, pin: '7771' },
-      { tenant: 'portalgym' },
-    );
+    const otherToken = await signInMember(call, { staffToken, memberId: other.body.id, tenant: 'portalgym' });
     const rebook = await call(
       'POST',
       `/api/portal/classes/${classId}/book`,
@@ -316,7 +463,7 @@ describe('member self-service portal', () => {
     assert.equal(rebook.status, 201);
 
     const res = await call('DELETE', `/api/portal/classes/bookings/${rebook.body.id}`, null, {
-      token: otherLogin.body.token,
+      token: otherToken,
       tenant: 'portalgym',
     });
     assert.equal(res.status, 404);

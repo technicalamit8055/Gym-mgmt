@@ -77,7 +77,7 @@ const COPY = {
     { title: 'Camera Open Karo', body: 'Phone ka camera open karo aur upar diya gaya QR code scan karo.' },
     {
       title: 'Login Karo',
-      body: 'Apni Member ID ya registered phone number aur PIN se login karo. PIN nahi hai? Front desk se poochho.',
+      body: 'Apni Member ID ya registered phone number aur password se login karo. Password nahi hai? "Forgot password?" dabao ya front desk se poochho.',
     },
     {
       title: 'Home Screen Par Add Karo',

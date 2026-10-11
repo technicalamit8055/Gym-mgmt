@@ -21,6 +21,7 @@ import {
   setVertical,
   t,
   toggleAppMode,
+  useMemberMode,
   usePlatformTheme,
 } from './vertical.js';
 import { renderLanding } from './views/landing.js';
@@ -200,7 +201,7 @@ const PUBLIC_ROUTES = [
   // Public by necessity — someone redeeming a reset link cannot sign in. The
   // pattern allows the trailing `?token=…` the link carries in the hash.
   { pattern: /^\/reset(\?|$)/, title: 'Set a new password', view: renderReset },
-  // The member app: its own sign-in (member code/phone + PIN, a different
+  // The member app: its own sign-in (member code/phone + password, a different
   // credential from any staff login) and its own tab shell. Rendered full-page
   // like every other entry here — a member has no staff sidebar to sit inside.
   // Both patterns share one view: renderPortal itself decides sign-in vs. app
@@ -780,6 +781,7 @@ async function renderRoute() {
  */
 async function dispatch() {
   const path = currentPath();
+  useMemberMode(path.startsWith('/portal'));
 
   if (platform.missing) {
     renderNotice(

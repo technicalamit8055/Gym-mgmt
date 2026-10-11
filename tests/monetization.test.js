@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -102,11 +103,13 @@ before(async () => {
   ops = (await call('POST', '/api/platform/admin/login', { email: 'ops@gymbook.test', password: 'operator-pass-123' }, { tenant: null }))
     .body.token;
 
+  const tokens = [];
   for (const [first, phone] of [['Asha', '9990001111'], ['Ravi', '9990002222']]) {
-    assert.equal((await call('POST', '/api/members', { first_name: first, last_name: 'K', phone }, { token: staff })).status, 201);
+    const created = await call('POST', '/api/members', { first_name: first, last_name: 'K', phone }, { token: staff });
+    assert.equal(created.status, 201);
+    tokens.push(await signInMember(call, { staffToken: staff, memberId: created.body.id }));
   }
-  asha = (await call('POST', '/api/portal/login', { identifier: '9990001111', pin: '1111' })).body.token;
-  ravi = (await call('POST', '/api/portal/login', { identifier: '9990002222', pin: '2222' })).body.token;
+  [asha, ravi] = tokens;
   assert.ok(asha && ravi);
 });
 

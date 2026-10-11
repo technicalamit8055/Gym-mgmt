@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { config, DEFAULT_TENANT_SLUG } from './config.js';
-import { get } from './db.js';
+import { get, run } from './db.js';
 import { forbidden, unauthorized } from './errors.js';
 
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
@@ -86,16 +86,29 @@ export function readToken(token) {
  * of token again: `scope: 'member'` (vs. a staff token's bare `role`, and a
  * platform token's `scope: 'platform'`), so a token lifted from any one of
  * the three surfaces is inert on the other two in both directions.
+ *
+ * Each one is also a row in member_sessions, named by the token's `sid`: the
+ * member's Devices screen lists those rows, and deleting one signs that
+ * device out at its next request instead of at the token's expiry.
  */
-export function issueMemberToken(member, tenantSlug) {
+export function issueMemberToken(member, tenantSlug, { userAgent = null } = {}) {
+  const sid = crypto.randomBytes(18).toString('base64url');
+  const exp = Math.floor(Date.now() / 1000) + config.tokenTtlSeconds;
+  run("DELETE FROM member_sessions WHERE expires_at < datetime('now')");
+  run(
+    `INSERT INTO member_sessions (id, member_id, user_agent, expires_at)
+     VALUES (?, ?, ?, datetime(?, 'unixepoch'))`,
+    [sid, member.id, userAgent ? String(userAgent).slice(0, 400) : null, exp],
+  );
   const payload = b64url(
     JSON.stringify({
       scope: 'member',
       sub: member.id,
       member_id: member.id,
       code: member.code,
+      sid,
       tenant: tenantSlug ?? DEFAULT_TENANT_SLUG,
-      exp: Math.floor(Date.now() / 1000) + config.tokenTtlSeconds,
+      exp,
     }),
   );
   return `${payload}.${sign(payload)}`;
@@ -116,7 +129,21 @@ export function requireMemberAuth(req, _res, next) {
   const member = get('SELECT * FROM members WHERE id = ?', [claims.sub]);
   if (!member) return next(unauthorized('This account no longer exists'));
 
+  // A token from before sessions were recorded has no `sid`, and is simply
+  // signed in again — they only ever lasted tokenTtlSeconds anyway.
+  const session = claims.sid
+    ? get('SELECT id FROM member_sessions WHERE id = ? AND member_id = ?', [claims.sid, member.id])
+    : null;
+  if (!session) return next(unauthorized('You were signed out of this device, please sign in again'));
+  // "Active now" on the Devices screen; at most one write a minute per device.
+  run(
+    `UPDATE member_sessions SET last_seen_at = datetime('now'), user_agent = COALESCE(?, user_agent)
+     WHERE id = ? AND last_seen_at < datetime('now', '-60 seconds')`,
+    [req.get('user-agent')?.slice(0, 400) ?? null, session.id],
+  );
+
   req.member = member;
+  req.memberSessionId = session.id;
   return next();
 }
 

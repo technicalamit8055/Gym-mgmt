@@ -148,15 +148,16 @@ const MAX_DEVICES_PER_MEMBER = 10;
  * them — the previous member stops getting this device's notifications, which
  * is exactly what signing out and in again should mean.
  */
-export function saveSubscription(memberId, { endpoint, p256dh, auth, platform, userAgent, pathPrefix }) {
+export function saveSubscription(memberId, { endpoint, p256dh, auth, platform, userAgent, pathPrefix, sessionId = null }) {
   run(
-    `INSERT INTO push_subscriptions (member_id, endpoint, p256dh, auth, platform, user_agent, path_prefix)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO push_subscriptions (member_id, endpoint, p256dh, auth, platform, user_agent, path_prefix, session_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(endpoint) DO UPDATE SET
        member_id = excluded.member_id, p256dh = excluded.p256dh, auth = excluded.auth,
        platform = excluded.platform, user_agent = excluded.user_agent, path_prefix = excluded.path_prefix,
+       session_id = excluded.session_id,
        failure_count = 0, last_error = NULL, updated_at = datetime('now')`,
-    [memberId, endpoint, p256dh, auth, platform, userAgent, pathPrefix],
+    [memberId, endpoint, p256dh, auth, platform, userAgent, pathPrefix, sessionId],
   );
   run(
     `DELETE FROM push_subscriptions WHERE member_id = ? AND id NOT IN (

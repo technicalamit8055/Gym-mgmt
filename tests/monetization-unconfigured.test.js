@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { memberToken as signInMember } from './helpers/memberAuth.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,8 +61,8 @@ before(async () => {
     { tenant: null },
   );
   const staff = (await call('POST', '/api/auth/login', { email: 'owner@nokeys.test', password: 'ownerpass123' })).body.token;
-  await call('POST', '/api/members', { first_name: 'Asha', phone: '9990001111' }, { token: staff });
-  member = (await call('POST', '/api/portal/login', { identifier: '9990001111', pin: '1111' })).body.token;
+  const asha = await call('POST', '/api/members', { first_name: 'Asha', phone: '9990001111' }, { token: staff });
+  member = await signInMember(call, { staffToken: staff, memberId: asha.body.id });
   ops = (await call('POST', '/api/platform/admin/login', { email: 'ops@gymbook.test', password: 'operator-pass-123' }, { tenant: null }))
     .body.token;
 
