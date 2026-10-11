@@ -76,7 +76,7 @@ attendanceRoutes.get('/', (req, res) => {
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const limit = Math.min(toInt(req.query.limit, 100), 500);
   res.json({
-    items: all(`${ATTENDANCE_SELECT} ${clause} ORDER BY a.check_in DESC LIMIT ?`, [...params, limit]).map(publicVisit),
+    items: all(`${ATTENDANCE_SELECT} ${clause} ORDER BY a.check_in DESC, a.id DESC LIMIT ?`, [...params, limit]).map(publicVisit),
   });
 });
 

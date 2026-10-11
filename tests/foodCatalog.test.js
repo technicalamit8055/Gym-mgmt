@@ -26,6 +26,8 @@ process.env.PLATFORM_ADMIN_PASSWORD = 'operator-pass-123';
 const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
 const { closeRegistryDb } = await import('../src/tenants.js');
+const { CORE_FOODS, INDIAN_CORE_FOODS } = await import('../src/foodCoreSeed.js');
+const VERIFIED_SEED = CORE_FOODS.length + INDIAN_CORE_FOODS.length;
 
 const TENANT = 'foodgym';
 
@@ -85,12 +87,17 @@ after(() => {
 });
 
 describe('the platform food catalogue', () => {
-  it('starts with the starter foods, unverified, and is operator-only', async () => {
+  it('starts with the starter foods unverified and the core foods verified, and is operator-only', async () => {
     const res = await operator('GET', '');
     assert.equal(res.status, 200);
     assert.ok(res.body.total > 50);
-    assert.equal(res.body.verified_total, 0);
-    assert.ok(res.body.items.some((f) => f.name === 'Paneer' && f.verified === false));
+    assert.equal(res.body.verified_total, VERIFIED_SEED);
+    assert.ok(res.body.items.some((f) => f.name === 'Ragi / Finger Millet Flour' && f.verified === true));
+    assert.ok(res.body.items.some((f) => f.name === 'Whole Egg' && f.verified === false), 'a per-piece starter food is left as it was');
+    const paneer = res.body.items.find((f) => f.name === 'Paneer');
+    assert.equal(paneer.verified, true, 'an untouched per-100 g starter food is upgraded, not duplicated');
+    assert.equal(paneer.serving_size_g, 50);
+    assert.equal(res.body.items.filter((f) => f.name.toLowerCase() === 'paneer').length, 1);
     assert.ok(res.body.categories.includes('protein'));
 
     assert.equal((await call('GET', '/api/platform/admin/catalog/foods')).status, 401);
@@ -134,7 +141,7 @@ describe('the platform food catalogue', () => {
     const id = (await operator('GET', '?q=Masala Dosa')).body.items[0].id;
     const res = await operator('POST', '/bulk', { ids: [id], action: 'verify' });
     assert.equal(res.body.changed, 1);
-    assert.equal((await operator('GET', '?verified=yes')).body.items.length, 1);
+    assert.equal((await operator('GET', '?verified=yes')).body.items.length, VERIFIED_SEED + 1);
 
     assert.equal((await memberFood('Masala Dosa')).verified, 1);
     const staff = await call('GET', '/api/diets/foods?q=Masala', undefined, { token: adminToken, tenant: TENANT });
@@ -248,7 +255,7 @@ describe('the platform food catalogue', () => {
     const recent = (await memberFoods()).recent.find((r) => r.food_name === 'Ragi Mudde');
     assert.equal(recent.food, null);
 
-    const many = (await operator('GET', '?q=Upma')).body.items.map((f) => f.id);
+    const many = (await operator('GET', '?q=Upma')).body.items.filter((f) => f.name === 'Upma').map((f) => f.id);
     assert.equal((await operator('POST', '/bulk', { ids: many, action: 'delete' })).body.changed, 1);
     assert.equal(await memberFood('Upma'), undefined);
   });

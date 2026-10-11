@@ -1238,7 +1238,8 @@ const MIGRATIONS = [
   /* ------------------------------------------------ Platform food catalogue --- */
   // Foods copied in from the operator's catalogue (src/foodCatalog.js), by its
   // id, so a rename or a corrected number there reaches this row; `verified`
-  // is the operator's blue tick and is only ever set by that sync.
+  // is the operator's blue tick, set by that sync — or by food search, for a
+  // food picked from USDA's lab-analysed data or a fully-labelled pack.
   (db) => ensureColumn(db, 'food_library', 'catalog_id', 'INTEGER'),
   (db) => ensureColumn(db, 'food_library', 'verified', 'INTEGER NOT NULL DEFAULT 0'),
   (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_food_library_catalog ON food_library(catalog_id) WHERE catalog_id IS NOT NULL'),
@@ -1273,6 +1274,23 @@ const MIGRATIONS = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_plan_share_inbox ON workout_plan_shares(recipient_id, status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_plan_share_sender ON workout_plan_shares(sender_id, created_at)');
   },
+
+  /* ------------------------------------------------- Online food search --- */
+  // Foods picked from an online database in food search (src/foodSearch.js):
+  // `source` is 'usda' or 'openfoodfacts' and this is that database's own id
+  // (an FDC id, a product code), so picking the same food twice reuses the row.
+  (db) => ensureColumn(db, 'food_library', 'external_id', 'TEXT'),
+  (db) =>
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_food_library_external ON food_library(source, external_id) WHERE external_id IS NOT NULL',
+    ),
+
+  /* ------------------------------------------- Timed and cardio sets --- */
+  // Not every set is weight × reps: a plank is a time, a treadmill run a
+  // distance and a time. Both stay 0 on a lifting set, as weight_kg does on
+  // these, so the existing volume and 1RM sums need no special case.
+  (db) => ensureColumn(db, 'workout_log_sets', 'duration_seconds', 'INTEGER NOT NULL DEFAULT 0'),
+  (db) => ensureColumn(db, 'workout_log_sets', 'distance_km', 'REAL NOT NULL DEFAULT 0'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

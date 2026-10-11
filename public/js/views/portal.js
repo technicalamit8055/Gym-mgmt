@@ -1169,14 +1169,19 @@ function planPerks(p, savePct, base) {
   const fromDescription = String(p.description || '')
     .split(/\r?\n|•|;|\.\s+|,\s+/)
     .map((s) => s.trim().replace(/\.$/, ''))
-    .filter((s) => s && s.length <= 40);
+    .filter((s) => s && s.length <= 40)
+    // A phrase cut from mid-sentence ("…, renewed every month") still leads its own line.
+    .map((s) => s[0].toUpperCase() + s.slice(1));
   const months = Math.round(p.duration_days / 30);
   const length =
     p.duration_days >= 360 ? 'Full year access' : months > 1 ? `${months} months access` : p.duration_days >= 28 ? 'Full month access' : `${p.duration_days} days access`;
   const perks = fromDescription.length ? fromDescription.slice(0, 3) : [length, isLibrary() ? 'All reading halls' : 'All fitness equipment'];
   if (perks.length < 3) {
     if (savePct >= 5) perks.push(`Save ${savePct}% vs ${base.name}`);
-    else if (p.id === base.id) perks.push(p.duration_days <= 31 ? 'Renew every month' : 'Shortest commitment');
+    else if (p.id === base.id) {
+      const filler = p.duration_days <= 31 ? 'Renew every month' : 'Shortest commitment';
+      if (!(filler.startsWith('Renew') && perks.some((s) => /renew/i.test(s)))) perks.push(filler);
+    }
     else perks.push(isLibrary() ? 'Your seat, held for you' : 'Full gym access');
   }
   return perks.slice(0, 3);
@@ -1532,6 +1537,86 @@ const summaryTicks = () =>
  * types, which is why it cannot wait for a round trip. */
 const estimate1rm = (kg, reps) => (kg > 0 && reps > 0 ? Math.round(kg * (1 + reps / 30) * 10) / 10 : 0);
 
+/* ── How an exercise is logged ─────────────────────────────────────────── */
+
+/**
+ * What a set of an exercise records, after Hevy's exercise types: weight ×
+ * reps for a lift, reps alone for a push-up, a time for a plank, a distance
+ * and a time for a treadmill run. Read off the exercise's equipment and name,
+ * because the catalogue already files cardio and bodyweight moves by
+ * equipment, and a hold is a hold whatever it is done with.
+ */
+const LOG_TYPES = ['weight_reps', 'reps', 'duration', 'distance_duration'];
+const TIMED_NAME = /\b(plank|wall sit|dead hang|l-sit|hollow (?:body )?hold|isometric|hold)\b/i;
+const DISTANCE_NAME = /\b(treadmill|run|running|jog|jogging|walk|walking|bike|cycle|cycling|row|rowing|rower|elliptical|swim|swimming|ski ?erg)\b/i;
+
+function logTypeOf(exercise) {
+  if (LOG_TYPES.includes(exercise?.log_type)) return exercise.log_type;
+  const name = String(exercise?.exercise_name ?? exercise?.name ?? '');
+  if (TIMED_NAME.test(name)) return 'duration';
+  if (exercise?.equipment === 'cardio' || exercise?.muscle_group === 'cardio') {
+    return DISTANCE_NAME.test(name) ? 'distance_duration' : 'duration';
+  }
+  if (exercise?.equipment === 'bodyweight') return 'reps';
+  return 'weight_reps';
+}
+
+/** A logged set's type from what it recorded — for history rows, which carry
+ * no equipment. */
+const logTypeOfSet = (set) =>
+  Number(set.distance_km) > 0
+    ? 'distance_duration'
+    : Number(set.duration_seconds) > 0
+      ? 'duration'
+      : Number(set.weight_kg) > 0
+        ? 'weight_reps'
+        : 'reps';
+
+/** Seconds as m:ss, or h:mm:ss from an hour up — a stopwatch's reading. */
+function durationLabel(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return hh ? `${hh}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
+}
+
+const distanceLabel = (km) => `${Math.round((Number(km) || 0) * 100) / 100} km`;
+
+/** One set as a line of text: "60 kg × 10", "12 reps", "1:00", "5 km · 25:00". */
+function setSummary(set, type = logTypeOfSet(set)) {
+  const seconds = Number(set.duration_seconds) || 0;
+  const km = Number(set.distance_km) || 0;
+  if (type === 'distance_duration') {
+    return [km > 0 ? distanceLabel(km) : null, seconds > 0 ? durationLabel(seconds) : null].filter(Boolean).join(' · ') || '—';
+  }
+  if (type === 'duration') return seconds > 0 ? durationLabel(seconds) : '—';
+  // A push-up logged with a weight before exercises had types keeps it.
+  if (type === 'reps' && !(Number(set.weight_kg) > 0)) return `${Number(set.reps) || 0} reps`;
+  return `${weightLabel(Number(set.weight_kg) || 0)} × ${Number(set.reps) || 0}`;
+}
+
+/**
+ * A time box filled the way Hevy's is: digits type in from the right, so
+ * "4", "5" reads 0:45 and "2", "5", "0", "0" reads 25:00 — one way to enter
+ * both a 45-second hold and a 25-minute run without a separator key.
+ */
+function digitsToSeconds(digits) {
+  const d = digits.padStart(6, '0').slice(-6);
+  return Number(d.slice(0, 2)) * 3600 + Number(d.slice(2, 4)) * 60 + Number(d.slice(4, 6));
+}
+
+function formatTimeDigits(digits) {
+  if (!digits) return '';
+  const d = digits.padStart(3, '0');
+  const ss = d.slice(-2);
+  const rest = d.slice(0, -2);
+  if (rest.length <= 2) return `${Number(rest)}:${ss}`;
+  return `${Number(rest.slice(0, -2))}:${rest.slice(-2)}:${ss}`;
+}
+
+const timeDigitsOf = (text) => String(text).replace(/\D/g, '').replace(/^0+/, '').slice(-6);
+
 /* ── The paywall ───────────────────────────────────────────────────────── */
 
 function upgradeSheet(status, { onRefresh } = {}) {
@@ -1586,15 +1671,32 @@ function upgradeSheet(status, { onRefresh } = {}) {
 
 /* ── Exercise progress ─────────────────────────────────────────────────── */
 
-/** What the progress chart can plot, each read off one session of
- * api.portal.exerciseHistory. Weights stay in kilograms until they are drawn. */
-const PROGRESS_METRICS = [
-  { key: 'heaviest', label: 'Heaviest Weight', weight: true, read: (s) => s.heaviest_weight_kg },
-  { key: '1rm', label: 'One Rep Max', weight: true, read: (s) => s.best_1rm_kg },
-  { key: 'set_volume', label: 'Best Set Volume', weight: true, read: (s) => s.best_set_volume_kg },
-  { key: 'volume', label: 'Session Volume', weight: true, read: (s) => s.volume_kg },
-  { key: 'reps', label: 'Total Reps', weight: false, read: (s) => s.total_reps },
-];
+/** What the progress chart can plot for each way of logging (see logTypeOf),
+ * each read off one session of api.portal.exerciseHistory. Weights stay in
+ * kilograms until they are drawn; `kind` picks the formatting. */
+const PROGRESS_METRICS = {
+  weight_reps: [
+    { key: 'heaviest', label: 'Heaviest Weight', kind: 'weight', read: (s) => s.heaviest_weight_kg },
+    { key: '1rm', label: 'One Rep Max', kind: 'weight', read: (s) => s.best_1rm_kg },
+    { key: 'set_volume', label: 'Best Set Volume', kind: 'weight', read: (s) => s.best_set_volume_kg },
+    { key: 'volume', label: 'Session Volume', kind: 'weight', read: (s) => s.volume_kg },
+    { key: 'reps', label: 'Total Reps', kind: 'count', read: (s) => s.total_reps },
+  ],
+  reps: [
+    { key: 'most_reps', label: 'Most Reps', kind: 'count', read: (s) => s.most_reps },
+    { key: 'reps', label: 'Total Reps', kind: 'count', read: (s) => s.total_reps },
+  ],
+  duration: [
+    { key: 'longest', label: 'Longest Time', kind: 'time', read: (s) => s.longest_duration_seconds },
+    { key: 'time', label: 'Total Time', kind: 'time', read: (s) => s.duration_seconds },
+  ],
+  distance_duration: [
+    { key: 'distance', label: 'Distance', kind: 'distance', read: (s) => s.distance_km },
+    { key: 'time', label: 'Time', kind: 'time', read: (s) => s.duration_seconds },
+    // Lower is better, so a falling line is the good news.
+    { key: 'pace', label: 'Best Pace', kind: 'pace', lowerIsBetter: true, read: (s) => s.best_pace_seconds_per_km ?? 0 },
+  ],
+};
 
 const PROGRESS_RANGES = [
   { key: '3m', label: '3 months', days: 92 },
@@ -1704,7 +1806,9 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   let active = tab;
   let history = null;
   let failed = null;
-  let metric = PROGRESS_METRICS[0].key;
+  const logType = logTypeOf(item);
+  const metrics = PROGRESS_METRICS[logType];
+  let metric = metrics[0].key;
   let range = 'all';
 
   const body = h('div', { class: 'portal-exd' });
@@ -1712,7 +1816,14 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   const tabs = h('div', { class: 'portal-exd-tabs', role: 'tablist' });
 
   const weightOf = (kg, axis) => (axis ? `${Math.round(toDisplayWeight(kg))}` : weightLabel(Math.round(kg * 10) / 10));
-  const setText = (set) => `${weightLabel(set.weight_kg)} × ${set.reps}`;
+  const setText = (set) => setSummary(set, logType);
+  const formatters = {
+    weight: weightOf,
+    count: (v) => String(Math.round(v)),
+    time: (v) => durationLabel(v),
+    distance: (v, axis) => (axis ? String(Math.round(v * 10) / 10) : distanceLabel(v)),
+    pace: (v, axis) => (axis ? durationLabel(v) : `${durationLabel(v)} /km`),
+  };
 
   function paintTabs() {
     clear(tabs).append(
@@ -1749,9 +1860,50 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
     );
   }
 
+  /** The Personal Records list, in the terms this exercise is logged in. */
+  function recordRows(records, recordRow) {
+    if (logType === 'reps') {
+      const bestSession = Math.max(0, ...history.sessions.map((s) => s.total_reps));
+      return [recordRow('refresh', 'Most Reps', String(records.most_reps)), recordRow('barChart', 'Best Session Reps', String(bestSession))];
+    }
+    if (logType === 'duration') {
+      return [
+        recordRow('timer', 'Longest Time', durationLabel(records.longest_duration_seconds)),
+        recordRow('barChart', 'Best Session Time', durationLabel(records.best_session_duration_seconds)),
+      ];
+    }
+    if (logType === 'distance_duration') {
+      return [
+        recordRow('trendUp', 'Longest Distance', distanceLabel(records.longest_distance_km)),
+        recordRow('timer', 'Longest Time', durationLabel(records.longest_duration_seconds)),
+        records.best_pace_seconds_per_km ? recordRow('activity', 'Best Pace', `${durationLabel(records.best_pace_seconds_per_km)} /km`) : null,
+      ];
+    }
+    return [
+      recordRow('weight', 'Heaviest Weight', weightLabel(records.heaviest_weight_kg)),
+      recordRow('target', 'Best 1RM (est.)', weightLabel(records.best_1rm_kg)),
+      records.best_set
+        ? recordRow('crown', 'Best Set', setText(records.best_set), `${weightLabel(records.best_set.volume_kg)} · ${shortDate(records.best_set.log_date)}`)
+        : null,
+      recordRow('barChart', 'Best Session Volume', weightLabel(records.best_session_volume_kg)),
+      recordRow('refresh', 'Most Reps', String(records.most_reps)),
+    ];
+  }
+
+  function lifetimeTotals(records) {
+    const workouts = [String(records.total_sessions), records.total_sessions === 1 ? 'Workout' : 'Workouts'];
+    const sets = [String(records.total_sets), 'Sets'];
+    if (logType === 'reps') return [workouts, sets, [String(records.total_reps), 'Reps']];
+    if (logType === 'duration') return [workouts, sets, [durationLabel(records.total_duration_seconds), 'Time']];
+    if (logType === 'distance_duration') {
+      return [workouts, [distanceLabel(records.total_distance_km), 'Distance'], [durationLabel(records.total_duration_seconds), 'Time']];
+    }
+    return [workouts, sets, [String(records.total_reps), 'Reps'], [weightLabel(records.total_volume_kg), 'Volume']];
+  }
+
   function summaryPanel() {
     const records = history.records;
-    const def = PROGRESS_METRICS.find((m) => m.key === metric);
+    const def = metrics.find((m) => m.key === metric);
     const cutoff = PROGRESS_RANGES.find((r) => r.key === range).days;
     const since = cutoff ? addDays(today(), -cutoff) : null;
     const points = [...history.sessions]
@@ -1760,7 +1912,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
       .map((s) => ({ date: s.log_date, value: def.read(s) }))
       .filter((p) => p.value > 0);
 
-    const format = (v, axis) => (def.weight ? weightOf(v, axis) : String(Math.round(v)));
+    const format = formatters[def.kind];
     const valueNode = h('div', { class: 'portal-exd-value' });
     const dateNode = h('div', { class: 'portal-exd-date' });
     const changeNode = h('div', { class: 'portal-exd-change' });
@@ -1782,7 +1934,8 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
             const delta = point.value - first;
             clear(changeNode);
             if (index > 0 && Math.abs(delta) >= 0.05) {
-              changeNode.className = `portal-exd-change ${delta > 0 ? 'up' : 'down'}`;
+              const better = def.lowerIsBetter ? delta < 0 : delta > 0;
+              changeNode.className = `portal-exd-change ${better ? 'up' : 'down'}`;
               changeNode.append(
                 renderIcon(delta > 0 ? 'trendUp' : 'trendDown', { size: 14 }),
                 `${delta > 0 ? '+' : '−'}${format(Math.abs(delta))}`,
@@ -1819,7 +1972,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
     const metricChips = h(
       'div',
       { class: 'portal-exd-metrics' },
-      ...PROGRESS_METRICS.map((m) =>
+      ...metrics.map((m) =>
         h(
           'button',
           {
@@ -1850,27 +2003,12 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
       metricChips,
       chartCard,
       h('h3', { class: 'portal-exd-heading' }, renderIcon('trophy', { size: 17 }), 'Personal Records'),
-      h(
-        'div',
-        { class: 'portal-exd-card is-list' },
-        recordRow('weight', 'Heaviest Weight', weightLabel(records.heaviest_weight_kg)),
-        recordRow('target', 'Best 1RM (est.)', weightLabel(records.best_1rm_kg)),
-        records.best_set
-          ? recordRow('crown', 'Best Set', setText(records.best_set), `${weightLabel(records.best_set.volume_kg)} · ${shortDate(records.best_set.log_date)}`)
-          : null,
-        recordRow('barChart', 'Best Session Volume', weightLabel(records.best_session_volume_kg)),
-        recordRow('refresh', 'Most Reps', String(records.most_reps)),
-      ),
+      h('div', { class: 'portal-exd-card is-list' }, ...recordRows(records, recordRow)),
       h('h3', { class: 'portal-exd-heading' }, renderIcon('activity', { size: 17 }), 'Lifetime'),
       h(
         'div',
         { class: 'portal-exd-totals' },
-        ...[
-          [String(records.total_sessions), records.total_sessions === 1 ? 'Workout' : 'Workouts'],
-          [String(records.total_sets), 'Sets'],
-          [String(records.total_reps), 'Reps'],
-          [weightLabel(records.total_volume_kg), 'Volume'],
-        ].map(([value, label]) => h('div', {}, h('strong', {}, value), h('span', {}, label))),
+        ...lifetimeTotals(records).map(([value, label]) => h('div', {}, h('strong', {}, value), h('span', {}, label))),
       ),
       records.first_logged_on
         ? h('p', { class: 'portal-exd-foot' }, `First logged ${longDate(records.first_logged_on)} · last ${longDate(records.last_logged_on)}`)
@@ -1879,6 +2017,25 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   }
 
   function historyPanel() {
+    // The set column, the small figure beside it and the session's footer.
+    const pace = (set) =>
+      set.distance_km > 0 && set.duration_seconds > 0 ? `${durationLabel(set.duration_seconds / set.distance_km)} /km` : '';
+    const column = {
+      weight_reps: {
+        label: 'Weight & reps',
+        extra: '1RM',
+        extraOf: (set) => (set.set_type === 'warmup' ? '—' : weightLabel(set.est_1rm_kg)),
+        foot: (s) => `Volume ${weightLabel(s.volume_kg)} · ${s.total_reps} reps`,
+      },
+      reps: { label: 'Reps', extra: '', extraOf: () => '', foot: (s) => `${s.total_reps} reps` },
+      duration: { label: 'Time', extra: '', extraOf: () => '', foot: (s) => `Total ${durationLabel(s.duration_seconds)}` },
+      distance_duration: {
+        label: 'Distance & time',
+        extra: 'Pace',
+        extraOf: pace,
+        foot: (s) => `${distanceLabel(s.distance_km)} · ${durationLabel(s.duration_seconds)}`,
+      },
+    }[logType];
     return h(
       'div',
       { class: 'portal-exd-history' },
@@ -1893,7 +2050,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
             h('div', {}, h('strong', {}, session.workout_name), h('span', {}, longDate(session.log_date))),
             session.has_pr ? h('span', { class: 'portal-exd-pr' }, renderIcon('trophy', { size: 13 }), 'PR') : null,
           ),
-          h('div', { class: 'portal-exd-set is-head' }, h('span', {}, 'Set'), h('span', {}, 'Weight & reps'), h('span', {}, '1RM')),
+          h('div', { class: 'portal-exd-set is-head' }, h('span', {}, 'Set'), h('span', {}, column.label), h('span', {}, column.extra)),
           ...session.sets.map((set) => {
             if (set.set_type !== 'warmup') working += 1;
             const type = SET_TYPES.find((t) => t.key === set.set_type);
@@ -1902,10 +2059,10 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
               { class: `portal-exd-set${set.is_pr ? ' is-pr' : ''}` },
               h('span', { class: `portal-set-type t-${set.set_type}` }, set.set_type === 'normal' ? String(working) : (type?.short ?? '')),
               h('span', {}, setText(set), set.is_pr ? renderIcon('trophy', { size: 13 }) : null),
-              h('span', { class: 'muted' }, set.set_type === 'warmup' ? '—' : weightLabel(set.est_1rm_kg)),
+              h('span', { class: 'muted' }, column.extraOf(set)),
             );
           }),
-          h('div', { class: 'portal-exd-session-foot' }, `Volume ${weightLabel(session.volume_kg)} · ${session.total_reps} reps`),
+          h('div', { class: 'portal-exd-session-foot' }, column.foot(session)),
         );
       }),
     );
@@ -2231,6 +2388,48 @@ function unitsFor(food) {
   return units;
 }
 
+/** Where a food's numbers come from, when that is somewhere other than the
+ * gym or the platform catalogue: USDA's whole foods or a pack's label. */
+function foodOriginBadge(food) {
+  if (food.source === 'usda') return h('span', { class: 'food-origin usda', title: 'USDA FoodData Central' }, 'USDA');
+  if (food.source === 'openfoodfacts' || food.barcode) {
+    return h('span', { class: 'food-origin pack', title: food.source === 'member' ? 'Typed off the label by a member' : 'Open Food Facts' }, 'Packaged');
+  }
+  return null;
+}
+
+/** One-tap amounts for the detail view: the pack's or the food's own serving,
+ * then everyday weights. Only for per-100 g / ml foods — a food logged in
+ * servings already starts at one. */
+function portionPresets(food, units) {
+  const presets = [];
+  for (const unit of units) {
+    if (unit.key === 'pack') presets.push({ unit, amount: 1, label: food.serving_label || `1 serving (${food.serving_size_g} ${unit.hint})` });
+    if (unit.key === 'amount') {
+      for (const n of [50, 100, 150, 200]) presets.push({ unit, amount: n, label: `${n} ${unit.hint}` });
+    }
+  }
+  return presets;
+}
+
+/**
+ * Library matches in the order the server ranked them (Indian staples, then
+ * ticked foods, then the rest — see src/foodSearch.js) once its answer for
+ * this query is in; until then, a close local guess: ticked first, whole-word
+ * matches ("egg", not "eggplant") next, shorter names first.
+ */
+function rankFoods(matches, needle, rankedIds) {
+  const order = new Map((rankedIds ?? []).map((id, i) => [id, i]));
+  const word = new RegExp(`(^|[^a-z0-9])${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`);
+  const guess = (f) => (f.verified ? 2 : 0) + (word.test(f.name.toLowerCase()) ? 1 : 0);
+  return [...matches].sort((a, b) => {
+    const ra = order.get(a.id) ?? Infinity;
+    const rb = order.get(b.id) ?? Infinity;
+    if (ra !== rb) return ra - rb;
+    return guess(b) - guess(a) || a.name.length - b.name.length;
+  });
+}
+
 const QUICK_TRACK_TABS = [
   { key: 'recent', label: 'Recent' },
   { key: 'favorites', label: 'Favourites' },
@@ -2265,6 +2464,9 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
    * the Diet tab repaints even if every item was removed again. */
   const tracked = { items: [], changed: false, open: false };
   const trackedTotal = (key) => Math.round(tracked.items.reduce((sum, item) => sum + item[key], 0) * 10) / 10;
+  /** Online results (USDA, Open Food Facts) for the search in `query`: shown
+   * under the library's, and copied into it when one is picked. */
+  const online = { query: '', status: null, results: [], ranked: [], loading: '', forced: false };
 
   /* ── Favourites ── */
 
@@ -2453,7 +2655,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
           'span',
           { class: 'qt-row-text' },
           h('span', { class: 'qt-row-name' }, h('span', {}, item.name), item.food.verified ? verifiedTick({ size: 15 }) : null),
-          h('span', { class: 'qt-row-meta' }, item.meta),
+          h('span', { class: 'qt-row-meta' }, foodOriginBadge(item.food), item.meta),
         ),
         h('span', { class: 'qt-row-kcal' }, String(item.kcal), h('small', {}, 'kcal')),
       ),
@@ -2469,6 +2671,103 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
         renderIcon('plus', { size: 18, stroke: 2.4 }),
       ),
     );
+  }
+
+  /* ── Online results: picked into the library, then logged like any food ── */
+
+  /** Copies an online result into the gym's library and hands back that
+   * row, which from then on is an ordinary library food. */
+  async function pickOnline(result) {
+    const food = await api.portal.selectFood(result.ref);
+    if (!foods.some((f) => f.id === food.id)) foods = [...foods, food];
+    online.results = online.results.filter((r) => r.ref !== result.ref);
+    return food;
+  }
+
+  function onlineRow(result) {
+    const per = /ml$/i.test(result.serving_unit) ? '100 ml' : '100 g';
+    const open = async (button) => {
+      button.disabled = true;
+      try {
+        const food = await pickOnline(result);
+        paintList();
+        openDetail(food, 'list');
+      } catch (err) {
+        toast(err.message || 'Could not add that food', 'error');
+        button.disabled = false;
+      }
+    };
+    return h(
+      'div',
+      { class: 'qt-row' },
+      h(
+        'button',
+        { class: 'qt-row-main', type: 'button', onclick: (event) => open(event.currentTarget) },
+        h(
+          'span',
+          { class: 'qt-row-text' },
+          h('span', { class: 'qt-row-name' }, h('span', {}, result.name), result.verified ? verifiedTick({ size: 15 }) : null),
+          h(
+            'span',
+            { class: 'qt-row-meta' },
+            foodOriginBadge(result),
+            [result.brand, result.serving_label ? `1 serving = ${result.serving_label}` : `per ${per}`].filter(Boolean).join(' · '),
+          ),
+        ),
+        h('span', { class: 'qt-row-kcal' }, String(result.calories), h('small', {}, `kcal/${per.replace(' ', '')}`)),
+      ),
+      h(
+        'button',
+        {
+          class: 'qt-add',
+          type: 'button',
+          'aria-label': `Add ${result.name}`,
+          onclick: async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+              const food = await pickOnline(result);
+              await quickAdd(libraryItem(food), button);
+            } catch (err) {
+              toast(err.message || 'Could not add that food', 'error');
+              button.disabled = false;
+            }
+          },
+        },
+        renderIcon('plus', { size: 18, stroke: 2.4 }),
+      ),
+    );
+  }
+
+  /** The online half of a search: its results, a button to ask when the
+   * library had enough that it wasn't asked, or why it has nothing. */
+  function onlineSection(needle, localCount) {
+    const nodes = [];
+    const current = online.query.toLowerCase() === needle;
+    const results = current ? online.results : [];
+    if (results.length) nodes.push(section('Online food database'), ...results.map(onlineRow));
+
+    const status = current ? online.status : null;
+    const down = status?.searched && ['usda', 'openfoodfacts'].every((s) => ['unavailable', 'rate_limited'].includes(status[s]));
+    // The server goes online by itself when the library has under 5 matches;
+    // only then (or when asked) is there something to wait for.
+    const waiting =
+      online.loading.toLowerCase() === needle && needle.length >= 3 && (online.forced || localCount < 5) && !results.length;
+    if (waiting) {
+      nodes.push(h('div', { class: 'qt-online-note' }, h('span', { class: 'qt-spinner', 'aria-hidden': 'true' }), 'Searching USDA and Open Food Facts…'));
+    } else if (down) {
+      nodes.push(h('div', { class: 'qt-online-note' }, 'The online food databases are not answering right now — try again shortly.'));
+    } else if (current && status && !status.searched && needle.length >= 3) {
+      nodes.push(
+        h(
+          'button',
+          { class: 'qt-online-btn', type: 'button', onclick: () => runSearch(online.query, { external: true }) },
+          renderIcon('globe', { size: 16 }),
+          'Search online food database',
+        ),
+      );
+    }
+    return nodes;
   }
 
   /* ── Header: meal picker ── */
@@ -2595,15 +2894,20 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
         seen.add(key);
         return true;
       });
-      const library = foods
-        .filter((f) => f.name.toLowerCase().includes(needle) && !seen.has(keyOf(f)))
+      const library = rankFoods(
+        foods.filter((f) => f.name.toLowerCase().includes(needle) && !seen.has(keyOf(f))),
+        needle,
+        online.query.toLowerCase() === needle ? online.ranked : null,
+      )
         .slice(0, 80)
         .map(libraryItem);
       if (mine.length) listBody.append(section('Your foods'), ...mine.map(row));
       if (library.length) listBody.append(section('Food library'), ...library.map(row));
-      if (!mine.length && !library.length) {
+      const onlineNodes = onlineSection(needle, mine.length + library.length);
+      if (!mine.length && !library.length && !onlineNodes.length) {
         listBody.append(emptyState('search', 'No matches', 'Check the spelling, scan the pack, or add it as a custom food.'));
       }
+      listBody.append(...onlineNodes);
     } else if (tab === 'recent') {
       if (recent.length) listBody.append(section('Recently tracked'), ...recent.map(recentItem).map(row));
       else listBody.append(emptyState('history', 'Nothing tracked yet', 'Foods you log show up here, ready to add again in one tap.'));
@@ -2625,7 +2929,31 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
   }
 
   // The first 300 library foods come with the sheet; a search also asks the
-  // server, so a gym whose library has grown past that still finds the rest.
+  // server, so a gym whose library has grown past that still finds the rest —
+  // and, when the library has little, the online databases (USDA, Open Food
+  // Facts) answer too.
+  async function runSearch(asked, { external } = {}) {
+    online.loading = asked;
+    online.forced = Boolean(external);
+    paintList();
+    try {
+      const res = await api.portal.foodSearch({ q: asked, external: external ? 1 : undefined });
+      const known = new Set(foods.map((f) => f.id));
+      const fresh = res.items.filter((f) => !known.has(f.id));
+      foods = [...foods, ...fresh];
+      if (query.trim() !== asked) return;
+      online.query = asked;
+      online.status = res.online;
+      online.results = res.remote;
+      online.ranked = res.items.map((f) => f.id);
+    } catch (err) {
+      if (external) toast(err.message || 'Could not search online', 'error');
+    } finally {
+      if (online.loading === asked) online.loading = '';
+    }
+    if (query.trim() === asked) paintList();
+  }
+
   let searchTimer = null;
   searchInput.addEventListener('input', () => {
     query = searchInput.value;
@@ -2635,18 +2963,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
     clearTimeout(searchTimer);
     const asked = query.trim();
     if (asked.length < 2) return;
-    searchTimer = setTimeout(async () => {
-      try {
-        const res = await api.portal.foods({ q: asked });
-        const known = new Set(foods.map((f) => f.id));
-        const fresh = res.items.filter((f) => !known.has(f.id));
-        if (!fresh.length) return;
-        foods = [...foods, ...fresh];
-        if (query.trim() === asked) paintList();
-      } catch {
-        // The local results already on screen stand.
-      }
-    }, 280);
+    searchTimer = setTimeout(() => runSearch(asked), 300);
   });
   clearSearch.addEventListener('click', () => {
     searchInput.value = '';
@@ -2760,8 +3077,27 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
       ? 'From Open Food Facts'
       : food.source === 'member'
         ? 'Added by a member from the label'
-        : null;
+        : food.source === 'usda'
+          ? 'From USDA FoodData Central'
+          : null;
     const sub = [food.brand, sourceNote].filter(Boolean).join(' · ');
+
+    const presetButtons = portionPresets(food, units).map((preset) =>
+      h(
+        'button',
+        {
+          class: 'qt-portion',
+          type: 'button',
+          onclick: () => {
+            if (unit !== preset.unit) setUnit(preset.unit);
+            amount = preset.amount;
+            qtyInput.value = String(amount);
+            paintNumbers();
+          },
+        },
+        preset.label,
+      ),
+    );
 
     clear(detailPane).append(
       h(
@@ -2780,7 +3116,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
         { class: 'qt-detail-head' },
         h('h3', {}, food.name, food.verified ? verifiedTick({ size: 20 }) : null),
         food.verified ? h('p', { class: 'qt-verified-note' }, 'Verified nutrition info') : null,
-        sub ? h('p', {}, food.source ? renderIcon('scan', { size: 12 }) : null, sub) : null,
+        sub ? h('p', {}, food.source ? renderIcon(food.source === 'usda' ? 'globe' : 'scan', { size: 12 }) : null, sub) : null,
       ),
       h(
         'div',
@@ -2810,6 +3146,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
           h('div', { class: 'qt-qty' }, qtyInput, qtyHint),
           h('button', { class: 'qt-step', type: 'button', 'aria-label': 'More', onclick: () => nudge(1) }, renderIcon('plus', { size: 18, stroke: 2.4 })),
         ),
+        presetButtons.length ? h('div', { class: 'qt-portions', role: 'group', 'aria-label': 'Quick amounts' }, ...presetButtons) : null,
       ),
       cta,
     );
@@ -3694,7 +4031,8 @@ async function openNutritionSettings({ onSaved } = {}) {
 
   const sourceSlot = h('div', {});
   const paintSource = () => {
-    clear(sourceSlot).append(
+    // Not the native .append: it would print the null below as the text "null".
+    append(clear(sourceSlot), [
       trainerPlan
         ? segmentedPicker(
             [
@@ -3709,7 +4047,7 @@ async function openNutritionSettings({ onSaved } = {}) {
           )
         : null,
       sourceHint,
-    );
+    ]);
     paintSourceHint();
   };
 
@@ -4685,7 +5023,11 @@ function renderPortalApp(ctx, initialMe) {
     } catch {
       // Fall through: a session already on the device still gets its card.
     }
-    if (!status?.has_access) {
+    // The add-on was switched off: the Workout tab is a paywall now, so a
+    // session left on the device has nowhere to resume to. The device copy is
+    // kept, so re-activating the add-on brings it back.
+    if (status && !status.has_access) return null;
+    if (!status) {
       if (!running) return null;
       return h(
         'div',
@@ -4899,7 +5241,8 @@ function renderPortalApp(ctx, initialMe) {
         isLibrary()
           ? null
           : h('div', { class: 'portal-greeting-art' }, h('img', { src: '/images/portal/portal-hero-athlete.png', alt: '' })),
-        h('h2', {}, `Hi, ${`${me.member.first_name} ${me.member.last_name || ''}`.trim()} 👋`),
+        // First name only: beside the athlete art a full name split mid-word on small phones.
+        h('h2', {}, `Hi, ${me.member.first_name} 👋`),
         h('p', {}, isLibrary() ? 'Have a productive day.' : 'Ready for today’s workout?'),
       ),
       heroCard,
@@ -5432,8 +5775,33 @@ function renderPortalApp(ctx, initialMe) {
     // check on each repaint.
     let justTicked = null;
 
+    // Holds whose stopwatch is running. The session clock's tick rewrites just
+    // their boxes rather than repainting, so a box being typed in elsewhere
+    // keeps its caret. Rebuilt on every paint.
+    let runningHolds = [];
+
+    // A stopwatch is its banked seconds plus however long it has been running.
+    // The start instant is persisted with the session, so a hold keeps timing
+    // through a locked phone or a reload just as the session clock does.
+    const elapsedOf = (set) =>
+      (Number(set.duration_seconds) || 0) + (set.timer_started_at ? Math.floor((Date.now() - set.timer_started_at) / 1000) : 0);
+
+    const stopHold = (set) => {
+      if (!set.timer_started_at) return;
+      set.duration_seconds = elapsedOf(set);
+      set.timer_started_at = null;
+    };
+
+    const isBlank = (value) => value === '' || value == null || Number(value) === 0;
+
     function setRow(exercise, set, index) {
+      const type = logTypeOf(exercise);
       const previous = exercise.previous;
+      // Last session's set in this exercise's own terms. A row from before the
+      // exercise had a type (a plank logged as 0 kg × 0) says nothing, so it is
+      // shown as no history rather than as a dash dressed up as a button.
+      const previousText = previous ? setSummary(previous, type) : null;
+      const hasPrevious = Boolean(previousText) && previousText !== '—';
       // Like Hevy, the badge is the set number and doubles as the set-type
       // switch: warmups don't count towards the numbering and show a W, drop
       // and failure sets their own letter.
@@ -5456,18 +5824,24 @@ function renderPortalApp(ctx, initialMe) {
         set.set_type === 'normal' ? String(workingNumber) : (typeInfo?.short ?? String(workingNumber)),
       );
 
-      const oneRm = estimate1rm(Number(set.weight_kg) || 0, Number(set.reps) || 0);
+      const oneRm = type === 'weight_reps' ? estimate1rm(Number(set.weight_kg) || 0, Number(set.reps) || 0) : 0;
       const beatsPrevious = previous && oneRm > estimate1rm(previous.weight_kg, previous.reps);
 
       // The greyed-out placeholders are last session's numbers; a blank box
       // means "same as last time", so this copies them in for real.
       const fillFromPrevious = () => {
-        if (!previous) return;
-        if (set.weight_display === '' || set.weight_display == null) {
+        if (!hasPrevious) return;
+        if (type === 'weight_reps' && (set.weight_display === '' || set.weight_display == null)) {
           set.weight_display = String(toDisplayWeight(previous.weight_kg));
           set.weight_kg = previous.weight_kg;
         }
-        if (set.reps === '' || set.reps == null || Number(set.reps) === 0) set.reps = previous.reps;
+        if ((type === 'weight_reps' || type === 'reps') && isBlank(set.reps)) set.reps = previous.reps;
+        if ((type === 'duration' || type === 'distance_duration') && isBlank(set.duration_seconds) && !set.timer_started_at) {
+          set.duration_seconds = previous.duration_seconds || 0;
+        }
+        if (type === 'distance_duration' && isBlank(set.distance_km) && previous.distance_km) {
+          set.distance_km = String(previous.distance_km);
+        }
       };
 
       const check = h(
@@ -5477,6 +5851,8 @@ function renderPortalApp(ctx, initialMe) {
           type: 'button',
           'aria-label': set.completed ? 'Mark set as not done' : 'Mark set as done',
           onclick: () => {
+            // Ticking a hold mid-count is the member saying "that's it".
+            stopHold(set);
             set.completed = !set.completed;
             justTicked = set.completed ? set : null;
             if (set.completed) fillFromPrevious();
@@ -5484,8 +5860,10 @@ function renderPortalApp(ctx, initialMe) {
             if (set.completed) {
               sound.playSetComplete();
               // Ticking a set is what starts the rest clock — that is the
-              // moment the member actually stops lifting.
-              rest.start(exercise.rest_seconds || 90);
+              // moment the member actually stops lifting. A rest of 0 is the
+              // plan saying none (a single cardio block).
+              const restFor = exercise.rest_seconds ?? 90;
+              if (restFor > 0) rest.start(restFor);
             } else {
               sound.playSetUncheck();
             }
@@ -5496,11 +5874,114 @@ function renderPortalApp(ctx, initialMe) {
         renderIcon('check', { size: 18, stroke: 2.4 }),
       );
 
+      const weightInput = () =>
+        h('input', {
+          class: 'portal-set-input',
+          type: 'number',
+          inputmode: 'decimal',
+          min: 0,
+          step: 0.5,
+          'aria-label': `Weight in ${weightUnit.get()}`,
+          placeholder: hasPrevious ? String(toDisplayWeight(previous.weight_kg)) : '0',
+          value: set.weight_display ?? '',
+          oninput: (event) => {
+            set.weight_display = event.target.value;
+            set.weight_kg = toKg(event.target.value);
+            persist();
+            paintMeta();
+          },
+        });
+
+      const repsInput = () =>
+        h('input', {
+          class: 'portal-set-input',
+          type: 'number',
+          inputmode: 'numeric',
+          min: 0,
+          step: 1,
+          'aria-label': 'Reps',
+          placeholder: hasPrevious && previous.reps ? String(previous.reps) : '0',
+          value: set.reps ?? '',
+          oninput: (event) => {
+            set.reps = Number(event.target.value);
+            persist();
+            paintMeta();
+          },
+        });
+
+      const distanceInput = () =>
+        h('input', {
+          class: 'portal-set-input',
+          type: 'number',
+          inputmode: 'decimal',
+          min: 0,
+          step: 0.01,
+          'aria-label': 'Distance in km',
+          placeholder: hasPrevious && previous.distance_km ? String(previous.distance_km) : '0',
+          value: set.distance_km ?? '',
+          oninput: (event) => {
+            set.distance_km = event.target.value;
+            persist();
+          },
+        });
+
+      const running = Boolean(set.timer_started_at);
+      const timeInput = h('input', {
+        class: 'portal-set-input is-time',
+        type: 'text',
+        inputmode: 'numeric',
+        autocomplete: 'off',
+        'aria-label': 'Time — digits fill in from the right',
+        placeholder: hasPrevious && previous.duration_seconds ? durationLabel(previous.duration_seconds) : '0:00',
+        value: running || Number(set.duration_seconds) > 0 ? durationLabel(elapsedOf(set)) : '',
+        readonly: running,
+        oninput: (event) => {
+          const digits = timeDigitsOf(event.target.value);
+          set.duration_seconds = digits ? digitsToSeconds(digits) : 0;
+          event.target.value = formatTimeDigits(digits);
+          persist();
+        },
+      });
+      if (running) runningHolds.push({ set, node: timeInput });
+
+      // Hevy's play button on a hold: count up while the member is in the
+      // plank instead of making them watch a clock and type the result.
+      const holdButton = h(
+        'button',
+        {
+          class: `portal-set-hold${running ? ' running' : ''}`,
+          type: 'button',
+          disabled: set.completed,
+          title: running ? 'Pause the stopwatch' : 'Start the stopwatch',
+          'aria-label': running ? 'Pause stopwatch' : 'Start stopwatch',
+          onclick: () => {
+            if (set.timer_started_at) {
+              stopHold(set);
+            } else {
+              // One hold at a time — starting this one banks any other.
+              for (const other of state.exercises.flatMap((ex) => ex.sets)) stopHold(other);
+              set.timer_started_at = Date.now();
+              rest.stop();
+            }
+            persist();
+            paint();
+          },
+        },
+        renderIcon(running ? 'pause' : 'play', { size: 14, stroke: 2.4 }),
+      );
+
+      const inputs = {
+        weight_reps: () => [weightInput(), repsInput()],
+        reps: () => [repsInput()],
+        duration: () => [h('div', { class: 'portal-set-timefield' }, holdButton, timeInput)],
+        distance_duration: () => [distanceInput(), timeInput],
+      }[type]();
+
       return h(
         'div',
-        { class: `portal-set-row${set.completed ? ' completed' : ''}` },
+        { class: `portal-set-row${inputs.length === 1 ? ' is-single' : ''}${set.completed ? ' completed' : ''}` },
         typeButton,
-        previous
+        hasPrevious
           ? h(
               'button',
               {
@@ -5513,38 +5994,10 @@ function renderPortalApp(ctx, initialMe) {
                   paint();
                 },
               },
-              `${weightLabel(previous.weight_kg)} × ${previous.reps}`,
+              previousText,
             )
           : h('div', { class: 'portal-set-prev is-empty' }, '—'),
-        h('input', {
-          class: 'portal-set-input',
-          type: 'number',
-          inputmode: 'decimal',
-          min: 0,
-          step: 0.5,
-          placeholder: previous ? String(toDisplayWeight(previous.weight_kg)) : '0',
-          value: set.weight_display ?? '',
-          oninput: (event) => {
-            set.weight_display = event.target.value;
-            set.weight_kg = toKg(event.target.value);
-            persist();
-            paintMeta();
-          },
-        }),
-        h('input', {
-          class: 'portal-set-input',
-          type: 'number',
-          inputmode: 'numeric',
-          min: 0,
-          step: 1,
-          placeholder: previous ? String(previous.reps) : '0',
-          value: set.reps ?? '',
-          oninput: (event) => {
-            set.reps = Number(event.target.value);
-            persist();
-            paintMeta();
-          },
-        }),
+        ...inputs,
         check,
         oneRm > 0
           ? h(
@@ -5591,6 +6044,12 @@ function renderPortalApp(ctx, initialMe) {
     }
 
     function exerciseCard(exercise, exIndex) {
+      const columns = {
+        weight_reps: [weightUnit.get(), 'Reps'],
+        reps: ['Reps'],
+        duration: ['Time'],
+        distance_duration: ['Km', 'Time'],
+      }[logTypeOf(exercise)];
       return h(
         'div',
         { class: 'portal-ex-card' },
@@ -5619,14 +6078,16 @@ function renderPortalApp(ctx, initialMe) {
                 type: 'button',
                 title: 'Rest between sets — tap to change',
                 onclick: () => {
-                  const next = REST_PRESETS[(REST_PRESETS.indexOf(exercise.rest_seconds) + 1) % REST_PRESETS.length];
-                  exercise.rest_seconds = next;
+                  // Off is in the cycle: a cardio block or a single hold
+                  // often wants no rest clock at all.
+                  const cycle = [0, ...REST_PRESETS];
+                  exercise.rest_seconds = cycle[(cycle.indexOf(exercise.rest_seconds ?? 90) + 1) % cycle.length];
                   persist();
                   paint();
                 },
               },
               renderIcon('timer', { size: 16 }),
-              h('span', {}, `${exercise.rest_seconds}s`),
+              h('span', {}, exercise.rest_seconds === 0 ? 'Off' : `${exercise.rest_seconds ?? 90}s`),
             ),
             h(
               'button',
@@ -5643,11 +6104,10 @@ function renderPortalApp(ctx, initialMe) {
         ),
         h(
           'div',
-          { class: 'portal-set-row portal-set-header' },
+          { class: `portal-set-row portal-set-header${columns.length === 1 ? ' is-single' : ''}` },
           h('span', {}, 'Set'),
           h('span', {}, 'Previous'),
-          h('span', {}, weightUnit.get()),
-          h('span', {}, 'Reps'),
+          ...columns.map((label) => h('span', {}, label)),
           h('span', {}, ''),
         ),
         ...exercise.sets.map((set, index) => setRow(exercise, set, index)),
@@ -5668,6 +6128,8 @@ function renderPortalApp(ctx, initialMe) {
                   weight_display: last?.weight_display ?? '',
                   weight_kg: last?.weight_kg ?? 0,
                   reps: last?.reps ?? '',
+                  duration_seconds: last?.duration_seconds ?? 0,
+                  distance_km: last?.distance_km ?? '',
                   completed: false,
                 });
                 persist();
@@ -5707,7 +6169,8 @@ function renderPortalApp(ctx, initialMe) {
             ...demoFields(item),
             target_sets: 3,
             target_reps: '',
-            rest_seconds: 90,
+            // A run or a row is usually one block, with nothing to rest for.
+            rest_seconds: logTypeOf(item) === 'distance_duration' ? 0 : 90,
             previous: item.previous ?? null,
             sets: [{ set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false }],
           });
@@ -5717,21 +6180,36 @@ function renderPortalApp(ctx, initialMe) {
       });
 
     async function finish() {
-      const sets = state.exercises.flatMap((exercise) =>
-        exercise.sets
-          // Untouched rows are dropped: a member who added three sets and did two
-          // should not have a 0 kg × 0 set in their history.
-          .filter((set) => set.completed || Number(set.reps) > 0)
-          .map((set, index) => ({
-            exercise_name: exercise.exercise_name,
-            muscle_group: exercise.muscle_group,
-            set_number: index + 1,
-            set_type: set.set_type,
-            weight_kg: Number(set.weight_kg) || 0,
-            reps: Number(set.reps) || 0,
-            completed: Boolean(set.completed),
-          })),
-      );
+      const sets = state.exercises.flatMap((exercise) => {
+        const type = logTypeOf(exercise);
+        // Only the fields this exercise logs are sent, so a plank row can never
+        // carry a stray weight into the volume or a PR.
+        const lifts = type === 'weight_reps';
+        const counts = lifts || type === 'reps';
+        const timed = type === 'duration' || type === 'distance_duration';
+        return (
+          exercise.sets
+            .map((set) => ({
+              set,
+              weight_kg: lifts ? Number(set.weight_kg) || 0 : 0,
+              reps: counts ? Number(set.reps) || 0 : 0,
+              // A stopwatch still running at Finish counts up to now.
+              duration_seconds: timed ? elapsedOf(set) : 0,
+              distance_km: type === 'distance_duration' ? Number(set.distance_km) || 0 : 0,
+            }))
+            // Untouched rows are dropped: a member who added three sets and did
+            // two should not have a 0 kg × 0 set in their history.
+            .filter((row) => row.set.completed || row.reps > 0 || row.duration_seconds > 0 || row.distance_km > 0)
+            .map(({ set, ...values }, index) => ({
+              exercise_name: exercise.exercise_name,
+              muscle_group: exercise.muscle_group,
+              set_number: index + 1,
+              set_type: set.set_type,
+              ...values,
+              completed: Boolean(set.completed),
+            }))
+        );
+      });
 
       if (!sets.length) {
         toast('Tick at least one set before finishing', 'error');
@@ -5934,6 +6412,7 @@ function renderPortalApp(ctx, initialMe) {
 
     function paint() {
       const soundOn = sound.getSoundEnabled();
+      runningHolds = [];
       clear(body).append(
         h(
           'div',
@@ -5994,6 +6473,7 @@ function renderPortalApp(ctx, initialMe) {
 
     const paintClock = () => {
       clockNode.textContent = clockFrom((Date.now() - state.started_at) / 1000);
+      for (const { set, node } of runningHolds) node.value = durationLabel(elapsedOf(set));
     };
     paintClock();
     clockInterval = setInterval(paintClock, 1000);
@@ -6979,7 +7459,7 @@ function renderPortalApp(ctx, initialMe) {
                 'div',
                 { class: 'portal-log-set' },
                 h('span', { class: `portal-set-type t-${set.set_type}` }, SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '—'),
-                h('span', {}, `${weightLabel(set.weight_kg)} × ${set.reps}`),
+                h('span', {}, setSummary(set)),
                 set.is_pr ? h('span', { class: 'badge amber' }, 'PR') : null,
                 h('span', { class: 'muted' }, set.est_1rm_kg ? `~${weightLabel(set.est_1rm_kg)} 1RM` : ''),
               ),
@@ -8266,7 +8746,7 @@ function renderPortalApp(ctx, initialMe) {
         ),
         h(
           'button',
-          { class: 'portal-prof-edit', type: 'button', onclick: openEditProfileModal },
+          { class: 'portal-prof-edit', type: 'button', 'aria-label': 'Edit profile', onclick: openEditProfileModal },
           renderIcon('edit', { size: 17, stroke: 2.2 }),
           h('span', {}, 'Edit'),
           h('span', { class: 'portal-prof-edit-more' }, ' Profile'),

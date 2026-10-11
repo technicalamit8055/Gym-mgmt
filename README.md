@@ -328,6 +328,9 @@ All optional — sensible defaults apply.
 | `VAPID_KEY_FILE` | `<platform db dir>/vapid-keys.json` | Where the generated key pair is kept — back it up with the databases |
 | `VAPID_SUBJECT` | `mailto:$PLATFORM_ADMIN_EMAIL` | Contact the push services (Google, Apple, Mozilla) can reach; must be `mailto:` or `https:` |
 | `PUSH_SWEEP_INTERVAL_MS` | `300000` | How often the reminder sweep runs |
+| `USDA_API_KEY` | `DEMO_KEY` | USDA FoodData Central key for online food search. `DEMO_KEY` allows only ~30 requests an hour per IP — get a free key (1,000/hour) at https://fdc.nal.usda.gov/api-key-signup for production |
+| `FOOD_SEARCH_ONLINE` | `true` | Set to `false` to keep food search to each gym's own library (no USDA / Open Food Facts calls) |
+| `FOOD_SEARCH_TIMEOUT_MS` | `4000` | How long food search waits on USDA / Open Food Facts before answering with local results only |
 
 ## Onboarding: how a gym (or hall) joins
 

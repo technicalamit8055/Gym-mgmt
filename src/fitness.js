@@ -252,7 +252,7 @@ export function previousSetsFor(memberId, exerciseNames) {
   if (!exerciseNames.length) return {};
   const placeholders = exerciseNames.map(() => '?').join(', ');
   const rows = all(
-    `SELECT s.exercise_name, s.weight_kg, s.reps, s.est_1rm_kg, l.log_date
+    `SELECT s.exercise_name, s.weight_kg, s.reps, s.duration_seconds, s.distance_km, s.est_1rm_kg, l.log_date
      FROM workout_log_sets s
      JOIN workout_logs l ON l.id = s.log_id
      WHERE l.member_id = ? AND s.exercise_name IN (${placeholders})
@@ -270,6 +270,14 @@ export function previousSetsFor(memberId, exerciseNames) {
 }
 
 const round1 = (value) => Math.round(value * 10) / 10;
+const round2 = (value) => Math.round(value * 100) / 100;
+
+/** The fastest pace (seconds per km) among sets that logged both a distance
+ * and a time, or null when none did. Lower is better, so it is a min. */
+function bestPace(sets) {
+  const paces = sets.filter((s) => s.distance_km > 0 && s.duration_seconds > 0).map((s) => s.duration_seconds / s.distance_km);
+  return paces.length ? Math.round(Math.min(...paces)) : null;
+}
 
 /**
  * One member's whole record on one exercise: every session that included it,
@@ -294,7 +302,7 @@ export function exerciseHistory(memberId, exerciseName, { limit = 200 } = {}) {
   );
   const setRows = logs.length
     ? all(
-        `SELECT log_id, set_number, set_type, weight_kg, reps, est_1rm_kg, is_pr
+        `SELECT log_id, set_number, set_type, weight_kg, reps, duration_seconds, distance_km, est_1rm_kg, is_pr
          FROM workout_log_sets
          WHERE log_id IN (${logs.map(() => '?').join(', ')})
            AND completed = 1 AND exercise_name = ? COLLATE NOCASE
@@ -316,6 +324,14 @@ export function exerciseHistory(memberId, exerciseName, { limit = 200 } = {}) {
     total_sets: 0,
     total_reps: 0,
     total_volume_kg: 0,
+    // Timed holds and cardio, which a weight-based record would show as 0.
+    longest_duration_seconds: 0,
+    longest_distance_km: 0,
+    best_session_duration_seconds: 0,
+    best_session_distance_km: 0,
+    best_pace_seconds_per_km: null,
+    total_duration_seconds: 0,
+    total_distance_km: 0,
     first_logged_on: logs.at(-1)?.log_date ?? null,
     last_logged_on: logs[0]?.log_date ?? null,
   };
@@ -340,6 +356,12 @@ export function exerciseHistory(memberId, exerciseName, { limit = 200 } = {}) {
       best_set_volume_kg: bestSet ? round1(bestSet.weight_kg * bestSet.reps) : 0,
       volume_kg: round1(sets.reduce((sum, s) => sum + s.weight_kg * s.reps, 0)),
       total_reps: sets.reduce((sum, s) => sum + s.reps, 0),
+      most_reps: Math.max(0, ...working.map((s) => s.reps)),
+      longest_duration_seconds: Math.max(0, ...working.map((s) => s.duration_seconds)),
+      longest_distance_km: Math.max(0, ...working.map((s) => s.distance_km)),
+      duration_seconds: sets.reduce((sum, s) => sum + s.duration_seconds, 0),
+      distance_km: round2(sets.reduce((sum, s) => sum + s.distance_km, 0)),
+      best_pace_seconds_per_km: bestPace(working),
       has_pr: sets.some((s) => s.is_pr),
     };
 
@@ -353,9 +375,19 @@ export function exerciseHistory(memberId, exerciseName, { limit = 200 } = {}) {
     records.total_sets += sets.length;
     records.total_reps += session.total_reps;
     records.total_volume_kg += session.volume_kg;
+    records.longest_duration_seconds = Math.max(records.longest_duration_seconds, session.longest_duration_seconds);
+    records.longest_distance_km = Math.max(records.longest_distance_km, session.longest_distance_km);
+    records.best_session_duration_seconds = Math.max(records.best_session_duration_seconds, session.duration_seconds);
+    records.best_session_distance_km = Math.max(records.best_session_distance_km, session.distance_km);
+    if (session.best_pace_seconds_per_km !== null) {
+      records.best_pace_seconds_per_km = Math.min(records.best_pace_seconds_per_km ?? Infinity, session.best_pace_seconds_per_km);
+    }
+    records.total_duration_seconds += session.duration_seconds;
+    records.total_distance_km += session.distance_km;
     return session;
   });
   records.total_volume_kg = round1(records.total_volume_kg);
+  records.total_distance_km = round2(records.total_distance_km);
 
   return { exercise_name: exerciseName, sessions, records };
 }

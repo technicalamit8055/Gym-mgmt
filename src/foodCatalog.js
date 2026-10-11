@@ -1,5 +1,6 @@
 import { getDb } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
+import { CORE_FOODS, INDIAN_CORE_FOODS } from './foodCoreSeed.js';
 import { FOOD_FIBER_SUGAR, FOODS } from './fitnessSeed.js';
 import { getRegistryDb } from './tenants.js';
 
@@ -89,9 +90,63 @@ function db() {
     handle.prepare("INSERT INTO platform_meta (key, value) VALUES ('food_catalog_seeded', '1')").run();
   }
 
+  const coreAdded = seedCoreFoods(handle);
+
   initialised.add(handle);
-  if (!seeded) bumpVersion();
+  if (!seeded || coreAdded) bumpVersion();
   return handle;
+}
+
+/** The verified batches (foodCoreSeed.js), each seeded once on its own marker,
+ * so a catalogue seeded before a batch existed still gets it. */
+const CORE_BATCHES = [
+  { marker: 'food_catalog_core_seeded', foods: CORE_FOODS },
+  { marker: 'food_catalog_core_india_seeded', foods: INDIAN_CORE_FOODS },
+];
+
+/**
+ * Adds any verified batch not seeded yet. A food the operator already has by
+ * that name keeps the operator's numbers, and one they delete later stays
+ * deleted — with one exception: a starter food (fitnessSeed.js) nobody has
+ * touched since it was seeded, on the same serving basis, is upgraded to the
+ * batch's numbers and tick instead of sitting beside it as a duplicate. The
+ * basis check matters: turning "1 egg" into "100 g" would silently change
+ * what every favourite and recent entry of it means.
+ */
+function seedCoreFoods(handle) {
+  const seededMarker = handle.prepare('SELECT value FROM platform_meta WHERE key = ?');
+  const pending = CORE_BATCHES.filter((batch) => !seededMarker.get(batch.marker));
+  if (!pending.length) return false;
+
+  const insert = handle.prepare(
+    `INSERT OR IGNORE INTO catalog_foods
+       (name, category, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g,
+        serving_size_g, serving_label, verified)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+  );
+  const upgrade = handle.prepare(
+    `UPDATE catalog_foods
+     SET category = ?, calories = ?, protein_g = ?, carbs_g = ?, fats_g = ?, fiber_g = ?, sugar_g = ?,
+         serving_size_g = ?, serving_label = ?, verified = 1, updated_at = datetime('now')
+     WHERE name = ? AND serving_unit = ? AND verified = 0 AND updated_at = created_at`,
+  );
+  const starterNames = new Set(FOODS.map(([name]) => name.toLowerCase()));
+  handle.exec('BEGIN');
+  try {
+    for (const batch of pending) {
+      for (const row of batch.foods) {
+        const [name, category, unit, ...rest] = row;
+        if (starterNames.has(name.toLowerCase())) upgrade.run(category, ...rest, name, unit);
+        insert.run(...row);
+      }
+      handle.prepare('INSERT INTO platform_meta (key, value) VALUES (?, ?)').run(batch.marker, '1');
+    }
+    handle.exec('COMMIT');
+  } catch (err) {
+    handle.exec('ROLLBACK');
+    throw err;
+  }
+  return true;
 }
 
 /** Every write moves this on, and a gym re-syncs when its copy is older. */
@@ -140,6 +195,30 @@ function categoryFrom(value, { lenient }) {
   if (CATEGORY_ALIASES[key]) return CATEGORY_ALIASES[key];
   if (lenient) return 'general';
   throw badRequest('That category is not one of the allowed values', { category: `use one of: ${FOOD_CATEGORIES.join(', ')}` });
+}
+
+/**
+ * A category for a food described by an outside database — USDA's food
+ * category, Open Food Facts' category tags, or failing those the name. Each
+ * text is tried in turn; the first one that says something wins.
+ */
+const CATEGORY_HINTS = [
+  ['supplements', /\b(protein[ -](powders?|bars?|shakes?)|whey|casein|creatine|bcaa|mass[ -]gainers?|dietary[ -]supplements?|sports[ -]nutrition)\b/],
+  ['meal', /\b(meals?|entrees?|dishes|fast[ -]foods?|restaurant|sandwich(es)?|pizzas?|burgers?|soups?)\b/],
+  ['dairy', /\b(dairy|dairies|milks?|cheeses?|yogh?urts?|curd|paneer|cream)\b/],
+  ['protein', /\b(poultry|poultries|chicken|turkey|beef|pork|lamb|mutton|goat|veal|game|meats?|sausages?|fish(es)?|finfish|shellfish|seafoods?|eggs?|legumes?|beans?|lentils?|pulses?|tofu|soy|dal)\b/],
+  ['fats', /\b(fats|oils?|nuts?|seeds?|butters?|ghee|almonds?|walnuts?|peanuts?|cashews?)\b/],
+  ['fruits', /\b(fruits?|vegetables?|veg|berries|salads?|produce)\b/],
+  ['carbs', /\b(cereals?|grains?|pastas?|breads?|baked|rice|oats?|potato(es)?|noodles?|tortillas?|crackers?|breakfasts?)\b/],
+];
+
+export function guessFoodCategory(...texts) {
+  for (const text of texts) {
+    const haystack = String(text ?? '').toLowerCase().replace(/\ben:/g, ' ');
+    if (!haystack.trim()) continue;
+    for (const [category, pattern] of CATEGORY_HINTS) if (pattern.test(haystack)) return category;
+  }
+  return 'general';
 }
 
 function booleanFrom(value) {

@@ -97,16 +97,332 @@ const GOAL_TONE = {
 
 /* ── Workout template builder ──────────────────────────────────────────── */
 
+/** "smith_machine" → "Smith Machine": how the picker names a piece of kit. */
+const titleCase = (value) =>
+  String(value ?? '')
+    .split('_')
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(' ');
+
+const nameKey = (name) => String(name ?? '').trim().toLowerCase();
+
+/** A list-sized demo: the clip's or GIF's first frame, or a dumbbell tile so
+ * rows without one stay the same shape. */
+function demoThumb(item, className) {
+  return (
+    exerciseMedia(item, { className, still: true }) ??
+    h('span', { class: `${className} is-empty` }, renderIcon('weight', { size: 18 }))
+  );
+}
+
+/** The demo playing, with what it works and how to do it — the picker's side
+ * panel, and the sheet a thumbnail opens. */
+function demoPanelBody(item) {
+  if (!item) {
+    return h(
+      'div',
+      { class: 'fit-demo-empty' },
+      renderIcon('play', { size: 26 }),
+      h('span', {}, 'Point at an exercise to watch its demo'),
+    );
+  }
+  const muscles = [item.muscle_group, ...(item.secondary_muscles ?? [])].filter(Boolean);
+  return h(
+    'div',
+    { class: 'fit-demo' },
+    h(
+      'div',
+      { class: 'fit-demo-stage' },
+      exerciseMedia(item, { className: 'fit-demo-media' }) ??
+        h('div', { class: 'fit-demo-none' }, renderIcon('weight', { size: 28 }), h('span', {}, 'No demo video yet')),
+    ),
+    h('div', { class: 'fit-demo-name' }, item.name ?? item.exercise_name),
+    h(
+      'div',
+      { class: 'fit-demo-tags' },
+      ...muscles.map((m, i) => h('span', { class: `badge ${i ? 'grey' : 'blue'}` }, labelOf(MUSCLE_GROUPS, m))),
+      item.equipment ? h('span', { class: 'badge grey' }, titleCase(item.equipment)) : null,
+    ),
+    item.instructions ? h('p', { class: 'fit-demo-text' }, item.instructions) : null,
+  );
+}
+
+function openDemoSheet(item) {
+  openModal({ title: item.name ?? item.exercise_name, className: 'fit-demo-modal', body: demoPanelBody(item) });
+}
+
 /**
- * The routine builder: a day list, each holding an exercise list, both
- * reorderable and both editable in place.
+ * The Add Exercises screen, after the member app's picker: a search box, muscle
+ * and equipment filters, then the library as rows with their demo. Rows toggle
+ * in and out of a multi-select and are added in the order they were picked.
+ *
+ * On a wide screen the demo of the row under the pointer plays in a panel
+ * alongside, so a trainer checks the movement without leaving the list; on a
+ * phone the thumbnail opens it as a sheet instead.
+ *
+ * `library` is the builder's own array, so an exercise created here is there
+ * for the next day's picker too.
+ */
+function openExercisePicker({ library, inDay = new Set(), onAdd }) {
+  let query = '';
+  const filter = { muscle: '', equipment: '' };
+  // A Map keeps the pick order and dedupes by name.
+  const selected = new Map();
+  // Rows are built once and reused across filters, so re-filtering never
+  // reloads a thumbnail.
+  const rows = new Map();
+  let previewing;
+
+  const keyOf = (item) => nameKey(item.name);
+  const isWide = () => window.matchMedia('(min-width: 761px)').matches;
+
+  const list = h('div', { class: 'fit-pick-list' });
+  const preview = h('div', { class: 'fit-pick-preview' }, demoPanelBody(null));
+  const pickedNote = h('span', { class: 'fit-pick-note' });
+  const addButton = h('button', {
+    class: 'btn primary',
+    type: 'button',
+    onclick: () => {
+      closeModal();
+      onAdd([...selected.values()]);
+    },
+  });
+
+  function showPreview(item) {
+    if (previewing === item) return;
+    previewing = item;
+    clear(preview).append(demoPanelBody(item));
+  }
+
+  function paintFooter() {
+    const count = selected.size;
+    addButton.disabled = count === 0;
+    clear(addButton).append(
+      renderIcon('plus', { size: 16 }),
+      count ? `Add ${count} exercise${count === 1 ? '' : 's'}` : 'Add exercises',
+    );
+    pickedNote.textContent = count
+      ? [...selected.values()].map((e) => e.name).join(', ')
+      : 'Tap exercises to select them';
+  }
+
+  function rowFor(item) {
+    if (rows.has(item)) return rows.get(item);
+    const sub = [labelOf(MUSCLE_GROUPS, item.muscle_group), item.equipment ? titleCase(item.equipment) : null]
+      .filter(Boolean)
+      .join(' · ');
+    const main = h(
+      'button',
+      {
+        class: 'fit-pick-main',
+        type: 'button',
+        'aria-pressed': 'false',
+        onclick: () => {
+          if (selected.has(keyOf(item))) selected.delete(keyOf(item));
+          else selected.set(keyOf(item), item);
+          paintRow(item);
+          paintFooter();
+          if (isWide()) showPreview(item);
+        },
+      },
+      h(
+        'span',
+        { class: 'fit-pick-text' },
+        h('span', { class: 'fit-pick-name' }, item.name),
+        h(
+          'span',
+          { class: 'fit-pick-sub' },
+          sub,
+          inDay.has(keyOf(item)) ? h('span', { class: 'fit-pick-in-day' }, 'In this day') : null,
+        ),
+      ),
+      h('span', { class: 'fit-pick-check' }, renderIcon('check', { size: 14, stroke: 3 })),
+    );
+    const row = h(
+      'div',
+      {
+        class: 'fit-pick-row',
+        onmouseenter: () => {
+          if (isWide()) showPreview(item);
+        },
+      },
+      h(
+        'button',
+        {
+          class: 'fit-pick-thumb-btn',
+          type: 'button',
+          title: 'Watch demo',
+          'aria-label': `Watch ${item.name} demo`,
+          onclick: () => (isWide() ? showPreview(item) : openDemoSheet(item)),
+        },
+        demoThumb(item, 'fit-pick-thumb'),
+        item.media_url ? h('span', { class: 'fit-play-badge' }, renderIcon('play', { size: 11 })) : null,
+      ),
+      main,
+    );
+    rows.set(item, row);
+    return row;
+  }
+
+  function paintRow(item) {
+    const row = rows.get(item);
+    if (!row) return;
+    const isOn = selected.has(keyOf(item));
+    row.classList.toggle('selected', isOn);
+    row.querySelector('.fit-pick-main').setAttribute('aria-pressed', String(isOn));
+  }
+
+  function createPanel(name) {
+    const muscle = h(
+      'select',
+      {},
+      h('option', { value: '' }, 'Muscle group…'),
+      ...MUSCLE_GROUPS.map((g) => h('option', { value: g.value, selected: g.value === filter.muscle }, g.label)),
+    );
+    const kit = h(
+      'select',
+      {},
+      ...EQUIPMENT.map((e) => h('option', { value: e, selected: e === (filter.equipment || 'other') }, titleCase(e))),
+    );
+    return h(
+      'div',
+      { class: 'fit-pick-none' },
+      h('p', {}, `No exercise called “${name}” yet. Add it to your gym's library:`),
+      h(
+        'div',
+        { class: 'fit-pick-create' },
+        muscle,
+        kit,
+        h(
+          'button',
+          {
+            class: 'btn sm primary',
+            type: 'button',
+            onclick: clickAsync(async () => {
+              if (!muscle.value) return toast('Choose the muscle group', 'error');
+              const made = await api.createExercise({ name, muscle_group: muscle.value, equipment: kit.value });
+              // The server hands back the existing row when the name is taken.
+              let item = library.find((e) => keyOf(e) === nameKey(made.name));
+              if (!item) {
+                item = made;
+                library.push(item);
+              }
+              selected.set(keyOf(item), item);
+              paintList();
+              paintRow(item);
+              paintFooter();
+              toast(`${item.name} added to your library`);
+            }),
+          },
+          renderIcon('plus', { size: 14 }),
+          'Create & select',
+        ),
+      ),
+    );
+  }
+
+  const LIMIT = 150;
+  function paintList() {
+    const needle = query.trim().toLowerCase();
+    const matches = library
+      .filter((e) => (!filter.muscle || e.muscle_group === filter.muscle) && (!filter.equipment || e.equipment === filter.equipment))
+      .filter((e) => !needle || `${e.name} ${labelOf(MUSCLE_GROUPS, e.muscle_group)} ${titleCase(e.equipment)}`.toLowerCase().includes(needle))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    clear(list);
+    if (!matches.length) {
+      const name = query.trim().replace(/\s+/g, ' ');
+      list.append(
+        name.length >= 2 ? createPanel(name) : h('div', { class: 'fit-pick-none' }, h('p', {}, 'Nothing matches these filters.')),
+      );
+      return;
+    }
+    list.append(...matches.slice(0, LIMIT).map(rowFor));
+    for (const item of matches.slice(0, LIMIT)) paintRow(item);
+    if (matches.length > LIMIT) {
+      list.append(h('div', { class: 'fit-pick-more' }, `Showing ${LIMIT} of ${matches.length} — search to narrow it down.`));
+    }
+    if (previewing === undefined && isWide()) showPreview(matches[0]);
+  }
+
+  const filterSelect = (key, allLabel, options) =>
+    h(
+      'select',
+      {
+        class: 'fit-pick-filter',
+        'aria-label': allLabel,
+        onchange: (event) => {
+          filter[key] = event.target.value;
+          event.target.classList.toggle('active', Boolean(event.target.value));
+          paintList();
+        },
+      },
+      h('option', { value: '' }, allLabel),
+      ...options.map((o) => h('option', { value: o.value }, o.label)),
+    );
+
+  const search = h(
+    'label',
+    { class: 'fit-pick-search' },
+    renderIcon('search', { size: 17 }),
+    h('input', {
+      type: 'search',
+      placeholder: 'Search exercises',
+      'aria-label': 'Search exercises',
+      oninput: (event) => {
+        query = event.target.value;
+        paintList();
+      },
+    }),
+  );
+
+  openModal({
+    title: 'Add exercises',
+    wide: true,
+    className: 'fit-pick-modal',
+    body: h(
+      'div',
+      { class: 'fit-pick' },
+      h(
+        'div',
+        { class: 'fit-pick-top' },
+        search,
+        h(
+          'div',
+          { class: 'fit-pick-filters' },
+          filterSelect('muscle', 'All muscles', MUSCLE_GROUPS),
+          filterSelect('equipment', 'All equipment', EQUIPMENT.map((e) => ({ value: e, label: titleCase(e) }))),
+        ),
+      ),
+      h('div', { class: 'fit-pick-body' }, list, preview),
+      h(
+        'div',
+        { class: 'fit-pick-foot' },
+        pickedNote,
+        h('button', { class: 'btn ghost', type: 'button', onclick: closeModal }, 'Cancel'),
+        addButton,
+      ),
+    ),
+  });
+  // openModal focuses the search box; on a phone that throws the keyboard over
+  // the list, and browsing is the common case.
+  if (!isWide()) search.querySelector('input').blur();
+  paintList();
+  paintFooter();
+}
+
+/**
+ * The routine builder: a list of days, each a list of exercise cards with
+ * their demo and the sets × reps × rest to aim for. Exercises come from the
+ * picker rather than a free-text box, so every one a member sees has its demo
+ * and muscle group attached.
  *
  * Local state repainted wholesale on every change rather than a diffing render:
  * a routine is a dozen rows, repainting it is imperceptible, and it means an
  * added exercise can never desync from the array behind it. `getValue()` is
  * what the form submit reads.
  */
-function workoutDaysEditor(initialDays = [], exerciseLibrary = []) {
+function workoutDaysEditor(initialDays = [], library = []) {
   const days = initialDays.map((day) => ({
     day_name: day.day_name,
     notes: day.notes ?? '',
@@ -119,107 +435,106 @@ function workoutDaysEditor(initialDays = [], exerciseLibrary = []) {
       notes: e.notes ?? '',
     })),
   }));
+  if (!days.length) days.push({ day_name: 'Day 1', notes: '', exercises: [] });
 
   const wrap = h('div', { class: 'fit-builder' });
-  const byName = new Map(exerciseLibrary.map((e) => [e.name, e]));
 
-  function exerciseRow(day, exercise, dayIndex, exIndex) {
-    const nameInput = h('input', {
-      class: 'fit-cell-name',
-      value: exercise.exercise_name,
-      list: 'fit-exercise-options',
-      placeholder: 'Exercise',
-      oninput: (event) => {
-        exercise.exercise_name = event.target.value;
-        // Picking from the library fills the muscle group in, so the trainer
-        // types one field instead of two.
-        const known = byName.get(event.target.value);
-        if (known) {
-          exercise.muscle_group = known.muscle_group;
-          groupSelect.value = known.muscle_group;
-        }
-      },
-    });
-    const groupSelect = h(
-      'select',
-      { class: 'fit-cell-group', onchange: (event) => { exercise.muscle_group = event.target.value; } },
-      ...MUSCLE_GROUPS.map((g) =>
-        h('option', { value: g.value, selected: g.value === exercise.muscle_group }, g.label),
-      ),
-    );
+  /** A plan row stores only the name; the demo and kit come from the library. */
+  const withDemo = (exercise) => ({
+    ...(library.find((e) => nameKey(e.name) === nameKey(exercise.exercise_name)) ?? {}),
+    ...exercise,
+    name: exercise.exercise_name,
+  });
 
+  /** Swaps the item at `from` with its neighbour at `to`, then repaints. */
+  const swap = (list, from, to) => {
+    [list[from], list[to]] = [list[to], list[from]];
+    paint();
+  };
+
+  const moveButtons = (list, index, noun) => [
+    h('button', { class: 'icon-btn sm', type: 'button', title: `Move ${noun} up`, disabled: index === 0, onclick: () => swap(list, index, index - 1) }, '↑'),
+    h('button', { class: 'icon-btn sm', type: 'button', title: `Move ${noun} down`, disabled: index === list.length - 1, onclick: () => swap(list, index, index + 1) }, '↓'),
+  ];
+
+  const target = (label, input) => h('label', { class: 'fit-ex-field' }, h('span', {}, label), input);
+
+  function exerciseCard(day, exercise, exIndex) {
+    const demo = withDemo(exercise);
     return h(
       'div',
-      { class: 'fit-ex-row' },
-      h('span', { class: 'fit-ex-handle' }, String(exIndex + 1)),
-      nameInput,
-      groupSelect,
-      h('input', {
-        class: 'fit-cell-num',
-        type: 'number',
-        min: 1,
-        max: 20,
-        value: exercise.target_sets,
-        title: 'Sets',
-        oninput: (event) => { exercise.target_sets = Number(event.target.value); },
-      }),
-      h('input', {
-        class: 'fit-cell-reps',
-        value: exercise.target_reps,
-        title: 'Reps',
-        placeholder: '8-12',
-        oninput: (event) => { exercise.target_reps = event.target.value; },
-      }),
-      h('input', {
-        class: 'fit-cell-num',
-        type: 'number',
-        min: 0,
-        max: 900,
-        step: 15,
-        value: exercise.rest_seconds,
-        title: 'Rest (seconds)',
-        oninput: (event) => { exercise.rest_seconds = Number(event.target.value); },
-      }),
+      { class: 'fit-ex-card' },
       h(
         'button',
         {
-          class: 'icon-btn sm',
+          class: 'fit-ex-thumb-btn',
           type: 'button',
-          title: 'Move up',
-          disabled: exIndex === 0,
-          onclick: () => {
-            [day.exercises[exIndex - 1], day.exercises[exIndex]] = [day.exercises[exIndex], day.exercises[exIndex - 1]];
-            paint();
-          },
+          title: 'Watch demo',
+          'aria-label': `Watch ${exercise.exercise_name} demo`,
+          onclick: () => openDemoSheet(demo),
         },
-        '↑',
+        demoThumb(demo, 'fit-ex-thumb'),
+        demo.media_url ? h('span', { class: 'fit-play-badge' }, renderIcon('play', { size: 11 })) : null,
       ),
       h(
-        'button',
-        {
-          class: 'icon-btn sm',
-          type: 'button',
-          title: 'Move down',
-          disabled: exIndex === day.exercises.length - 1,
-          onclick: () => {
-            [day.exercises[exIndex + 1], day.exercises[exIndex]] = [day.exercises[exIndex], day.exercises[exIndex + 1]];
-            paint();
-          },
-        },
-        '↓',
+        'div',
+        { class: 'fit-ex-info' },
+        h('div', { class: 'fit-ex-name' }, exercise.exercise_name),
+        h('div', { class: 'fit-ex-sub' }, labelOf(MUSCLE_GROUPS, exercise.muscle_group)),
       ),
       h(
-        'button',
-        {
-          class: 'icon-btn sm danger',
-          type: 'button',
-          title: 'Remove exercise',
-          onclick: () => {
-            day.exercises.splice(exIndex, 1);
-            paint();
+        'div',
+        { class: 'fit-ex-targets' },
+        target(
+          'Sets',
+          h('input', {
+            class: 'fit-cell-num',
+            type: 'number',
+            min: 1,
+            max: 20,
+            value: exercise.target_sets,
+            oninput: (event) => { exercise.target_sets = Number(event.target.value); },
+          }),
+        ),
+        target(
+          'Reps',
+          h('input', {
+            class: 'fit-cell-reps',
+            value: exercise.target_reps,
+            placeholder: '8-12',
+            oninput: (event) => { exercise.target_reps = event.target.value; },
+          }),
+        ),
+        target(
+          'Rest (s)',
+          h('input', {
+            class: 'fit-cell-num',
+            type: 'number',
+            min: 0,
+            max: 900,
+            step: 15,
+            value: exercise.rest_seconds,
+            oninput: (event) => { exercise.rest_seconds = Number(event.target.value); },
+          }),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'fit-ex-actions' },
+        ...moveButtons(day.exercises, exIndex, 'exercise'),
+        h(
+          'button',
+          {
+            class: 'icon-btn sm danger',
+            type: 'button',
+            title: 'Remove exercise',
+            onclick: () => {
+              day.exercises.splice(exIndex, 1);
+              paint();
+            },
           },
-        },
-        renderIcon('close', { size: 14 }),
+          renderIcon('close', { size: 14 }),
+        ),
       ),
     );
   }
@@ -227,105 +542,72 @@ function workoutDaysEditor(initialDays = [], exerciseLibrary = []) {
   function paint() {
     clear(wrap);
     days.forEach((day, dayIndex) => {
-      const card = h(
-        'div',
-        { class: 'fit-day-card' },
+      wrap.append(
         h(
           'div',
-          { class: 'fit-day-head' },
+          { class: 'fit-day-card' },
+          h(
+            'div',
+            { class: 'fit-day-head' },
+            h('input', {
+              class: 'fit-day-name',
+              value: day.day_name,
+              placeholder: `Day ${dayIndex + 1}: e.g. Push (Chest & Triceps)`,
+              oninput: (event) => { day.day_name = event.target.value; },
+            }),
+            ...moveButtons(days, dayIndex, 'day'),
+            h(
+              'button',
+              {
+                class: 'icon-btn sm danger',
+                type: 'button',
+                title: 'Remove day',
+                onclick: () => {
+                  days.splice(dayIndex, 1);
+                  paint();
+                },
+              },
+              renderIcon('trash', { size: 14 }),
+            ),
+          ),
           h('input', {
-            class: 'fit-day-name',
-            value: day.day_name,
-            placeholder: `Day ${dayIndex + 1}: e.g. Push (Chest & Triceps)`,
-            oninput: (event) => { day.day_name = event.target.value; },
+            class: 'fit-day-notes',
+            value: day.notes,
+            placeholder: 'Coaching note for this day (optional)',
+            oninput: (event) => { day.notes = event.target.value; },
           }),
+          day.exercises.length
+            ? h('div', { class: 'fit-ex-list' }, ...day.exercises.map((exercise, exIndex) => exerciseCard(day, exercise, exIndex)))
+            : null,
           h(
             'button',
             {
-              class: 'icon-btn sm',
+              class: 'fit-add-ex',
               type: 'button',
-              title: 'Move day up',
-              disabled: dayIndex === 0,
-              onclick: () => {
-                [days[dayIndex - 1], days[dayIndex]] = [days[dayIndex], days[dayIndex - 1]];
-                paint();
-              },
+              onclick: () =>
+                openExercisePicker({
+                  library,
+                  inDay: new Set(day.exercises.map((e) => nameKey(e.exercise_name))),
+                  onAdd: (picked) => {
+                    for (const item of picked) {
+                      day.exercises.push({
+                        exercise_name: item.name,
+                        muscle_group: item.muscle_group,
+                        target_sets: 3,
+                        target_reps: '8-12',
+                        rest_seconds: 90,
+                        notes: '',
+                      });
+                    }
+                    paint();
+                  },
+                }),
             },
-            '↑',
+            renderIcon('plus', { size: 15 }),
+            day.exercises.length ? 'Add more exercises' : 'Add exercises',
           ),
-          h(
-            'button',
-            {
-              class: 'icon-btn sm',
-              type: 'button',
-              title: 'Move day down',
-              disabled: dayIndex === days.length - 1,
-              onclick: () => {
-                [days[dayIndex + 1], days[dayIndex]] = [days[dayIndex], days[dayIndex + 1]];
-                paint();
-              },
-            },
-            '↓',
-          ),
-          h(
-            'button',
-            {
-              class: 'icon-btn sm danger',
-              type: 'button',
-              title: 'Remove day',
-              onclick: () => {
-                days.splice(dayIndex, 1);
-                paint();
-              },
-            },
-            renderIcon('trash', { size: 14 }),
-          ),
-        ),
-        h('input', {
-          class: 'fit-day-notes',
-          value: day.notes,
-          placeholder: 'Coaching note for this day (optional)',
-          oninput: (event) => { day.notes = event.target.value; },
-        }),
-        day.exercises.length
-          ? h(
-              'div',
-              { class: 'fit-ex-list' },
-              h(
-                'div',
-                { class: 'fit-ex-row fit-ex-header' },
-                h('span', {}, '#'),
-                h('span', {}, 'Exercise'),
-                h('span', {}, 'Muscle'),
-                h('span', {}, 'Sets'),
-                h('span', {}, 'Reps'),
-                h('span', {}, 'Rest'),
-                h('span', { style: 'grid-column:span 3' }, ''),
-              ),
-              ...day.exercises.map((exercise, exIndex) => exerciseRow(day, exercise, dayIndex, exIndex)),
-            )
-          : h('div', { class: 'fit-empty-inline' }, 'No exercises in this day yet.'),
-        h(
-          'button',
-          {
-            class: 'btn sm ghost',
-            type: 'button',
-            onclick: () => {
-              day.exercises.push({
-                exercise_name: '',
-                muscle_group: 'chest',
-                target_sets: 3,
-                target_reps: '8-12',
-                rest_seconds: 90,
-                notes: '',
-              });
-              paint();
-            },
-          },
-          renderIcon('plus', { size: 15 }), 'Add exercise',
         ),
       );
-      wrap.append(card);
     });
 
     wrap.append(
@@ -388,25 +670,199 @@ async function openWorkoutTemplateForm({ template, onSaved }) {
   );
 
   form.querySelector('.form-grid').after(
-    h(
-      'div',
-      { class: 'fit-builder-wrap' },
-      h('h4', { class: 'fit-builder-title' }, 'Training days'),
-      // One shared datalist for every exercise input in the builder, so typing
-      // "bench" offers the catalogue instead of nothing.
-      h(
-        'datalist',
-        { id: 'fit-exercise-options' },
-        ...library.map((e) => h('option', { value: e.name }, `${labelOf(MUSCLE_GROUPS, e.muscle_group)} · ${e.equipment}`)),
-      ),
-      editor.node,
-    ),
+    h('div', { class: 'fit-builder-wrap' }, h('h4', { class: 'fit-builder-title' }, 'Training days'), editor.node),
   );
 
   openModal({ title: template ? `Edit · ${template.name}` : 'New workout plan', body: form, wide: true });
 }
 
 /* ── Diet template builder ─────────────────────────────────────────────── */
+
+/** Where a food's numbers come from, when not the gym or the platform. */
+function foodOriginBadge(food) {
+  if (food.source === 'usda') return h('span', { class: 'food-origin usda', title: 'USDA FoodData Central' }, 'USDA');
+  if (food.source === 'openfoodfacts' || food.barcode) return h('span', { class: 'food-origin pack', title: 'Open Food Facts' }, 'Packaged');
+  return null;
+}
+
+const round1 = (n) => Math.round(n * 10) / 10;
+
+/** The amounts a picked food can go into a plan at, each as a multiple of its
+ * serving_unit: its own serving and everyday weights for a per-100 g / ml
+ * food, a half, one or two servings for anything else. */
+function portionChoices(food) {
+  const per100 = /^100\s?(g|ml)$/i.exec(food.serving_unit || '');
+  if (!per100) {
+    return [0.5, 1, 2].map((n) => ({ label: `${n === 0.5 ? '½' : n} × ${food.serving_unit}`, factor: n }));
+  }
+  const measure = per100[1].toLowerCase();
+  const choices = [];
+  if (food.serving_size_g) {
+    choices.push({
+      label: food.serving_label || `1 serving (${food.serving_size_g}${measure})`,
+      factor: food.serving_size_g / 100,
+    });
+  }
+  for (const n of [100, 50, 150, 200]) choices.push({ label: `${n}${measure}`, factor: n / 100 });
+  return choices;
+}
+
+/**
+ * Finds a food for a diet plan — the gym's library first, then USDA and Open
+ * Food Facts online — and asks how much. `onPick` gets a plan item: name,
+ * portion and that portion's numbers. An online food is copied into the
+ * gym's library as it is picked, so members logging the plan find it too.
+ */
+function openFoodPicker({ onPick }) {
+  let query = '';
+  let result = null;
+  let timer = null;
+  const list = h('div', { class: 'fit-pick-list fit-food-list' });
+
+  const paintMessage = (text) => clear(list).append(h('div', { class: 'fit-pick-none' }, h('p', {}, text)));
+
+  async function choose(food, button) {
+    let picked = food;
+    if (!food.id) {
+      button.disabled = true;
+      try {
+        picked = await api.selectFood(food.ref);
+      } catch (err) {
+        toast(err.message || 'Could not add that food', 'error');
+        button.disabled = false;
+        return;
+      }
+    }
+    paintPortions(picked);
+  }
+
+  function rowFor(food) {
+    const per = /ml$/i.test(food.serving_unit) ? '100ml' : food.serving_unit;
+    const button = h(
+      'button',
+      { class: 'fit-pick-main', type: 'button', onclick: () => choose(food, button) },
+      h(
+        'span',
+        { class: 'fit-pick-text' },
+        h('span', { class: 'fit-pick-name food-name-tick' }, food.name, food.verified ? verifiedTick() : null),
+        h(
+          'span',
+          { class: 'fit-pick-sub' },
+          foodOriginBadge(food),
+          [food.brand, `${food.calories} kcal / ${per}`, `P ${food.protein_g} · C ${food.carbs_g} · F ${food.fats_g}`].filter(Boolean).join(' · '),
+        ),
+      ),
+      renderIcon('arrowRight', { size: 16 }),
+    );
+    return h('div', { class: 'fit-pick-row' }, button);
+  }
+
+  function paintResults() {
+    if (query.trim().length < 2) return paintMessage('Type at least 2 letters — e.g. “paneer”, “oats”, “whey”.');
+    if (!result) return paintMessage('Searching…');
+    const { items, remote, online } = result;
+    clear(list);
+    if (items.length) list.append(h('div', { class: 'fit-food-section' }, 'Food library'), ...items.map(rowFor));
+    if (remote.length) list.append(h('div', { class: 'fit-food-section' }, 'Online food database'), ...remote.map(rowFor));
+    if (!online.searched && query.trim().length >= 3) {
+      list.append(
+        h(
+          'button',
+          { class: 'btn sm ghost fit-food-online', type: 'button', onclick: () => search({ external: true }) },
+          renderIcon('globe', { size: 15 }),
+          'Search online food database',
+        ),
+      );
+    } else if (online.searched && ['usda', 'openfoodfacts'].every((s) => ['unavailable', 'rate_limited'].includes(online[s]))) {
+      list.append(h('div', { class: 'fit-pick-none' }, h('p', {}, 'The online food databases are not answering right now.')));
+    }
+    if (!items.length && !remote.length && online.searched) paintMessage('Nothing found. Type the food in by hand instead.');
+  }
+
+  async function search({ external = false } = {}) {
+    const asked = query.trim();
+    if (asked.length < 2) return paintResults();
+    if (external) paintMessage('Searching USDA and Open Food Facts…');
+    try {
+      const res = await api.foodSearch({ q: asked, external: external ? 1 : undefined });
+      if (query.trim() !== asked) return;
+      result = res;
+    } catch (err) {
+      if (query.trim() === asked) paintMessage(err.message || 'Search failed — try again.');
+      return;
+    }
+    paintResults();
+  }
+
+  function paintPortions(food) {
+    clear(list).append(
+      h(
+        'div',
+        { class: 'fit-food-portions' },
+        h(
+          'button',
+          { class: 'btn sm ghost', type: 'button', onclick: paintResults },
+          renderIcon('arrowLeft', { size: 15 }),
+          'Back to results',
+        ),
+        h('h4', { class: 'food-name-tick' }, food.name, food.verified ? verifiedTick() : null),
+        h('p', { class: 'muted' }, 'How much goes in this meal?'),
+        h(
+          'div',
+          { class: 'fit-food-portion-grid' },
+          ...portionChoices(food).map((choice) =>
+            h(
+              'button',
+              {
+                class: 'fit-food-portion',
+                type: 'button',
+                onclick: () => {
+                  closeModal();
+                  onPick({
+                    food_name: food.name,
+                    portion_size: choice.label.slice(0, 60),
+                    calories: Math.round(food.calories * choice.factor),
+                    protein_g: round1(food.protein_g * choice.factor),
+                    carbs_g: round1(food.carbs_g * choice.factor),
+                    fats_g: round1(food.fats_g * choice.factor),
+                  });
+                },
+              },
+              h('strong', {}, choice.label),
+              h('span', {}, `${Math.round(food.calories * choice.factor)} kcal · P ${round1(food.protein_g * choice.factor)}g`),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  const input = h('input', {
+    type: 'search',
+    placeholder: 'Search foods',
+    'aria-label': 'Search foods',
+    oninput: (event) => {
+      query = event.target.value;
+      result = null;
+      clearTimeout(timer);
+      paintResults();
+      timer = setTimeout(search, 300);
+    },
+  });
+
+  openModal({
+    title: 'Add a food',
+    className: 'fit-food-pick-modal',
+    body: h(
+      'div',
+      { class: 'fit-food-pick' },
+      h('label', { class: 'fit-pick-search' }, renderIcon('search', { size: 17 }), input),
+      list,
+      h('p', { class: 'fit-food-credit' }, 'Online results: USDA FoodData Central and Open Food Facts.'),
+    ),
+  });
+  paintResults();
+}
 
 function dietMealsEditor(initialMeals = [], foodLibrary = []) {
   const meals = initialMeals.map((meal) => ({
@@ -608,16 +1064,35 @@ function dietMealsEditor(initialMeals = [], foodLibrary = []) {
               )
             : h('div', { class: 'fit-empty-inline' }, 'No foods in this meal yet.'),
           h(
-            'button',
-            {
-              class: 'btn sm ghost',
-              type: 'button',
-              onclick: () => {
-                meal.items.push({ food_name: '', portion_size: '100g', calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 });
-                paint();
+            'div',
+            { class: 'fit-meal-actions' },
+            h(
+              'button',
+              {
+                class: 'btn sm',
+                type: 'button',
+                onclick: () =>
+                  openFoodPicker({
+                    onPick: (item) => {
+                      meal.items.push(item);
+                      paint();
+                    },
+                  }),
               },
-            },
-            renderIcon('plus', { size: 15 }), 'Add food',
+              renderIcon('search', { size: 15 }), 'Search foods',
+            ),
+            h(
+              'button',
+              {
+                class: 'btn sm ghost',
+                type: 'button',
+                onclick: () => {
+                  meal.items.push({ food_name: '', portion_size: '100g', calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 });
+                  paint();
+                },
+              },
+              renderIcon('plus', { size: 15 }), 'Type a food in',
+            ),
           ),
         ),
       );
@@ -1163,11 +1638,22 @@ async function renderFoodLibrary(reload) {
                 h('strong', { class: 'food-name-tick' }, r.name, r.verified ? verifiedTick() : null),
                 h('div', { class: 'muted', style: 'font-size:12px' }, 'Platform food library'),
               )
+            : r.source === 'usda' || (r.source === 'openfoodfacts' && !r.barcode)
+            ? h(
+                'div',
+                {},
+                h('strong', { class: 'food-name-tick' }, r.name, r.verified ? verifiedTick() : null),
+                h(
+                  'div',
+                  { class: 'muted', style: 'font-size:12px' },
+                  r.source === 'usda' ? 'USDA FoodData Central' : 'Open Food Facts',
+                ),
+              )
             : r.barcode
             ? h(
                 'div',
                 {},
-                h('strong', {}, r.name),
+                h('strong', { class: 'food-name-tick' }, r.name, r.verified ? verifiedTick() : null),
                 h(
                   'div',
                   { class: 'muted', style: 'font-size:12px' },

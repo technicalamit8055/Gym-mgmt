@@ -4,6 +4,7 @@ import { all, get, run, tx } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { DIET_GOALS } from '../fitness.js';
 import { syncFoodCatalog } from '../foodCatalog.js';
+import { externalMode, importFood, parseFoodRef, searchFoods } from '../foodSearch.js';
 import { effectiveDietTargets, exerciseForDay, nutritionProfile } from '../nutrition.js';
 import { parse, today, toInt } from '../validate.js';
 import { requireModule } from '../verticals.js';
@@ -439,6 +440,18 @@ dietRoutes.post('/foods', (req, res) => {
     ],
   );
   return res.status(201).json(get('SELECT * FROM food_library WHERE id = ?', [info.lastInsertRowid]));
+});
+
+/** The library plus, when it has little, USDA and Open Food Facts — see
+ * src/foodSearch.js. Online results carry a `ref` to pick them by. */
+dietRoutes.get('/food-search', async (req, res) => {
+  res.json(await searchFoods({ q: req.query.q, external: externalMode(req.query.external), limit: toInt(req.query.limit, 30) }));
+});
+
+/** Copies a picked online food into this gym's library and returns the row. */
+dietRoutes.post('/food-search/select', async (req, res) => {
+  const { food, created } = await importFood(parseFoodRef(req.body));
+  res.status(created ? 201 : 200).json(food);
 });
 
 dietRoutes.delete('/foods/:id', (req, res) => {

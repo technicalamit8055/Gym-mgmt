@@ -478,6 +478,8 @@ export const api = {
   foods: (params) => request('GET', `/diets/foods${query(params)}`),
   createFood: (payload) => request('POST', '/diets/foods', payload),
   deleteFood: (id) => request('DELETE', `/diets/foods/${id}`),
+  foodSearch: (params) => request('GET', `/diets/food-search${query(params)}`),
+  selectFood: (ref) => request('POST', '/diets/food-search/select', { ref }),
 
   fitnessAddonSettings: () => request('GET', '/fitness-addons/settings'),
   updateFitnessAddonSettings: (payload) => request('PUT', '/fitness-addons/settings', payload),
@@ -542,6 +544,8 @@ export const api = {
     deleteFoodEntry: (id) => request('DELETE', `/portal/diets/entries/${id}`, undefined, { member: true }),
     logWater: (payload) => request('POST', '/portal/diets/water', payload, { member: true }),
     foods: (params) => request('GET', `/portal/diets/foods${query(params)}`, undefined, { member: true }),
+    foodSearch: (params) => request('GET', `/portal/diets/food-search${query(params)}`, undefined, { member: true }),
+    selectFood: (ref) => request('POST', '/portal/diets/food-search/select', { ref }, { member: true }),
     barcodeFood: (code) => request('GET', `/portal/diets/barcode/${encodeURIComponent(code)}`, undefined, { member: true }),
     addBarcodeFood: (payload) => request('POST', '/portal/diets/barcode-foods', payload, { member: true }),
     addFavoriteFood: (payload) => request('POST', '/portal/diets/favorites', payload, { member: true }),

@@ -49,6 +49,15 @@ export const config = {
   foodDbUrl: (process.env.FOOD_DB_URL || 'https://world.openfoodfacts.org').replace(/\/+$/, ''),
   // Open Food Facts asks every client to identify itself this way.
   foodDbUserAgent: process.env.FOOD_DB_USER_AGENT || 'GymBook/1.0 (gym management software; member food logging)',
+  // USDA FoodData Central (src/foodUsda.js), for whole foods in food search.
+  // DEMO_KEY works without signing up but allows only ~30 requests an hour per
+  // IP; a free key from https://fdc.nal.usda.gov/api-key-signup allows 1,000.
+  usdaApiKey: process.env.USDA_API_KEY || 'DEMO_KEY',
+  usdaApiUrl: (process.env.USDA_API_URL || 'https://api.nal.usda.gov/fdc/v1').replace(/\/+$/, ''),
+  // The online tier of food search (src/foodSearch.js). Off means search only
+  // ever reads the gym's own library — for servers without outbound internet.
+  foodSearchOnline: process.env.FOOD_SEARCH_ONLINE !== 'false',
+  foodSearchTimeoutMs: Number(process.env.FOOD_SEARCH_TIMEOUT_MS || 4000),
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',

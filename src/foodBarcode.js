@@ -18,6 +18,7 @@
 import { config } from './config.js';
 import { get, run } from './db.js';
 import { HttpError, badRequest, tooManyRequests } from './errors.js';
+import { guessFoodCategory } from './foodCatalog.js';
 
 /** Products that came back empty are not asked about again for a while —
  * across every gym on this server, since the answer is the same for all. */
@@ -42,6 +43,11 @@ const FIELDS = [
   'serving_size',
   'serving_quantity',
   'nutriments',
+  'categories_tags',
+  'nutriscore_grade',
+  'states_tags',
+  'countries_tags',
+  'lang',
 ].join(',');
 
 /** Digits only, and a valid check digit for the lengths that carry a plain
@@ -78,6 +84,28 @@ export function libraryFoodByBarcode(code) {
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const finite = (...values) => values.map(Number).find((v) => Number.isFinite(v) && v >= 0);
+
+/**
+ * Whether per-100 g (or ml) figures could describe a real food: no more than
+ * 900 kcal (pure fat), no macro over 100 g, the macros together not over the
+ * 100 g they are a share of, and no more sugar than carbohydrate. Rounding
+ * gets a gram's grace. Crowd-sourced labels fail this more often than you'd
+ * hope — a kJ figure typed as kcal, a per-pack column typed as per-100 g.
+ */
+export function plausibleNutrition(food) {
+  const { calories, protein_g: p = 0, carbs_g: c = 0, fats_g: f = 0, fiber_g: fibre = 0, sugar_g: sugar = 0 } = food;
+  if (!Number.isFinite(calories) || calories < 0 || calories > 900) return false;
+  if ([p, c, f, fibre, sugar].some((v) => !Number.isFinite(v) || v < 0 || v > 100)) return false;
+  return p + c + f <= 101 && sugar <= c + 1;
+}
+
+/** Open Food Facts' own completeness flags: a Nutri-Score could be worked out
+ * and the nutrition table is marked complete. The plan's bar for the tick. */
+function labelIsComplete(product) {
+  const grade = String(product?.nutriscore_grade ?? '').toLowerCase();
+  const states = Array.isArray(product?.states_tags) ? product.states_tags : [];
+  return /^[a-e]$/.test(grade) && states.includes('en:nutrition-facts-completed');
+}
 
 /**
  * An Open Food Facts product as a food_library row, or null when its label is
@@ -119,9 +147,10 @@ export function productToFood(product) {
   const liquid = product.product_quantity_unit === 'ml' || /\d\s*(ml|cl|l)\b/i.test(String(product.quantity || ''));
   const servingG = finite(product.serving_quantity);
 
-  return {
+  const food = {
     name: `${name}${hasPlain ? '' : ' (as prepared)'}`.slice(0, 120),
     brand: brand?.slice(0, 80) ?? null,
+    category: guessFoodCategory((product.categories_tags ?? []).join(' '), rawName),
     serving_unit: liquid ? '100ml' : '100g',
     calories: Math.round(kcal),
     protein_g: round1(macros.protein_g),
@@ -131,21 +160,30 @@ export function productToFood(product) {
     sugar_g: round1(macros.sugar_g),
     serving_size_g: servingG && servingG <= 2000 ? round1(servingG) : null,
     serving_label: product.serving_size ? String(product.serving_size).trim().slice(0, 60) : null,
+    verified: labelIsComplete(product) ? 1 : 0,
   };
+  return plausibleNutrition(food) ? food : null;
 }
 
-/** Writes a barcode food into this gym's library. Names are unique there, so
- * a second product that happens to share one gets its barcode appended. */
-export function insertBarcodeFood(food, { barcode, source }) {
+/**
+ * Writes a food from outside the gym — a scanned pack, a pick from online
+ * search — into this gym's library. Names are unique there, so a second food
+ * that happens to share one gets its barcode (or where it came from) appended.
+ * `externalId` is the source database's own id, so the same pick is found
+ * again rather than copied twice.
+ */
+export function insertSourcedFood(food, { source, barcode = null, externalId = null }) {
   const taken = get('SELECT id FROM food_library WHERE name = ? COLLATE NOCASE', [food.name]);
-  const name = taken ? `${food.name.slice(0, 104)} (${barcode})` : food.name;
+  const suffix = barcode ?? { usda: 'USDA', openfoodfacts: 'Open Food Facts' }[source] ?? externalId ?? source;
+  const name = taken ? `${food.name.slice(0, 104)} (${suffix})`.slice(0, 120) : food.name;
   const info = run(
     `INSERT INTO food_library
        (name, category, serving_unit, calories, protein_g, carbs_g, fats_g, fiber_g, sugar_g, is_custom,
-        barcode, brand, serving_size_g, serving_label, source)
-     VALUES (?, 'general', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+        barcode, brand, serving_size_g, serving_label, source, external_id, verified)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
     [
       name,
+      food.category ?? 'general',
       food.serving_unit,
       food.calories,
       food.protein_g,
@@ -158,9 +196,16 @@ export function insertBarcodeFood(food, { barcode, source }) {
       food.serving_size_g ?? null,
       food.serving_label ?? null,
       source,
+      externalId,
+      food.verified ? 1 : 0,
     ],
   );
   return get('SELECT * FROM food_library WHERE id = ?', [info.lastInsertRowid]);
+}
+
+/** A barcode food — scanned and found upstream, or typed off the label. */
+export function insertBarcodeFood(food, { barcode, source }) {
+  return insertSourcedFood(food, { source, barcode, externalId: source === 'openfoodfacts' ? barcode : null });
 }
 
 function takeUpstreamSlot() {
@@ -224,10 +269,185 @@ export async function lookupBarcode(rawCode) {
   return { found: true, food: insertBarcodeFood(food, { barcode: code, source: 'openfoodfacts' }), source: 'openfoodfacts' };
 }
 
-/** Test hook: forget remembered misses and the upstream rate window. */
+/* ── Search by name ───────────────────────────────────────────────────── */
+
+/** Open Food Facts allows far fewer searches than product reads (10 a
+ * minute). Results are cached upstream of this (src/foodSearch.js), so the
+ * window is only spent on queries nobody on this server has asked lately. */
+const SEARCH_PER_MINUTE = 10;
+let searchWindowStart = 0;
+let searchWindowCount = 0;
+
+function takeSearchSlot() {
+  const now = Date.now();
+  if (now - searchWindowStart >= 60_000) {
+    searchWindowStart = now;
+    searchWindowCount = 0;
+  }
+  if (searchWindowCount >= SEARCH_PER_MINUTE) {
+    throw tooManyRequests('The packaged-food database is busy — try that search again in a minute');
+  }
+  searchWindowCount += 1;
+}
+
+/** Products whose label never gave a protein figure: a zero there would read
+ * as "no protein", which for a fitness app is the one number that matters. */
+function hasProtein(product) {
+  const n = product?.nutriments ?? {};
+  return finite(n.proteins_100g, n.proteins_prepared_100g) !== undefined;
+}
+
+/* ── Made for India ──────────────────────────────────────────────────── */
+
+/** Brands an Indian member actually finds on the shelf, ranked first. */
+export const INDIAN_BRANDS = [
+  'Amul', 'Tata', 'Britannia', 'Mother Dairy', 'Pintola', 'Alpino', 'MuscleBlaze', 'Yogabar', 'Saffola',
+  'Aashirvaad', 'Fortune', 'Haldiram', 'Bikaji', 'MTR', 'Patanjali', 'Dabur', 'Parle', 'Sunfeast', 'ITC',
+  'Bournvita', 'Horlicks', 'Kissan', 'Nandini', 'Aavin', 'Verka', 'Gowardhan', 'Milky Mist', 'Epigamia',
+  'Heritage', 'Govind', 'Kwality', 'The Whole Truth', 'RiteBite', 'Max Protein', 'True Elements', 'Happilo',
+  'Too Yumm', 'Nutrabay', 'AS-IT-IS', 'Avvatar', 'Bigmuscles', 'Sofit', 'Act II', 'Bingo', 'Unibic',
+  'Everest', 'MDH', 'Lijjat', 'Sundrop', 'Kellogg\'s India', 'Nestle India',
+];
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const INDIAN_BRAND = new RegExp(`(^|[^a-z])(${INDIAN_BRANDS.map(escapeRegExp).join('|')})([^a-z]|$)`, 'i');
+
+const indiaTagged = (product) => (Array.isArray(product?.countries_tags) ? product.countries_tags : []).includes('en:india');
+const indianBrand = (product) => INDIAN_BRAND.test(`${product?.brands ?? ''} ${product?.product_name_en || product?.product_name || ''}`);
+
+/** Food words no English-language Indian label uses — "Oeufs de France",
+ * "Nouilles aux oeufs", "Biscuits moelleux" — in French, Spanish, German,
+ * Italian. One is enough to drop a product. */
+const FOREIGN_WORDS = new RegExp(
+  '\\b(' +
+    [
+      'oeufs?', 'œufs?', 'nouilles', 'moelleux', 'poulet', 'fromages?', 'lait', 'laitiers?', 'beurre', 'pâtes', 'pates',
+      'céréales', 'cereales', 'farine', 'blé', 'ble', 'sucre', 'chocolat', 'jambon', 'galettes?', 'gâteaux?', 'gateaux?',
+      'fourrés?', 'fourres?', 'saveur', 'complet', 'huevos?', 'leche', 'pollo', 'queso', 'galletas', 'harina',
+      'azúcar', 'azucar', 'integral', 'milch', 'eier', 'käse', 'kase', 'hähnchen', 'hahnchen', 'nudeln', 'kekse',
+      'vollkorn', 'uova', 'formaggio', 'biscotti', 'farina', 'zucchero', 'integrale', 'latte intero',
+    ].join('|') +
+    ')\\b',
+  'i',
+);
+/** Small words that glue a foreign name together. One of the unmistakable
+ * ones, or two of the ambiguous ones ("de", "la"), and it is not English. */
+const FOREIGN_GLUE = /\b(aux|avec|sans|mit|und|ohne|della|delle|des|du|les|von|für|sin|con|el|los|las)\b/i;
+const AMBIGUOUS_GLUE = /\b(de|la|le|di|al|et|y)\b/gi;
+
+/**
+ * Whether a product name reads as English (or Hindi). Accented Latin letters
+ * mark a European label — unless the product is sold in India, where
+ * "Nescafé" is still on the shelf. Other scripts are dropped; Devanagari is
+ * kept.
+ */
+export function looksEnglish(name, { soldInIndia = false } = {}) {
+  const text = String(name ?? '').normalize('NFC').replace(/[’‘´`'"“”–—™®©°•·]/g, ' ');
+  if (!text.trim()) return false;
+  if (FOREIGN_WORDS.test(text) || FOREIGN_GLUE.test(text)) return false;
+  if ((text.match(AMBIGUOUS_GLUE) ?? []).length >= 2) return false;
+  const rest = soldInIndia ? text.normalize('NFD').replace(/[̀-ͯ]/g, '') : text;
+  return !/[^\x00-\x7Fऀ-ॿ]/.test(rest);
+}
+
+/** A search result an Indian member could plausibly buy: an English (or
+ * Hindi) name, and not a label whose only language is a foreign one. */
+function suitsIndia(product, food) {
+  const lang = String(product.lang ?? '').toLowerCase();
+  const englishLabel = ['en', 'hi'].includes(lang);
+  if (lang && !englishLabel && !product.product_name_en && !indianBrand(product)) return false;
+  // Country tags are crowd-edited and European packs pick up "India" now and
+  // then; an accent is only forgiven on an Indian brand, or an India-tagged
+  // pack whose label is in English or Hindi.
+  return looksEnglish(food.name, { soldInIndia: indianBrand(product) || (indiaTagged(product) && englishLabel) });
+}
+
+async function fetchSearch(query, { limit, page, india }) {
+  takeSearchSlot();
+  const params = new URLSearchParams({
+    search_terms: String(query),
+    search_simple: '1',
+    action: 'process',
+    json: '1',
+    page_size: String(Math.min(Math.max(Number(limit) || 20, 1), 50)),
+    page: String(Math.max(Number(page) || 1, 1)),
+    fields: FIELDS,
+  });
+  if (india) {
+    params.set('tagtype_0', 'countries');
+    params.set('tag_contains_0', 'contains');
+    params.set('tag_0', 'india');
+  }
+  let res;
+  try {
+    res = await fetch(`${config.foodDbUrl}/cgi/search.pl?${params}`, {
+      headers: { 'User-Agent': config.foodDbUserAgent, Accept: 'application/json' },
+      signal: AbortSignal.timeout(config.foodSearchTimeoutMs),
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach Open Food Facts');
+  }
+  if (res.status === 429) throw tooManyRequests('Open Food Facts is rate-limiting this server');
+  if (!res.ok) throw new HttpError(502, 'Open Food Facts is having trouble');
+  const body = await res.json().catch(() => null);
+  return Array.isArray(body?.products) ? body.products : [];
+}
+
+/** Products → rows worth showing in India, Indian brands and India-tagged
+ * packs first (a stable sort keeps Open Food Facts' own order within). */
+function indianFoods(products) {
+  const kept = [];
+  for (const product of products) {
+    const code = String(product?.code ?? '').trim();
+    if (!/^\d{4,20}$/.test(code) || !hasProtein(product)) continue;
+    const food = productToFood(product);
+    if (!food || !suitsIndia(product, food)) continue;
+    const brand = indianBrand(product);
+    const tagged = indiaTagged(product);
+    kept.push({
+      food: { ...food, external_id: code, india: brand || tagged ? 1 : 0 },
+      score: (brand ? 3 : 0) + (tagged ? 2 : 0) + food.verified,
+    });
+  }
+  return kept.sort((a, b) => b.score - a.score).map((k) => k.food);
+}
+
+/**
+ * Packaged foods by name, as food_library-shaped rows carrying `external_id`
+ * (the product code) and `india` (an Indian brand, or sold in India) —
+ * nothing is written here; the gym's library only gets the one a person
+ * actually picks.
+ *
+ * Asks for products sold in India first; only when none of those survive
+ * does it look worldwide, and even then foreign-language labels are dropped,
+ * as are labels missing energy or protein or with numbers no food has.
+ */
+export async function searchOpenFoodFacts(query, { limit = 20, page = 1 } = {}) {
+  const local = indianFoods(await fetchSearch(query, { limit, page, india: true }));
+  if (local.length) return local;
+  try {
+    return indianFoods(await fetchSearch(query, { limit, page, india: false }));
+  } catch (err) {
+    // The India answer (nothing) stands rather than failing the search.
+    if (err.status === 429) return local;
+    throw err;
+  }
+}
+
+/** One product by its code, as searchOpenFoodFacts() would have shown it —
+ * for picking a search result the server no longer has cached. */
+export async function openFoodFactsProduct(code) {
+  const product = await fetchProduct(code);
+  if (!product || !hasProtein(product)) return null;
+  const food = productToFood(product);
+  return food ? { ...food, external_id: String(code) } : null;
+}
+
+/** Test hook: forget remembered misses and the upstream rate windows. */
 export function resetBarcodeCaches() {
   misses.clear();
   windowStart = 0;
   windowCount = 0;
+  searchWindowStart = 0;
+  searchWindowCount = 0;
 }
 

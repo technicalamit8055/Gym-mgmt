@@ -2968,6 +2968,9 @@ body[data-mode='light'] .login {
 /* The athlete bleeds to the phone edge and is cut off by the membership card
    (which sits above it), so the greeting's bottom edge overlaps the flex gap. */
 .portal-greeting.has-art { margin: -4px -18px -18px; padding: 34px 18px 38px; min-height: 140px; }
+/* The art fills the right 58% (its first stretch faded out), so the words
+   wrap inside the left half instead of running under the athlete. */
+.portal-greeting.has-art h2, .portal-greeting.has-art p { max-width: 52%; overflow-wrap: break-word; }
 .portal-greeting-art {
   position: absolute; right: 0; bottom: 0; width: 58%; aspect-ratio: 1667 / 830; overflow: hidden; pointer-events: none;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18%), linear-gradient(180deg, transparent 0, #000 18%);
@@ -3024,6 +3027,19 @@ body[data-mode='light'] .portal-greeting-art img { mix-blend-mode: multiply; }
   box-shadow: var(--shadow-sm); transition: transform 0.15s ease;
 }
 .portal-hero-go:active { transform: scale(0.9); }
+/* Narrow phones (320–359px): beside the 88px ring a plan name at 28px had
+   ~80px and split mid-word ("Monthl|y"). Shrink the ring, not the name's line. */
+@media (max-width: 359px) {
+  .portal-hero-card { padding: 18px 14px 18px 16px; }
+  .portal-hero-top { gap: 10px; }
+  .portal-hero-plan { font-size: 23px; }
+  .portal-hero-bottom { font-size: 14px; }
+  .portal-hero-ring { gap: 8px; }
+  .portal-hero-ring-wrap svg { width: 70px; height: 70px; }
+  .portal-hero-ring-text strong { font-size: 21px; }
+  .portal-hero-ring-text span { font-size: 7.5px; }
+  .portal-hero-go { width: 34px; height: 34px; }
+}
 .portal-hero-pill {
   background: color-mix(in srgb, var(--brand) 16%, transparent); color: var(--brand);
   border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);
@@ -3530,6 +3546,13 @@ body:not([data-mode='light']) .portal-prof {
   .portal-prof-edit { padding: 8px 11px; font-size: 14px; }
   .portal-prof-edit-more { display: none; }
 }
+/* Small phones (~360px): even "Edit" leaves the name too little room and a
+   surname splits mid-word, so the button folds to an icon in the corner. */
+@container (max-width: 310px) {
+  .portal-prof-edit { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 11px; }
+  .portal-prof-edit span { display: none; }
+  .portal-prof-who { padding-right: 34px; }
+}
 
 /* Cards of rows */
 .portal-prof-card {
@@ -3835,6 +3858,12 @@ body:not([data-mode='light']) .portal-pay {
   .portal-pay-fact strong { font-size: 16px; }
   .portal-pay-fact + .portal-pay-fact { margin-left: 12px; padding-left: 12px; }
 }
+/* Narrower still (320px phones) the dates split mid-number: one fact per row. */
+@container (max-width: 270px) {
+  /* The facts box is the container itself, so it can't be restyled from here — each fact spans the row instead. */
+  .portal-pay-fact { grid-column: 1 / -1; }
+  .portal-pay-fact + .portal-pay-fact { margin: 12px 0 0; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--p-border); }
+}
 
 /* Section heads */
 .portal-pay-section-head { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
@@ -3882,6 +3911,8 @@ body:not([data-mode='light']) .portal-pay {
 /* Renewal tiles: two to a row; an odd last one takes the full width */
 .portal-pay-plans { container-type: inline-size; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: -4px; }
 .portal-pay-plans.is-odd > .portal-pay-tile:last-child { grid-column: 1 / -1; min-height: 180px; padding-bottom: 18px; }
+/* The full-width tile has no bottom gutter for its arrow, so keep the perks clear of it. */
+.portal-pay-plans.is-odd > .portal-pay-tile:last-child .portal-pay-perks { padding-right: 52px; }
 .portal-pay-tile {
   position: relative; overflow: hidden; min-height: 196px; padding: 16px 14px 64px; border-radius: 20px;
   display: flex; flex-direction: column; gap: 14px; text-align: left; cursor: pointer;
@@ -3937,6 +3968,14 @@ body:not([data-mode='light']) .portal-pay {
   .portal-pay-perks li { font-size: 12.5px; }
   .portal-pay-plans:not(.is-odd) .portal-pay-tile-art,
   .portal-pay-plans.is-odd > .portal-pay-tile:not(:last-child) .portal-pay-tile-art { opacity: 0.35; max-width: 80%; }
+}
+/* A 320px phone: beside the icon a half tile left ~60px for the name and
+   price ("Quarte|rly", "₹1,5|00"), so the icon moves above them. */
+@container (max-width: 300px) {
+  .portal-pay-tile { padding-left: 12px; padding-right: 12px; }
+  .portal-pay-tile-top { flex-direction: column; gap: 8px; }
+  .portal-pay-tile-ico { width: 36px; height: 36px; }
+  .portal-pay-tile-ico .svg-icon { width: 19px; height: 19px; }
 }
 
 /* Front-desk note */
@@ -4145,10 +4184,9 @@ body:not([data-mode='light']) .portal-pay {
  * shares the same grid so the labels stay over their columns.
  */
 .fit-ex-list { display: flex; flex-direction: column; gap: 6px; }
-.fit-ex-row, .fit-item-row {
+.fit-item-row {
   display: grid; align-items: center; gap: 6px;
 }
-.fit-ex-row { grid-template-columns: 24px minmax(120px, 1fr) 110px 58px 76px 66px 30px 30px 30px; }
 .fit-item-row { grid-template-columns: 24px minmax(120px, 1fr) 90px 66px 62px 62px 62px 30px; }
 .fit-ex-header {
   font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
@@ -4185,6 +4223,151 @@ body:not([data-mode='light']) .portal-pay {
 .icon-btn.danger:hover { background: rgba(248, 113, 113, 0.1); border-color: rgba(248, 113, 113, 0.35); }
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
 .icon-btn:disabled:hover { background: none; border-color: transparent; }
+
+/*
+ * Workout builder exercise cards: the demo, the name, then sets / reps / rest
+ * each under its own small label, so no header row is needed and the card
+ * folds onto two lines on a phone without losing which number is which.
+ */
+.fit-ex-card {
+  display: grid; align-items: center; gap: 12px;
+  grid-template-columns: 64px minmax(0, 1fr) auto auto;
+  grid-template-areas: 'thumb info targets actions';
+  padding: 8px 10px 8px 8px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface);
+}
+.fit-ex-thumb-btn, .fit-pick-thumb-btn {
+  position: relative; flex: none; padding: 0; border: 0; cursor: pointer;
+  border-radius: 8px; overflow: hidden; background: var(--surface-2);
+}
+.fit-ex-thumb-btn { grid-area: thumb; width: 64px; height: 48px; }
+.fit-ex-thumb, .fit-pick-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fit-ex-thumb.is-empty, .fit-pick-thumb.is-empty { display: grid; place-items: center; color: var(--muted); }
+.fit-ex-thumb-btn:focus-visible, .fit-pick-thumb-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.fit-play-badge {
+  position: absolute; right: 4px; bottom: 4px; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(0, 0, 0, 0.6); color: #fff;
+}
+.fit-ex-info { grid-area: info; min-width: 0; }
+.fit-ex-name { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fit-ex-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.fit-ex-targets { grid-area: targets; display: flex; gap: 6px; }
+.fit-ex-field { display: flex; flex-direction: column; gap: 3px; width: 62px; }
+.fit-ex-field span {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+}
+.fit-ex-actions { grid-area: actions; display: flex; gap: 2px; }
+
+.fit-add-ex {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;
+  padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--brand); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.fit-add-ex:hover { background: var(--brand-soft); border-color: var(--brand); }
+
+@media (max-width: 560px) {
+  .fit-ex-card {
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+    grid-template-areas: 'thumb info actions' 'targets targets targets';
+    row-gap: 10px;
+  }
+  .fit-ex-thumb-btn { width: 56px; height: 44px; }
+  .fit-ex-field { flex: 1; width: auto; }
+}
+
+/* The Add Exercises picker: search and filters, then the list beside a panel
+   playing the demo of the row under the pointer. */
+.modal.fit-pick-modal { width: min(1000px, 100%); }
+.modal.fit-pick-modal .modal-body { padding: 0; }
+.fit-pick { display: flex; flex-direction: column; height: min(72vh, 700px); }
+.fit-pick-top {
+  display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border);
+}
+.fit-pick-search {
+  flex: 1 1 260px; display: flex; align-items: center; gap: 8px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--muted);
+}
+.fit-pick-search:focus-within { border-color: var(--brand); box-shadow: var(--ring); }
+.fit-pick-search input {
+  flex: 1; min-width: 0; padding: 9px 0; border: 0; background: none; color: var(--text);
+  font: inherit; font-size: 14px; outline: none; min-height: 0;
+}
+.fit-pick-search input:focus { border: 0; box-shadow: none; background: none; }
+.fit-pick-filters { display: flex; gap: 8px; }
+/* background-color, not the shorthand: the global select chevron is a background image. */
+.fit-pick-filter {
+  width: auto; padding: 8px 34px 8px 14px; border: 1px solid var(--border); border-radius: 999px;
+  background-color: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+}
+.fit-pick-filter.active { border-color: var(--brand); background-color: var(--brand-soft); color: var(--brand); }
+.fit-pick-filter:focus { outline: none; box-shadow: var(--ring); }
+.fit-pick-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+.fit-pick-list { overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.fit-pick-preview { overflow-y: auto; padding: 16px; border-left: 1px solid var(--border); background: var(--bg-alt); }
+.fit-pick-row {
+  display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: var(--radius-sm);
+}
+.fit-pick-row:hover { background: var(--surface-2); }
+.fit-pick-row.selected { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); }
+.fit-pick-thumb-btn { width: 72px; height: 54px; }
+.fit-pick-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 0;
+  border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.fit-pick-main:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 6px; }
+.fit-pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fit-pick-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fit-pick-sub { font-size: 12px; color: var(--muted); }
+.fit-pick-in-day { color: var(--brand); font-weight: 600; }
+.fit-pick-in-day::before { content: ' · '; color: var(--muted); font-weight: 400; }
+.fit-pick-check {
+  flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  border: 2px solid var(--border); color: transparent;
+}
+.fit-pick-row.selected .fit-pick-check { background: var(--brand); border-color: var(--brand); color: #fff; }
+.fit-pick-none { padding: 32px 16px; text-align: center; color: var(--muted); font-size: 13.5px; }
+.fit-pick-none p { margin: 0 0 12px; }
+.fit-pick-create { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.fit-pick-create select { width: auto; font-size: 13px; background-color: var(--surface-2); }
+.fit-pick-more { padding: 12px; text-align: center; font-size: 12px; color: var(--muted); }
+.fit-pick-foot {
+  display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+  border-top: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 5%, transparent);
+  border-radius: 0 0 18px 18px;
+}
+.fit-pick-note {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.fit-demo { display: flex; flex-direction: column; gap: 10px; }
+.fit-demo-stage {
+  aspect-ratio: 4 / 3; border-radius: var(--radius); overflow: hidden; background: var(--surface-2);
+}
+.fit-demo-modal .fit-demo-stage { aspect-ratio: 16 / 10; }
+.fit-demo-media { width: 100%; height: 100%; object-fit: contain; display: block; }
+.fit-demo-none, .fit-demo-empty {
+  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--muted); font-size: 13px; text-align: center;
+}
+.fit-demo-empty { min-height: 220px; }
+.fit-demo-name { font-weight: 650; font-size: 15px; }
+.fit-demo-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.fit-demo-text { margin: 0; font-size: 13px; line-height: 1.55; white-space: pre-line; }
+
+@media (max-width: 760px) {
+  .fit-pick-body { grid-template-columns: minmax(0, 1fr); }
+  .fit-pick-preview { display: none; }
+}
+@media (max-width: 560px) {
+  .fit-pick { height: calc(100dvh - 140px); }
+  .fit-pick-top { padding: 10px 14px; }
+  .fit-pick-filters { width: 100%; }
+  .fit-pick-filter { flex: 1; min-width: 0; }
+  .fit-pick-foot { border-radius: 0; padding: 10px 14px; }
+  .fit-pick-note { display: none; }
+  .fit-pick-foot .btn { flex: 1; }
+}
 
 /* ------------------------------------------------------- staff: previews */
 
@@ -4549,6 +4732,22 @@ body[data-mode='light'] .portal-pr-feature-art > img { mix-blend-mode: multiply;
   color: var(--muted); font-weight: 650; padding: 0 0 1px;
 }
 .portal-set-header span { text-align: center; }
+/* Reps-only and timed exercises log one value, which takes both input columns. */
+.portal-set-row.is-single { grid-template-columns: 30px minmax(0, 1.15fr) minmax(0, 2fr) 32px; }
+
+/* A timed hold's box with its stopwatch button tucked inside the left edge. */
+.portal-set-timefield { position: relative; min-width: 0; }
+.portal-set-timefield .portal-set-input { padding-left: 34px; padding-right: 34px; }
+.portal-set-hold {
+  position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; padding: 0; border-radius: 999px; cursor: pointer;
+  display: grid; place-items: center;
+  border: 1.5px solid var(--brand); background: var(--surface); color: var(--brand);
+}
+.portal-set-hold svg { fill: currentColor; }
+.portal-set-hold.running { background: var(--brand); color: #fff; }
+.portal-set-hold:disabled { opacity: 0.4; cursor: default; }
+.portal-set-input.is-time[readonly] { color: var(--brand); font-weight: 650; }
 /*
  * Body rows bleed out to the card edges (the card pads 14px) and pull up over
  * the card's 7px gap, so a ticked set is a full-width band like Hevy's and a
@@ -5552,7 +5751,7 @@ body[data-mode='light'] .diet-fab-layer { background: rgba(15, 23, 42, 0.35); }
 /* ------------------------------------------------- exercise & weight */
 
 /* Two compact tiles under the plan row; the detail opens in a sheet. */
-.portal-mini-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin-top: -4px; }
+.portal-mini-row { container-type: inline-size; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin-top: -4px; }
 .portal-mini-tile {
   --t: var(--green);
   display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 10px 10px 12px; border-radius: 18px;
@@ -5574,6 +5773,14 @@ body[data-mode='light'] .diet-fab-layer { background: rgba(15, 23, 42, 0.35); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .portal-mini-text em { font-style: normal; font-size: 11.5px; color: var(--t); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Two tiles on a small phone leave ~60px for the value ("Not lo…"): drop
+   the chevron (the whole tile is the button) and let the value wrap. */
+@container (max-width: 340px) {
+  .portal-mini-tile { gap: 8px; padding: 10px; }
+  .portal-mini-tile > svg:last-child { display: none; }
+  .portal-mini-ico { width: 30px; height: 30px; border-radius: 10px; }
+  .portal-mini-text strong { font-size: 14px; white-space: normal; }
+}
 
 /* The exercise and weight sheets reuse the Diet tab's rows outside its
    .portal-diet scope, so they bring the tokens those rows read. */
@@ -5890,7 +6097,7 @@ body[data-mode='light'] .portal-insights { --i-carbs: #f59e0b; }
    * above anything).
    */
   .fit-ex-header { display: none; }
-  .fit-ex-row, .fit-item-row {
+  .fit-item-row {
     grid-template-columns: repeat(2, 1fr);
     padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: var(--surface);
@@ -7803,7 +8010,7 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .portal-exd-record-value { display: flex; flex-direction: column; align-items: flex-end; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 .portal-exd-record-value small { font-size: 11.5px; font-weight: 500; color: var(--muted); }
 
-.portal-exd-totals { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 12px 4px; }
+.portal-exd-totals { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 12px 4px; }
 .portal-exd-totals > div { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
 .portal-exd-totals > div + div { border-left: 1px solid var(--border); }
 .portal-exd-totals strong { font-size: 15.5px; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -7891,3 +8098,61 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .fc-report ul { margin: 8px 0 0; padding-left: 18px; max-height: 180px; overflow-y: auto; color: var(--muted); }
 .fc-ai-label { margin-bottom: -6px; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
 .fc-ai-tips { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+
+/* ── Food search: online results (USDA, Open Food Facts) ─────────────────── */
+/* Where a food's numbers come from, ahead of its serving in a result row. */
+.food-origin {
+  display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 5px; vertical-align: 1px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.5;
+}
+.food-origin.usda { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
+.food-origin.pack { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+
+/* Member quick track */
+.qt-online-note {
+  display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 8px 4px;
+  font-size: 13px; color: var(--muted); text-align: center;
+}
+.qt-spinner {
+  flex: none; width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--brand) 25%, transparent); border-top-color: var(--brand);
+  animation: qt-spin 0.8s linear infinite;
+}
+@keyframes qt-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .qt-spinner { animation-duration: 2.4s; } }
+.qt-online-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 12px; padding: 11px 14px;
+  border: 1px dashed var(--border); border-radius: 12px; background: none; color: var(--brand);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.qt-online-btn:hover { border-color: var(--brand); background: var(--brand-soft); }
+.qt-portions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.qt-portion {
+  height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.qt-portion:hover { color: var(--brand); border-color: var(--brand); }
+
+/* Staff diet builder */
+.fit-meal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fit-food-pick { display: flex; flex-direction: column; gap: 10px; }
+.fit-food-pick .fit-pick-search { flex: none; }
+.fit-food-list { max-height: min(60vh, 520px); min-height: 160px; padding: 2px 0; }
+.fit-food-section {
+  padding: 10px 8px 4px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+}
+.fit-food-online { align-self: center; margin-top: 10px; }
+.fit-food-credit { margin: 0; font-size: 11.5px; color: var(--muted); }
+.fit-food-portions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 4px 4px 8px; }
+.fit-food-portions h4 { margin: 6px 0 0; font-size: 16px; }
+.fit-food-portions p { margin: 0; font-size: 13px; }
+.fit-food-portion-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; width: 100%; }
+.fit-food-portion {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 12px; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text);
+  font: inherit; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.fit-food-portion:hover { border-color: var(--brand); background: var(--brand-soft); }
+.fit-food-portion strong { font-size: 13.5px; }
+.fit-food-portion span { font-size: 12px; color: var(--muted); }

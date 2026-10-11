@@ -804,6 +804,65 @@ describe('Heavy-style workout logging in the portal', () => {
     const blank = await call('GET', '/api/portal/workouts/exercise-history?name=', undefined, { token: memberToken });
     assert.equal(blank.status, 400);
   });
+
+  it('logs a plank as a time and a treadmill run as a distance and time', async () => {
+    const runner = await call('POST', '/api/members', { first_name: 'Cardio', phone: '9876504444' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: runner.body.id }, { token: adminToken });
+    const token = (await call('POST', '/api/portal/login', { identifier: runner.body.code, pin: '4444' })).body.token;
+
+    const saved = await call(
+      'POST',
+      '/api/portal/workouts/logs',
+      {
+        workout_name: 'Conditioning',
+        duration_seconds: 2400,
+        sets: [
+          { exercise_name: 'Treadmill Run', muscle_group: 'cardio', distance_km: 5, duration_seconds: 1500 },
+          { exercise_name: 'Plank', muscle_group: 'abdominals', duration_seconds: 60 },
+          { exercise_name: 'Plank', muscle_group: 'abdominals', duration_seconds: 75 },
+          { exercise_name: 'Push-Up', muscle_group: 'chest', reps: 15 },
+        ],
+      },
+      { token },
+    );
+    assert.equal(saved.status, 201);
+    assert.equal(saved.body.summary.total_volume_kg, 0, 'nothing here moved a weight');
+    assert.equal(saved.body.summary.total_reps, 15);
+    assert.deepEqual(saved.body.prs, [], 'a time or a distance is not a 1RM');
+    const run = saved.body.sets.find((s) => s.exercise_name === 'Treadmill Run');
+    assert.equal(run.distance_km, 5);
+    assert.equal(run.duration_seconds, 1500);
+
+    const plank = (await call('GET', '/api/portal/workouts/exercise-history?name=Plank', undefined, { token })).body;
+    assert.equal(plank.records.longest_duration_seconds, 75);
+    assert.equal(plank.records.total_duration_seconds, 135);
+    assert.equal(plank.sessions[0].duration_seconds, 135);
+
+    const treadmill = (await call('GET', '/api/portal/workouts/exercise-history?name=Treadmill%20Run', undefined, { token })).body;
+    assert.equal(treadmill.records.longest_distance_km, 5);
+    assert.equal(treadmill.records.best_pace_seconds_per_km, 300, '25 minutes over 5 km is 5:00 /km');
+    assert.equal(treadmill.records.total_distance_km, 5);
+
+    // The logger's Previous column for the next session.
+    const picker = (await call('GET', '/api/portal/workouts/exercises?q=plank', undefined, { token })).body;
+    assert.equal(picker.items.find((e) => e.name === 'Plank').previous.duration_seconds, 75);
+
+    const bad = await call(
+      'POST',
+      '/api/portal/workouts/logs',
+      {
+        workout_name: 'Bad',
+        sets: [
+          { exercise_name: 'Plank', muscle_group: 'abdominals', duration_seconds: 1.5 },
+          { exercise_name: 'Treadmill Run', muscle_group: 'cardio', distance_km: -1 },
+        ],
+      },
+      { token },
+    );
+    assert.equal(bad.status, 400);
+    assert.ok(bad.body.details['sets.0.duration_seconds']);
+    assert.ok(bad.body.details['sets.1.distance_km']);
+  });
 });
 
 describe('Hevy-style plans a member builds for themselves', () => {

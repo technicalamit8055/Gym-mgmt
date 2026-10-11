@@ -19,6 +19,7 @@ import {
 } from '../fitness.js';
 import { insertBarcodeFood, libraryFoodByBarcode, lookupBarcode, normaliseBarcode } from '../foodBarcode.js';
 import { syncFoodCatalog } from '../foodCatalog.js';
+import { externalMode, importFood, parseFoodRef, searchFoods } from '../foodSearch.js';
 import { expireOverdueSubscriptions } from '../maintenance.js';
 import {
   ACTIVITY_KEYS,
@@ -891,6 +892,17 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
       errors[`sets.${index}.reps`] = 'must be a whole number of reps';
     }
 
+    // A timed hold or a cardio piece logs these instead of weight × reps.
+    const seconds = Number(set?.duration_seconds ?? 0);
+    if (!Number.isInteger(seconds) || seconds < 0 || seconds > 86400) {
+      errors[`sets.${index}.duration_seconds`] = 'must be a whole number of seconds up to 24 hours';
+    }
+
+    const distance = Number(set?.distance_km ?? 0);
+    if (!Number.isFinite(distance) || distance < 0 || distance > 1000) {
+      errors[`sets.${index}.distance_km`] = 'must be a distance in km from 0 to 1000';
+    }
+
     const rpe = set?.rpe === undefined || set?.rpe === null || set?.rpe === '' ? null : Number(set.rpe);
     if (rpe !== null && (!Number.isFinite(rpe) || rpe < 1 || rpe > 10)) {
       errors[`sets.${index}.rpe`] = 'must be between 1 and 10';
@@ -903,6 +915,8 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
       set_type: setType,
       weight_kg: Math.round(weight * 100) / 100,
       reps,
+      duration_seconds: seconds,
+      distance_km: Math.round(distance * 1000) / 1000,
       rpe,
       completed: set?.completed === false || set?.completed === 0 ? 0 : 1,
       notes: set?.notes ? String(set.notes).trim().slice(0, 300) : null,
@@ -952,8 +966,9 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
       const est1rm = estimate1rm(set.weight_kg, set.reps);
       const id = run(
         `INSERT INTO workout_log_sets
-           (log_id, exercise_name, muscle_group, set_number, set_type, weight_kg, reps, rpe, est_1rm_kg, completed, notes, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (log_id, exercise_name, muscle_group, set_number, set_type, weight_kg, reps,
+            duration_seconds, distance_km, rpe, est_1rm_kg, completed, notes, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           logId,
           set.exercise_name,
@@ -962,6 +977,8 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
           set.set_type,
           set.weight_kg,
           set.reps,
+          set.duration_seconds,
+          set.distance_km,
           set.rpe,
           est1rm,
           set.completed,
@@ -1436,6 +1453,21 @@ portalRoutes.delete('/diets/favorites/:id', requireMemberAuth, requireModule('fi
 /* ── Own nutrition targets ────────────────────────────────────────────── */
 
 const fitnessGate = [requireMemberAuth, requireModule('fitness'), requireFitnessAccess];
+
+/* ── Food search ──────────────────────────────────────────────────────── */
+
+/** The gym's library plus, when it has little, USDA and Open Food Facts —
+ * see src/foodSearch.js. Online results carry a `ref` to pick them by. */
+portalRoutes.get('/diets/food-search', ...fitnessGate, async (req, res) => {
+  res.json(await searchFoods({ q: req.query.q, external: externalMode(req.query.external), limit: toInt(req.query.limit, 30) }));
+});
+
+/** A picked online food joins the gym's library — the next member searching
+ * for it finds it there — and comes back as a row to log by food_id. */
+portalRoutes.post('/diets/food-search/select', ...fitnessGate, async (req, res) => {
+  const { food, created } = await importFood(parseFoodRef(req.body));
+  res.status(created ? 201 : 200).json(food);
+});
 
 /* ── Barcode foods ────────────────────────────────────────────────────── */
 

@@ -335,6 +335,19 @@ function fitnessSection(member, { reload }) {
 
   const SET_TYPE_SHORT = { normal: '—', warmup: 'W', drop: 'D', failure: 'F' };
   const minutes = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
+  const clock = (seconds) => {
+    const s = Math.round(seconds);
+    const hh = Math.floor(s / 3600);
+    const mm = Math.floor((s % 3600) / 60);
+    const ss = String(s % 60).padStart(2, '0');
+    return hh ? `${hh}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
+  };
+  // A set in the terms it was logged in: a run, a timed hold, or weight × reps.
+  const setLine = (set) => {
+    const parts = [set.distance_km > 0 ? `${set.distance_km} km` : null, set.duration_seconds > 0 ? clock(set.duration_seconds) : null].filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+    return set.weight_kg > 0 ? `${set.weight_kg} kg × ${set.reps}` : `${set.reps} reps`;
+  };
 
   function openAssignForm({ kind, templates, current }) {
     const isWorkout = kind === 'workout';
@@ -846,7 +859,7 @@ function fitnessSection(member, { reload }) {
                     'div',
                     { class: 'row', style: 'gap:10px;font-size:13px;padding:3px 0' },
                     h('span', { class: 'badge grey' }, SET_TYPE_SHORT[set.set_type] ?? set.set_type),
-                    h('span', {}, `${set.weight_kg} kg × ${set.reps}`),
+                    h('span', {}, setLine(set)),
                     set.is_pr ? h('span', { class: 'badge amber' }, 'PR') : null,
                     h('span', { class: 'muted' }, set.est_1rm_kg ? `~${set.est_1rm_kg} kg 1RM` : ''),
                   ),
