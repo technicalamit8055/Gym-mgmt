@@ -1619,6 +1619,9 @@ const timeDigitsOf = (text) => String(text).replace(/\D/g, '').replace(/^0+/, ''
 
 /* ── The paywall ───────────────────────────────────────────────────────── */
 
+/* Short strokes fanned either side of the price, like the price is shining. */
+const paywallRays = (side) => h('span', { class: `portal-paywall-rays ${side}`, 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
+
 function upgradeSheet(status, { onRefresh } = {}) {
   const price = money(status.settings.monthly_price);
   return h(
@@ -1627,43 +1630,78 @@ function upgradeSheet(status, { onRefresh } = {}) {
     h(
       'div',
       { class: 'portal-paywall' },
-      h('div', { class: 'portal-paywall-glow' }),
-      h('div', { class: 'portal-paywall-badge' }, renderIcon('sparkle', { size: 14 }), ' Premium'),
-      h('h2', { class: 'portal-paywall-title' }, 'Diet & Workout Tracking'),
-      h('p', { class: 'portal-paywall-sub' }, status.settings.description),
       h(
-        'div',
-        { class: 'portal-paywall-features' },
-        ...[
-          ['weight', 'Log every set', 'Weights, reps and rest timers, with your last session next to each set.'],
-          ['trophy', 'Chase your records', 'Automatic 1RM estimates and a personal-record wall that fills up as you lift.'],
-          ['flame', 'Hit your macros', 'Calorie and protein rings, meal by meal, plus a water tracker.'],
-          ['member', 'Coached, not guessed', 'Your gym’s trainers assign the plan and can see how you are getting on.'],
-        ].map(([icon, title, body]) =>
+        'section',
+        { class: 'portal-paywall-hero' },
+        h(
+          'div',
+          { class: 'portal-paywall-copy' },
+          h('div', { class: 'portal-paywall-badge' }, renderIcon('crown', { size: 15, stroke: 2.2 }), 'Premium'),
+          h('h2', { class: 'portal-paywall-title' }, 'Diet & Workout ', h('span', {}, 'Tracking')),
+          h('p', { class: 'portal-paywall-sub' }, status.settings.description),
           h(
-            'div',
-            { class: 'portal-paywall-feature' },
-            h('div', { class: 'portal-paywall-feature-icon' }, renderIcon(icon, { size: 17 })),
-            h('div', {}, h('strong', {}, title), h('p', {}, body)),
+            'ul',
+            { class: 'portal-paywall-ticks' },
+            ...['Track', 'Improve', 'Stay Fit'].map((label) =>
+              h('li', {}, h('span', { class: 'portal-paywall-tick' }, renderIcon('check', { size: 11, stroke: 3 })), label),
+            ),
           ),
         ),
+        h('img', {
+          class: 'portal-paywall-art',
+          src: '/images/portal/paywall-athlete.webp',
+          alt: '',
+          'aria-hidden': 'true',
+          loading: 'lazy',
+          decoding: 'async',
+        }),
       ),
       h(
         'div',
-        { class: 'portal-paywall-price' },
-        h('strong', {}, price),
-        h('span', {}, '/ month'),
-      ),
-      h(
-        'p',
-        { class: 'portal-paywall-cta-note' },
-        'Ask the front desk to switch it on — they can activate it while you wait.',
-      ),
-      h(
-        'button',
-        { class: 'btn primary block', type: 'button', onclick: onRefresh },
-        renderIcon('refresh', { size: 15 }),
-        ' I have paid — check again',
+        { class: 'portal-paywall-panel' },
+        h(
+          'div',
+          { class: 'portal-paywall-features' },
+          ...[
+            ['blue', 'weight', 'Log every set', 'Weights, reps and rest timers, with your last session next to each set.'],
+            ['violet', 'trophy', 'Chase your records', 'Automatic 1RM estimates and a personal-record wall that fills up as you lift.'],
+            ['green', 'flame', 'Hit your macros', 'Calorie and protein rings, meal by meal, plus a water tracker.'],
+            ['orange', 'members', 'Coached, not guessed', 'Your gym’s trainers assign the plan and can see how you are getting on.'],
+          ].map(([tone, icon, title, body]) =>
+            h(
+              'div',
+              { class: `portal-paywall-feature tone-${tone}` },
+              h('div', { class: 'portal-paywall-feature-icon' }, renderIcon(icon, { size: 26, stroke: 2.2 })),
+              h('div', { class: 'portal-paywall-feature-text' }, h('strong', {}, title), h('p', {}, body)),
+              h('span', { class: 'portal-paywall-feature-chev', 'aria-hidden': 'true' }, renderIcon('chevronRight', { size: 14, stroke: 2.4 })),
+            ),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'portal-paywall-pricing' },
+          h('div', { class: 'portal-paywall-price-badge' }, renderIcon('crown', { size: 14, stroke: 2.2 }), 'Affordable pricing'),
+          h(
+            'div',
+            { class: 'portal-paywall-price' },
+            paywallRays('left'),
+            h('strong', {}, price),
+            h('span', {}, '/ month'),
+            paywallRays('right'),
+          ),
+          h(
+            'p',
+            { class: 'portal-paywall-cta-note' },
+            'Ask the front desk to switch it on — they can activate it while you wait.',
+          ),
+        ),
+        h(
+          'button',
+          { class: 'btn primary block portal-paywall-cta', type: 'button', onclick: onRefresh },
+          renderIcon('refresh', { size: 20, stroke: 2.2 }),
+          h('span', {}, 'I have paid — check again'),
+          renderIcon('arrowRight', { size: 20, stroke: 2.2 }),
+        ),
       ),
     ),
   );
@@ -5455,32 +5493,63 @@ function renderPortalApp(ctx, initialMe) {
   /* ------------------------------------------------------------- Store tab */
 
   /** Holds the Store's slot until the shop itself ships: what is coming, and
-   * nothing that can be tapped into a dead end. */
+   * nothing that can be tapped into a dead end (the chevrons are decoration). */
   function renderStoreTab() {
-    const teaser = (icon, tone, title, sub) =>
+    /* Product shots are optional files: a missing one takes its whole slot
+       (the halo or blob behind it too) with it, and the card closes up. */
+    const art = (name, className, ...backdrop) =>
+      h(
+        'span',
+        { class: className, 'aria-hidden': 'true' },
+        ...backdrop,
+        h('img', {
+          src: `/images/portal/${name}.png`,
+          alt: '',
+          decoding: 'async',
+          onerror: (e) => {
+            e.currentTarget.parentElement.parentElement?.classList.add('no-art');
+            e.currentTarget.parentElement.remove();
+          },
+        }),
+      );
+    const teaser = (icon, tone, title, sub, image) =>
       h(
         'div',
         { class: `portal-store-item tone-${tone}` },
-        h('span', { class: 'portal-store-item-icon' }, renderIcon(icon, { size: 20 })),
-        h('div', {}, h('strong', {}, title), h('span', {}, sub)),
+        h('span', { class: 'portal-store-item-icon' }, renderIcon(icon, { size: 26, stroke: 2.2 })),
+        h('div', { class: 'portal-store-item-text' }, h('strong', {}, title), h('span', {}, sub)),
+        art(image, 'portal-store-item-art'),
+        h('span', { class: 'portal-store-item-chev', 'aria-hidden': 'true' }, renderIcon('chevronRight', { size: 16, stroke: 2.4 })),
       );
+    /* The hand-drawn stroke under "is on its way". */
+    const swash = svg(
+      'svg',
+      { class: 'portal-store-swash', viewBox: '0 0 160 14', 'aria-hidden': 'true', focusable: 'false' },
+      svg('path', { d: 'M4 11C38 5 92 2 156 4', fill: 'none', stroke: 'currentColor', 'stroke-width': 5, 'stroke-linecap': 'round' }),
+    );
     return h(
       'div',
       { class: 'portal-tab-body portal-store' },
       h(
-        'div',
+        'section',
         { class: 'portal-store-hero' },
-        h('span', { class: 'portal-store-hero-icon' }, renderIcon('store', { size: 34 })),
-        h('span', { class: 'portal-store-chip' }, 'Coming soon'),
-        h('h2', {}, 'The gym store is on its way'),
-        h('p', {}, 'Soon you can shop supplements, gear and merchandise from your gym — right here in the app.'),
+        art('store-hero', 'portal-store-hero-art', h('span', { class: 'portal-store-blob' })),
+        h(
+          'div',
+          { class: 'portal-store-hero-copy' },
+          h('span', { class: 'portal-store-hero-icon' }, renderIcon('store', { size: 36, stroke: 2 })),
+          h('span', { class: 'portal-store-chip' }, 'Coming soon'),
+          h('h2', {}, 'The gym store ', h('span', {}, 'is on its way')),
+          swash,
+          h('p', {}, 'Soon you can shop supplements, gear and merchandise from your gym — right here in the app.'),
+        ),
       ),
       h(
         'div',
         { class: 'portal-store-list' },
-        teaser('zap', 'orange', 'Supplements', 'Protein, pre-workout and more'),
-        teaser('bag', 'purple', 'Gear & apparel', 'Gym wear, shakers and accessories'),
-        teaser('cart', 'green', 'Pick up at the desk', 'Order in the app, collect at your gym'),
+        teaser('zap', 'blue', 'Supplements', 'Protein, pre-workout and more', 'store-supplements'),
+        teaser('shirt', 'purple', 'Gear & apparel', 'Gym wear, shakers and accessories', 'store-apparel'),
+        teaser('cart', 'green', 'Pick up at the desk', 'Order in the app, collect at your gym', 'store-pickup'),
       ),
     );
   }

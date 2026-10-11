@@ -2923,36 +2923,125 @@ body[data-mode='light'] .login {
 
 /* ------------------------------------------------------------------ store */
 
+/*
+ * A brand-tinted hero with the copy on the left and the product still life
+ * (store-hero.png) standing in the bottom-right corner, then three teaser
+ * cards, each a solid tone tile, its text, a product shot on a soft halo and
+ * a chevron. Every image is optional: without it the card keeps its tints.
+ */
+.portal-store { gap: 14px; }
+
 .portal-store-hero {
-  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px;
-  padding: 30px 20px 26px; border-radius: 24px;
-  border: 1px solid var(--border);
-  background: radial-gradient(320px 200px at 50% 0%, var(--brand-soft), transparent 75%), var(--surface);
-  box-shadow: var(--shadow-sm);
+  position: relative; overflow: hidden; isolation: isolate;
+  min-height: 272px; padding: 22px 0 24px 20px; border-radius: 26px;
+  border: 1px solid color-mix(in srgb, var(--brand) 12%, #fff);
+  background:
+    radial-gradient(circle at 92% 6%, color-mix(in srgb, var(--brand) 28%, #fff) 0%, transparent 34%),
+    radial-gradient(circle at 74% 70%, color-mix(in srgb, var(--brand) 16%, #fff) 0%, transparent 55%),
+    linear-gradient(115deg, #fff 0%, color-mix(in srgb, var(--brand) 5%, #fff) 45%, color-mix(in srgb, var(--brand) 16%, #fff) 100%);
+  box-shadow: 0 10px 30px -18px color-mix(in srgb, var(--brand) 55%, transparent);
 }
+.portal-store-hero-art {
+  position: absolute; z-index: 0; right: 0; bottom: 0;
+  width: 52%; max-width: 260px; height: 100%;
+  pointer-events: none; user-select: none;
+}
+.portal-store-hero-art img {
+  position: absolute; right: 0; bottom: 0; width: 100%; height: 100%;
+  object-fit: contain; object-position: right bottom;
+}
+/* The rounded brand blob peeking out behind the tub. */
+.portal-store-blob {
+  position: absolute; top: 14%; left: 14%;
+  width: 48%; aspect-ratio: 1.1; border-radius: 48% 52% 40% 60% / 55% 45% 55% 45%;
+  background: color-mix(in srgb, var(--brand) 55%, #fff);
+  opacity: 0.55;
+}
+.portal-store-hero-copy {
+  position: relative; z-index: 1; width: 57%; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start;
+}
+.portal-store-hero.no-art { min-height: 0; padding-right: 20px; }
+.portal-store-hero.no-art .portal-store-hero-copy { width: 100%; }
+.portal-store-item.no-art .portal-store-item-text span { padding-right: 0; }
 .portal-store-hero-icon {
-  display: grid; place-items: center; width: 72px; height: 72px; border-radius: 22px;
-  color: var(--brand); background: var(--brand-soft);
-  border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent);
+  display: grid; place-items: center; width: 64px; height: 64px; border-radius: 20px; margin-bottom: 14px;
+  color: #fff;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--brand) 80%, #fff) 0%, var(--brand) 55%, color-mix(in srgb, var(--brand) 60%, #8b5cf6) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 10px 20px -8px color-mix(in srgb, var(--brand) 70%, transparent);
 }
 .portal-store-chip {
-  padding: 4px 10px; border-radius: 999px;
-  font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--brand); background: var(--brand-soft);
+  padding: 5px 13px; border-radius: 999px; margin-bottom: 12px;
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--brand) 85%, #000);
+  background: color-mix(in srgb, var(--brand) 18%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 14%, transparent);
 }
-.portal-store-hero h2 { margin: 2px 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
-.portal-store-hero p { margin: 0; max-width: 300px; color: var(--muted); font-size: 14px; line-height: 1.45; }
-.portal-store-list { display: flex; flex-direction: column; gap: 10px; }
+.portal-store-hero h2 {
+  margin: 0; color: #0b1220;
+  font-size: clamp(23px, 7vw, 29px); font-weight: 850; line-height: 1.08; letter-spacing: -0.035em;
+}
+.portal-store-hero h2 span { display: block; color: var(--brand); white-space: nowrap; }
+.portal-store-swash { display: block; width: 92px; height: 10px; margin: 8px 0 12px 12px; color: var(--brand); opacity: 0.85; }
+.portal-store-hero p { margin: 0; color: #3d4757; font-size: 13px; line-height: 1.5; text-wrap: pretty; }
+.portal-store-hero.no-art p { max-width: 34ch; }
+
+.portal-store-list { display: flex; flex-direction: column; gap: 12px; }
 .portal-store-item {
-  display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 18px;
-  border: 1px solid var(--border); background: var(--surface);
+  position: relative; overflow: hidden; isolation: isolate;
+  display: flex; align-items: center; gap: 14px;
+  min-height: 92px; padding: 12px 12px 12px 14px; border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--tone) 8%, var(--surface));
+  background: linear-gradient(100deg, var(--surface) 30%, color-mix(in srgb, var(--tone) 7%, var(--surface)) 100%);
+  box-shadow: 0 6px 18px -14px rgba(15, 23, 42, 0.35);
 }
 .portal-store-item-icon {
-  flex: none; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px;
-  color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent);
+  flex: none; display: grid; place-items: center; width: 50px; height: 50px; border-radius: 15px;
+  color: #fff;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--tone) 72%, #fff) 0%, var(--tone) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 8px 16px -8px color-mix(in srgb, var(--tone) 80%, transparent);
 }
-.portal-store-item strong { display: block; font-size: 14.5px; }
-.portal-store-item span:not(.portal-store-item-icon) { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+.portal-store-item-text { position: relative; z-index: 1; flex: 1; min-width: 0; }
+.portal-store-item-text strong { display: block; font-size: 16px; font-weight: 750; letter-spacing: -0.015em; color: var(--text); }
+/* The subtitle wraps before the product shot; the title may run onto its halo. */
+.portal-store-item-text span { display: block; margin-top: 3px; padding-right: 84px; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
+/* The product shot sits on a tinted halo and runs off the card's bottom edge,
+   under the text's tail and left of the chevron. */
+.portal-store-item-art {
+  position: absolute; z-index: 0; right: 42px; top: 50%; transform: translateY(-50%);
+  width: 106px; height: 106px; border-radius: 50%;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: radial-gradient(circle, color-mix(in srgb, var(--tone) 18%, var(--surface)) 0%, color-mix(in srgb, var(--tone) 6%, var(--surface)) 62%, transparent 72%);
+  pointer-events: none;
+}
+.portal-store-item-art img { display: block; width: 116%; height: 100%; object-fit: contain; object-position: center bottom; }
+.portal-store-item-chev {
+  position: relative; z-index: 1; flex: none; margin-left: auto;
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--text); background: color-mix(in srgb, var(--tone) 9%, var(--surface));
+}
+
+body:not([data-mode='light']) .portal-store-hero {
+  border-color: color-mix(in srgb, var(--brand) 24%, var(--border));
+  background:
+    radial-gradient(circle at 92% 6%, color-mix(in srgb, var(--brand) 32%, transparent) 0%, transparent 34%),
+    radial-gradient(circle at 74% 70%, color-mix(in srgb, var(--brand) 18%, transparent) 0%, transparent 55%),
+    linear-gradient(115deg, var(--surface) 0%, color-mix(in srgb, var(--brand) 14%, var(--surface)) 100%);
+  box-shadow: var(--shadow);
+}
+body:not([data-mode='light']) .portal-store-blob { background: var(--brand); opacity: 0.28; }
+body:not([data-mode='light']) .portal-store-chip { color: var(--brand); background: color-mix(in srgb, var(--brand) 18%, transparent); }
+body:not([data-mode='light']) .portal-store-hero h2 { color: var(--text); }
+body:not([data-mode='light']) .portal-store-hero p { color: var(--muted); }
+body:not([data-mode='light']) .portal-store-item {
+  border-color: var(--border);
+  background: linear-gradient(100deg, var(--surface) 30%, color-mix(in srgb, var(--tone) 12%, var(--surface)) 100%);
+}
+
+@media (max-width: 360px) {
+  .portal-store-item-art { right: 40px; width: 88px; height: 88px; }
+  .portal-store-item-text span { padding-right: 66px; }
+}
 
 /* --------------------------------------------------------------- greeting */
 
@@ -4394,44 +4483,176 @@ body:not([data-mode='light']) .portal-pay {
 
 /* ═══════════════════════════════════════════════ member portal: paywall ══ */
 
-.portal-paywall {
-  position: relative; overflow: hidden;
-  padding: 26px 20px 20px; border-radius: var(--radius-lg);
+/*
+ * A brand-tinted hero (badge, title, ticks, the athlete standing on the right)
+ * with a white panel tucked under its bottom edge holding the feature rows, a
+ * gold pricing card and the check-again button. Tints come from --brand, so a
+ * gym on the orange preset gets a peach hero rather than a blue one.
+ */
+.portal-paywall { position: relative; display: flex; flex-direction: column; }
+
+.portal-paywall-hero {
+  position: relative; overflow: hidden; isolation: isolate;
+  display: flex; min-height: 222px;
+  padding: 20px 0 30px 18px; border-radius: 24px 24px 0 0;
+  border: 1px solid color-mix(in srgb, var(--brand) 14%, #fff);
+  border-bottom: 0;
+  /* The halo disc sits where the athlete's chest lands (see .portal-paywall-art). */
+  background:
+    radial-gradient(circle 84px at 76% 60%, color-mix(in srgb, var(--brand) 14%, #fff) 0%, color-mix(in srgb, var(--brand) 30%, #fff) 80%, transparent 100%),
+    linear-gradient(120deg, color-mix(in srgb, var(--brand) 5%, #fff) 0%, color-mix(in srgb, var(--brand) 16%, #fff) 100%);
+}
+.portal-paywall-copy { position: relative; z-index: 1; flex: 0 0 50%; min-width: 0; }
+/* The athlete, cut out with his floating tiles, stands in the right half with
+   his waist tucked behind the panel below; the radial glow in the hero's
+   background is the halo he stands in front of. */
+.portal-paywall-art {
+  position: absolute; z-index: 0; right: 0; bottom: -2px;
+  width: 48%; max-width: 240px; height: auto;
+  pointer-events: none; user-select: none;
+  filter: drop-shadow(0 10px 18px rgba(15, 23, 42, 0.12));
+}
+
+.portal-paywall-badge,
+.portal-paywall-price-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px; border-radius: 999px;
+  background: linear-gradient(180deg, #fff6d6 0%, #ffe9a8 100%);
+  border: 1px solid #fbd977;
+  color: #a5620b;
+  font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  box-shadow: 0 2px 8px -3px rgba(217, 119, 6, 0.35);
+}
+.portal-paywall-badge .svg-icon,
+.portal-paywall-price-badge .svg-icon { color: #e8930c; fill: #f7b52c; }
+.portal-paywall-badge { margin-bottom: 12px; }
+
+.portal-paywall-title {
+  margin: 0 0 8px; color: #0b1220;
+  font-size: clamp(22px, 6.6vw, 29px); font-weight: 850; line-height: 1.04; letter-spacing: -0.035em;
+}
+.portal-paywall-title span { display: block; color: var(--brand); }
+.portal-paywall-title { white-space: nowrap; }
+.portal-paywall-sub { margin: 0 0 12px; font-size: 12.5px; line-height: 1.42; color: #3d4757; }
+
+.portal-paywall-ticks {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 6px 9px;
+  /* One row, as in the mockup, running a little under the art's feathered
+     edge; a narrow phone wraps it instead. */
+  width: max-content; max-width: calc(100% + 24px);
+  font-size: 11px; font-weight: 500; color: #3d4757; white-space: nowrap;
+}
+.portal-paywall-ticks li { display: inline-flex; align-items: center; gap: 5px; }
+.portal-paywall-tick {
+  width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--brand); color: #fff;
+  box-shadow: 0 2px 6px -2px var(--brand-glow);
+}
+
+/* The panel overlaps the hero's lower edge so the athlete stands behind it. */
+.portal-paywall-panel {
+  position: relative; z-index: 1; margin-top: -16px;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 10px 10px 12px; border-radius: 22px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  background: linear-gradient(160deg, var(--surface) 0%, var(--bg-alt) 100%);
-  box-shadow: var(--shadow), inset 0 1px 0 var(--hairline);
-  text-align: center;
+  box-shadow: 0 -6px 24px -12px rgba(15, 23, 42, 0.18), var(--shadow);
 }
-.portal-paywall-glow {
-  position: absolute; inset: -60% 20% auto; height: 220px; pointer-events: none;
-  background: radial-gradient(circle at 50% 50%, var(--brand-glow) 0%, transparent 70%);
-}
-.portal-paywall-badge {
-  position: relative; display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 11px; border-radius: 999px; margin-bottom: 12px;
-  background: var(--brand-soft); color: var(--brand);
-  border: 1px solid var(--brand);
-  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
-}
-.portal-paywall-title { position: relative; margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
-.portal-paywall-sub { position: relative; margin: 0 0 20px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
 
-.portal-paywall-features { position: relative; display: flex; flex-direction: column; gap: 12px; text-align: left; }
-.portal-paywall-feature { display: flex; gap: 12px; align-items: flex-start; }
+.portal-paywall-features { display: flex; flex-direction: column; gap: 10px; }
+.portal-paywall-feature {
+  --tone: #3b82f6;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 10px 10px 9px; border-radius: 16px;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--tone) 8%, var(--surface)) 0%, color-mix(in srgb, var(--tone) 3%, var(--surface)) 100%);
+  border: 1px solid color-mix(in srgb, var(--tone) 6%, var(--surface));
+}
+.portal-paywall-feature.tone-blue { --tone: #3b82f6; }
+.portal-paywall-feature.tone-violet { --tone: #a855f7; }
+.portal-paywall-feature.tone-green { --tone: #16a34a; }
+.portal-paywall-feature.tone-orange { --tone: #f97316; }
 .portal-paywall-feature-icon {
-  flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
-  background: var(--surface-2); color: var(--brand); border: 1px solid var(--border);
+  flex: none; width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--tone) 14%, var(--surface));
+  color: var(--tone);
 }
-.portal-paywall-feature strong { font-size: 13.5px; }
-.portal-paywall-feature p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+/* The stroke icons, filled in with their own tone so they read as solid glyphs
+   the way the mockup draws them; the dumbbell is all bars, so it stays a
+   heavy stroke instead. */
+.portal-paywall-feature-icon .svg-icon { fill: color-mix(in srgb, var(--tone) 85%, transparent); }
+.portal-paywall-feature.tone-blue .portal-paywall-feature-icon .svg-icon { fill: none; stroke-width: 3; }
+.portal-paywall-feature-text { flex: 1; min-width: 0; }
+.portal-paywall-feature-text strong { display: block; font-size: 14.5px; font-weight: 750; letter-spacing: -0.01em; color: var(--text); }
+.portal-paywall-feature-text p { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.portal-paywall-feature-chev {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text);
+}
 
-.portal-paywall-price {
-  position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px;
-  margin: 22px 0 4px;
+.portal-paywall-pricing {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 14px 16px 16px; border-radius: 18px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.85) 0%, transparent 70%),
+    linear-gradient(180deg, #fff8e4 0%, #feefc9 100%);
+  border: 1px solid #fbe3a2;
 }
-.portal-paywall-price strong { font-size: 32px; letter-spacing: -0.03em; color: var(--brand); }
-.portal-paywall-price span { font-size: 13px; color: var(--muted); }
-.portal-paywall-cta-note { position: relative; margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+.portal-paywall-price-badge { font-size: 11px; padding: 5px 16px; }
+.portal-paywall-price { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin: 8px 0 2px; }
+.portal-paywall-price strong {
+  font-size: clamp(40px, 12vw, 50px); font-weight: 850; letter-spacing: -0.045em; line-height: 1;
+  color: var(--brand);
+}
+.portal-paywall-price > span { font-size: 15px; font-weight: 500; color: #3d4757; }
+.portal-paywall-cta-note { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: #3d4757; max-width: 34ch; }
+
+/* Three short gold strokes fanned out on each side of the price; the right
+   set is the left one mirrored. */
+.portal-paywall-rays { position: relative; align-self: center; width: 30px; height: 40px; margin: 0 14px; }
+.portal-paywall-rays.right { transform: scaleX(-1); }
+.portal-paywall-rays i { position: absolute; right: 0; height: 3px; border-radius: 3px; background: #f5b324; }
+.portal-paywall-rays i:nth-child(1) { width: 15px; top: 4px; right: 2px; transform: rotate(45deg); }
+.portal-paywall-rays i:nth-child(2) { width: 17px; top: 20px; transform: rotate(14deg); }
+.portal-paywall-rays i:nth-child(3) { width: 6px; top: 33px; right: 9px; transform: rotate(-12deg); }
+
+/* White label on a deepened brand gradient, whatever text colour the preset
+   gives .btn.primary; [type] lifts it over the per-theme overrides. */
+.portal-paywall .btn.primary.portal-paywall-cta[type] {
+  min-height: 54px; gap: 12px; border-radius: 16px;
+  font-size: 16px; font-weight: 700; letter-spacing: -0.005em;
+  color: #fff;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 88%, #fff) 0%, color-mix(in srgb, var(--brand) 84%, #000) 100%);
+  border-color: color-mix(in srgb, var(--brand) 70%, #000);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 10px 22px -8px color-mix(in srgb, var(--brand) 70%, transparent);
+}
+.portal-paywall .btn.primary.portal-paywall-cta[type]:hover { filter: brightness(1.06); }
+.portal-paywall-cta > span { white-space: normal; }
+
+/* Dark mode: the hero and pricing card keep their character but sink into the
+   page instead of glowing like a lightbox. */
+body:not([data-mode='light']) .portal-paywall-hero {
+  border-color: color-mix(in srgb, var(--brand) 26%, var(--border));
+  background:
+    radial-gradient(circle 84px at 76% 60%, color-mix(in srgb, var(--brand) 18%, transparent) 0%, color-mix(in srgb, var(--brand) 36%, transparent) 80%, transparent 100%),
+    linear-gradient(120deg, color-mix(in srgb, var(--brand) 8%, var(--surface)) 0%, color-mix(in srgb, var(--brand) 20%, var(--surface)) 100%);
+}
+body:not([data-mode='light']) .portal-paywall-title { color: var(--text); }
+body:not([data-mode='light']) .portal-paywall-sub,
+body:not([data-mode='light']) .portal-paywall-ticks,
+body:not([data-mode='light']) .portal-paywall-price > span,
+body:not([data-mode='light']) .portal-paywall-cta-note { color: var(--muted); }
+body:not([data-mode='light']) .portal-paywall-feature-icon { background: color-mix(in srgb, var(--tone) 20%, var(--surface)); }
+body:not([data-mode='light']) .portal-paywall-pricing {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.12) 0%, rgba(251, 191, 36, 0.06) 100%);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+body:not([data-mode='light']) .portal-paywall-badge,
+body:not([data-mode='light']) .portal-paywall-price-badge {
+  background: rgba(251, 191, 36, 0.16); border-color: rgba(251, 191, 36, 0.45); color: #fcd34d; box-shadow: none;
+}
+body:not([data-mode='light']) .portal-paywall-panel { box-shadow: var(--shadow); }
 
 /* ═══════════════════════════════════════ member portal: workout logger ══ */
 
