@@ -24,6 +24,8 @@ import {
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { cropAndResizeImage } from '../photo.js';
+import { payWithRazorpay } from '../razorpayCheckout.js';
+import { renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
@@ -1622,8 +1624,149 @@ const timeDigitsOf = (text) => String(text).replace(/\D/g, '').replace(/^0+/, ''
 /* Short strokes fanned either side of the price, like the price is shining. */
 const paywallRays = (side) => h('span', { class: `portal-paywall-rays ${side}`, 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
 
+/**
+ * The Diet & Workout paywall, in whichever of three shapes the operator has
+ * chosen (see src/monetization.js): `desk` asks the front desk to switch it
+ * on, `online` sells the three in-app tiers over Razorpay UPI, and `both`
+ * offers the tiers with the desk as a second way in. The server has already
+ * fallen back to `desk` where online payments are not set up.
+ */
 function upgradeSheet(status, { onRefresh } = {}) {
   const price = money(status.settings.monthly_price);
+  const mode = status.monetization?.addon_collection_mode ?? 'desk';
+  const tiers = status.monetization?.addon_tiers ?? [];
+  const online = (mode === 'online' || mode === 'both') && tiers.length > 0;
+  const both = online && mode === 'both';
+
+  const deskPricing = () => [
+    h(
+      'div',
+      { class: 'portal-paywall-pricing' },
+      h('div', { class: 'portal-paywall-price-badge' }, renderIcon('crown', { size: 14, stroke: 2.2 }), 'Affordable pricing'),
+      h(
+        'div',
+        { class: 'portal-paywall-price' },
+        paywallRays('left'),
+        h('strong', {}, price),
+        h('span', {}, '/ month'),
+        paywallRays('right'),
+      ),
+      h(
+        'p',
+        { class: 'portal-paywall-cta-note' },
+        'Ask the front desk to switch it on — they can activate it while you wait.',
+      ),
+    ),
+    h(
+      'button',
+      { class: 'btn primary block portal-paywall-cta', type: 'button', onclick: onRefresh },
+      renderIcon('refresh', { size: 20, stroke: 2.2 }),
+      h('span', {}, 'I have paid — check again'),
+      renderIcon('arrowRight', { size: 20, stroke: 2.2 }),
+    ),
+  ];
+
+  /* Three tier cards with the 3-month one picked to start, and one Unlock
+     button that names the price it is about to charge. */
+  function onlinePricing() {
+    let selected = tiers.find((t) => t.key === '3m') ?? tiers[0];
+    const ctaLabel = h('span', {});
+    const paintCta = () => {
+      ctaLabel.textContent = `Unlock now · ${money(selected.price)}`;
+    };
+    const cards = tiers.map((tier) => {
+      const card = h(
+        'button',
+        {
+          type: 'button',
+          role: 'radio',
+          class: `portal-paywall-tier${tier === selected ? ' selected' : ''}`,
+          'aria-checked': String(tier === selected),
+          onclick: () => {
+            selected = tier;
+            for (const el of cards) {
+              el.classList.toggle('selected', el === card);
+              el.setAttribute('aria-checked', String(el === card));
+            }
+            paintCta();
+          },
+        },
+        tier.key === '3m' ? h('span', { class: 'portal-paywall-tier-flag' }, 'Most popular') : null,
+        h('span', { class: 'portal-paywall-tier-term' }, `${tier.months} month${tier.months === 1 ? '' : 's'}`),
+        h('strong', { class: 'portal-paywall-tier-price' }, money(tier.price)),
+        h('span', { class: 'portal-paywall-tier-note' }, `${money(tier.per_month)}/mo`),
+        tier.save_pct ? h('span', { class: 'portal-paywall-tier-save' }, `Save ${tier.save_pct}%`) : null,
+      );
+      return card;
+    });
+    paintCta();
+
+    const cta = h(
+      'button',
+      {
+        class: 'btn primary block portal-paywall-cta',
+        type: 'button',
+        onclick: async () => {
+          cta.disabled = true;
+          try {
+            const { checkout } = await api.portal.fitnessCheckout(selected.key);
+            const proof = await payWithRazorpay(checkout);
+            await api.portal.fitnessVerify(proof);
+            toast('Diet & Workout unlocked — enjoy!');
+            onRefresh?.();
+          } catch (err) {
+            // Closing the sheet is a choice, not an error — unless a failed
+            // attempt came before it, which is worth telling them about.
+            if (!err.cancelled || err.message !== 'Payment cancelled') {
+              toast(err.message || 'The payment did not go through', 'error');
+            }
+          } finally {
+            cta.disabled = false;
+          }
+        },
+      },
+      renderIcon('unlock', { size: 20, stroke: 2.2 }),
+      ctaLabel,
+      renderIcon('arrowRight', { size: 20, stroke: 2.2 }),
+    );
+
+    return [
+      h(
+        'div',
+        { class: 'portal-paywall-pricing portal-paywall-pricing-tiers' },
+        h('div', { class: 'portal-paywall-price-badge' }, renderIcon('crown', { size: 14, stroke: 2.2 }), 'Pick your plan'),
+        h('div', { class: 'portal-paywall-tiers', role: 'radiogroup', 'aria-label': 'Plan length' }, ...cards),
+        h(
+          'p',
+          { class: 'portal-paywall-secure' },
+          renderIcon('lock', { size: 13, stroke: 2.4 }),
+          'Instant unlock · Secure UPI payment by Razorpay',
+        ),
+      ),
+      cta,
+    ];
+  }
+
+  /* The desk as the second way in, in `both` mode — quieter than the tiers. */
+  const deskAlternative = () =>
+    h(
+      'div',
+      { class: 'portal-paywall-desk' },
+      h('span', { class: 'portal-paywall-desk-icon' }, renderIcon('desk', { size: 20, stroke: 2.2 })),
+      h(
+        'div',
+        { class: 'portal-paywall-desk-text' },
+        h('strong', {}, 'Prefer to pay at the gym?'),
+        h('span', {}, `Ask the front desk to activate it — ${price} / month.`),
+      ),
+      h(
+        'button',
+        { class: 'btn sm ghost', type: 'button', onclick: onRefresh },
+        renderIcon('refresh', { size: 15, stroke: 2.2 }),
+        'Check again',
+      ),
+    );
+
   return h(
     'div',
     { class: 'portal-tab-body' },
@@ -1677,31 +1820,8 @@ function upgradeSheet(status, { onRefresh } = {}) {
             ),
           ),
         ),
-        h(
-          'div',
-          { class: 'portal-paywall-pricing' },
-          h('div', { class: 'portal-paywall-price-badge' }, renderIcon('crown', { size: 14, stroke: 2.2 }), 'Affordable pricing'),
-          h(
-            'div',
-            { class: 'portal-paywall-price' },
-            paywallRays('left'),
-            h('strong', {}, price),
-            h('span', {}, '/ month'),
-            paywallRays('right'),
-          ),
-          h(
-            'p',
-            { class: 'portal-paywall-cta-note' },
-            'Ask the front desk to switch it on — they can activate it while you wait.',
-          ),
-        ),
-        h(
-          'button',
-          { class: 'btn primary block portal-paywall-cta', type: 'button', onclick: onRefresh },
-          renderIcon('refresh', { size: 20, stroke: 2.2 }),
-          h('span', {}, 'I have paid — check again'),
-          renderIcon('arrowRight', { size: 20, stroke: 2.2 }),
-        ),
+        ...(online ? onlinePricing() : deskPricing()),
+        both ? deskAlternative() : null,
       ),
     ),
   );
@@ -4600,10 +4720,14 @@ function openWeightSheet({ latest, onSaved }) {
  *
  * A gym's Schedule is not a bottom slot either: Home already carries today's
  * classes with "View all" and a Book Class quick action, so the slot goes to
- * the Store (a coming-soon screen for now). TAB_HOME_OF maps such off-bar
- * screens to the tab that should stay lit while one is showing.
+ * the Store. TAB_HOME_OF maps such off-bar screens to the tab that should
+ * stay lit while one is showing.
+ *
+ * The Store follows the operator's switch (see src/monetization.js): a "Soon"
+ * badge while it is coming soon, no badge once live, and no slot at all when
+ * the operator has turned it off.
  */
-function buildTabs() {
+function buildTabs(storeStatus = 'coming_soon') {
   if (isLibrary()) {
     return [
       { key: 'home', label: 'Home', icon: 'home' },
@@ -4616,9 +4740,9 @@ function buildTabs() {
     { key: 'home', label: 'Home', icon: 'home' },
     { key: 'workout', label: 'Workout', icon: 'dumbbell' },
     { key: 'diet', label: 'Diet', icon: 'leaf' },
-    { key: 'store', label: 'Store', icon: 'bag', badge: 'Soon' },
+    storeStatus === 'disabled' ? null : { key: 'store', label: 'Store', icon: 'bag', badge: storeStatus === 'live' ? null : 'Soon' },
     { key: 'profile', label: 'Profile', icon: 'person' },
-  ];
+  ].filter(Boolean);
 }
 
 const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile' };
@@ -4734,7 +4858,7 @@ function navIcon(name, key) {
 }
 
 function renderPortalApp(ctx, initialMe) {
-  const TABS = buildTabs();
+  const TABS = buildTabs(initialMe.monetization?.store_status);
   let me = initialMe;
   let active = 'home';
   let tickInterval = null;
@@ -4903,6 +5027,11 @@ function renderPortalApp(ctx, initialMe) {
     lastTab.set(key);
     paintTabbar();
     topbarSub.textContent = TOPBAR_SUBTITLES[key] ?? '';
+    // The Store draws its own header (delivery address, search, cart), so the
+    // app's topbar steps aside while it is open.
+    topbar.classList.toggle('is-store-hidden', key === 'store');
+    tabbar.classList.toggle('is-store', key === 'store');
+    content.classList.toggle('is-store', key === 'store');
     content.classList.remove('is-refresh');
     clear(content).append(h('div', { class: 'portal-loading' }, 'Loading…'));
     try {
@@ -5492,9 +5621,27 @@ function renderPortalApp(ctx, initialMe) {
 
   /* ------------------------------------------------------------- Store tab */
 
+  /**
+   * The live shop once the operator opens it, and the coming-soon screen until
+   * then. Asked fresh on every visit rather than read off `me`, so a store
+   * that opens while the app is already running shows up on the next tap.
+   */
+  async function renderStoreTab() {
+    let store = null;
+    try {
+      store = await api.portal.store();
+    } catch (err) {
+      // Offline with a store that was live: say so and offer a retry. One that
+      // was never live can keep showing its placeholder, as it always has.
+      if (me.monetization?.store_status === 'live') throw err;
+    }
+    if (store?.status === 'live') return renderLiveStore({ store, memberId: me.member.id, openScreen });
+    return renderStoreComingSoon();
+  }
+
   /** Holds the Store's slot until the shop itself ships: what is coming, and
    * nothing that can be tapped into a dead end (the chevrons are decoration). */
-  function renderStoreTab() {
+  function renderStoreComingSoon() {
     /* Product shots are optional files: a missing one takes its whole slot
        (the halo or blob behind it too) with it, and the card closes up. */
     const art = (name, className, ...backdrop) =>

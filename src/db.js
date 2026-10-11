@@ -1291,6 +1291,51 @@ const MIGRATIONS = [
   // these, so the existing volume and 1RM sums need no special case.
   (db) => ensureColumn(db, 'workout_log_sets', 'duration_seconds', 'INTEGER NOT NULL DEFAULT 0'),
   (db) => ensureColumn(db, 'workout_log_sets', 'distance_km', 'REAL NOT NULL DEFAULT 0'),
+  // How an add-on was paid for: 'desk' (sold by staff, the only way before
+  // in-app payments) or 'online' (the member paid the platform through
+  // Razorpay, and the gym's cut is a commission in the platform ledger).
+  (db) => ensureColumn(db, 'member_fitness_addons', 'channel', "TEXT NOT NULL DEFAULT 'desk'"),
+  // The gym's own shelf: tees, shakers, bars and drinks it stocks and sells
+  // at the desk. Entirely the gym's money, so it lives in the gym's own file —
+  // the platform catalogue and its orders live in the registry instead (see
+  // src/monetization.js).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gym_products (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        name           TEXT NOT NULL,
+        category       TEXT NOT NULL DEFAULT 'other',
+        description    TEXT,
+        sku            TEXT,
+        price          REAL NOT NULL CHECK (price >= 0),
+        cost_price     REAL CHECK (cost_price IS NULL OR cost_price >= 0),
+        stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
+        low_stock_at   INTEGER NOT NULL DEFAULT 5 CHECK (low_stock_at >= 0),
+        active         INTEGER NOT NULL DEFAULT 1,
+        created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // Price and name are copied onto each sale, so a later price change or a
+    // retired product never rewrites what was actually charged.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gym_product_sales (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id   INTEGER REFERENCES gym_products(id) ON DELETE SET NULL,
+        product_name TEXT NOT NULL,
+        member_id    INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        quantity     INTEGER NOT NULL CHECK (quantity > 0),
+        unit_price   REAL NOT NULL CHECK (unit_price >= 0),
+        total        REAL NOT NULL CHECK (total >= 0),
+        method       TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash', 'card', 'upi', 'bank', 'online')),
+        sold_on      TEXT NOT NULL,
+        sold_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        note         TEXT,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_gym_product_sales_date ON gym_product_sales(sold_on)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

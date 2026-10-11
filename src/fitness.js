@@ -153,7 +153,7 @@ export function fitnessAccessFor(memberId) {
  * A renewal bought early stacks onto the unused tail instead of throwing it
  * away — the same courtesy subscriptions.js extends to memberships.
  */
-export function activateFitnessAddon({ memberId, months = 1, price, startDate, paymentId, userId, note }) {
+export function activateFitnessAddon({ memberId, months = 1, price, startDate, paymentId, userId, note, channel }) {
   const from = startDate || today();
   const existing = get(
     "SELECT * FROM member_fitness_addons WHERE member_id = ? AND status = 'active' ORDER BY end_date DESC LIMIT 1",
@@ -167,17 +167,17 @@ export function activateFitnessAddon({ memberId, months = 1, price, startDate, p
     run(
       `UPDATE member_fitness_addons
        SET end_date = ?, price = price + ?, payment_id = COALESCE(?, payment_id),
-           assigned_by = COALESCE(?, assigned_by), notes = COALESCE(?, notes)
+           assigned_by = COALESCE(?, assigned_by), notes = COALESCE(?, notes), channel = COALESCE(?, channel)
        WHERE id = ?`,
-      [addMonths(base, months), price, paymentId ?? null, userId ?? null, note ?? null, existing.id],
+      [addMonths(base, months), price, paymentId ?? null, userId ?? null, note ?? null, channel ?? null, existing.id],
     );
     return get('SELECT * FROM member_fitness_addons WHERE id = ?', [existing.id]);
   }
 
   const info = run(
-    `INSERT INTO member_fitness_addons (member_id, start_date, end_date, price, payment_id, assigned_by, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [memberId, from, addMonths(addDays(from, -1), months), price, paymentId ?? null, userId ?? null, note ?? null],
+    `INSERT INTO member_fitness_addons (member_id, start_date, end_date, price, payment_id, assigned_by, notes, channel)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [memberId, from, addMonths(addDays(from, -1), months), price, paymentId ?? null, userId ?? null, note ?? null, channel ?? 'desk'],
   );
   return get('SELECT * FROM member_fitness_addons WHERE id = ?', [info.lastInsertRowid]);
 }

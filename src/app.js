@@ -27,6 +27,8 @@ import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
 import { seatRoutes } from './routes/seats.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { storeHubRoutes } from './routes/storeHub.js';
+import { storeMediaRoutes } from './routes/storeMedia.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { workoutRoutes } from './routes/workouts.js';
@@ -106,6 +108,8 @@ export function createApp() {
   // Platform-wide exercise demos: not per-gym and nothing private, so it sits
   // out here with the other URLs an <img> has to be able to fetch.
   app.use('/api/exercise-media', exerciseMediaRoutes);
+  // Store product photos and banners: platform-wide, public, like the above.
+  app.use('/api/store-media', storeMediaRoutes);
   // Same reasoning as member photos: an unauthenticated but signed URL, so an
   // <img>/<a> tag can fetch it, and reachable even for a lapsed gym.
   app.use('/api/document-files', documentFileRoutes);
@@ -148,6 +152,7 @@ export function createApp() {
   app.use('/api/workouts', workoutRoutes);
   app.use('/api/diets', dietRoutes);
   app.use('/api/fitness-addons', fitnessAddonRoutes);
+  app.use('/api/store-hub', storeHubRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireRole } from '../auth.js';
 import { config } from '../config.js';
 import { conflict, HttpError, notFound } from '../errors.js';
+import { settleRazorpayOrder } from '../monetization.js';
 import { createSubscription, isRazorpayConfigured, verifyWebhookSignature } from '../razorpay.js';
 import {
   applyWebhookStatus,
@@ -76,6 +77,23 @@ export function handleRazorpayWebhook(req, res) {
     event = JSON.parse(rawBody.toString('utf8'));
   } catch {
     return res.status(400).json({ error: 'Malformed webhook payload' });
+  }
+
+  // A member's in-app purchase (the fitness add-on or a store order). The
+  // portal settles these itself when Checkout returns; this is the backstop
+  // for a member who closed the app between paying and that call.
+  if (event?.event === 'order.paid' || event?.event === 'payment.captured') {
+    const payment = event?.payload?.payment?.entity;
+    if (payment?.order_id && payment?.id) {
+      try {
+        settleRazorpayOrder(payment.order_id, payment.id);
+      } catch (err) {
+        // A 5xx makes Razorpay retry, which is what an unfinished settle needs.
+        console.error('[razorpay] settling order failed:', err.message);
+        return res.status(500).json({ error: 'Could not settle that payment yet' });
+      }
+    }
+    return res.status(200).json({ ok: true });
   }
 
   const subscriptionId = event?.payload?.subscription?.entity?.id;

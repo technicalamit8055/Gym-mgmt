@@ -138,9 +138,9 @@ export class ApiError extends Error {
 
 /** Uploads a file as the raw request body — no JSON/base64 wrapping, so a
  * multi-megabyte GIF costs what it weighs. */
-async function uploadFile(path, file, { token } = {}) {
+async function uploadFile(path, file, { token, method = 'PUT' } = {}) {
   const res = await fetch(`${pathPrefix}/api${path}`, {
-    method: 'PUT',
+    method,
     headers: { 'Content-Type': file.type || 'application/octet-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: file,
   });
@@ -294,6 +294,34 @@ export const api = {
     request('POST', '/platform/admin/catalog/foods/import', { rows, verified }, { token: platformSession.token }),
   platformBulkFoods: (ids, action) =>
     request('POST', '/platform/admin/catalog/foods/bulk', { ids, action }, { token: platformSession.token }),
+
+  // Store & monetization: switches, the central supplement catalogue, member
+  // delivery orders and what each gym is owed.
+  platformMonetization: () => request('GET', '/platform/admin/monetization', undefined, { token: platformSession.token }),
+  platformUpdateMonetization: (payload) => request('PUT', '/platform/admin/monetization', payload, { token: platformSession.token }),
+  platformStoreProducts: (params) =>
+    request('GET', `/platform/admin/store/products${query(params)}`, undefined, { token: platformSession.token }),
+  platformCreateStoreProduct: (payload) => request('POST', '/platform/admin/store/products', payload, { token: platformSession.token }),
+  platformUpdateStoreProduct: (id, payload) =>
+    request('PATCH', `/platform/admin/store/products/${id}`, payload, { token: platformSession.token }),
+  platformDeleteStoreProduct: (id) => request('DELETE', `/platform/admin/store/products/${id}`, undefined, { token: platformSession.token }),
+  platformStoreOrders: (params) => request('GET', `/platform/admin/store/orders${query(params)}`, undefined, { token: platformSession.token }),
+  platformUpdateStoreOrder: (id, payload) => request('PATCH', `/platform/admin/store/orders/${id}`, payload, { token: platformSession.token }),
+  platformCommissions: () => request('GET', '/platform/admin/commissions', undefined, { token: platformSession.token }),
+  platformAddProductImage: (id, file) =>
+    uploadFile(`/platform/admin/store/products/${id}/images`, file, { token: platformSession.token, method: 'POST' }),
+  platformDeleteProductImage: (id, imageId) =>
+    request('DELETE', `/platform/admin/store/products/${id}/images/${imageId}`, undefined, { token: platformSession.token }),
+  platformPrimaryProductImage: (id, imageId) =>
+    request('POST', `/platform/admin/store/products/${id}/images/${imageId}/primary`, {}, { token: platformSession.token }),
+  platformBanners: () => request('GET', '/platform/admin/store/banners', undefined, { token: platformSession.token }),
+  platformCreateBanner: (payload) => request('POST', '/platform/admin/store/banners', payload, { token: platformSession.token }),
+  platformUpdateBanner: (id, payload) => request('PATCH', `/platform/admin/store/banners/${id}`, payload, { token: platformSession.token }),
+  platformBannerImage: (id, file) => uploadFile(`/platform/admin/store/banners/${id}/image`, file, { token: platformSession.token }),
+  platformClearBannerImage: (id) => request('DELETE', `/platform/admin/store/banners/${id}/image`, undefined, { token: platformSession.token }),
+  platformDeleteBanner: (id) => request('DELETE', `/platform/admin/store/banners/${id}`, undefined, { token: platformSession.token }),
+  platformRecordPayout: (slug, payload) =>
+    request('POST', `/platform/admin/commissions/${slug}/payout`, payload, { token: platformSession.token }),
 
   dashboard: () => request('GET', '/dashboard'),
 
@@ -490,6 +518,23 @@ export const api = {
   setFitnessTrialCancelled: (memberId, cancelled) =>
     request('POST', `/fitness-addons/members/${memberId}/trial`, { cancelled }),
 
+  // Store & Commissions: the platform's commission statement for this gym,
+  // and the gym's own products sold at the desk.
+  storeHub: {
+    summary: () => request('GET', '/store-hub/summary'),
+    commissions: (params) => request('GET', `/store-hub/commissions${query(params)}`),
+    products: (params) => request('GET', `/store-hub/products${query(params)}`),
+    createProduct: (payload) => request('POST', '/store-hub/products', payload),
+    updateProduct: (id, payload) => request('PATCH', `/store-hub/products/${id}`, payload),
+    restock: (id, quantity) => request('POST', `/store-hub/products/${id}/restock`, { quantity }),
+    deleteProduct: (id) => request('DELETE', `/store-hub/products/${id}`),
+    sales: (params) => request('GET', `/store-hub/sales${query(params)}`),
+    sell: (payload) => request('POST', '/store-hub/sales', payload),
+    pickups: () => request('GET', '/store-hub/pickups'),
+    pickupReceived: (id) => request('POST', `/store-hub/pickups/${id}/received`, {}),
+    pickupCollected: (id) => request('POST', `/store-hub/pickups/${id}/collected`, {}),
+  },
+
   // Member self-service portal. `anonymous` on login: a stale member token
   // from a previous member on this device must not turn a fresh sign-in
   // attempt into a 401 redirect loop. Every other call is `member: true`,
@@ -560,6 +605,16 @@ export const api = {
     activityTypes: () => request('GET', '/portal/activities/types', undefined, { member: true }),
     logActivity: (payload) => request('POST', '/portal/activities', payload, { member: true }),
     deleteActivity: (id) => request('DELETE', `/portal/activities/${id}`, undefined, { member: true }),
+
+    // In-app payments: the add-on's online tiers and the store. Each checkout
+    // returns the Razorpay order to open; each verify hands back what
+    // Checkout reported so the server can check its signature.
+    fitnessCheckout: (tier) => request('POST', '/portal/fitness/checkout', { tier }, { member: true }),
+    fitnessVerify: (payload) => request('POST', '/portal/fitness/verify', payload, { member: true }),
+    store: () => request('GET', '/portal/store', undefined, { member: true }),
+    storeCheckout: (payload) => request('POST', '/portal/store/checkout', payload, { member: true }),
+    storeVerify: (payload) => request('POST', '/portal/store/verify', payload, { member: true }),
+    storeOrders: () => request('GET', '/portal/store/orders', undefined, { member: true }),
 
     // Push notifications and the notification center (see public/js/push.js).
     notifications: {

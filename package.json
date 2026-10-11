@@ -16,7 +16,8 @@
     "vendor:zxing": "node scripts/vendor-zxing.js",
     "icons:gen": "node scripts/gen-icons.js",
     "icons:gen:library": "node scripts/gen-icons-library.js",
-    "emulator": "powershell -ExecutionPolicy Bypass -File scripts/open-emulator.ps1"
+    "emulator": "powershell -ExecutionPolicy Bypass -File scripts/open-emulator.ps1",
+    "seed:store": "node --no-warnings=ExperimentalWarning scripts/seed-store.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",

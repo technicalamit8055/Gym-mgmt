@@ -43,6 +43,11 @@ export const config = {
   exerciseMediaDir:
     process.env.EXERCISE_MEDIA_DIR ||
     path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'exercise-media'),
+  // Store product photos and banners uploaded from the operator console, beside
+  // the platform DB for the same reason as exercise media above.
+  storeMediaDir:
+    process.env.STORE_MEDIA_DIR ||
+    path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'store-media'),
   trialDays: Number(process.env.TRIAL_DAYS || 7),
   // Open Food Facts, for the member app's barcode scanner (src/foodBarcode.js).
   // Overridable so tests can point it at a local stub instead of the internet.
@@ -69,6 +74,8 @@ export const config = {
     // dashboard access exists. If exhausted, Razorpay auto-completes the
     // subscription and the gym would need to hit /subscribe again.
     totalCount: Number(process.env.RAZORPAY_TOTAL_COUNT || 120),
+    // Overridable so tests can point the Orders API at a local stub.
+    apiBase: (process.env.RAZORPAY_API_BASE || 'https://api.razorpay.com/v1').replace(/\/+$/, ''),
   },
   // Opt-in only: trusting X-Forwarded-For without a real proxy in front lets
   // a client spoof its own IP and dodge the rate limiter below.

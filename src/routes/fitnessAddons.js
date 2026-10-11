@@ -32,7 +32,10 @@ fitnessAddonRoutes.get('/settings', (_req, res) => {
     settings: fitnessSettings(),
     stats: get(`
       SELECT COUNT(*) AS active_subscribers,
-             COALESCE(SUM(price), 0) AS lifetime_revenue
+             COUNT(CASE WHEN channel = 'online' THEN 1 END) AS online_subscribers,
+             -- Desk sales only: an in-app purchase is paid to the platform, and
+             -- the gym's share of it is a commission (see /api/store-hub).
+             COALESCE(SUM(CASE WHEN channel = 'desk' THEN price END), 0) AS lifetime_revenue
       FROM member_fitness_addons WHERE status = 'active'
     `),
     bundled_plans: all('SELECT id, name FROM plans WHERE includes_fitness_addon = 1 AND active = 1 ORDER BY name'),

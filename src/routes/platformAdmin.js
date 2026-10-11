@@ -44,6 +44,36 @@ import {
   updateCatalogFood,
 } from '../foodCatalog.js';
 import { all, closeDb, get, tenantStorage } from '../db.js';
+import {
+  BANNER_LINKS,
+  COLLECTION_MODES,
+  FULFILLMENT_STATUSES,
+  MAX_STORE_IMAGE_BYTES,
+  STORE_CATEGORIES,
+  STORE_STATUSES,
+  addProductImage,
+  addonTiers,
+  clearBannerImage,
+  commissionBalances,
+  createBanner,
+  createStoreProduct,
+  deleteBanner,
+  deleteProductImage,
+  deleteStoreProduct,
+  listBanners,
+  makeProductImagePrimary,
+  setBannerImage,
+  updateBanner,
+  listStoreOrders,
+  listStoreProducts,
+  monetizationSettings,
+  monetizationSummary,
+  recordPayout,
+  updateMonetizationSettings,
+  updateStoreOrder,
+  updateStoreProduct,
+} from '../monetization.js';
+import { isRazorpayOrdersConfigured } from '../razorpay.js';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests, unauthorized } from '../errors.js';
 import { issuePasswordReset } from '../passwordReset.js';
 import { createLimiter } from '../rateLimit.js';
@@ -704,4 +734,121 @@ platformAdminRoutes.patch('/catalog/foods/:id', (req, res) => {
 platformAdminRoutes.delete('/catalog/foods/:id', (req, res) => {
   deleteCatalogFood(Number(req.params.id));
   res.json({ ok: true });
+});
+
+/* ── Store & monetization ──────────────────────────────────────────────── */
+
+/**
+ * The platform's own revenue switches: whether the member store is open, how
+ * the Diet & Workout add-on is paid for, the gym's cut of each, and the one
+ * supplement catalogue every gym's members shop from. See src/monetization.js.
+ */
+
+function monetizationState() {
+  const settings = monetizationSettings();
+  return {
+    settings,
+    addon_tiers: addonTiers(settings),
+    razorpay_configured: isRazorpayOrdersConfigured(),
+    summary: monetizationSummary(),
+    options: {
+      store_statuses: STORE_STATUSES,
+      collection_modes: COLLECTION_MODES,
+      categories: STORE_CATEGORIES,
+      fulfillment_statuses: FULFILLMENT_STATUSES,
+      banner_links: BANNER_LINKS,
+    },
+  };
+}
+
+platformAdminRoutes.get('/monetization', (_req, res) => {
+  res.json(monetizationState());
+});
+
+platformAdminRoutes.put('/monetization', (req, res) => {
+  updateMonetizationSettings(req.body);
+  res.json(monetizationState());
+});
+
+platformAdminRoutes.get('/store/products', (req, res) => {
+  const items = listStoreProducts({
+    q: req.query.q ? String(req.query.q).trim() : undefined,
+    category: req.query.category ? String(req.query.category) : undefined,
+  });
+  res.json({ items, total: items.length, categories: STORE_CATEGORIES });
+});
+
+platformAdminRoutes.post('/store/products', (req, res) => {
+  res.status(201).json(createStoreProduct(req.body));
+});
+
+platformAdminRoutes.patch('/store/products/:id', (req, res) => {
+  res.json(updateStoreProduct(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/store/products/:id', (req, res) => {
+  res.json(deleteStoreProduct(Number(req.params.id)));
+});
+
+/** Product photos go up as the raw file, like exercise demos; the console
+ * shrinks them in the browser first. */
+const rawImage = express.raw({ type: () => true, limit: MAX_STORE_IMAGE_BYTES });
+
+platformAdminRoutes.post('/store/products/:id/images', rawImage, (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw badRequest('Send the image as the request body');
+  res.status(201).json(addProductImage(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/store/products/:id/images/:imageId', (req, res) => {
+  res.json(deleteProductImage(Number(req.params.id), Number(req.params.imageId)));
+});
+
+platformAdminRoutes.post('/store/products/:id/images/:imageId/primary', (req, res) => {
+  res.json(makeProductImagePrimary(Number(req.params.id), Number(req.params.imageId)));
+});
+
+platformAdminRoutes.get('/store/banners', (_req, res) => {
+  res.json({ items: listBanners() });
+});
+
+platformAdminRoutes.post('/store/banners', (req, res) => {
+  res.status(201).json(createBanner(req.body));
+});
+
+platformAdminRoutes.patch('/store/banners/:id', (req, res) => {
+  res.json(updateBanner(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.put('/store/banners/:id/image', rawImage, (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw badRequest('Send the image as the request body');
+  res.json(setBannerImage(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/store/banners/:id/image', (req, res) => {
+  res.json(clearBannerImage(Number(req.params.id)));
+});
+
+platformAdminRoutes.delete('/store/banners/:id', (req, res) => {
+  res.json(deleteBanner(Number(req.params.id)));
+});
+
+platformAdminRoutes.get('/store/orders', (req, res) => {
+  const items = listStoreOrders({
+    status: req.query.status ? String(req.query.status) : undefined,
+    tenantSlug: req.query.tenant ? String(req.query.tenant) : undefined,
+  });
+  res.json({ items, total: items.length });
+});
+
+platformAdminRoutes.patch('/store/orders/:id', (req, res) => {
+  res.json(updateStoreOrder(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.get('/commissions', (_req, res) => {
+  res.json({ items: commissionBalances() });
+});
+
+/** Settles a gym's payable balance once the bank transfer has gone out. */
+platformAdminRoutes.post('/commissions/:slug/payout', (req, res) => {
+  res.json(recordPayout(req.params.slug, req.body));
 });

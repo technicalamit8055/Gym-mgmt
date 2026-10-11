@@ -304,8 +304,8 @@ All optional — sensible defaults apply.
 | `EXERCISE_MEDIA_DIR` | beside `PLATFORM_DB_FILE`, in `exercise-media/` | Exercise demo images/GIFs/clips uploaded from the operator console. Keep it on the same persistent volume as the databases; it is not part of the DB backups |
 | `TENANTS_DIR` | `data/tenants` | Per-gym SQLite files live here, one per tenant |
 | `TRIAL_DAYS` | `7` | Free trial length for a newly signed-up gym |
-| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | — | Razorpay API credentials — billing is disabled until both are set |
-| `RAZORPAY_WEBHOOK_SECRET` | — | Verifies that `/api/platform/webhooks/razorpay` calls really come from Razorpay |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | — | Razorpay API credentials — billing is disabled until both are set. They also switch on members' in-app UPI payments (the Diet & Workout add-on and the store); without them the paywall falls back to the front desk, and a live store can be browsed but its checkout stays closed |
+| `RAZORPAY_WEBHOOK_SECRET` | — | Verifies that `/api/platform/webhooks/razorpay` calls really come from Razorpay. Subscribe the webhook to `order.paid` as well, so a member who closes the app mid-payment still gets what they paid for |
 | `RAZORPAY_PLAN_ID` | — | The single monthly plan created in the Razorpay dashboard |
 | `TRUST_PROXY` | `false` | Set to `true` only when actually deployed behind a reverse proxy — enables correct client IP/HTTPS detection |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MS` / `LOGIN_LOCKOUT_MS` | `5` / `900000` / `900000` | Failed-login lockout: attempts, window, lockout duration |

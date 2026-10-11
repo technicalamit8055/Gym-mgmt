@@ -49,6 +49,19 @@ import { createLimiter } from '../rateLimit.js';
 import { addDays, parse, today, toInt } from '../validate.js';
 import { moduleEnabled, requireModule } from '../verticals.js';
 import { gymDateOf } from '../clock.js';
+import {
+  createAddonCheckout,
+  createStoreCheckout,
+  findAddonPayment,
+  findStoreOrderByRazorpayId,
+  listMemberOrders,
+  portalMonetization,
+  settleAddonPayment,
+  settleStorePayment,
+  storeOrder,
+  storefront,
+} from '../monetization.js';
+import { verifyPaymentSignature } from '../razorpay.js';
 
 /**
  * Member self-service portal: the app a member/student signs into directly,
@@ -243,6 +256,9 @@ portalRoutes.get('/me', requireMemberAuth, (req, res) => {
       streak_days: attendanceStreak(member.id),
     },
     vertical: getBusinessType(),
+    // Which Store screen and which add-on paywall to draw — the operator's
+    // switches, already downgraded where online payments are not set up.
+    monetization: portalMonetization(),
   });
 });
 
@@ -460,7 +476,88 @@ function requireFitnessAccess(req, _res, next) {
 }
 
 portalRoutes.get('/fitness/status', requireMemberAuth, requireModule('fitness'), (req, res) => {
+  res.json({ ...fitnessAccessFor(req.member.id), monetization: portalMonetization() });
+});
+
+/* ── In-app payments: the add-on and the store ─────────────────────────── */
+
+/** What Checkout needs to prefill, read fresh rather than from the token. */
+function checkoutMember(memberId) {
+  return get('SELECT id, first_name, last_name, email, phone FROM members WHERE id = ?', [memberId]);
+}
+
+/**
+ * Checkout's success callback, checked. The signature proves Razorpay saw the
+ * payment; the ownership check stops one member settling (and so seeing)
+ * another member's order by replaying its ids.
+ */
+function verifiedPayment(req) {
+  const body = parse(req.body, {
+    razorpay_order_id: { type: 'string', required: true, max: 64 },
+    razorpay_payment_id: { type: 'string', required: true, max: 64 },
+    razorpay_signature: { type: 'string', required: true, max: 256 },
+  });
+  const ok = verifyPaymentSignature({
+    orderId: body.razorpay_order_id,
+    paymentId: body.razorpay_payment_id,
+    signature: body.razorpay_signature,
+  });
+  if (!ok) throw badRequest('We could not verify that payment. If money left your account, contact the gym.');
+  return { razorpayOrderId: body.razorpay_order_id, paymentId: body.razorpay_payment_id };
+}
+
+const ownsPurchase = (row, req) => row && row.tenant_slug === req.tenant.slug && row.member_id === req.member.id;
+
+portalRoutes.post('/fitness/checkout', requireMemberAuth, requireModule('fitness'), async (req, res) => {
+  const body = parse(req.body, { tier: { type: 'enum', values: ['1m', '3m', '6m'], required: true } });
+  res.status(201).json(
+    await createAddonCheckout({ tenantSlug: req.tenant.slug, member: checkoutMember(req.member.id), tier: body.tier }),
+  );
+});
+
+portalRoutes.post('/fitness/verify', requireMemberAuth, requireModule('fitness'), (req, res) => {
+  const payment = verifiedPayment(req);
+  if (!ownsPurchase(findAddonPayment(payment.razorpayOrderId), req)) throw notFound('No add-on purchase matches that payment');
+  settleAddonPayment(payment);
   res.json(fitnessAccessFor(req.member.id));
+});
+
+/** The storefront — catalogue, banners, delivery promise — empty unless the
+ * operator has opened the store. */
+portalRoutes.get('/store', requireMemberAuth, (req, res) => {
+  const front = storefront(req.tenant.slug);
+  res.json({
+    ...front,
+    // The delivery form starts from what the gym already has on file.
+    shipping:
+      front.status === 'live'
+        ? get("SELECT first_name || COALESCE(' ' || last_name, '') AS name, phone, address FROM members WHERE id = ?", [req.member.id])
+        : null,
+  });
+});
+
+portalRoutes.post('/store/checkout', requireMemberAuth, async (req, res) => {
+  res.status(201).json(
+    await createStoreCheckout({
+      tenantSlug: req.tenant.slug,
+      member: checkoutMember(req.member.id),
+      items: req.body?.items,
+      shipping: req.body?.shipping,
+      method: req.body?.method ?? 'delivery',
+    }),
+  );
+});
+
+portalRoutes.post('/store/verify', requireMemberAuth, (req, res) => {
+  const payment = verifiedPayment(req);
+  const order = findStoreOrderByRazorpayId(payment.razorpayOrderId);
+  if (!ownsPurchase(order, req)) throw notFound('No store order matches that payment');
+  settleStorePayment(payment);
+  res.json({ order: storeOrder(order.id) });
+});
+
+portalRoutes.get('/store/orders', requireMemberAuth, (req, res) => {
+  res.json({ items: listMemberOrders(req.tenant.slug, req.member.id) });
 });
 
 /**

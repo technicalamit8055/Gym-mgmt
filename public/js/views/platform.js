@@ -6,17 +6,19 @@ import {
   closeModal,
   confirmDialog,
   date,
+  emptyState,
   h,
   openModal,
   relativeDays,
   renderIcon,
-  stat,
   table,
   toast,
 } from '../ui.js';
+import { getAppMode, toggleAppMode } from '../vertical.js';
 import { checkSummary, dnsRecordsTable, domainStatusBadge } from './customDomains.js';
 import { renderCatalogSection } from './exerciseCatalog.js';
 import { renderFoodCatalogSection } from './foodCatalog.js';
+import { renderStoreAdminSection } from './storeAdmin.js';
 
 /**
  * Operator console — the view for whoever runs the platform, listing every
@@ -28,6 +30,8 @@ import { renderFoodCatalogSection } from './foodCatalog.js';
  */
 
 const STATUS_TONE = { active: 'green', trial: 'blue', suspended: 'red', cancelled: 'grey' };
+const STATUS_LABEL = { active: 'Active', trial: 'Trial', suspended: 'Suspended', cancelled: 'Cancelled' };
+const STATUS_ORDER = ['active', 'trial', 'suspended', 'cancelled'];
 const STATUSES = [
   { value: 'active', label: 'Active — paid, full access' },
   { value: 'trial', label: 'Trial — full access until the end date' },
@@ -59,6 +63,46 @@ const bytes = (n) => {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+const statusBadge = (status) =>
+  h('span', { class: `badge dot ${STATUS_TONE[status] || 'grey'}` }, STATUS_LABEL[status] || status);
+
+/** Two-letter monogram for a gym, tinted by business type, so a long list of
+ * names has something to scan down besides text. */
+function gymAvatar(row) {
+  const letters = String(row.gym_name || row.slug || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join('');
+  return h('span', { class: `op-avatar ${row.business_type === 'library' ? 'library' : 'gym'}`, 'aria-hidden': 'true' }, letters);
+}
+
+/**
+ * A console metric tile: label and a tinted icon on top, the figure, then an
+ * optional footer line. Its own markup rather than ui.js's stat() so the tone
+ * can follow what the number means (green for paying, blue for trial…)
+ * instead of every tile wearing the brand orange.
+ */
+function kpi(label, value, { icon, tone = 'blue', foot, onClick } = {}) {
+  return h(
+    onClick ? 'button' : 'div',
+    { class: `card op-kpi tone-${tone}${onClick ? ' clickable' : ''}`, type: onClick ? 'button' : null, onclick: onClick || null },
+    h(
+      'div',
+      { class: 'op-kpi-head' },
+      h('span', { class: 'op-kpi-label' }, label),
+      icon ? h('span', { class: 'op-kpi-icon' }, renderIcon(icon, { size: 17 })) : null,
+    ),
+    h('div', { class: 'op-kpi-value' }, value),
+    foot ? h('div', { class: 'op-kpi-foot' }, foot) : null,
+  );
+}
+
+/** A card title with its tinted icon tile, as every console card wears it. */
+const cardTitle = (icon, text, tone = 'blue') =>
+  h('div', { class: `op-card-title tone-${tone}` }, h('span', { class: 'head-icon' }, renderIcon(icon, { size: 17 })), h('h3', {}, text));
+
 function loginCard(rerender) {
   const form = buildForm(
     [
@@ -75,21 +119,52 @@ function loginCard(rerender) {
     },
   );
   form.querySelector('.modal-foot').remove();
-  form.append(h('button', { class: 'btn primary block', type: 'submit' }, 'Sign in'));
+  form.append(h('button', { class: 'btn primary block lg', type: 'submit' }, renderIcon('key', { size: 17 }), 'Sign in to the console'));
 
+  const mark = () => h('div', { class: 'login-logo-mark' }, renderIcon('wrench', { size: 20 }));
+  const point = (icon, text) => h('li', {}, h('span', { class: 'pt-icon' }, renderIcon(icon, { size: 16 })), text);
+
+  // The staff sign-in's split layout, so the console reads as part of the same
+  // product rather than a bare debug form.
   return h(
     'div',
-    { class: 'login' },
+    { class: 'auth op-auth' },
     h(
-      'div',
-      { class: 'login-card' },
-      h('h1', {}, renderIcon('wrench', { size: 22 }), 'Operator console'),
-      h('p', { class: 'sub' }, 'Platform-wide access to every gym on this deployment.'),
-      form,
+      'aside',
+      { class: 'auth-aside' },
+      h('div', { class: 'auth-brand' }, mark(), 'Operator console'),
       h(
         'div',
-        { class: 'row', style: 'margin-top:16px;justify-content:center' },
-        h('a', { class: 'btn sm ghost', href: '#/' }, renderIcon('arrowLeft', { size: 15 }), 'Back to the site'),
+        { class: 'auth-pitch' },
+        h('span', { class: 'op-eyebrow' }, renderIcon('shield', { size: 14 }), 'Restricted access'),
+        h('h2', {}, 'Every gym on the platform, in one place.'),
+        h('p', {}, 'Accounts, trials and billing status, custom domains, backups and the shared libraries every gym draws on.'),
+        h(
+          'ul',
+          { class: 'auth-points' },
+          point('building', 'Gym and library accounts at a glance'),
+          point('globe', 'Custom domains and DNS health'),
+          point('database', 'Backups you can run on demand'),
+          point('store', 'Store, add-ons and revenue share'),
+        ),
+      ),
+      h('div', { class: 'auth-foot' }, 'Gym staff sign in at their own address — this console is for the platform operator only.'),
+    ),
+    h(
+      'main',
+      { class: 'auth-main' },
+      h(
+        'div',
+        { class: 'auth-card' },
+        h('div', { class: 'auth-mobile-brand' }, mark(), 'Operator console'),
+        h('h1', {}, 'Welcome back'),
+        h('p', { class: 'sub' }, 'Sign in with the operator credentials set on this deployment.'),
+        form,
+        h(
+          'div',
+          { class: 'auth-alt' },
+          h('a', { href: '#/' }, renderIcon('arrowLeft', { size: 14 }), 'Back to the site'),
+        ),
       ),
     ),
   );
@@ -348,7 +423,7 @@ function domainsCard(tenant, domains, setup, { onChanged, refresh }) {
     h(
       'div',
       { class: 'card-head' },
-      h('h3', {}, `Custom domains (${domains.length})`),
+      cardTitle('globe', `Custom domains (${domains.length})`, 'blue'),
       h('div', { class: 'spacer' }),
       setup.enabled ? add : null,
     ),
@@ -443,25 +518,53 @@ async function renderDomainsSection(rerender) {
   const active = data.items.filter((d) => d.status === 'active').length;
   return h(
     'div',
-    {},
+    { class: 'op-stack' },
     h(
       'div',
-      { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
-      stat('Domains', data.total, `${active} live`),
-      stat('Waiting for DNS', data.total - active),
-      // Hostnames and IPs at stat-tile size wrap mid-word; set them smaller.
-      stat('CNAME target', h('span', { class: 'domain-stat-value' }, data.cname_target || '—'), data.enabled ? 'What gyms point at' : 'Not configured'),
-      stat('Root-domain IPs', h('span', { class: 'domain-stat-value' }, data.apex_ipv4?.length ? data.apex_ipv4.join(', ') : '—'), 'A records for root domains'),
+      { class: 'op-kpis' },
+      kpi('Connected domains', data.total, { icon: 'globe', tone: 'blue', foot: `${active} live` }),
+      kpi('Waiting for DNS', data.total - active, {
+        icon: 'hourglass',
+        tone: data.total - active ? 'amber' : 'green',
+        foot: data.total - active ? 'Not routing yet' : 'Nothing pending',
+      }),
+      // Hostnames and IPs at tile size wrap mid-word; set them smaller.
+      kpi('CNAME target', h('span', { class: 'op-kpi-mono' }, data.cname_target || '—'), {
+        icon: 'link',
+        tone: 'purple',
+        foot: data.enabled ? 'What gyms point at' : 'Not configured',
+      }),
+      kpi('Root-domain IPs', h('span', { class: 'op-kpi-mono' }, data.apex_ipv4?.length ? data.apex_ipv4.join(', ') : '—'), {
+        icon: 'layers',
+        tone: 'green',
+        foot: 'A records for root domains',
+      }),
     ),
     !data.enabled
       ? h(
         'div',
-        { class: 'card', style: 'margin-bottom:16px' },
-        h('p', { class: 'muted', style: 'margin:0' }, 'Custom domains are off. Set CUSTOM_DOMAIN_TARGET (and CUSTOM_DOMAIN_IPV4 for root domains), put an on-demand-TLS proxy in front, then restart — see docs/CUSTOM_DOMAINS.md.'),
+        { class: 'op-callout' },
+        renderIcon('info', { size: 18 }),
+        h(
+          'div',
+          {},
+          h('strong', {}, 'Custom domains are off on this deployment. '),
+          'Set CUSTOM_DOMAIN_TARGET (and CUSTOM_DOMAIN_IPV4 for root domains), put an on-demand-TLS proxy in front, then restart — see docs/CUSTOM_DOMAINS.md.',
+        ),
       )
       : null,
-    h('div', { class: 'toolbar' }, search),
-    h('div', { class: 'card', style: 'padding:6px 6px 14px' }, tableNode),
+    h(
+      'div',
+      { class: 'card op-table-card' },
+      h(
+        'div',
+        { class: 'op-table-head' },
+        cardTitle('globe', 'All domains', 'blue'),
+        h('div', { class: 'spacer' }),
+        search,
+      ),
+      tableNode,
+    ),
   );
 }
 
@@ -534,7 +637,14 @@ const bareUrl = (url) => String(url).replace(/^https?:\/\//, '');
  * and whether its integrations are live. */
 async function openDetailModal(row, onChanged) {
   const bodyNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
-  openModal({ title: row.gym_name, body: bodyNode, wide: true });
+  openModal({
+    title: row.gym_name,
+    subtitle: `${row.business_type === 'library' ? 'Library' : 'Gym'} · /g/${row.slug} · ${STATUS_LABEL[row.status] || row.status}`,
+    icon: 'building',
+    className: 'op-detail',
+    body: bodyNode,
+    wide: true,
+  });
 
   // Redrawn in place by the domain actions, so checking DNS keeps this open
   // on the gym instead of dropping the operator back on the list.
@@ -564,14 +674,28 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
       ? `Paired but ${whatsapp.state.toLowerCase()}`
       : 'Never linked';
 
+  const action = (icon, text, open, extra = '') =>
+    h('button', { class: `btn sm ${extra}`, type: 'button', onclick: () => { closeModal(); open(); } }, renderIcon(icon, { size: 15 }), text);
+
   clear(bodyNode).append(
     h(
       'div',
-      { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
-      stat('Active members', stats?.members ?? '—', `${stats?.members_total ?? 0} on the roster`),
-      stat('This month', amount(stats?.revenue_month, currency), 'Collected', { accent: true }),
-      stat('All time', amount(stats?.revenue_total, currency), 'Collected'),
-      stat('Visits 30d', stats?.visits_30d ?? '—'),
+      { class: 'op-detail-actions' },
+      action('edit', 'Edit details', () => openEditModal(tenant, onChanged)),
+      action('shield', 'Change status', () => openStatusModal(tenant, onChanged)),
+      action('key', 'Reset password', () => openPasswordResetModal(tenant)),
+      action('layers', 'Change type', () => openBusinessTypeModal(tenant, onChanged)),
+      h('div', { class: 'spacer' }),
+      h('a', { class: 'btn sm primary', href: url, target: '_blank', rel: 'noopener' }, 'Open gym', renderIcon('arrowRight', { size: 15 })),
+    ),
+
+    h(
+      'div',
+      { class: 'op-kpis compact' },
+      kpi('Active members', stats?.members ?? '—', { icon: 'members', tone: 'purple', foot: `${stats?.members_total ?? 0} on the roster` }),
+      kpi('This month', amount(stats?.revenue_month, currency), { icon: 'revenue', tone: 'green', foot: 'Collected' }),
+      kpi('All time', amount(stats?.revenue_total, currency), { icon: 'wallet', tone: 'amber', foot: 'Collected' }),
+      kpi('Visits', stats?.visits_30d ?? '—', { icon: 'activity', tone: 'blue', foot: 'Last 30 days' }),
     ),
 
     h(
@@ -581,7 +705,7 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
       h(
         'div',
         { class: 'card' },
-        h('div', { class: 'card-head' }, h('h3', {}, 'Account')),
+        h('div', { class: 'card-head' }, cardTitle('idCard', 'Account', 'blue')),
         h(
           'dl',
           { class: 'kv' },
@@ -590,7 +714,7 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
           ...(url !== platformUrl
             ? kv('Platform address', h('a', { href: platformUrl, target: '_blank', rel: 'noopener' }, bareUrl(platformUrl)))
             : []),
-          ...kv('Status', h('span', { class: `badge ${STATUS_TONE[tenant.status] || 'grey'}` }, tenant.status)),
+          ...kv('Status', statusBadge(tenant.status)),
           ...kv('Signed up', date(tenant.created_at)),
           ...kv('Currency', currency),
           ...kv('Timezone', tenant.timezone || h('span', { class: 'muted' }, 'server default')),
@@ -612,7 +736,7 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
       h(
         'div',
         { class: 'card' },
-        h('div', { class: 'card-head' }, h('h3', {}, `Staff (${detail?.staff?.length ?? 0})`)),
+        h('div', { class: 'card-head' }, cardTitle('staff', `Staff (${detail?.staff?.length ?? 0})`, 'purple')),
         table(
           [
             { label: 'Name', render: (s) => h('div', {}, s.name, h('div', { class: 'muted', style: 'font-size:12px' }, s.email)) },
@@ -631,7 +755,7 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
       h(
         'div',
         { class: 'card' },
-        h('div', { class: 'card-head' }, h('h3', {}, 'Recent payments')),
+        h('div', { class: 'card-head' }, cardTitle('billing', 'Recent payments', 'green')),
         table(
           [
             { label: 'Member', render: (p) => `${p.first_name} ${p.last_name || ''}`.trim() },
@@ -647,7 +771,7 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
       h(
         'div',
         { class: 'card' },
-        h('div', { class: 'card-head' }, h('h3', {}, 'Plans')),
+        h('div', { class: 'card-head' }, cardTitle('plans', 'Plans', 'amber')),
         table(
           [
             { label: 'Plan', render: (p) => p.name },
@@ -667,15 +791,29 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
       domainsCard(tenant, domains, domainSetup, { onChanged, refresh }),
     ),
 
+    // Set apart from the everyday actions above, so the one irreversible
+    // button is never a neighbour of "Edit details".
     h(
       'div',
-      { class: 'row', style: 'gap:8px;margin-top:16px;flex-wrap:wrap' },
-      h('button', { class: 'btn sm', onclick: () => { closeModal(); openEditModal(tenant, onChanged); } }, 'Edit details'),
-      h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openStatusModal(tenant, onChanged); } }, 'Change status'),
-      h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openPasswordResetModal(tenant); } }, 'Reset password'),
-      h('button', { class: 'btn sm ghost', onclick: () => { closeModal(); openBusinessTypeModal(tenant, onChanged); } }, 'Change type'),
-      h('div', { class: 'spacer', style: 'flex:1' }),
-      h('button', { class: 'btn sm danger', onclick: () => { closeModal(); openDeleteModal(tenant, onChanged); } }, 'Delete gym'),
+      { class: 'op-danger' },
+      h(
+        'div',
+        {},
+        h('div', { class: 'op-danger-title' }, 'Delete this gym'),
+        h(
+          'div',
+          { class: 'muted' },
+          tenant.status === 'cancelled'
+            ? 'Removes it from the registry and deletes its database. A final snapshot is archived first.'
+            : 'Only a cancelled gym can be deleted — change its status first.',
+        ),
+      ),
+      h(
+        'button',
+        { class: 'btn sm danger', type: 'button', onclick: () => { closeModal(); openDeleteModal(tenant, onChanged); } },
+        renderIcon('trash', { size: 15 }),
+        'Delete gym',
+      ),
     ),
   );
 }
@@ -762,13 +900,19 @@ function openPasswordResetModal(tenant) {
   });
 }
 
-function trialCell(tenant) {
-  if (!tenant.trial_ends_on) return h('span', { class: 'muted' }, '—');
-  const days = relativeDays(tenant.trial_ends_on);
-  if (tenant.status !== 'trial') return h('span', { class: 'muted' }, date(tenant.trial_ends_on));
-  if (days < 0) return h('span', { class: 'badge red' }, `Lapsed ${Math.abs(days)}d ago`);
-  if (days === 0) return h('span', { class: 'badge amber' }, 'Ends today');
-  return h('span', { class: `badge ${days <= 2 ? 'amber' : 'blue'}` }, `${days}d left`);
+/** The line under a gym's status badge: how long a trial has left, or why a
+ * suspended gym was suspended. Null when there is nothing to add. */
+function statusNote(tenant) {
+  if (tenant.status === 'trial' && tenant.trial_ends_on) {
+    const days = relativeDays(tenant.trial_ends_on);
+    if (days < 0) return h('div', { class: 'op-status-note op-note-red' }, `Lapsed ${Math.abs(days)}d ago`);
+    if (days === 0) return h('div', { class: 'op-status-note op-note-amber' }, 'Ends today');
+    return h('div', { class: `op-status-note${days <= 2 ? ' op-note-amber' : ''}`, title: `Ends ${date(tenant.trial_ends_on)}` }, `${days}d left`);
+  }
+  if (tenant.status === 'suspended' && tenant.suspended_reason) {
+    return h('div', { class: 'op-status-note', title: tenant.suspended_reason }, tenant.suspended_reason);
+  }
+  return null;
 }
 
 /**
@@ -780,24 +924,40 @@ function trialCell(tenant) {
  */
 function backupCard() {
   const listNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
-  const meta = h('div', { class: 'muted', style: 'font-size:12px' });
+  const meta = h('div', { class: 'op-pills' });
   const run = h('button', { class: 'btn sm primary' }, renderIcon('refresh', { size: 15 }), 'Back up now');
+  const pill = (icon, text) => h('span', { class: 'op-pill' }, renderIcon(icon, { size: 13 }), text);
 
   const load = async () => {
     try {
       const data = await api.platformBackups();
-      meta.textContent = `Every ${data.interval_hours || 0}h · keeping ${data.keep} · ${data.offsite ? 'off-site copy configured' : 'this machine only'
-        }`;
+      clear(meta).append(
+        // 0 switches the built-in timer off in favour of an external scheduler.
+        pill('history', data.interval_hours ? `Every ${data.interval_hours}h` : 'No built-in schedule'),
+        pill('layers', `Keeping ${data.keep}`),
+        pill(data.offsite ? 'globe' : 'database', data.offsite ? 'Off-site copy on' : 'This machine only'),
+      );
       clear(listNode).append(
-        table(
-          [
-            { label: 'Taken', render: (b) => date(b.taken_at, { withTime: true }) },
-            { label: 'Databases', align: 'right', render: (b) => b.databases },
-            { label: 'Size', align: 'right', render: (b) => bytes(b.bytes) },
-          ],
-          data.items,
-          { empty: 'No backups taken yet' },
-        ),
+        data.items.length
+          ? h(
+            'div',
+            { class: 'op-list' },
+            ...data.items.slice(0, 5).map((b, i) =>
+              h(
+                'div',
+                { class: 'op-list-row' },
+                h('span', { class: `op-list-icon ${i === 0 ? 'tone-green' : 'tone-blue'}` }, renderIcon(i === 0 ? 'checkCircle' : 'database', { size: 15 })),
+                h(
+                  'div',
+                  { class: 'op-list-main' },
+                  h('div', { class: 'op-list-title' }, date(b.taken_at, { withTime: true })),
+                  h('div', { class: 'op-list-note' }, `${b.databases} database${b.databases === 1 ? '' : 's'}${i === 0 ? ' · latest' : ''}`),
+                ),
+                h('span', { class: 'op-list-aside' }, bytes(b.bytes)),
+              ),
+            ),
+          )
+          : emptyState('Run one now, or schedule them with BACKUP_INTERVAL_HOURS.', { icon: 'database', title: 'No backups taken yet' }),
       );
     } catch (err) {
       clear(listNode).append(h('div', { class: 'empty' }, err.message || 'Could not load backups'));
@@ -806,7 +966,7 @@ function backupCard() {
 
   run.onclick = async () => {
     run.disabled = true;
-    run.textContent = 'Backing up…';
+    clear(run).append(renderIcon('refresh', { size: 15, class: 'spin' }), 'Backing up…');
     try {
       const summary = await api.platformRunBackup();
       if (summary.errors?.length) {
@@ -830,51 +990,298 @@ function backupCard() {
   return h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-head' }, h('h3', {}, 'Backups'), h('div', { class: 'spacer' }), run),
+    h('div', { class: 'card-head' }, cardTitle('database', 'Backups', 'green'), h('div', { class: 'spacer' }), run),
     meta,
-    h('div', { style: 'margin-top:10px' }, listNode),
+    h('div', { style: 'margin-top:14px' }, listNode),
   );
 }
 
-/** Which half of the console is showing. Module state, so it survives the
- * full re-render every action here triggers. */
-let consoleSection = 'gyms';
+/**
+ * The gyms that want the operator today: trials about to lapse or already
+ * lapsed, suspensions, unreadable databases and domains stuck on DNS. Worst
+ * first, so the top of the card is always the most urgent thing.
+ */
+function attentionItems(rows) {
+  const items = [];
+  for (const row of rows) {
+    if (!row.stats) {
+      items.push({ row, tone: 'red', icon: 'alert', title: 'Database could not be read', note: 'Stats failed to load — check the server log' });
+    }
+    if (row.status === 'trial' && row.trial_ends_on) {
+      const days = relativeDays(row.trial_ends_on);
+      if (days < 0) {
+        items.push({ row, tone: 'red', icon: 'hourglass', title: `Trial lapsed ${Math.abs(days)}d ago`, note: 'Extend it or move the gym to active' });
+      } else if (days <= 3) {
+        items.push({ row, tone: 'amber', icon: 'hourglass', title: days === 0 ? 'Trial ends today' : `Trial ends in ${days}d`, note: `Ends ${date(row.trial_ends_on)}` });
+      }
+    }
+    if (row.status === 'suspended') {
+      items.push({ row, tone: 'red', icon: 'ban', title: 'Suspended', note: row.suspended_reason || 'No reason recorded' });
+    }
+    for (const domain of row.custom_domains ?? []) {
+      if (domain.status !== 'active') {
+        items.push({ row, tone: 'amber', icon: 'globe', title: `${domain.hostname} waiting for DNS`, note: 'Custom domain is not routing yet' });
+      }
+    }
+  }
+  const rank = { red: 0, amber: 1 };
+  return items.sort((a, b) => rank[a.tone] - rank[b.tone]);
+}
 
-function consoleHeader(rerender) {
-  const tab = (section, text) =>
-    h(
-      'button',
-      {
-        class: `btn sm ${consoleSection === section ? 'primary' : 'ghost'}`,
-        type: 'button',
-        onclick: async () => {
-          consoleSection = section;
-          await rerender();
-        },
-      },
-      text,
-    );
-
+function attentionCard(rows, onOpen) {
+  const items = attentionItems(rows);
+  const shown = items.slice(0, 6);
   return h(
-    'header',
-    { class: 'landing-top' },
-    h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('wrench', { size: 18 })), 'Operator console'),
-    h('div', { class: 'row', style: 'gap:6px;margin-left:16px' }, tab('gyms', 'Gyms'), tab('domains', 'Domains'), tab('catalog', 'Exercise library'), tab('foods', 'Food library')),
-    h('div', { class: 'spacer' }),
-    h('a', { class: 'btn sm ghost', href: '#/' }, 'Site'),
+    'div',
+    { class: 'card' },
     h(
-      'button',
-      {
-        class: 'btn sm ghost',
-        onclick: async () => {
-          platformSession.clear();
-          await rerender();
-        },
-      },
-      'Sign out',
+      'div',
+      { class: 'card-head' },
+      cardTitle('bell', 'Needs attention', items.length ? 'amber' : 'green'),
+      h('div', { class: 'spacer' }),
+      items.length ? h('span', { class: 'badge amber' }, `${items.length} open`) : null,
+    ),
+    items.length
+      ? h(
+        'div',
+        { class: 'op-list' },
+        ...shown.map((item) =>
+          h(
+            'button',
+            { class: 'op-list-row interactive', type: 'button', onclick: () => onOpen(item.row) },
+            h('span', { class: `op-list-icon tone-${item.tone}` }, renderIcon(item.icon, { size: 15 })),
+            h(
+              'div',
+              { class: 'op-list-main' },
+              h('div', { class: 'op-list-title' }, item.row.gym_name),
+              h('div', { class: 'op-list-note' }, h('span', { class: `op-note-${item.tone}` }, item.title), ` · ${item.note}`),
+            ),
+            renderIcon('chevronRight', { size: 16, class: 'op-list-chevron' }),
+          ),
+        ),
+        items.length > shown.length
+          ? h('div', { class: 'op-list-more' }, `+ ${items.length - shown.length} more`)
+          : null,
+      )
+      : emptyState('No lapsing trials, suspensions or stuck domains.', { icon: 'checkCircle', title: 'All clear' }),
+  );
+}
+
+/** One bar split by status, with a clickable legend that filters the list. */
+function statusMixCard(counts, total, onPick) {
+  return h(
+    'div',
+    { class: 'card op-mix' },
+    h('div', { class: 'card-head' }, cardTitle('activity', 'Account status', 'purple')),
+    h('div', { class: 'op-mix-total' }, h('strong', {}, total), h('span', { class: 'muted' }, total === 1 ? 'account' : 'accounts')),
+    h(
+      'div',
+      { class: 'op-mix-bar', role: 'img', 'aria-label': STATUS_ORDER.map((s) => `${STATUS_LABEL[s]} ${counts[s] || 0}`).join(', ') },
+      ...(total
+        ? STATUS_ORDER.filter((s) => counts[s]).map((s) =>
+          h('span', { class: `op-mix-seg ${STATUS_TONE[s]}`, style: `flex:${counts[s]}`, title: `${STATUS_LABEL[s]}: ${counts[s]}` }),
+        )
+        : [h('span', { class: 'op-mix-seg empty', style: 'flex:1' })]),
+    ),
+    h(
+      'div',
+      { class: 'op-mix-legend' },
+      ...STATUS_ORDER.map((s) =>
+        h(
+          'button',
+          { class: 'op-mix-row', type: 'button', title: `Show ${STATUS_LABEL[s].toLowerCase()} accounts`, onclick: () => onPick(s) },
+          h('span', { class: `op-mix-dot ${STATUS_TONE[s]}` }),
+          h('span', { class: 'op-mix-label' }, STATUS_LABEL[s]),
+          h('span', { class: 'op-mix-count' }, counts[s] || 0),
+          h('span', { class: 'op-mix-pct' }, total ? `${Math.round(((counts[s] || 0) / total) * 100)}%` : '—'),
+        ),
+      ),
     ),
   );
 }
+
+/** Which page of the console is showing. Module state, so it survives the
+ * full re-render every action here triggers. */
+let consoleSection = 'gyms';
+
+const SECTIONS = [
+  {
+    id: 'gyms',
+    group: 'Platform',
+    icon: 'building',
+    label: 'Gyms',
+    title: 'Gyms & libraries',
+    sub: 'Every account on this deployment — status, trials, members and what they collected.',
+  },
+  {
+    id: 'domains',
+    group: 'Platform',
+    icon: 'globe',
+    label: 'Domains',
+    title: 'Custom domains',
+    sub: 'Every gym’s connected domains, and whether their DNS checks out.',
+  },
+  {
+    id: 'catalog',
+    group: 'Content',
+    icon: 'barbell',
+    label: 'Exercise library',
+    title: 'Exercise library',
+    sub: 'The shared catalogue behind every gym’s workout logger.',
+  },
+  {
+    id: 'foods',
+    group: 'Content',
+    icon: 'apple',
+    label: 'Food library',
+    title: 'Food library',
+    sub: 'The food database every member’s diet tracker searches.',
+  },
+  {
+    id: 'store',
+    group: 'Revenue',
+    icon: 'store',
+    label: 'Store & monetization',
+    title: 'Store & monetization',
+    sub: 'The member store, the Diet & Workout add-on and each gym’s revenue share.',
+  },
+];
+
+/**
+ * The console's frame: a sidebar of sections on the left (a sticky strip of
+ * tabs on a phone) and a page header naming where you are. Every section
+ * renders inside it, so they all share one chrome.
+ */
+function consoleShell(rerender, body, { actions = [] } = {}) {
+  const current = SECTIONS.find((s) => s.id === consoleSection) || SECTIONS[0];
+
+  const go = async (id) => {
+    if (id === consoleSection) return;
+    consoleSection = id;
+    window.scrollTo(0, 0);
+    await rerender();
+  };
+
+  const signOut = async () => {
+    platformSession.clear();
+    await rerender();
+  };
+
+  // Two copies of the theme switch (sidebar footer, phone header) — each
+  // repaints both, so they never disagree about which mode is on.
+  const painters = [];
+  const modeButton = (compact) => {
+    const button = h('button', {
+      class: compact ? 'btn sm ghost icon-only' : 'btn sm ghost',
+      type: 'button',
+      title: 'Switch between light and dark',
+    });
+    const paint = () => {
+      const light = getAppMode() === 'light';
+      clear(button).append(renderIcon(light ? 'moon' : 'sun', { size: 15 }));
+      if (!compact) button.append(light ? 'Dark' : 'Light');
+      button.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+    };
+    button.onclick = () => {
+      toggleAppMode();
+      painters.forEach((p) => p());
+    };
+    painters.push(paint);
+    paint();
+    return button;
+  };
+
+  const groups = [...new Set(SECTIONS.map((s) => s.group))];
+
+  return h(
+    'div',
+    { class: 'console op-shell' },
+    h(
+      'aside',
+      { class: 'op-side' },
+      h(
+        'div',
+        { class: 'op-side-brand' },
+        h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('wrench', { size: 18 })), h('div', { class: 'op-brand-text' }, h('span', {}, 'Operator'), h('small', {}, 'Platform console'))),
+        h(
+          'div',
+          { class: 'op-side-quick' },
+          modeButton(true),
+          h('button', { class: 'btn sm ghost icon-only', type: 'button', title: 'Sign out', 'aria-label': 'Sign out', onclick: signOut }, renderIcon('logout', { size: 15 })),
+        ),
+      ),
+      h(
+        'nav',
+        { class: 'op-nav', 'aria-label': 'Console sections' },
+        ...groups.map((group) => [
+          h('div', { class: 'nav-section' }, group),
+          ...SECTIONS.filter((s) => s.group === group).map((s) =>
+            h(
+              'button',
+              {
+                class: `nav-link${s.id === current.id ? ' active' : ''}`,
+                type: 'button',
+                'aria-current': s.id === current.id ? 'page' : null,
+                onclick: () => go(s.id),
+              },
+              h('span', { class: 'icon' }, renderIcon(s.icon, { size: 18 })),
+              h('span', {}, s.label),
+            ),
+          ),
+        ]),
+      ),
+      h(
+        'div',
+        { class: 'op-side-foot' },
+        h(
+          'div',
+          { class: 'sidebar-user' },
+          h('span', { class: 'op-user-mark' }, renderIcon('shield', { size: 16 })),
+          h('div', { class: 'sidebar-user-meta' }, h('div', { class: 'sidebar-user-name' }, 'Platform operator'), h('div', { class: 'sidebar-user-role' }, 'Full access')),
+        ),
+        h(
+          'div',
+          { class: 'sidebar-actions' },
+          modeButton(false),
+          h('a', { class: 'btn sm ghost', href: '#/' }, renderIcon('home', { size: 15 }), 'Site'),
+          h('button', { class: 'btn sm ghost op-signout', type: 'button', onclick: signOut }, renderIcon('logout', { size: 15 }), 'Sign out'),
+        ),
+      ),
+    ),
+    h(
+      'main',
+      { class: 'op-main' },
+      h(
+        'header',
+        { class: 'op-page-head' },
+        h(
+          'div',
+          { class: 'op-page-title' },
+          h('span', { class: 'op-eyebrow' }, renderIcon(current.icon, { size: 14 }), current.group),
+          h('h1', {}, current.title),
+          h('p', {}, current.sub),
+        ),
+        actions.length ? h('div', { class: 'op-page-actions' }, ...actions) : null,
+      ),
+      h('div', { class: 'op-body' }, body),
+    ),
+  );
+}
+
+const refreshButton = (rerender) =>
+  h(
+    'button',
+    {
+      class: 'btn sm',
+      type: 'button',
+      onclick: async (event) => {
+        event.currentTarget.disabled = true;
+        await rerender();
+      },
+    },
+    renderIcon('refreshCw', { size: 15 }),
+    'Refresh',
+  );
 
 export async function renderPlatformConsole({ context, rerender }) {
   if (!context.platform_admin) {
@@ -897,41 +1304,14 @@ export async function renderPlatformConsole({ context, rerender }) {
 
   if (!platformSession.token) return loginCard(rerender);
 
-  if (consoleSection === 'catalog') {
-    return h(
-      'div',
-      { class: 'console' },
-      consoleHeader(rerender),
-      h(
-        'div',
-        { class: 'console-body' },
-        renderCatalogSection({
-          onExpired: async () => {
-            platformSession.clear();
-            await rerender();
-          },
-        }),
-      ),
-    );
-  }
+  const onExpired = async () => {
+    platformSession.clear();
+    await rerender();
+  };
 
-  if (consoleSection === 'foods') {
-    return h(
-      'div',
-      { class: 'console' },
-      consoleHeader(rerender),
-      h(
-        'div',
-        { class: 'console-body' },
-        renderFoodCatalogSection({
-          onExpired: async () => {
-            platformSession.clear();
-            await rerender();
-          },
-        }),
-      ),
-    );
-  }
+  if (consoleSection === 'catalog') return consoleShell(rerender, renderCatalogSection({ onExpired }));
+  if (consoleSection === 'foods') return consoleShell(rerender, renderFoodCatalogSection({ onExpired }));
+  if (consoleSection === 'store') return consoleShell(rerender, renderStoreAdminSection({ onExpired }));
 
   if (consoleSection === 'domains') {
     let section;
@@ -944,7 +1324,7 @@ export async function renderPlatformConsole({ context, rerender }) {
       }
       throw err;
     }
-    return h('div', { class: 'console' }, consoleHeader(rerender), h('div', { class: 'console-body' }, section));
+    return consoleShell(rerender, section, { actions: [refreshButton(rerender)] });
   }
 
   let data;
@@ -970,6 +1350,12 @@ export async function renderPlatformConsole({ context, rerender }) {
     return acc;
   }, {});
 
+  const businessTypeCounts = data.items.reduce((acc, row) => {
+    const key = row.business_type || 'gym';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
   // Rolled up from the rows already fetched rather than a second server pass.
   // Bucketed by currency because summing gyms billed in different ones would
   // produce a number that means nothing.
@@ -989,6 +1375,7 @@ export async function renderPlatformConsole({ context, rerender }) {
 
   const state = { q: '', status: '', businessType: '', sort: 'created:desc' };
   const tableNode = h('div', {});
+  const countNode = h('span', { class: 'badge grey' });
 
   const SORTS = {
     'created:desc': (a, b) => String(b.created_at).localeCompare(String(a.created_at)),
@@ -999,53 +1386,56 @@ export async function renderPlatformConsole({ context, rerender }) {
     'visits:desc': (a, b) => (b.stats?.visits_30d ?? -1) - (a.stats?.visits_30d ?? -1),
   };
 
+  const rowAction = (icon, title, run) =>
+    h(
+      'button',
+      {
+        class: 'btn sm ghost icon-only',
+        type: 'button',
+        title,
+        'aria-label': title,
+        onclick: (e) => {
+          e.stopPropagation();
+          run();
+        },
+      },
+      renderIcon(icon, { size: 15 }),
+    );
+
   const columns = [
     {
-      label: 'Gym',
+      label: 'Account',
       render: (row) =>
         h(
           'div',
-          {},
+          { class: 'op-gym' },
+          gymAvatar(row),
           h(
             'div',
-            { class: 'row', style: 'gap:6px' },
-            h('span', { style: 'font-weight:600' }, row.gym_name),
-            h('span', { class: `badge ${row.business_type === 'library' ? 'blue' : 'grey'}` }, row.business_type === 'library' ? 'Library' : 'Gym'),
-          ),
-          h(
-            'a',
-            {
-              class: 'muted',
-              style: 'font-size:12px',
-              href: gymPathUrl(row.slug),
-              onclick: (e) => e.stopPropagation(),
-            },
-            `/g/${row.slug}`,
-          ),
-          ...(row.custom_domains ?? []).map((domain) =>
+            { class: 'op-gym-text' },
+            h('div', { class: 'op-gym-name' }, row.gym_name),
             h(
               'div',
-              { class: 'muted', style: 'font-size:12px', title: domain.status === 'active' ? 'Live custom domain' : 'Custom domain waiting for DNS' },
-              renderIcon('globe', { size: 12 }),
-              ` ${domain.hostname}`,
-              domain.status === 'active' ? null : h('span', { class: 'badge amber', style: 'margin-left:6px' }, 'DNS'),
+              { class: 'op-gym-meta' },
+              h('a', { href: gymPathUrl(row.slug), onclick: (e) => e.stopPropagation() }, `/g/${row.slug}`),
+              h('span', {}, row.business_type === 'library' ? 'Library' : 'Gym'),
+            ),
+            ...(row.custom_domains ?? []).map((domain) =>
+              h(
+                'div',
+                { class: 'op-gym-domain', title: domain.status === 'active' ? 'Live custom domain' : 'Custom domain waiting for DNS' },
+                renderIcon('globe', { size: 12 }),
+                domain.hostname,
+                domain.status === 'active' ? null : h('span', { class: 'badge amber' }, 'DNS'),
+              ),
             ),
           ),
         ),
     },
     {
       label: 'Status',
-      render: (row) =>
-        h(
-          'div',
-          { class: 'wrap', style: 'gap:6px' },
-          h('span', { class: `badge ${STATUS_TONE[row.status] || 'grey'}` }, row.status),
-          row.suspended_reason && row.status === 'suspended'
-            ? h('span', { class: 'muted', style: 'font-size:12px' }, row.suspended_reason)
-            : null,
-        ),
+      render: (row) => h('div', { class: 'op-status-cell' }, statusBadge(row.status), statusNote(row)),
     },
-    { label: 'Trial', render: trialCell },
     {
       label: 'Members',
       align: 'right',
@@ -1054,43 +1444,47 @@ export async function renderPlatformConsole({ context, rerender }) {
     {
       label: 'This month',
       align: 'right',
-      render: (row) => (row.stats ? amount(row.stats.revenue_month, row.currency) : '—'),
+      render: (row) => (row.stats ? h('strong', {}, amount(row.stats.revenue_month, row.currency)) : '—'),
     },
     { label: 'Visits 30d', align: 'right', render: (row) => row.stats?.visits_30d ?? '—' },
-    { label: 'Created', render: (row) => h('span', { class: 'muted' }, date(row.created_at)) },
+    { label: 'Joined', render: (row) => h('span', { class: 'muted op-nowrap' }, date(row.created_at)) },
     {
       label: '',
       align: 'right',
       render: (row) =>
         h(
           'div',
-          { class: 'row', style: 'gap:6px;justify-content:flex-end' },
-          h(
-            'button',
-            {
-              class: 'btn sm ghost',
-              onclick: (e) => {
-                e.stopPropagation();
-                openStatusModal(row, rerender);
-              },
-            },
-            'Status',
-          ),
-          h(
-            'button',
-            {
-              class: 'btn sm ghost',
-              title: 'Issue a one-time password reset link for this gym',
-              onclick: (e) => {
-                e.stopPropagation();
-                openPasswordResetModal(row);
-              },
-            },
-            'Reset password',
-          ),
+          { class: 'op-row-actions' },
+          rowAction('shield', 'Change status', () => openStatusModal(row, rerender)),
+          rowAction('key', 'Issue a password reset link', () => openPasswordResetModal(row)),
+          renderIcon('chevronRight', { size: 16, class: 'op-row-chevron' }),
         ),
     },
   ];
+
+  const statusTabs = h('div', { class: 'filter-tabs op-status-tabs', role: 'tablist' });
+  const drawTabs = () => {
+    clear(statusTabs).append(
+      ...[['', 'All', data.total], ...STATUS_ORDER.map((s) => [s, STATUS_LABEL[s], counts[s] || 0])].map(([value, text, n]) =>
+        h(
+          'button',
+          {
+            class: `filter-tab${state.status === value ? ' active' : ''}`,
+            type: 'button',
+            role: 'tab',
+            'aria-selected': String(state.status === value),
+            onclick: () => {
+              state.status = value;
+              drawTabs();
+              draw();
+            },
+          },
+          text,
+          h('span', { class: 'op-tab-count' }, n),
+        ),
+      ),
+    );
+  };
 
   const draw = () => {
     const needle = state.q.toLowerCase();
@@ -1106,71 +1500,43 @@ export async function renderPlatformConsole({ context, rerender }) {
       )
       .sort(SORTS[state.sort]);
 
+    countNode.textContent = rows.length === data.items.length ? `${rows.length}` : `${rows.length} of ${data.items.length}`;
     clear(tableNode).append(
       table(columns, rows, {
         onRowClick: (row) => openDetailModal(row, rerender),
-        empty: state.q || state.status || state.businessType ? 'No gym matches that' : 'No gyms have signed up yet',
+        empty: state.q || state.status || state.businessType ? 'No account matches those filters' : 'No gyms have signed up yet',
       }),
     );
-    // Appended separately rather than as a `cond ? node : null` argument above:
-    // clear() hands back the element, so that .append() is the DOM's own, which
-    // renders a null as the literal text "null".
-    if (rows.length && rows.length !== data.items.length) {
-      tableNode.append(
-        h(
-          'div',
-          { class: 'muted', style: 'font-size:12px;padding:10px 12px 0' },
-          `${rows.length} of ${data.items.length} gyms`,
-        ),
-      );
-    }
   };
 
   const search = h('input', {
     class: 'search',
     type: 'search',
-    placeholder: 'Search by gym name, address or domain…',
+    placeholder: 'Search name, address or domain…',
   });
   search.addEventListener('input', () => {
     state.q = search.value.trim();
     draw();
   });
 
-  const statusFilter = h(
-    'select',
-    {
-      onchange: (e) => {
-        state.status = e.target.value;
-        draw();
-      },
-    },
-    h('option', { value: '' }, 'Any status'),
-    ...['active', 'trial', 'suspended', 'cancelled'].map((s) =>
-      h('option', { value: s }, `${s[0].toUpperCase()}${s.slice(1)} (${counts[s] || 0})`),
-    ),
-  );
-
-  const businessTypeCounts = data.items.reduce((acc, row) => {
-    const key = row.business_type || 'gym';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
   const businessTypeFilter = h(
     'select',
     {
+      'aria-label': 'Business type',
       onchange: (e) => {
         state.businessType = e.target.value;
         draw();
       },
     },
-    h('option', { value: '' }, 'Gym + Library'),
-    h('option', { value: 'gym' }, `Gym (${businessTypeCounts.gym || 0})`),
-    h('option', { value: 'library' }, `Library (${businessTypeCounts.library || 0})`),
+    h('option', { value: '' }, 'All types'),
+    h('option', { value: 'gym' }, `Gyms (${businessTypeCounts.gym || 0})`),
+    h('option', { value: 'library' }, `Libraries (${businessTypeCounts.library || 0})`),
   );
 
   const sortSelect = h(
     'select',
     {
+      'aria-label': 'Sort',
       onchange: (e) => {
         state.sort = e.target.value;
         draw();
@@ -1184,54 +1550,90 @@ export async function renderPlatformConsole({ context, rerender }) {
     h('option', { value: 'visits:desc' }, 'Most visits'),
   );
 
+  drawTabs();
   draw();
 
-  const signups = (analytics?.signups_by_month ?? []).map((point) => ({
-    label: point.month.slice(5),
-    value: point.count,
-  }));
-
-  return h(
+  const directory = h(
     'div',
-    { class: 'console' },
-    consoleHeader(rerender),
-
+    { class: 'card op-table-card' },
     h(
       'div',
-      { class: 'console-body' },
+      { class: 'op-table-head' },
+      cardTitle('building', 'All accounts', 'blue'),
+      countNode,
+      h('div', { class: 'spacer' }),
+      statusTabs,
+    ),
+    h('div', { class: 'op-table-tools' }, search, businessTypeFilter, sortSelect),
+    tableNode,
+  );
+
+  const pickStatus = (status) => {
+    state.status = status;
+    drawTabs();
+    draw();
+    directory.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const signups = (analytics?.signups_by_month ?? []).map((point) => ({
+    label: new Date(`${point.month}-01T00:00:00`).toLocaleString(undefined, { month: 'short' }),
+    value: point.count,
+  }));
+  const signupTotal = signups.reduce((sum, point) => sum + point.value, 0);
+  const paying = counts.active || 0;
+
+  return consoleShell(
+    rerender,
+    h(
+      'div',
+      { class: 'op-stack' },
       h(
         'div',
-        { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
-        stat('Gyms', data.total, `${counts.trial || 0} on trial`),
-        stat('Active', counts.active || 0, 'Paying', { accent: true }),
-        stat('Members', totalMembers, 'Active, platform-wide'),
-        stat('Collected', revenueLabel, 'This month, across all gyms'),
+        { class: 'op-kpis' },
+        kpi('Accounts', data.total, {
+          icon: 'building',
+          tone: 'blue',
+          foot: `${businessTypeCounts.gym || 0} gyms · ${businessTypeCounts.library || 0} libraries`,
+        }),
+        kpi('Paying', paying, {
+          icon: 'checkCircle',
+          tone: 'green',
+          foot: data.total ? `${Math.round((paying / data.total) * 100)}% of accounts · ${counts.trial || 0} on trial` : 'No accounts yet',
+          onClick: () => pickStatus('active'),
+        }),
+        kpi('Active members', totalMembers.toLocaleString(), { icon: 'members', tone: 'purple', foot: 'Across every account' }),
+        kpi('Collected', revenueLabel, { icon: 'revenue', tone: 'amber', foot: 'This month, all accounts' }),
       ),
 
       h(
         'div',
-        { class: 'grid cols-2', style: 'gap:16px;margin-bottom:16px' },
+        { class: 'op-split' },
         h(
           'div',
           { class: 'card' },
-          h('div', { class: 'card-head' }, h('h3', {}, 'Signups')),
+          h(
+            'div',
+            { class: 'card-head' },
+            cardTitle('trendUp', 'New signups', 'blue'),
+            h('div', { class: 'spacer' }),
+            h('span', { class: 'muted op-head-note' }, signups.length ? `${signupTotal} in the last ${signups.length} months` : ''),
+          ),
           signups.length
-            ? barChart(signups, { height: 150 })
-            : h('div', { class: 'empty' }, 'No signup history yet'),
+            ? barChart(signups, { height: 190 })
+            : emptyState('Signups appear here month by month.', { icon: 'trendUp', title: 'No signup history yet' }),
         ),
-        backupCard(),
+        statusMixCard(counts, data.total, pickStatus),
       ),
 
       h(
         'div',
-        { class: 'toolbar' },
-        search,
-        statusFilter,
-        businessTypeFilter,
-        sortSelect,
+        { class: 'op-split even' },
+        attentionCard(data.items, (row) => openDetailModal(row, rerender)),
+        backupCard(),
       ),
 
-      h('div', { class: 'card', style: 'padding:6px 6px 14px' }, tableNode),
+      directory,
     ),
+    { actions: [refreshButton(rerender)] },
   );
 }

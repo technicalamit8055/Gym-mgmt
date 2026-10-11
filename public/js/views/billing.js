@@ -17,6 +17,8 @@ import {
 } from '../ui.js';
 import { openMembershipForm, openPaymentForm } from './forms.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
+import { isLibrary } from '../vertical.js';
+import { renderStoreHub } from './storeHub.js';
 
 /** Membership filter → [dot tone, caption under the "listed" count]. */
 const FILTERS = {
@@ -183,7 +185,10 @@ export async function renderBilling({ setActions, reload }) {
     ...[
       ['memberships', 'Memberships', 'users'],
       ['payments', 'Payments', 'card'],
-    ].map(([key, label, icon]) =>
+      // The store and the fitness add-on are gym products; a library has
+      // neither, so it has nothing to earn commission on.
+      isLibrary() ? null : ['store', 'Store & Commissions', 'bag'],
+    ].filter(Boolean).map(([key, label, icon]) =>
       h(
         'button',
         {
@@ -560,10 +565,17 @@ export async function renderBilling({ setActions, reload }) {
       h('div', { style: 'flex:1' }),
       ...(state.tab === 'memberships'
         ? [filterControl]
-        : [labelledControl('From', dateFrom), labelledControl('to', dateTo)]),
+        : state.tab === 'payments'
+          ? [labelledControl('From', dateFrom), labelledControl('to', dateTo)]
+          : []),
     );
     clear(body).append(h('div', { class: 'empty' }, 'Loading…'));
-    const view = state.tab === 'memberships' ? await renderMemberships() : await renderPayments();
+    const view =
+      state.tab === 'memberships'
+        ? await renderMemberships()
+        : state.tab === 'payments'
+          ? await renderPayments()
+          : await renderStoreHub({ billStat });
     clear(body).append(view);
   }
 
