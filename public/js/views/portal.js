@@ -25,7 +25,7 @@ import {
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { cropAndResizeImage } from '../photo.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
-import { renderLiveStore } from './portalStore.js';
+import { createOrdersNav, orderCard, orderClosed, renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
@@ -8329,7 +8329,7 @@ function renderPortalApp(ctx, initialMe) {
   /* --------------------------------------------------------- Notifications */
 
   /** /api/portal/notifications/config, once per portal instance (refreshed by
-   * the Profile tab). Null until it lands — enabling needs its public key. */
+   * the Notifications & Sounds screen). Null until it lands — enabling needs its public key. */
   let pushConfig = null;
   let unread = 0;
   const bellBadge = h('span', { class: 'portal-bell-badge', hidden: true });
@@ -8678,10 +8678,11 @@ function renderPortalApp(ctx, initialMe) {
     unsupported: { title: 'Notifications unavailable', sub: 'This browser cannot receive notifications. Try Chrome, Edge or Safari.' },
   };
 
-  /** Profile's Notifications card: this device's on/off state, then what to
-   * hear about. The category switches are the member's, not the device's —
-   * they apply to every phone the member has turned notifications on for. */
-  async function notificationSection() {
+  /** The Notifications card on the Notifications & Sounds screen: this
+   * device's on/off state, then what to hear about. The category switches are
+   * the member's, not the device's — they apply to every phone the member has
+   * turned notifications on for. `repaint` redraws the screen after a change. */
+  async function notificationSection(repaint) {
     let config;
     try {
       config = await loadPushConfig({ refresh: true });
@@ -8699,7 +8700,7 @@ function renderPortalApp(ctx, initialMe) {
       } catch (err) {
         toast(err.message || 'Could not save', 'error');
       }
-      switchTab('profile');
+      repaint();
     };
 
     let deviceRow;
@@ -8721,7 +8722,7 @@ function renderPortalApp(ctx, initialMe) {
           } else {
             await turnOnPush();
           }
-          switchTab('profile');
+          repaint();
         }),
       });
       // In a plain browser tab Android files every notification under
@@ -8820,6 +8821,82 @@ function renderPortalApp(ctx, initialMe) {
     ];
   }
 
+  /** The in-app Audio & Feedback card on the Notifications & Sounds screen.
+   * These live on this device only (see sound.js). */
+  let previewIndex = 0;
+  function soundSection(repaint) {
+    const soundOn = sound.getSoundEnabled();
+    return [
+      h('h3', { class: 'portal-prof-label' }, 'Audio & Feedback'),
+      h(
+        'div',
+        { class: 'portal-prof-card' },
+        profileRow({
+          icon: 'volume', tone: 'orange', title: 'Sound effects', sub: 'Play sounds for actions and notifications',
+          control: settingsSwitch(soundOn, 'Sound effects', () => {
+            sound.setSoundEnabled(!soundOn);
+            repaint();
+          }),
+        }),
+        profileRow({
+          icon: 'barChart', tone: 'purple', title: 'Volume', sub: 'Adjust app sound volume', className: 'has-segmented',
+          control: volumeSegmented(sound.getSoundVolume(), (value) => {
+            sound.setSoundVolume(value);
+            repaint();
+          }),
+        }),
+        profileRow({
+          icon: 'smartphone', tone: 'green', title: 'Vibration', sub: 'Vibrate for important actions',
+          control: settingsSwitch(sound.getHapticsEnabled(), 'Vibration', () => {
+            sound.setHapticsEnabled(!sound.getHapticsEnabled());
+            repaint();
+          }),
+        }),
+        h(
+          'button',
+          {
+            class: 'portal-prof-test',
+            type: 'button',
+            disabled: !soundOn,
+            onclick: () => {
+              const key = sound.SOUND_PREVIEW_ORDER[previewIndex % sound.SOUND_PREVIEW_ORDER.length];
+              previewIndex += 1;
+              const label = sound.previewSound(key);
+              if (label) toast(`🔊 ${label}`);
+            },
+          },
+          h('span', { class: 'portal-prof-ico' }, renderIcon('bell', { size: 20 })),
+          h(
+            'span',
+            { class: 'portal-prof-text' },
+            h('strong', {}, 'Test sound'),
+            h('small', {}, soundOn ? 'Play a sample notification sound' : 'Turn sound effects on to preview'),
+          ),
+          h('span', { class: 'portal-prof-play' }, renderIcon('play', { size: 14 })),
+        ),
+      ),
+    ];
+  }
+
+  /** Profile → Notifications & Sounds: every alert, sound and vibration
+   * setting on one screen of its own, so the Profile tab stays short. A
+   * change redraws the screen in place — no "Loading…" flash, scroll kept. */
+  function openAlertsScreen() {
+    const wrap = h('div', { class: 'portal-prof portal-prof-screen' });
+    const paint = async () => {
+      const notifications = await notificationSection(paint);
+      wrap.replaceChildren(...soundSection(paint), ...(notifications ?? []));
+    };
+    openScreen({
+      title: 'Notifications & Sounds',
+      subtitle: 'Reminders, alerts, sounds and vibration',
+      render: async () => {
+        await paint();
+        return wrap;
+      },
+    });
+  }
+
   /* ----------------------------------------------------------- Profile tab */
 
   function openChangePinModal() {
@@ -8898,6 +8975,48 @@ function renderPortalApp(ctx, initialMe) {
     } catch (err) {
       toast(err.message || 'Could not open diet settings', 'error');
     }
+  }
+
+  /**
+   * Profile's "My orders": a live card for each Store order still on its way
+   * (up to two) and a row into the full list, where every order opens to its
+   * timeline, courier tracking, address and bill. Filled once the tab has
+   * painted, so Profile never waits on it. Stays out of the way for a member
+   * with no orders while the shop isn't open.
+   */
+  async function fillOrdersSection(slot) {
+    const storeLive = me.monetization?.store_status === 'live';
+    let items = [];
+    try {
+      ({ items } = await api.portal.storeOrders());
+    } catch {
+      if (!storeLive) return;
+    }
+    if (!slot.isConnected || (!items.length && !storeLive)) return;
+    const gymName = gymDisplayName(ctx);
+    const nav = createOrdersNav(slot, { gymName, onShop: storeLive ? () => switchTab('store') : null });
+    const open = items.filter((order) => !orderClosed(order));
+    append(clear(slot), [
+      h('h3', { class: 'portal-prof-label' }, 'My orders'),
+      open.length
+        ? h('div', { class: 'portal-prof-live-orders' }, ...open.slice(0, 2).map((order) => orderCard(order, { gymName, onOpen: nav.openOrder, compact: true })))
+        : null,
+      h(
+        'div',
+        { class: 'portal-prof-card' },
+        items.length
+          ? profileRow({
+              icon: 'package', tone: 'green', title: 'All orders',
+              sub: `${items.length} order${items.length === 1 ? '' : 's'} · track deliveries and see past orders`,
+              onclick: nav.openList,
+            })
+          : profileRow({
+              icon: 'package', tone: 'green', title: 'No orders yet', sub: 'Supplements delivered or kept at your gym',
+              onclick: () => switchTab('store'),
+            }),
+      ),
+    ]);
+    slot.hidden = false;
   }
 
   async function renderProfileTab() {
@@ -9031,62 +9150,9 @@ function renderPortalApp(ctx, initialMe) {
       ),
     );
 
-    /* Audio & feedback */
-    const soundOn = sound.getSoundEnabled();
-    let previewIndex = 0;
-    body.append(
-      h('h3', { class: 'portal-prof-label' }, 'Audio & Feedback'),
-      h(
-        'div',
-        { class: 'portal-prof-card' },
-        profileRow({
-          icon: 'volume', tone: 'orange', title: 'Sound effects', sub: 'Play sounds for actions and notifications',
-          control: settingsSwitch(soundOn, 'Sound effects', () => {
-            sound.setSoundEnabled(!soundOn);
-            switchTab('profile');
-          }),
-        }),
-        profileRow({
-          icon: 'barChart', tone: 'purple', title: 'Volume', sub: 'Adjust app sound volume', className: 'has-segmented',
-          control: volumeSegmented(sound.getSoundVolume(), (value) => {
-            sound.setSoundVolume(value);
-            switchTab('profile');
-          }),
-        }),
-        profileRow({
-          icon: 'smartphone', tone: 'green', title: 'Vibration', sub: 'Vibrate for important actions',
-          control: settingsSwitch(sound.getHapticsEnabled(), 'Vibration', () => {
-            sound.setHapticsEnabled(!sound.getHapticsEnabled());
-            switchTab('profile');
-          }),
-        }),
-        h(
-          'button',
-          {
-            class: 'portal-prof-test',
-            type: 'button',
-            disabled: !soundOn,
-            onclick: () => {
-              const key = sound.SOUND_PREVIEW_ORDER[previewIndex % sound.SOUND_PREVIEW_ORDER.length];
-              previewIndex += 1;
-              const label = sound.previewSound(key);
-              if (label) toast(`🔊 ${label}`);
-            },
-          },
-          h('span', { class: 'portal-prof-ico' }, renderIcon('bell', { size: 20 })),
-          h(
-            'span',
-            { class: 'portal-prof-text' },
-            h('strong', {}, 'Test sound'),
-            h('small', {}, soundOn ? 'Play a sample notification sound' : 'Turn sound effects on to preview'),
-          ),
-          h('span', { class: 'portal-prof-play' }, renderIcon('play', { size: 14 })),
-        ),
-      ),
-    );
-
-    const notifications = await notificationSection();
-    if (notifications) body.append(...notifications);
+    const ordersSlot = h('div', { class: 'portal-prof-orders', hidden: true });
+    body.append(ordersSlot);
+    fillOrdersSection(ordersSlot);
 
     /* Settings */
     const installRow = profileRow({
@@ -9102,6 +9168,10 @@ function renderPortalApp(ctx, initialMe) {
       h(
         'div',
         { class: 'portal-prof-card' },
+        profileRow({
+          icon: 'bell', tone: 'orange', title: 'Notifications & Sounds', sub: 'Reminders, alerts, sounds and vibration',
+          onclick: openAlertsScreen,
+        }),
         TABS.some((tabDef) => tabDef.key === 'diet')
           ? profileRow({
               icon: 'nutrition', tone: 'green', title: 'Diet & nutrition', sub: 'Calorie and macro goals, body stats, exercise calories',

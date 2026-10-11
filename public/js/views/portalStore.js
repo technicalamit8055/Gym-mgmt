@@ -50,19 +50,20 @@ const NUTRITION_ROWS = [
 ];
 
 const MAX_QTY = 10;
+/** [status, short label, icon, what it means — for the order page's timeline] */
 const STEPS = {
   delivery: [
-    ['placed', 'Placed', 'receipt'],
-    ['packed', 'Packed', 'package'],
-    ['shipped', 'Shipped', 'truck'],
-    ['delivered', 'Delivered', 'checkCircle'],
+    ['placed', 'Placed', 'receipt', 'We have your order and payment'],
+    ['packed', 'Packed', 'package', 'Your items are packed and sealed'],
+    ['shipped', 'Shipped', 'truck', 'Handed to the courier'],
+    ['delivered', 'Delivered', 'checkCircle', 'Delivered to your address'],
   ],
   pickup: [
-    ['placed', 'Placed', 'receipt'],
-    ['packed', 'Packed', 'package'],
-    ['shipped', 'To your gym', 'truck'],
-    ['ready', 'At the desk', 'building'],
-    ['delivered', 'Collected', 'checkCircle'],
+    ['placed', 'Placed', 'receipt', 'We have your order and payment'],
+    ['packed', 'Packed', 'package', 'Your items are packed and sealed'],
+    ['shipped', 'To your gym', 'truck', 'On its way to your gym'],
+    ['ready', 'At the desk', 'building', 'Waiting for you at the front desk'],
+    ['delivered', 'Collected', 'checkCircle', 'Collected from the desk'],
   ],
 };
 
@@ -301,6 +302,79 @@ function heartButton(product, ctx) {
   return btn;
 }
 
+/* ── Badges: Bestseller and the quality marks a product has earned ────── */
+
+/** Bestseller first when the operator ticked it, then each quality badge
+ * (Trustified, Lab tested…) in the order the console lists them. */
+function badgeItems(product) {
+  return [
+    ...(product.featured ? [{ kind: 'best', name: 'Bestseller' }] : []),
+    ...(product.badges ?? []).map((b) => ({ kind: 'cert', name: b.name, image_url: b.image_url })),
+  ];
+}
+
+function badgePill(item, { large = false } = {}) {
+  const size = large ? 15 : 12;
+  const icon =
+    item.kind === 'best'
+      ? renderIcon('flame', { size, stroke: 2.4 })
+      : item.image_url
+        ? h('img', { src: item.image_url, alt: '', loading: 'lazy', decoding: 'async' })
+        : renderIcon('shield', { size, stroke: 2.4 });
+  return h('span', { class: `bk-tag ${item.kind}${large ? ' lg' : ''}` }, h('i', {}, icon), h('span', {}, item.name));
+}
+
+// One clock turns every card's badges together, so a long catalogue doesn't
+// run a timer per card. A rotator whose card left the screen drops out on the
+// next tick; one that never made it on screen is given a few ticks first.
+const BADGE_TURN_MS = 2600;
+const rotators = new Set();
+let badgeClock = null;
+
+function turnBadges() {
+  if (document.hidden) return;
+  for (const r of rotators) {
+    if (r.el.isConnected) {
+      r.seen = true;
+      r.turn();
+    } else if (r.seen || ++r.misses > 3) rotators.delete(r);
+  }
+  if (!rotators.size) {
+    clearInterval(badgeClock);
+    badgeClock = null;
+  }
+}
+
+/** A card's badge slot: the one badge it has, or each in turn, the leaving
+ * one rolling up and out as the next rolls in from below. */
+function badgeRotator(product) {
+  const items = badgeItems(product);
+  if (!items.length) return null;
+  const el = h('div', { class: 'bk-tags', role: 'img', 'aria-label': items.map((i) => i.name).join(', ') }, badgePill(items[0]));
+  if (items.length < 2) return el;
+  let at = 0;
+  rotators.add({
+    el,
+    seen: false,
+    misses: 0,
+    turn() {
+      const leaving = el.lastElementChild;
+      at = (at + 1) % items.length;
+      const coming = badgePill(items[at]);
+      el.append(coming);
+      if (calm()) {
+        leaving.remove();
+        return;
+      }
+      const timing = { duration: 420, easing: 'cubic-bezier(0.3, 0.7, 0.2, 1)' };
+      leaving.animate([{ transform: 'none', opacity: 1 }, { transform: 'translateY(-115%)', opacity: 0 }], timing).onfinish = () => leaving.remove();
+      coming.animate([{ transform: 'translateY(115%)', opacity: 0 }, { transform: 'none', opacity: 1 }], timing);
+    },
+  });
+  badgeClock ??= setInterval(turnBadges, BADGE_TURN_MS);
+  return el;
+}
+
 /** "1 kg • Double Rich Chocolate" — the option a card is showing. */
 function optionLine(product, variant) {
   if (!variant) return unitLabel(product);
@@ -331,6 +405,7 @@ function productCard(product, ctx, { rail = false } = {}) {
       soldOut ? h('span', { class: 'bk-card-oos' }, 'Out of stock') : null,
       h('span', { class: 'bk-eta' }, renderIcon('clock', { size: 11, stroke: 2.4 }), ctx.etaShort()),
     ),
+    badgeRotator(product),
     h('div', { class: 'bk-card-name' }, product.title),
     h(
       'div',
@@ -949,6 +1024,9 @@ function openProductPage(ctx, product, initialVariant) {
         { class: 'bk-pd-info' },
         h('span', { class: 'bk-eta' }, renderIcon('clock', { size: 11, stroke: 2.6 }), ctx.etaShort()),
         h('h1', {}, product.title),
+        badgeItems(product).length
+          ? h('div', { class: 'bk-pd-tags' }, ...badgeItems(product).map((item) => badgePill(item, { large: true })))
+          : null,
         h('button', { type: 'button', class: 'bk-pd-brand', onclick: () => ctx.openSearch(product.brand) }, `View all by ${product.brand}`, renderIcon('chevronRight', { size: 14, stroke: 2.6 })),
         priceRow,
         unitBlock,
@@ -1028,8 +1106,256 @@ function orderTracker(order) {
   );
 }
 
+/* ── Orders: the list, one order's page, and the peek on Profile ──────── */
+
+/** "11 Oct, 4:42 pm". The registry stamps times with SQLite's
+ * datetime('now') — UTC with no zone marker — so one is added before parsing. */
+function when(value, { time = true } = {}) {
+  if (!value) return '';
+  const raw = String(value).replace(' ', 'T');
+  const parsed = new Date(/Z$|[+-]\d\d:?\d\d$/.test(raw) ? raw : `${raw}Z`);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString(undefined, { day: 'numeric', month: 'short', ...(time ? { hour: 'numeric', minute: '2-digit' } : {}) });
+}
+
+export const orderClosed = (order) => order.payment_status === 'refunded' || ['delivered', 'cancelled'].includes(order.fulfillment_status);
+
+/** Where an order stands, in the member's words, with the colour it wears. */
+function orderStatus(order, gymName) {
+  const pickup = order.fulfillment_method === 'pickup';
+  if (order.payment_status === 'refunded') {
+    return { tone: 'red', icon: 'xCircle', title: 'Cancelled & refunded', sub: 'The money is back in your UPI account' };
+  }
+  switch (order.fulfillment_status) {
+    case 'cancelled':
+      return { tone: 'red', icon: 'xCircle', title: 'Order cancelled', sub: 'Any refund goes back to your UPI account' };
+    case 'packed':
+      return { tone: 'blue', icon: 'package', title: 'Packed', sub: pickup ? `Heading to ${gymName} next` : 'Ready to hand to the courier' };
+    case 'shipped':
+      return {
+        tone: 'amber',
+        icon: 'truck',
+        title: pickup ? `On its way to ${gymName}` : 'On the way',
+        sub: order.courier_name ? `With ${order.courier_name}` : pickup ? 'We will tell you when it reaches the desk' : 'Your order has shipped',
+      };
+    case 'ready':
+      return { tone: 'green', icon: 'building', title: 'Ready for pickup', sub: `Collect it at the ${gymName} front desk` };
+    case 'delivered':
+      return { tone: 'green', icon: 'checkCircle', title: pickup ? 'Collected' : 'Delivered', sub: when(order.updated_at, { time: false }) };
+    default:
+      return { tone: 'blue', icon: 'receipt', title: 'Order placed', sub: 'We are getting it packed' };
+  }
+}
+
+function orderThumbs(order, max = 4) {
+  const shown = order.items.slice(0, max);
+  const more = order.items.length - shown.length;
+  return h(
+    'div',
+    { class: 'bk-order-thumbs', 'aria-hidden': 'true' },
+    ...shown.map((item) =>
+      h('span', { class: 'bk-opt-thumb' }, item.image_url ? h('img', { class: 'bk-thumb', src: item.image_url, alt: '', loading: 'lazy' }) : renderIcon('bag', { size: 18 })),
+    ),
+    more > 0 ? h('span', { class: 'bk-opt-thumb bk-more' }, `+${more}`) : null,
+  );
+}
+
+function trackLink(order, { block = false } = {}) {
+  if (!order.tracking_url) return null;
+  return h(
+    'a',
+    { class: `bk-track-btn${block ? ' block' : ''}`, href: order.tracking_url, target: '_blank', rel: 'noopener noreferrer', onclick: (e) => e.stopPropagation() },
+    renderIcon('truck', { size: 15, stroke: 2.2 }),
+    'Track shipment',
+  );
+}
+
+/** One order in the list, and the live card on Profile: where it stands,
+ * what's in it, and a way into the full page. */
+export function orderCard(order, { gymName, onOpen, compact = false }) {
+  const status = orderStatus(order, gymName);
+  const count = order.items.reduce((n, i) => n + i.quantity, 0);
+  return h(
+    'article',
+    {
+      class: `bk-order${compact ? ' compact' : ''}`,
+      role: 'button',
+      tabindex: '0',
+      'aria-label': `${status.title}, order ${order.order_code}`,
+      onclick: () => onOpen(order),
+      onkeydown: (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen(order)),
+    },
+    h(
+      'header',
+      {},
+      h('span', { class: `bk-order-icon tone-${status.tone}` }, renderIcon(status.icon, { size: 18, stroke: 2.2 })),
+      h('div', {}, h('strong', {}, status.title), h('span', {}, status.sub)),
+      renderIcon('chevronRight', { size: 18, stroke: 2.4 }),
+    ),
+    orderClosed(order) ? null : orderTracker(order),
+    h(
+      'footer',
+      {},
+      orderThumbs(order, compact ? 3 : 4),
+      h(
+        'div',
+        { class: 'bk-order-meta' },
+        h('strong', {}, money(order.total_amount)),
+        h('span', {}, `${count} item${count === 1 ? '' : 's'} · ${when(order.paid_at || order.created_at, { time: false })}`),
+      ),
+    ),
+    order.fulfillment_status === 'shipped' ? trackLink(order) : null,
+  );
+}
+
+/** The steps top to bottom, Blinkit-style: done in green with the time we
+ * know, the current one pulsing, the rest still to come. */
+function orderTimeline(order) {
+  const steps = STEPS[order.fulfillment_method] ?? STEPS.delivery;
+  const reached = steps.findIndex(([key]) => key === order.fulfillment_status);
+  return h(
+    'ol',
+    { class: 'bk-timeline', 'aria-label': 'Order progress' },
+    ...steps.map(([key, label, icon, about], i) => {
+      const stamp = i === 0 ? when(order.paid_at || order.created_at) : i === reached ? when(order.updated_at) : '';
+      return h(
+        'li',
+        { class: i < reached ? 'done' : i === reached ? 'done now' : '', 'aria-current': i === reached ? 'step' : null },
+        h('span', { class: 'bk-tl-dot' }, renderIcon(icon, { size: 14, stroke: 2.4 })),
+        h(
+          'div',
+          {},
+          h('strong', {}, key === 'delivered' && i === reached && order.fulfillment_method !== 'pickup' ? 'Delivered' : label),
+          h('small', {}, about),
+          stamp ? h('time', {}, stamp) : null,
+        ),
+      );
+    }),
+  );
+}
+
+async function copy(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`${what} copied`);
+  } catch {
+    toast(text);
+  }
+}
+
+function openOrderPage(ctx, order) {
+  const gymName = ctx.store.delivery.gym_name;
+  const pickup = order.fulfillment_method === 'pickup';
+  const status = orderStatus(order, gymName);
+  const count = order.items.reduce((n, i) => n + i.quantity, 0);
+  const saved = Math.max(0, order.mrp_total - order.total_amount);
+  const address = [order.shipping_address, order.shipping_city, order.shipping_state, order.shipping_pincode].filter(Boolean).join(', ');
+  const closed = orderClosed(order);
+
+  const courier = order.tracking_id || order.tracking_url || order.courier_name
+    ? h(
+        'section',
+        { class: 'bk-card-block' },
+        h('h3', {}, 'Shipment'),
+        h(
+          'div',
+          { class: 'bk-od-row' },
+          h('span', { class: 'bk-od-ico' }, renderIcon('truck', { size: 18 })),
+          h('div', {}, h('strong', {}, order.courier_name || 'Courier'), order.tracking_id ? h('small', {}, `Tracking ID ${order.tracking_id}`) : null),
+          order.tracking_id
+            ? h('button', { type: 'button', class: 'bk-od-copy', 'aria-label': 'Copy tracking ID', onclick: () => copy(order.tracking_id, 'Tracking ID') }, renderIcon('copy', { size: 16 }))
+            : null,
+        ),
+        trackLink(order, { block: true }),
+      )
+    : null;
+
+  ctx.pages.push(
+    h(
+      'div',
+      { class: 'bk-page-inner bk-od' },
+      pageHead(ctx, 'Order details', { sub: order.order_code, search: false, cart: false }),
+      h(
+        'section',
+        { class: `bk-od-hero tone-${status.tone}` },
+        h('span', { class: 'bk-od-hero-icon' }, renderIcon(status.icon, { size: 26, stroke: 2.2 })),
+        h('div', {}, h('h1', {}, status.title), h('p', {}, status.sub)),
+      ),
+      closed && order.fulfillment_status !== 'delivered' ? null : h('section', { class: 'bk-card-block' }, orderTimeline(order)),
+      courier,
+      h(
+        'section',
+        { class: 'bk-card-block' },
+        h('h3', {}, pickup ? 'Pickup at' : 'Delivering to'),
+        h(
+          'div',
+          { class: 'bk-od-row' },
+          h('span', { class: 'bk-od-ico' }, renderIcon(pickup ? 'building' : 'mapPin', { size: 18 })),
+          h(
+            'div',
+            {},
+            h('strong', {}, pickup ? `${gymName} front desk` : order.shipping_name),
+            h('small', {}, pickup ? `For ${order.shipping_name} · ${order.shipping_phone}` : address),
+            pickup ? null : h('small', {}, order.shipping_phone),
+          ),
+        ),
+      ),
+      h(
+        'section',
+        { class: 'bk-card-block' },
+        h('h3', {}, `${count} item${count === 1 ? '' : 's'} in this order`),
+        ...order.items.map((item) =>
+          h(
+            'div',
+            { class: 'bk-od-item' },
+            h('span', { class: 'bk-opt-thumb' }, item.image_url ? h('img', { class: 'bk-thumb', src: item.image_url, alt: '', loading: 'lazy' }) : renderIcon('bag', { size: 18 })),
+            h('div', {}, h('strong', {}, item.title), h('small', {}, [item.variant_label, `${item.quantity} × ${money(item.unit_price)}`].filter(Boolean).join(' · '))),
+            h('span', { class: 'bk-od-price' }, item.unit_mrp > item.unit_price ? h('s', {}, money(item.unit_mrp * item.quantity)) : null, money(item.line_total)),
+          ),
+        ),
+      ),
+      h(
+        'section',
+        { class: 'bk-card-block' },
+        h('h3', {}, 'Bill summary'),
+        h(
+          'dl',
+          { class: 'bk-bill' },
+          h('dt', {}, 'Item total'),
+          h('dd', {}, saved ? h('s', {}, money(order.mrp_total)) : null, money(order.subtotal)),
+          h('dt', {}, pickup ? 'Gym pickup' : 'Delivery'),
+          h('dd', { class: 'free' }, 'FREE'),
+          h('dt', { class: 'grand' }, order.payment_status === 'refunded' ? 'Refunded' : 'Paid'),
+          h('dd', { class: 'grand' }, money(order.total_amount)),
+        ),
+        saved ? h('p', { class: 'bk-saved' }, renderIcon('sparkle', { size: 15 }), `You saved ${money(saved)} on this order`) : null,
+      ),
+      h(
+        'section',
+        { class: 'bk-card-block bk-od-facts' },
+        h('h3', {}, 'Order info'),
+        h(
+          'dl',
+          {},
+          h('dt', {}, 'Order ID'),
+          h('dd', {}, order.order_code, h('button', { type: 'button', class: 'bk-od-copy', 'aria-label': 'Copy order ID', onclick: () => copy(order.order_code, 'Order ID') }, renderIcon('copy', { size: 14 }))),
+          h('dt', {}, 'Placed on'),
+          h('dd', {}, when(order.paid_at || order.created_at)),
+          h('dt', {}, 'Payment'),
+          h('dd', {}, order.payment_status === 'refunded' ? 'Refunded to UPI' : 'Paid online · UPI'),
+          order.razorpay_payment_id ? [h('dt', {}, 'Payment ref'), h('dd', {}, order.razorpay_payment_id)] : null,
+        ),
+        h('p', { class: 'bk-od-help' }, renderIcon('building', { size: 15 }), `Need help? Show this order ID at the ${gymName} front desk.`),
+      ),
+      ctx.onShop
+        ? h('div', { class: 'bk-placed-actions' }, h('button', { type: 'button', class: 'bk-btn-ghost', onclick: () => ctx.onShop() }, 'Shop again'))
+        : null,
+    ),
+  );
+}
+
 async function openOrdersPage(ctx) {
-  const d = ctx.store.delivery;
+  const gymName = ctx.store.delivery.gym_name;
   const body = h('div', { class: 'bk-orders' }, h('div', { class: 'bk-empty' }, h('p', {}, 'Loading your orders…')));
   ctx.pages.push(h('div', { class: 'bk-page-inner' }, pageHead(ctx, 'My orders', { search: false, cart: false }), body));
   try {
@@ -1043,59 +1369,54 @@ async function openOrdersPage(ctx) {
           h('span', { class: 'bk-empty-icon' }, renderIcon('package', { size: 34, stroke: 1.6 })),
           h('strong', {}, 'No orders yet'),
           h('p', {}, 'Everything you buy shows up here with live status.'),
+          ctx.onShop ? h('button', { type: 'button', class: 'bk-btn-green', onclick: () => ctx.onShop() }, 'Start shopping') : null,
         ),
       );
       return;
     }
+    const open = items.filter((o) => !orderClosed(o));
+    const past = items.filter(orderClosed);
+    const card = (order) => orderCard(order, { gymName, onOpen: (o) => openOrderPage(ctx, o) });
     fill(
       body,
-      ...items.map((order) =>
-        h(
-          'article',
-          { class: 'bk-order' },
-          h(
-            'header',
-            {},
-            h('span', { class: 'bk-order-icon' }, renderIcon(order.fulfillment_method === 'pickup' ? 'building' : 'truck', { size: 18 })),
-            h(
-              'div',
-              {},
-              h('strong', {}, order.fulfillment_method === 'pickup' ? `Pickup at ${d.gym_name}` : 'Home delivery'),
-              h('span', {}, `${order.order_code} · ${date(order.paid_at || order.created_at)}`),
-            ),
-            h('strong', { class: 'bk-order-total' }, money(order.total_amount)),
-          ),
-          h(
-            'div',
-            { class: 'bk-order-items' },
-            ...order.items.map((item) =>
-              h(
-                'div',
-                { class: 'bk-order-item' },
-                h('span', { class: 'bk-opt-thumb' }, item.image_url ? h('img', { class: 'bk-thumb', src: item.image_url, alt: '', loading: 'lazy' }) : renderIcon('bag', { size: 18 })),
-                h('span', {}, `${item.quantity} × ${item.title}`, item.variant_label ? h('small', {}, item.variant_label) : null),
-              ),
-            ),
-          ),
-          orderTracker(order),
-          order.fulfillment_status === 'ready'
-            ? h('div', { class: 'bk-order-ready' }, renderIcon('building', { size: 16 }), `Waiting for you at the ${d.gym_name} front desk`)
-            : null,
-          order.tracking_url || order.tracking_id
-            ? h(
-                'div',
-                { class: 'bk-order-track' },
-                renderIcon('truck', { size: 15, stroke: 2.2 }),
-                h('span', {}, [order.courier_name, order.tracking_id].filter(Boolean).join(' · ') || 'Shipment'),
-                order.tracking_url ? h('a', { href: order.tracking_url, target: '_blank', rel: 'noopener noreferrer' }, 'Track') : null,
-              )
-            : null,
-        ),
-      ),
+      open.length ? h('h3', { class: 'bk-orders-label' }, 'In progress') : null,
+      ...open.map(card),
+      past.length ? h('h3', { class: 'bk-orders-label' }, open.length ? 'Past orders' : 'Your orders') : null,
+      ...past.map(card),
     );
   } catch (err) {
     fill(body, h('div', { class: 'bk-empty' }, h('p', {}, err.message || 'Could not load your orders')));
   }
+}
+
+/**
+ * Orders from outside the shop — the Profile tab. Pages open over the app
+ * exactly as they do from the Store, with the same back-gesture handling;
+ * the shop's catalogue and cart are not needed for any of them.
+ */
+export function createOrdersNav(anchor, { gymName, onShop } = {}) {
+  let ctx = null;
+  // The pager is made on first use: it listens for the back gesture.
+  const ready = () => {
+    if (ctx) return ctx;
+    ctx = {
+      store: { delivery: { gym_name: gymName } },
+      pages: createPager(anchor),
+      watchers: new Set(),
+      cart: { count: () => 0 },
+      onShop: onShop
+        ? () => {
+            ctx.pages.closeAll();
+            setTimeout(onShop, 250);
+          }
+        : null,
+    };
+    return ctx;
+  };
+  return {
+    openList: () => openOrdersPage(ready()),
+    openOrder: (order) => openOrderPage(ready(), order),
+  };
 }
 
 function orderPlacedView(ctx, order) {
@@ -1424,6 +1745,7 @@ export function renderLiveStore({ store, memberId }) {
   ctx.openSearch = (q = '') => openSearchPage(ctx, q);
   ctx.openCart = () => openCartPage(ctx);
   ctx.openOrders = () => openOrdersPage(ctx);
+  ctx.onShop = () => ctx.pages.closeAll();
 
   // One cart listener drives every Add button, stepper, badge and cart bar.
   ctx.cart.onChange(() => {

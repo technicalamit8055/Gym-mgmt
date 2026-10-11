@@ -55,14 +55,19 @@ import {
   addonTiers,
   clearBannerImage,
   commissionBalances,
+  createBadge,
   createBanner,
   createStoreProduct,
+  deleteBadge,
   deleteBanner,
   deleteProductImage,
   deleteStoreProduct,
+  listBadges,
   listBanners,
   makeProductImagePrimary,
+  setBadgeImage,
   setBannerImage,
+  updateBadge,
   updateBanner,
   listStoreOrders,
   listStoreProducts,
@@ -830,6 +835,28 @@ platformAdminRoutes.delete('/store/banners/:id/image', (req, res) => {
 
 platformAdminRoutes.delete('/store/banners/:id', (req, res) => {
   res.json(deleteBanner(Number(req.params.id)));
+});
+
+/** Quality badges: the library products pick from, each with its icon. */
+platformAdminRoutes.get('/store/badges', (_req, res) => {
+  res.json({ items: listBadges() });
+});
+
+platformAdminRoutes.post('/store/badges', (req, res) => {
+  res.status(201).json(createBadge(req.body));
+});
+
+platformAdminRoutes.patch('/store/badges/:id', (req, res) => {
+  res.json(updateBadge(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.put('/store/badges/:id/image', rawImage, (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw badRequest('Send the image as the request body');
+  res.json(setBadgeImage(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/store/badges/:id', (req, res) => {
+  res.json(deleteBadge(Number(req.params.id)));
 });
 
 platformAdminRoutes.get('/store/orders', (req, res) => {

@@ -99,9 +99,9 @@ const field = (label, control, { full = false, hint } = {}) =>
 
 /* ── Product editor ───────────────────────────────────────────────────── */
 
-function openProductModal(product, onSaved) {
+function openProductModal(product, onSaved, badges = []) {
   const isNew = !product;
-  const p = product ?? { category: 'protein', active: 1, featured: 0, variants: [], nutrition_facts: null };
+  const p = product ?? { category: 'protein', active: 1, featured: 0, variants: [], nutrition_facts: null, badges: [] };
   const input = (name, value, attrs = {}) => h('input', { name, value: value ?? '', ...attrs });
 
   const inputs = {
@@ -179,6 +179,38 @@ function openProductModal(product, onSaved) {
     drawVariants();
   };
 
+  /* Quality badges: tap to pin or unpin. Members see them one at a time on
+     the product's card, after Bestseller when that is ticked. */
+  const picked = new Set((p.badges ?? []).map((b) => b.id));
+  const badgePicker = h('div', { class: 'sa-badge-pick' });
+  function drawBadgePicker() {
+    fill(
+      badgePicker,
+      badges.length
+        ? badges.map((b) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                class: `sa-badge-chip${picked.has(b.id) ? ' on' : ''}${b.active ? '' : ' off'}`,
+                'aria-pressed': String(picked.has(b.id)),
+                title: b.active ? b.name : `${b.name} (hidden from members)`,
+                onclick: () => {
+                  if (picked.has(b.id)) picked.delete(b.id);
+                  else picked.add(b.id);
+                  drawBadgePicker();
+                },
+              },
+              h('span', { class: 'sa-badge-ico' }, badgeIcon(b, 14)),
+              b.name,
+              picked.has(b.id) ? renderIcon('check', { size: 13, stroke: 2.6 }) : null,
+            ),
+          )
+        : h('p', { class: 'muted sa-hint', style: 'margin:0' }, 'No badges yet — add them under “Quality badges” first.'),
+    );
+  }
+  drawBadgePicker();
+
   /* Photos: uploaded straight away (they don't wait for "Save"), the first
      one is the cover the store's cards show. */
   const photosBlock = h('div', { class: 'sa-photos' });
@@ -251,6 +283,7 @@ function openProductModal(product, onSaved) {
           lab_report_url: inputs.lab_report_url.value.trim() || null,
           description: inputs.description.value.trim() || null,
           featured: inputs.featured.checked,
+          badge_ids: badges.filter((b) => picked.has(b.id)).map((b) => b.id),
           active: inputs.active.checked,
           nutrition_facts: Object.keys(facts).length ? facts : null,
           variants: variants.map((v) => ({
@@ -271,7 +304,7 @@ function openProductModal(product, onSaved) {
           if (isNew) {
             // Straight into edit mode, where the photos section lives.
             toast('Product added — now add its photos');
-            openProductModal(saved, onSaved);
+            openProductModal(saved, onSaved, badges);
           } else toast('Product saved');
         } catch (err) {
           const detail = err.details && Object.entries(err.details).map(([k, v]) => `${k.replace('_', ' ')} ${v}`).join(', ');
@@ -291,13 +324,14 @@ function openProductModal(product, onSaved) {
       field('Selling price (₹) *', inputs.price, { hint: 'Variants can override both.' }),
       h('div', { class: 'field full' }, h('span', {}, 'Photos'), photosBlock),
       field('…or an image link', inputs.image_url, { full: true, hint: 'Only used while the product has no uploaded photos.' }),
+      h('div', { class: 'field full' }, h('span', {}, 'Quality badges'), badgePicker),
       field('Lab report URL', inputs.lab_report_url, { full: true, hint: 'Third-party purity / label-claim test, shown to members as a link.' }),
       field('Description', inputs.description, { full: true }),
       h(
         'div',
         { class: 'field full sa-checks' },
         h('label', {}, inputs.active, ' Active — members can see and buy it'),
-        h('label', {}, inputs.featured, ' Bestseller — pinned to the top with a badge'),
+        h('label', {}, inputs.featured, ' Bestseller — pinned to the top, and leads the badges on its card'),
       ),
     ),
     h('h4', { class: 'sa-subhead' }, 'Nutrition facts ', h('span', { class: 'muted' }, '(per serving)')),
@@ -569,6 +603,128 @@ function openBannerModal(banner, products, onSaved) {
   });
 }
 
+/* ── Quality badges ───────────────────────────────────────────────────── */
+
+/** The icon a badge shows, or a shield while it has none. */
+const badgeIcon = (b, size = 18) =>
+  b.image_url ? h('img', { src: b.image_url, alt: '' }) : renderIcon('shield', { size });
+
+function openBadgeModal(badge, onSaved) {
+  const isNew = !badge;
+  const name = h('input', { value: badge?.name ?? '', maxlength: 30, required: true, placeholder: 'Trustified' });
+  const active = h('input', { type: 'checkbox', checked: badge ? Boolean(badge.active) : true });
+
+  let current = badge;
+  // A new badge has no id to upload against yet: its icon waits here, shown
+  // as a preview, and goes up straight after the badge is created.
+  let pending = null;
+  let preview = null;
+  const iconBlock = h('div', { class: 'sa-photos' });
+  function drawIcon() {
+    if (!current) {
+      fill(
+        iconBlock,
+        h('div', { class: 'sa-photo sa-badge-photo' }, preview ? h('img', { src: preview, alt: '' }) : renderIcon('shield', { size: 30 })),
+        filePicker(pending ? 'Choose another icon' : 'Choose icon', {
+          onFiles: ([file]) => {
+            if (preview) URL.revokeObjectURL(preview);
+            pending = file;
+            preview = URL.createObjectURL(file);
+            drawIcon();
+          },
+        }),
+      );
+      return;
+    }
+    fill(
+      iconBlock,
+      h('div', { class: 'sa-photo sa-badge-photo' }, badgeIcon(current, 30)),
+      filePicker(current.image_url ? 'Replace icon' : 'Upload icon', {
+        onFiles: async ([file]) => {
+          try {
+            current = await api.platformBadgeImage(current.id, await shrinkImage(file, 240));
+            drawIcon();
+            onSaved();
+          } catch (err) {
+            toast(err.message || 'Could not upload the icon', 'error');
+          }
+        },
+      }),
+    );
+  }
+  drawIcon();
+
+  const save = h('button', {
+    class: 'btn primary',
+    onclick: async () => {
+      save.disabled = true;
+      try {
+        const payload = { name: name.value.trim(), active: active.checked };
+        const saved = isNew ? await api.platformCreateBadge(payload) : await api.platformUpdateBadge(badge.id, payload);
+        let iconFailed = false;
+        if (isNew && pending) {
+          try {
+            await api.platformBadgeImage(saved.id, await shrinkImage(pending, 240));
+          } catch (err) {
+            iconFailed = true;
+            toast(`Badge added, but the icon didn’t upload: ${err.message || 'try again'}`, 'error');
+          }
+        }
+        if (preview) URL.revokeObjectURL(preview);
+        closeModal();
+        await onSaved();
+        if (isNew && (!pending || iconFailed)) {
+          // Back into the badge so the icon can be added (or retried) there.
+          if (!iconFailed) toast('Badge added — now upload its icon');
+          openBadgeModal({ ...saved, product_count: 0 }, onSaved);
+        } else toast(isNew ? 'Badge added' : 'Badge saved');
+      } catch (err) {
+        toast(err.message || 'Could not save the badge', 'error');
+      } finally {
+        save.disabled = false;
+      }
+    },
+  }, isNew ? 'Add badge' : 'Save badge');
+
+  const remove = isNew
+    ? null
+    : h('button', {
+        class: 'btn ghost danger',
+        onclick: () =>
+          confirmDialog({
+            title: `Delete “${badge.name}”?`,
+            message: badge.product_count
+              ? `It comes off the ${badge.product_count} product${badge.product_count === 1 ? '' : 's'} that carry it, straight away.`
+              : 'No product carries it yet.',
+            confirmLabel: 'Delete',
+            danger: true,
+            onConfirm: async () => {
+              await api.platformDeleteBadge(badge.id);
+              toast('Badge deleted');
+              await onSaved();
+            },
+          }),
+      }, 'Delete');
+
+  openModal({
+    title: isNew ? 'New quality badge' : `Badge · ${badge.name}`,
+    body: h(
+      'div',
+      { class: 'form-grid' },
+      field('Name *', name, { full: true, hint: 'Short — it sits on product cards next to the icon. e.g. Trustified, Informed Choice, Lab tested.' }),
+      h(
+        'div',
+        { class: 'field full' },
+        h('span', {}, 'Icon'),
+        iconBlock,
+        h('div', { class: 'muted sa-hint' }, 'The certifier’s seal or logo — a square PNG with a transparent background looks best.'),
+      ),
+      h('div', { class: 'field full sa-checks' }, h('label', {}, active, ' Show this badge to members')),
+    ),
+    footer: [remove, h('div', { style: 'flex:1' }), h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), save],
+  });
+}
+
 /* ── The section ──────────────────────────────────────────────────────── */
 
 export function renderStoreAdminSection({ onExpired } = {}) {
@@ -731,7 +887,41 @@ export function renderStoreAdminSection({ onExpired } = {}) {
     );
   }
 
-  function catalogCard(products, onChanged) {
+  function badgesCard(badges, onChanged) {
+    return h(
+      'div',
+      { class: 'card' },
+      h(
+        'div',
+        { class: 'card-head' },
+        h('h3', {}, renderIcon('verified', { size: 17 }), 'Quality badges'),
+        h('span', { class: 'muted' }, 'Tests and certifications a product has passed'),
+        h('div', { class: 'spacer' }),
+        h('button', { class: 'btn primary sm', onclick: () => openBadgeModal(null, onChanged) }, renderIcon('plus', { size: 14 }), 'Add badge'),
+      ),
+      badges.length
+        ? h(
+            'div',
+            { class: 'sa-badges' },
+            ...badges.map((b) =>
+              h(
+                'button',
+                { type: 'button', class: `sa-badge-tile${b.active ? '' : ' off'}`, onclick: () => openBadgeModal(b, onChanged) },
+                h('span', { class: 'sa-badge-ico lg' }, badgeIcon(b, 22)),
+                h(
+                  'span',
+                  { class: 'sa-badge-text' },
+                  h('strong', {}, b.name),
+                  h('small', {}, [b.active ? null : 'Hidden', `${b.product_count} product${b.product_count === 1 ? '' : 's'}`, b.image_url ? null : 'no icon yet'].filter(Boolean).join(' · ')),
+                ),
+              ),
+            ),
+          )
+        : h('p', { class: 'muted', style: 'margin:0' }, 'No badges yet. Add one per certification (Trustified, Informed Choice, Lab tested…), upload its seal, then tick it on the products that passed.'),
+    );
+  }
+
+  function catalogCard(products, badges, onChanged) {
     return h(
       'div',
       { class: 'card' },
@@ -741,7 +931,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
         h('h3', {}, renderIcon('bag', { size: 17 }), 'Central catalogue'),
         h('span', { class: 'muted' }, `${products.filter((p) => p.active).length} active of ${products.length}`),
         h('div', { class: 'spacer' }),
-        h('button', { class: 'btn primary sm', onclick: () => openProductModal(null, onChanged) }, renderIcon('plus', { size: 14 }), 'Add product'),
+        h('button', { class: 'btn primary sm', onclick: () => openProductModal(null, onChanged, badges) }, renderIcon('plus', { size: 14 }), 'Add product'),
       ),
       table(
         [
@@ -769,7 +959,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
           },
           {
             label: 'Status',
-            render: (p) => h('span', { class: 'row', style: 'gap:6px' }, p.active ? badge('green', 'Active') : badge('grey', 'Hidden'), p.featured ? badge('amber', 'Bestseller') : null),
+            render: (p) => h('span', { class: 'row', style: 'gap:6px' }, p.active ? badge('green', 'Active') : badge('grey', 'Hidden'), p.featured ? badge('amber', 'Bestseller') : null, ...p.badges.map((b) => h('span', { class: 'sa-badge-ico', title: b.name }, badgeIcon(b, 13)))),
           },
           {
             label: '',
@@ -777,7 +967,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
               h(
                 'div',
                 { class: 'row', style: 'gap:4px;justify-content:flex-end' },
-                h('button', { class: 'btn sm ghost', onclick: () => openProductModal(p, onChanged) }, 'Edit'),
+                h('button', { class: 'btn sm ghost', onclick: () => openProductModal(p, onChanged, badges) }, 'Edit'),
                 h(
                   'button',
                   {
@@ -879,13 +1069,14 @@ export function renderStoreAdminSection({ onExpired } = {}) {
         api.platformStoreOrders({ status: orderFilter.status }),
         api.platformCommissions(),
         api.platformBanners(),
+        api.platformBadges(),
       ]),
     ).catch((err) => {
       toast(err.message || 'Could not load store & monetization', 'error');
       return null;
     });
     if (!data) return;
-    const [state, products, orders, commissions, banners] = data;
+    const [state, products, orders, commissions, banners, badges] = data;
     const { summary, settings } = state;
     const status = STORE_STATUS[settings.store_status];
 
@@ -908,7 +1099,8 @@ export function renderStoreAdminSection({ onExpired } = {}) {
         : null,
       controlsCard(state),
       bannersCard(banners.items, products.items, refresh),
-      catalogCard(products.items, refresh),
+      badgesCard(badges.items, refresh),
+      catalogCard(products.items, badges.items, refresh),
       ordersCard(orders.items, refresh),
       payoutsCard(commissions.items, refresh),
     );

@@ -320,6 +320,11 @@ export const api = {
   platformBannerImage: (id, file) => uploadFile(`/platform/admin/store/banners/${id}/image`, file, { token: platformSession.token }),
   platformClearBannerImage: (id) => request('DELETE', `/platform/admin/store/banners/${id}/image`, undefined, { token: platformSession.token }),
   platformDeleteBanner: (id) => request('DELETE', `/platform/admin/store/banners/${id}`, undefined, { token: platformSession.token }),
+  platformBadges: () => request('GET', '/platform/admin/store/badges', undefined, { token: platformSession.token }),
+  platformCreateBadge: (payload) => request('POST', '/platform/admin/store/badges', payload, { token: platformSession.token }),
+  platformUpdateBadge: (id, payload) => request('PATCH', `/platform/admin/store/badges/${id}`, payload, { token: platformSession.token }),
+  platformBadgeImage: (id, file) => uploadFile(`/platform/admin/store/badges/${id}/image`, file, { token: platformSession.token }),
+  platformDeleteBadge: (id) => request('DELETE', `/platform/admin/store/badges/${id}`, undefined, { token: platformSession.token }),
   platformRecordPayout: (slug, payload) =>
     request('POST', `/platform/admin/commissions/${slug}/payout`, payload, { token: platformSession.token }),
 

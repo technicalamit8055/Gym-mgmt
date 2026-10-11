@@ -3333,7 +3333,7 @@ body:not([data-mode='light']) .portal-store-item {
  * .bk is the store tab; .bk-page is a full-screen page pushed over it (see
  * createPager in portalStore.js); .bk-sheet is a bottom sheet.
  */
-.bk, .bk-page, .modal.bk-sheet {
+.bk, .bk-page, .modal.bk-sheet, .portal-prof-orders {
   --bk-green: #0c831f;
   --bk-green-dark: #0a6b19;
   --bk-green-soft: color-mix(in srgb, #0c831f 10%, var(--surface));
@@ -3346,7 +3346,7 @@ body:not([data-mode='light']) .portal-store-item {
   --bk-gutter: 18px;
 }
 .bk-page { --bk-gutter: 12px; }
-body:not([data-mode='light']) :is(.bk, .bk-page, .modal.bk-sheet) {
+body:not([data-mode='light']) :is(.bk, .bk-page, .modal.bk-sheet, .portal-prof-orders) {
   --bk-green: #22a33a;
   --bk-green-dark: #1b8a30;
   --bk-green-soft: rgba(34, 163, 58, 0.14);
@@ -3568,6 +3568,30 @@ body:not([data-mode='light']) :is(.bk, .bk-page, .modal.bk-sheet) {
   color: var(--text); background: color-mix(in srgb, var(--text) 7%, var(--surface));
 }
 .bk-card-img .bk-eta { position: absolute; left: 0; bottom: -4px; z-index: 1; }
+
+/* Badges: Bestseller and quality marks. On a card they share one slot and
+   take turns (see badgeRotator); stacked in one grid cell, so the leaving
+   pill and the arriving one can overlap while they roll past each other. */
+.bk-tags { display: grid; height: 22px; margin-top: 4px; overflow: hidden; }
+.bk-tags > * { grid-area: 1 / 1; justify-self: start; align-self: center; }
+.bk-tag {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 20px; padding: 0 8px 0 2px;
+  border-radius: 999px; white-space: nowrap; font-size: 10.5px; font-weight: 750; letter-spacing: 0.01em;
+}
+.bk-tag > span { overflow: hidden; text-overflow: ellipsis; }
+.bk-tag > i {
+  flex: none; display: grid; place-items: center; width: 16px; height: 16px; overflow: hidden;
+  border-radius: 50%; font-style: normal; background: #fff;
+}
+.bk-tag > i img { width: 100%; height: 100%; object-fit: contain; }
+.bk-tag.best { color: #9a3412; background: linear-gradient(90deg, #ffedd5, #fde2c4); }
+.bk-tag.best > i { color: #fff; background: linear-gradient(135deg, #fb923c, #ea580c); }
+.bk-tag.cert { color: var(--bk-add-ink); background: var(--bk-add); }
+.bk-tag.cert > i { color: var(--bk-green); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bk-green) 25%, transparent); }
+body:not([data-mode='light']) .bk-tag.best { color: #fdba74; background: rgba(251, 146, 60, 0.16); }
+.bk-tag.lg { height: 30px; gap: 6px; padding: 0 12px 0 3px; font-size: 12.5px; }
+.bk-tag.lg > i { width: 24px; height: 24px; }
+.bk-pd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 2px; }
 .bk-card-name {
   margin-top: 4px; font-size: 13.5px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -3949,19 +3973,43 @@ body.bk-page-open { overflow: hidden; }
 .bk-saved { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; font-size: 13px; font-weight: 750; color: var(--bk-green); }
 .bk-placed-actions { display: flex; flex-direction: column; gap: 10px; margin-top: auto !important; }
 
-/* My orders */
+/* My orders: cards in the list (and live on Profile), then one order's page */
 .bk-orders { display: flex; flex-direction: column; gap: 12px; }
-.bk-order { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); }
+.bk-orders-label { margin: 6px 2px -2px; font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.bk-order {
+  display: flex; flex-direction: column; gap: 14px; padding: 14px; border-radius: 18px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border);
+  transition: transform 0.12s var(--ease), border-color 0.15s var(--ease);
+  -webkit-tap-highlight-color: transparent;
+}
+.bk-order:active { transform: scale(0.985); }
+.bk-order:focus-visible { outline: 2px solid var(--bk-green); outline-offset: 2px; }
 .bk-order header { display: flex; align-items: center; gap: 10px; }
-.bk-order header > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.bk-order header strong { font-size: 14px; }
-.bk-order header > div span { font-size: 12px; color: var(--muted); }
-.bk-order-icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; color: var(--bk-green); background: var(--bk-green-soft); }
-.bk-order-total { font-size: 15px; font-weight: 900; }
-.bk-order-items { display: flex; flex-direction: column; gap: 8px; }
-.bk-order-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.bk-order-item .bk-opt-thumb { width: 40px; height: 40px; }
-.bk-order-item small { display: block; font-size: 11.5px; color: var(--muted); }
+.bk-order header > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.bk-order header strong { font-size: 14.5px; font-weight: 850; }
+.bk-order header > div span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-order header > svg { flex: none; color: var(--muted); }
+.bk-order footer { display: flex; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.bk-order-thumbs { flex: 1; min-width: 0; display: flex; gap: 6px; }
+.bk-order-thumbs .bk-opt-thumb { width: 40px; height: 40px; }
+.bk-more { font-size: 12px; font-weight: 800; color: var(--muted); }
+.bk-order-meta { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.bk-order-meta strong { font-size: 15px; font-weight: 900; }
+.bk-order-meta span { font-size: 11.5px; color: var(--muted); }
+.bk-order.compact { gap: 12px; }
+.bk-order.compact footer { padding-top: 10px; }
+.bk-order.compact .bk-order-thumbs .bk-opt-thumb { width: 34px; height: 34px; }
+
+/* Status colours: the order icon and the hero on its page */
+.bk-order-icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent); }
+:is(.bk-order-icon, .bk-od-hero).tone-green { --tone: var(--bk-green); }
+:is(.bk-order-icon, .bk-od-hero).tone-blue { --tone: var(--bk-blue); }
+:is(.bk-order-icon, .bk-od-hero).tone-amber { --tone: #d97706; }
+:is(.bk-order-icon, .bk-od-hero).tone-red { --tone: #dc2626; }
+body:not([data-mode='light']) :is(.bk-order-icon, .bk-od-hero).tone-amber { --tone: var(--amber); }
+body:not([data-mode='light']) :is(.bk-order-icon, .bk-od-hero).tone-red { --tone: var(--red); }
+
+/* The compact tracker on a card */
 .bk-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(var(--n), 1fr); }
 .bk-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; text-align: center; color: var(--muted); }
 .bk-steps li::before { content: ''; position: absolute; top: 13px; right: 50%; width: 100%; height: 3px; background: var(--border); }
@@ -3970,14 +4018,78 @@ body.bk-page-open { overflow: hidden; }
 .bk-steps li.done::before { background: var(--bk-green); }
 .bk-step-dot { position: relative; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--muted); background: var(--surface-2); border: 2px solid var(--border); }
 .bk-steps li.done .bk-step-dot { color: #fff; background: var(--bk-green); border-color: var(--bk-green); }
+.bk-steps li[aria-current='step'] .bk-step-dot { animation: bk-ping 1.8s ease-out infinite; }
+@keyframes bk-ping {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--bk-green) 45%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 8px transparent; }
+}
 .bk-order-cancelled { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; color: var(--red); }
-.bk-order-ready { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; font-size: 13px; font-weight: 700; color: var(--bk-green); background: var(--bk-green-soft); }
-.bk-order-track { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; background: var(--surface-2); }
-.bk-order-track span { flex: 1; min-width: 0; }
-.bk-order-track a { font-weight: 800; color: var(--bk-green); text-decoration: none; }
+
+.bk-track-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; padding: 0 14px;
+  border-radius: 10px; font-size: 13px; font-weight: 800; text-decoration: none;
+  color: var(--bk-green); background: var(--bk-green-soft);
+}
+.bk-track-btn.block { width: 100%; height: 44px; margin-top: 4px; color: #fff; background: var(--bk-green); }
+
+/* One order's page */
+.bk-page-inner > .bk-od-hero { margin: 0 var(--bk-gutter); }
+.bk-od-hero {
+  display: flex; align-items: center; gap: 14px; padding: 18px 16px; border-radius: 18px;
+  background: color-mix(in srgb, var(--tone) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--tone) 28%, transparent);
+}
+.bk-od-hero-icon { flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; color: #fff; background: var(--tone); }
+.bk-od-hero h1 { margin: 0; font-size: 19px; font-weight: 900; letter-spacing: -0.02em; }
+.bk-od-hero p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+
+.bk-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.bk-timeline li { position: relative; display: flex; gap: 12px; padding-bottom: 18px; color: var(--muted); }
+.bk-timeline li:last-child { padding-bottom: 0; }
+.bk-timeline li::before {
+  content: ''; position: absolute; left: 14px; top: 30px; bottom: 0; width: 2px; margin-left: -1px;
+  background: repeating-linear-gradient(to bottom, var(--border) 0 4px, transparent 4px 8px);
+}
+.bk-timeline li:last-child::before { display: none; }
+.bk-timeline li.done:not(.now)::before { background: var(--bk-green); }
+.bk-tl-dot { position: relative; z-index: 1; flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-2); border: 2px solid var(--border); }
+.bk-timeline li.done .bk-tl-dot { color: #fff; background: var(--bk-green); border-color: var(--bk-green); }
+.bk-timeline li.now .bk-tl-dot { animation: bk-ping 1.8s ease-out infinite; }
+.bk-timeline li > div { display: flex; flex-direction: column; gap: 1px; padding-top: 4px; }
+.bk-timeline strong { font-size: 14px; font-weight: 800; }
+.bk-timeline li.done strong { color: var(--text); }
+.bk-timeline small { font-size: 12px; }
+.bk-timeline time { font-size: 11.5px; font-weight: 700; color: var(--bk-green); }
+
+.bk-od-row { display: flex; align-items: center; gap: 12px; }
+.bk-od-row > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.bk-od-row strong { font-size: 14px; }
+.bk-od-row small { font-size: 12.5px; color: var(--muted); }
+.bk-od-ico { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; color: var(--bk-green); background: var(--bk-green-soft); }
+.bk-od-copy {
+  flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; cursor: pointer;
+  color: var(--muted); background: var(--surface-2);
+}
+.bk-od-item { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+.bk-od-item + .bk-od-item { border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 10px; }
+.bk-od-item > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bk-od-item strong { font-size: 13.5px; font-weight: 750; }
+.bk-od-item small { font-size: 12px; color: var(--muted); }
+.bk-od-price { display: flex; flex-direction: column; align-items: flex-end; font-size: 14px; font-weight: 850; }
+.bk-od-price s { font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.bk-od-facts dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 0; font-size: 13px; }
+.bk-od-facts dt { color: var(--muted); }
+.bk-od-facts dd { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.bk-od-facts dd .bk-od-copy { width: 26px; height: 26px; }
+.bk-od-help { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; color: var(--muted); background: var(--surface-2); }
+.bk-od-help svg { flex: none; }
+
+/* Profile's "My orders" */
+.portal-prof-orders { display: flex; flex-direction: column; gap: 10px; }
+.portal-prof-orders[hidden] { display: none; }
+.portal-prof-live-orders { display: flex; flex-direction: column; gap: 10px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .bk-page, .bk-page.leaving, .bk-placed-check, .bk-search-hint.roll { animation: none; }
+  .bk-page, .bk-page.leaving, .bk-placed-check, .bk-search-hint.roll, .bk-steps li .bk-step-dot, .bk-timeline .bk-tl-dot { animation: none; }
 }
 
 /* --------------------------------------------------------------- greeting */
@@ -4513,6 +4625,8 @@ body:not([data-mode='light']) .portal-prof {
 .portal-prof .tone-rose { --t: #f43f5e; }
 .portal-prof .tone-amber { --t: #f59e0b; }
 .portal-prof .tone-grey { --t: #64748b; }
+/* Notifications & Sounds screen: the profile cards outside the Profile tab. */
+.portal-prof-screen { display: flex; flex-direction: column; }
 
 /* Hero */
 .portal-prof-hero {
@@ -7638,6 +7752,31 @@ body.portal-demo-open { overflow: hidden; }
 .sa-banner-text small { font-size: 12px; opacity: 0.9; }
 .sa-banner > img { position: absolute; right: 6px; bottom: 30px; width: 36%; height: 70%; object-fit: contain; }
 .sa-banner-foot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+/* Quality badges: the library, and the picker in the product editor */
+.sa-badge-ico {
+  flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; overflow: hidden;
+  border-radius: 50%; color: var(--muted); background: #fff; border: 1px solid var(--border);
+}
+.sa-badge-ico img { width: 100%; height: 100%; object-fit: contain; }
+.sa-badge-ico.lg { width: 44px; height: 44px; border-radius: 12px; }
+.sa-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.sa-badge-tile {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius); cursor: pointer;
+  font: inherit; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+}
+.sa-badge-tile:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
+.sa-badge-tile.off { opacity: 0.6; }
+.sa-badge-text { display: flex; flex-direction: column; min-width: 0; }
+.sa-badge-text strong { font-size: 14px; }
+.sa-badge-text small { font-size: 12px; color: var(--muted); }
+.sa-badge-photo { display: grid; place-items: center; width: 64px; height: 64px; color: var(--muted); }
+.sa-badge-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.sa-badge-chip {
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px 0 6px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--text); background: var(--surface-2); border: 1.5px solid var(--border);
+}
+.sa-badge-chip.on { color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--surface)); border-color: var(--green); }
+.sa-badge-chip.off { border-style: dashed; }
 .sa-order-ship { margin-bottom: 16px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); }
 .sa-order-ship p { margin: 4px 0 8px; color: var(--muted); font-size: 13px; }
 .sa-order-ship ul { margin: 0; padding-left: 18px; font-size: 13px; }

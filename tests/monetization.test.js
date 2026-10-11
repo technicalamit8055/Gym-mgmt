@@ -487,3 +487,53 @@ describe('pickup at the gym, photos and banners', () => {
     assert.equal(res.status, 400);
   });
 });
+
+describe('quality badges', () => {
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 2)]);
+  const upload = (urlPath, bytes) =>
+    fetch(`${base}/api/platform/admin${urlPath}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${ops}`, 'Content-Type': 'image/png' },
+      body: bytes,
+    }).then(async (res) => ({ status: res.status, body: await res.json() }));
+  let trustified;
+  let hidden;
+  let product;
+
+  it('keeps a library of badges with uploaded icons', async () => {
+    const res = await opsCall('POST', '/store/badges', { name: 'Trustified' });
+    assert.equal(res.status, 201);
+    trustified = res.body;
+    const icon = await upload(`/store/badges/${trustified.id}/image`, png);
+    assert.equal(icon.status, 200, JSON.stringify(icon.body));
+    assert.match(icon.body.image_url, /\/api\/store-media\/q\d+-[a-f0-9]{10}\.png$/);
+    assert.equal((await fetch(`${base}${icon.body.image_url}`)).status, 200);
+    hidden = (await opsCall('POST', '/store/badges', { name: 'Draft seal', active: false })).body;
+    assert.equal((await opsCall('POST', '/store/badges', { name: 'X' })).status, 400);
+  });
+
+  it('pins badges to a product and shows members only the active ones', async () => {
+    product = (await opsCall('GET', '/store/products')).body.items[0];
+    const res = await opsCall('PATCH', `/store/products/${product.id}`, { badge_ids: [trustified.id, hidden.id] });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.badges.map((b) => b.name), ['Trustified', 'Draft seal']);
+    assert.equal((await opsCall('PATCH', `/store/products/${product.id}`, { badge_ids: [9999] })).status, 400);
+
+    const store = await call('GET', '/api/portal/store', null, { token: asha });
+    const seen = store.body.products.find((p) => p.id === product.id);
+    assert.deepEqual(seen.badges.map((b) => b.name), ['Trustified']);
+    assert.ok(seen.badges[0].image_url);
+
+    const library = (await opsCall('GET', '/store/badges')).body.items;
+    assert.equal(library.find((b) => b.id === trustified.id).product_count, 1);
+  });
+
+  it('leaves badges alone on an unrelated edit and drops a deleted badge everywhere', async () => {
+    const edit = await opsCall('PATCH', `/store/products/${product.id}`, { description: 'Updated' });
+    assert.equal(edit.body.badges.length, 2);
+    assert.equal((await opsCall('DELETE', `/store/badges/${hidden.id}`)).status, 200);
+    const after = (await opsCall('GET', '/store/products')).body.items.find((p) => p.id === product.id);
+    assert.deepEqual(after.badges.map((b) => b.name), ['Trustified']);
+    assert.equal((await opsCall('DELETE', `/store/badges/${hidden.id}`)).status, 404);
+  });
+});

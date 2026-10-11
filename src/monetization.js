@@ -260,6 +260,22 @@ function db() {
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Quality marks (Trustified, Informed Choice, Lab tested…): uploaded once
+    -- from the console, then pinned to any number of products.
+    CREATE TABLE IF NOT EXISTS store_badges (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      image_file TEXT,
+      active     INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS store_product_badges (
+      product_id INTEGER NOT NULL,
+      badge_id   INTEGER NOT NULL,
+      PRIMARY KEY (product_id, badge_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_store_product_badges_badge ON store_product_badges(badge_id);
   `);
   migrate(handle);
 
@@ -467,7 +483,8 @@ function cleanVariants(raw) {
 /* ── Uploaded photos ──────────────────────────────────────────────────── */
 
 export const MAX_STORE_IMAGE_BYTES = 4 * 1024 * 1024;
-const STORE_FILE_RE = /^(?:p\d+|b\d+)-[a-f0-9]{10}\.(?:png|jpg|webp)$/;
+// p = product photo, b = banner, q = quality badge.
+const STORE_FILE_RE = /^(?:p\d+|b\d+|q\d+)-[a-f0-9]{10}\.(?:png|jpg|webp)$/;
 
 /** Where an uploaded store photo lives on disk, or null for a name that is not
  * one of ours — the serving route's only defence against path tricks. */
@@ -505,7 +522,8 @@ function removeStoreImage(file) {
   // Content-addressed, so two rows can share a file: keep it while any does.
   const stillUsed =
     one('SELECT 1 AS ok FROM store_product_images WHERE file = ?', file) ||
-    one('SELECT 1 AS ok FROM store_banners WHERE image_file = ?', file);
+    one('SELECT 1 AS ok FROM store_banners WHERE image_file = ?', file) ||
+    one('SELECT 1 AS ok FROM store_badges WHERE image_file = ?', file);
   if (stillUsed) return;
   try {
     fs.unlinkSync(target);
@@ -555,7 +573,25 @@ function imagesFor(productIds) {
   return byProduct;
 }
 
-function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map()) {
+/** Each product's quality badges in the library's order. Members only see
+ * badges the operator has left switched on. */
+function badgesFor(productIds, { activeOnly = false } = {}) {
+  const byProduct = new Map();
+  if (!productIds.length) return byProduct;
+  for (const row of many(
+    `SELECT pb.product_id, b.* FROM store_product_badges pb JOIN store_badges b ON b.id = pb.badge_id
+     WHERE pb.product_id IN (${productIds.map(() => '?').join(',')}) ${activeOnly ? 'AND b.active = 1' : ''}
+     ORDER BY b.id`,
+    ...productIds,
+  )) {
+    const { product_id: productId, ...badge } = row;
+    if (!byProduct.has(productId)) byProduct.set(productId, []);
+    byProduct.get(productId).push(presentBadge(badge));
+  }
+  return byProduct;
+}
+
+function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map(), badgesByProduct = new Map()) {
   if (!row) return row;
   let nutrition = null;
   try {
@@ -578,6 +614,7 @@ function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map()) {
     image_link: row.image_url,
     images: uploaded.length ? uploaded : row.image_url ? [{ id: null, url: row.image_url }] : [],
     nutrition_facts: nutrition,
+    badges: badgesByProduct.get(row.id) ?? [],
     variants,
     from_price: Math.min(...priced),
     flavors: [...new Set(variants.map((v) => v.flavor).filter(Boolean))],
@@ -614,15 +651,38 @@ export function listStoreProducts({ activeOnly = false, q, category } = {}) {
       variantsByProduct.get(v.product_id).push(v);
     }
   }
-  const imagesByProduct = imagesFor(rows.map((r) => r.id));
-  return rows.map((row) => hydrateProduct(row, variantsByProduct, imagesByProduct));
+  const ids = rows.map((r) => r.id);
+  const imagesByProduct = imagesFor(ids);
+  const badgesByProduct = badgesFor(ids, { activeOnly });
+  return rows.map((row) => hydrateProduct(row, variantsByProduct, imagesByProduct, badgesByProduct));
 }
 
 export function getStoreProduct(id) {
   const row = one('SELECT * FROM store_products WHERE id = ?', id);
   if (!row) throw notFound('Product not found');
   const variants = many('SELECT * FROM store_product_variants WHERE product_id = ? ORDER BY sort_order, id', id);
-  return hydrateProduct(row, new Map([[row.id, variants]]), imagesFor([row.id]));
+  return hydrateProduct(row, new Map([[row.id, variants]]), imagesFor([row.id]), badgesFor([row.id]));
+}
+
+/** The badge ids a product should carry, checked against the library.
+ * Undefined means "leave them as they are". */
+function cleanBadgeIds(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return [];
+  if (!Array.isArray(raw)) throw badRequest('Badges must be a list', { badge_ids: 'must be a list' });
+  const ids = [...new Set(raw.map(Number))];
+  if (ids.some((id) => !Number.isInteger(id) || id < 1)) throw badRequest('Unknown badge', { badge_ids: 'unknown badge' });
+  if (ids.length > 12) throw badRequest('At most 12 badges per product', { badge_ids: 'at most 12' });
+  if (ids.length) {
+    const known = many(`SELECT id FROM store_badges WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids);
+    if (known.length !== ids.length) throw badRequest('Unknown badge', { badge_ids: 'unknown badge' });
+  }
+  return ids;
+}
+
+function writeProductBadges(productId, ids) {
+  exec('DELETE FROM store_product_badges WHERE product_id = ?', productId);
+  for (const id of ids) exec('INSERT INTO store_product_badges (product_id, badge_id) VALUES (?, ?)', productId, id);
 }
 
 /** Upserts the product's variants by id; any existing variant not in the list
@@ -670,6 +730,7 @@ export function createStoreProduct(payload) {
   assertPricing(body.mrp, body.price);
   const variants = cleanVariants(payload?.variants) ?? [];
   for (const v of variants) assertPricing(v.mrp ?? body.mrp, v.price ?? body.price);
+  const badgeIds = cleanBadgeIds(payload?.badge_ids) ?? [];
 
   return registryTx(() => {
     const info = exec(
@@ -690,6 +751,7 @@ export function createStoreProduct(payload) {
     );
     const id = Number(info.lastInsertRowid);
     writeVariants(id, variants);
+    writeProductBadges(id, badgeIds);
     return getStoreProduct(id);
   });
 }
@@ -715,6 +777,7 @@ export function updateStoreProduct(id, payload) {
   assertPricing(mrp, price);
   const variants = cleanVariants(payload?.variants);
   for (const v of variants ?? []) assertPricing(v.mrp ?? mrp, v.price ?? price);
+  const badgeIds = cleanBadgeIds(payload?.badge_ids);
 
   return registryTx(() => {
     const columns = Object.keys(sets);
@@ -726,6 +789,7 @@ export function updateStoreProduct(id, payload) {
       );
     }
     if (variants) writeVariants(id, variants);
+    if (badgeIds) writeProductBadges(id, badgeIds);
     // The last active product going away would leave a live store empty.
     if (sets.active === 0) guardLiveStoreHasStock();
     return getStoreProduct(id);
@@ -751,6 +815,7 @@ export function deleteStoreProduct(id) {
     const files = many('SELECT file FROM store_product_images WHERE product_id = ?', id).map((r) => r.file);
     exec('DELETE FROM store_product_variants WHERE product_id = ?', id);
     exec('DELETE FROM store_product_images WHERE product_id = ?', id);
+    exec('DELETE FROM store_product_badges WHERE product_id = ?', id);
     exec('DELETE FROM store_products WHERE id = ?', id);
     guardLiveStoreHasStock();
     for (const file of files) removeStoreImage(file);
@@ -1317,6 +1382,66 @@ export function deleteBanner(id) {
   if (!banner) throw notFound('Banner not found');
   exec('DELETE FROM store_banners WHERE id = ?', id);
   removeStoreImage(banner.image_file);
+  return { deleted: true };
+}
+
+/* ── Quality badges ───────────────────────────────────────────────────── */
+
+function presentBadge(row) {
+  const { image_file: file, ...rest } = row;
+  return { ...rest, image_url: storeMediaUrl(file) };
+}
+
+const badgeRow = (id) => one('SELECT * FROM store_badges WHERE id = ?', id);
+
+/** The library, each with how many products carry it. */
+export function listBadges() {
+  return many(
+    `SELECT b.*, (SELECT COUNT(*) FROM store_product_badges pb WHERE pb.badge_id = b.id) AS product_count
+     FROM store_badges b ORDER BY b.id`,
+  ).map(presentBadge);
+}
+
+function parseBadge(payload, { creating }) {
+  return parse(payload, {
+    name: { type: 'string', min: 2, max: 30, required: creating },
+    active: { type: 'boolean' },
+  });
+}
+
+export function createBadge(payload) {
+  const body = parseBadge(payload, { creating: true });
+  const info = exec('INSERT INTO store_badges (name, active) VALUES (?, ?)', body.name, body.active ?? 1);
+  return presentBadge(badgeRow(Number(info.lastInsertRowid)));
+}
+
+export function updateBadge(id, payload) {
+  if (!badgeRow(id)) throw notFound('Badge not found');
+  const body = parseBadge(payload, { creating: false });
+  const columns = Object.keys(body).filter((k) => body[k] !== null);
+  if (!columns.length) throw badRequest('Nothing to update');
+  exec(`UPDATE store_badges SET ${columns.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...columns.map((k) => body[k]), id);
+  return presentBadge(badgeRow(id));
+}
+
+export function setBadgeImage(id, bytes) {
+  const badge = badgeRow(id);
+  if (!badge) throw notFound('Badge not found');
+  const file = writeStoreImage(`q${id}`, bytes);
+  exec('UPDATE store_badges SET image_file = ? WHERE id = ?', file, id);
+  if (badge.image_file && badge.image_file !== file) removeStoreImage(badge.image_file);
+  return presentBadge(badgeRow(id));
+}
+
+/** Takes the badge off every product that carried it. */
+export function deleteBadge(id) {
+  const badge = badgeRow(id);
+  if (!badge) throw notFound('Badge not found');
+  registryTx(() => {
+    exec('DELETE FROM store_product_badges WHERE badge_id = ?', id);
+    exec('DELETE FROM store_badges WHERE id = ?', id);
+  });
+  removeStoreImage(badge.image_file);
   return { deleted: true };
 }
 
