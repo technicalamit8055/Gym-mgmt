@@ -18,6 +18,7 @@ import { getAppMode, toggleAppMode } from '../vertical.js';
 import { checkSummary, dnsRecordsTable, domainStatusBadge } from './customDomains.js';
 import { renderCatalogSection } from './exerciseCatalog.js';
 import { renderFoodCatalogSection } from './foodCatalog.js';
+import { renderNavBadgesSection } from './navBadgesAdmin.js';
 import { renderStoreAdminSection } from './storeAdmin.js';
 
 /**
@@ -1138,6 +1139,14 @@ const SECTIONS = [
     sub: 'The food database every member’s diet tracker searches.',
   },
   {
+    id: 'navbadges',
+    group: 'Content',
+    icon: 'sparkle',
+    label: 'Menu badges',
+    title: 'Member app menu badges',
+    sub: 'Labels like “Offer” or “New” on the bottom tabs of every member’s app.',
+  },
+  {
     id: 'store',
     group: 'Revenue',
     icon: 'store',
@@ -1312,6 +1321,7 @@ export async function renderPlatformConsole({ context, rerender }) {
   if (consoleSection === 'catalog') return consoleShell(rerender, renderCatalogSection({ onExpired }));
   if (consoleSection === 'foods') return consoleShell(rerender, renderFoodCatalogSection({ onExpired }));
   if (consoleSection === 'store') return consoleShell(rerender, renderStoreAdminSection({ onExpired }));
+  if (consoleSection === 'navbadges') return consoleShell(rerender, renderNavBadgesSection({ onExpired }));
 
   if (consoleSection === 'domains') {
     let section;

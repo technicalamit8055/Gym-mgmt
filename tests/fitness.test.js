@@ -864,6 +864,93 @@ describe('Heavy-style workout logging in the portal', () => {
   });
 });
 
+describe('editing a finished workout', () => {
+  let editorToken;
+  let strangerToken;
+  const press = (weight_kg, reps, set_type = 'normal') => ({ exercise_name: 'Edit Test Press', muscle_group: 'chest', set_type, weight_kg, reps });
+  const save = async (workout_name, sets) =>
+    (await call('POST', '/api/portal/workouts/logs', { workout_name, duration_seconds: 1800, sets }, { token: editorToken })).body.log;
+  const edit = (id, body, token = editorToken) => call('PUT', `/api/portal/workouts/logs/${id}`, body, { token });
+  const record = async () =>
+    (await call('GET', '/api/portal/workouts/prs', undefined, { token: editorToken })).body.items.find(
+      (p) => p.exercise_name === 'Edit Test Press',
+    );
+
+  before(async () => {
+    const member = await call('POST', '/api/members', { first_name: 'Edith', phone: '9876502222' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    editorToken = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+    const stranger = await call('POST', '/api/members', { first_name: 'Stan', phone: '9876503333' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: stranger.body.id }, { token: adminToken });
+    strangerToken = await signInMember(call, { staffToken: adminToken, memberId: stranger.body.id });
+  });
+
+  it('replaces the sets and works the totals out again', async () => {
+    const log = await save('Push', [press(20, 10, 'warmup'), press(50, 8)]);
+    const res = await edit(log.id, {
+      workout_name: 'Push day',
+      duration_seconds: 2700,
+      notes: 'Felt strong',
+      sets: [press(20, 10, 'warmup'), press(50, 8), press(55, 6)],
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.workout_name, 'Push day');
+    assert.equal(res.body.notes, 'Felt strong');
+    assert.equal(res.body.duration_seconds, 2700);
+    assert.equal(res.body.total_sets, 3);
+    assert.equal(res.body.total_reps, 24);
+    assert.equal(res.body.total_volume_kg, 20 * 10 + 50 * 8 + 55 * 6);
+    assert.equal(res.body.sets.length, 3);
+    assert.equal(res.body.started_at, log.started_at, 'when it started stays as logged');
+    assert.equal(res.body.log_date, log.log_date);
+
+    const cleared = await edit(log.id, { workout_name: 'Push day', duration_seconds: 2700, notes: '', sets: [press(50, 8)] });
+    assert.equal(cleared.body.notes, null);
+    assert.equal(cleared.body.sets.length, 1);
+  });
+
+  it('takes a typo record back to the member\'s real best', async () => {
+    const earlier = await save('Earlier', [press(60, 5)]);
+    const typo = await save('Typo', [press(400, 5)]);
+    assert.equal((await record()).max_weight_kg, 400);
+
+    // Corrected to a real PR: the record follows, and the set keeps its mark.
+    let res = await edit(typo.id, { workout_name: 'Typo', duration_seconds: 1800, sets: [press(70, 5)] });
+    assert.equal((await record()).max_weight_kg, 70);
+    assert.equal(res.body.sets[0].is_pr, 1);
+
+    // Corrected below an earlier session: the record falls back to it.
+    res = await edit(typo.id, { workout_name: 'Typo', duration_seconds: 1800, sets: [press(45, 5)] });
+    assert.equal((await record()).max_weight_kg, 60);
+    assert.equal(res.body.sets[0].is_pr, 0);
+
+    // A record nothing else backs up goes with the exercise.
+    await call('DELETE', `/api/portal/workouts/logs/${earlier.id}`, undefined, { token: editorToken });
+    const lone = await save('Lone', [press(80, 5)]);
+    assert.equal((await record()).max_weight_kg, 80);
+    await edit(lone.id, {
+      workout_name: 'Lone',
+      duration_seconds: 600,
+      sets: [{ exercise_name: 'Plank', muscle_group: 'abdominals', duration_seconds: 60 }],
+    });
+    assert.equal((await record()).max_weight_kg, 50, 'the best left is the 50 kg × 8 from the first session');
+  });
+
+  it('checks the sets and keeps other members out', async () => {
+    const log = await save('Mine', [press(40, 5)]);
+    const empty = await edit(log.id, { workout_name: 'Mine', sets: [] });
+    assert.equal(empty.status, 400);
+    const bad = await edit(log.id, { workout_name: 'Mine', sets: [press(-5, 5)] });
+    assert.equal(bad.status, 400);
+    assert.ok(bad.body.details['sets.0.weight_kg']);
+
+    const stranger = await edit(log.id, { workout_name: 'Hijack', sets: [press(1, 1)] }, strangerToken);
+    assert.equal(stranger.status, 404);
+    const still = await call('GET', `/api/portal/workouts/logs/${log.id}`, undefined, { token: editorToken });
+    assert.equal(still.body.workout_name, 'Mine');
+  });
+});
+
 describe('Hevy-style plans a member builds for themselves', () => {
   let trainerPlanId;
   let ownPlan;

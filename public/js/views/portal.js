@@ -1779,6 +1779,58 @@ const clockFrom = (seconds) => {
 
 const minutesLabel = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
 
+/** A session's length the way Hevy writes it: "48min", "1h 5min". */
+function workoutTimeLabel(seconds) {
+  const minutes = Math.max(1, Math.round((Number(seconds) || 0) / 60));
+  return minutes < 60 ? `${minutes}min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
+}
+
+/** The body regions a session's muscle split is told in — Hevy's, coarser than
+ * the groups an exercise is filed under. */
+const SPLIT_REGIONS = {
+  abdominals: 'Core',
+  biceps: 'Arms',
+  triceps: 'Arms',
+  forearms: 'Arms',
+  chest: 'Chest',
+  lats: 'Back',
+  upper_back: 'Back',
+  lower_back: 'Back',
+  traps: 'Back',
+  shoulders: 'Shoulders',
+  quadriceps: 'Legs',
+  hamstrings: 'Legs',
+  glutes: 'Legs',
+  calves: 'Legs',
+  abductors: 'Legs',
+  adductors: 'Legs',
+  cardio: 'Cardio',
+  full_body: 'Full body',
+};
+
+/** Each region's share of a session's working sets, biggest first. Warm-ups
+ * are left out: they prime a muscle, they do not train it. Percentages are
+ * rounded so they still add up to 100. */
+function muscleSplit(sets) {
+  const working = sets.filter((set) => set.set_type !== 'warmup');
+  const counted = working.length ? working : sets;
+  const tally = new Map();
+  for (const set of counted) {
+    const region = SPLIT_REGIONS[set.muscle_group] ?? 'Other';
+    tally.set(region, (tally.get(region) ?? 0) + 1);
+  }
+  const rows = [...tally]
+    .map(([label, n]) => ({ label, exact: (n / counted.length) * 100 }))
+    .sort((a, b) => b.exact - a.exact)
+    .map((row) => ({ ...row, pct: Math.floor(row.exact) }));
+  let spare = 100 - rows.reduce((sum, row) => sum + row.pct, 0);
+  for (const row of [...rows].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {
+    if (spare-- <= 0) break;
+    row.pct += 1;
+  }
+  return rows.map(({ label, pct }) => ({ label, pct }));
+}
+
 /** The burst of rays and confetti around the workout summary's emoji. Rays are
  * [angle°, inner radius, outer radius] about the emoji's centre. */
 function summaryConfetti() {
@@ -5004,24 +5056,61 @@ function openWeightSheet({ latest, onSaved }) {
  * The Store follows the operator's switch (see src/monetization.js): a "Soon"
  * badge while it is coming soon, no badge once live, and no slot at all when
  * the operator has turned it off.
+ *
+ * Any tab can also carry a badge the operator pinned from the console
+ * ("Offer", "New" — see src/navBadges.js). That one wins over the built-in
+ * "Soon", and one marked hide-when-seen stays off on a phone that has already
+ * opened the tab since the badge was last edited.
  */
-function buildTabs(storeStatus = 'coming_soon') {
-  if (isLibrary()) {
-    return [
-      { key: 'home', label: 'Home', icon: 'home' },
-      { key: 'pass', label: 'Pass', icon: 'idCard' },
-      { key: 'schedule', label: 'Shift', icon: 'seat' },
-      { key: 'profile', label: 'Profile', icon: 'person' },
-    ];
+function buildTabs(storeStatus = 'coming_soon', navBadges = {}) {
+  const tabs = isLibrary()
+    ? [
+        { key: 'home', label: 'Home', icon: 'home' },
+        { key: 'pass', label: 'Pass', icon: 'idCard' },
+        { key: 'schedule', label: 'Shift', icon: 'seat' },
+        { key: 'profile', label: 'Profile', icon: 'person' },
+      ]
+    : [
+        { key: 'home', label: 'Home', icon: 'home' },
+        { key: 'workout', label: 'Workout', icon: 'dumbbell' },
+        { key: 'diet', label: 'Diet', icon: 'leaf' },
+        storeStatus === 'disabled' ? null : { key: 'store', label: 'Store', icon: 'bag', badge: storeStatus === 'live' ? null : 'Soon' },
+        { key: 'profile', label: 'Profile', icon: 'person' },
+      ].filter(Boolean);
+  for (const tabDef of tabs) {
+    const pinned = navBadges?.[tabDef.key];
+    if (!pinned || (pinned.hide_when_seen && seenNavBadges.has(tabDef.key, pinned.version))) continue;
+    tabDef.badge = pinned.label;
+    tabDef.badgeTone = pinned.tone;
+    tabDef.badgeImage = pinned.image_url || null;
+    tabDef.badgeOnce = pinned.hide_when_seen ? pinned.version : null;
   }
-  return [
-    { key: 'home', label: 'Home', icon: 'home' },
-    { key: 'workout', label: 'Workout', icon: 'dumbbell' },
-    { key: 'diet', label: 'Diet', icon: 'leaf' },
-    storeStatus === 'disabled' ? null : { key: 'store', label: 'Store', icon: 'bag', badge: storeStatus === 'live' ? null : 'Soon' },
-    { key: 'profile', label: 'Profile', icon: 'person' },
-  ].filter(Boolean);
+  return tabs;
 }
+
+/** Which operator badges this phone has already opened the tab for, by
+ * badge version — so editing a badge brings it back for everyone. */
+const SEEN_NAV_BADGES_KEY = 'gymbook.portal.seenNavBadges';
+
+const seenNavBadges = {
+  read() {
+    try {
+      return JSON.parse(localStorage.getItem(SEEN_NAV_BADGES_KEY)) || {};
+    } catch {
+      return {};
+    }
+  },
+  has(tab, version) {
+    return this.read()[tab] === version;
+  },
+  mark(tab, version) {
+    try {
+      localStorage.setItem(SEEN_NAV_BADGES_KEY, JSON.stringify({ ...this.read(), [tab]: version }));
+    } catch {
+      // Storage blocked: the badge just shows again on the next launch.
+    }
+  },
+};
 
 const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile' };
 
@@ -5136,7 +5225,7 @@ function navIcon(name, key) {
 }
 
 function renderPortalApp(ctx, initialMe) {
-  const TABS = buildTabs(initialMe.monetization?.store_status);
+  const TABS = buildTabs(initialMe.monetization?.store_status, initialMe.nav_badges);
   let me = initialMe;
   let active = 'home';
   let tickInterval = null;
@@ -5201,7 +5290,11 @@ function renderPortalApp(ctx, initialMe) {
         'span',
         { class: 'portal-tab-icon' },
         navIcon(tabDef.icon, tabDef.key),
-        tabDef.badge ? h('span', { class: 'portal-tab-badge' }, tabDef.badge) : null,
+        tabDef.badgeImage
+          ? h('img', { class: 'portal-tab-badge is-image', src: tabDef.badgeImage, alt: tabDef.badge, width: 26, height: 26, decoding: 'async' })
+          : tabDef.badge
+            ? h('span', { class: `portal-tab-badge${tabDef.badgeTone && tabDef.badgeTone !== 'brand' ? ` tone-${tabDef.badgeTone}` : ''}` }, tabDef.badge)
+            : null,
       ),
       h('span', { class: 'portal-tab-label' }, tabDef.label),
     );
@@ -5214,6 +5307,12 @@ function renderPortalApp(ctx, initialMe) {
     const lit = TABS.some((tabDef) => tabDef.key === active) ? active : TAB_HOME_OF[active];
     TABS.forEach((tabDef, i) => {
       const isActive = lit === tabDef.key;
+      // A hide-when-seen badge goes once the member has actually opened its tab.
+      if (isActive && tabDef.key === active && tabDef.badgeOnce) {
+        seenNavBadges.mark(tabDef.key, tabDef.badgeOnce);
+        tabDef.badgeOnce = null;
+        tabButtons[i].querySelector('.portal-tab-badge')?.remove();
+      }
       tabButtons[i].classList.toggle('active', isActive);
       if (isActive) tabButtons[i].setAttribute('aria-current', 'page');
       else tabButtons[i].removeAttribute('aria-current');
@@ -5228,9 +5327,14 @@ function renderPortalApp(ctx, initialMe) {
    * Opening one adds a history entry so the phone's back button or gesture
    * pops it. Tab switches never touch the URL (see the module header), so a
    * popstate while a screen is open can only mean "leave this screen".
+   *
+   * A screen opened from another one (Edit workout from its detail) passes
+   * `onBack`: back then re-arms the history entry and hands over to it, so
+   * the arrow and the phone's gesture both land on the screen it came from.
    */
   let screenOpen = false;
   let skipNextPop = false;
+  let screenBack = null;
 
   function onPopState() {
     // A portal instance replaced by a re-render (or a sign-out) must stop
@@ -5243,6 +5347,12 @@ function renderPortalApp(ctx, initialMe) {
       skipNextPop = false;
       return;
     }
+    if (screenOpen && screenBack) {
+      const back = screenBack;
+      history.pushState({ portalScreen: true }, '', window.location.href);
+      back();
+      return;
+    }
     if (screenOpen) {
       screenOpen = false;
       switchTab(active);
@@ -5250,8 +5360,9 @@ function renderPortalApp(ctx, initialMe) {
   }
   window.addEventListener('popstate', onPopState);
 
-  async function openScreen({ title, subtitle, render }) {
+  async function openScreen({ title, subtitle, render, action = null, onBack = null }) {
     stopTicking();
+    screenBack = onBack;
     if (!screenOpen) {
       history.pushState({ portalScreen: true }, '', window.location.href);
       screenOpen = true;
@@ -5265,6 +5376,7 @@ function renderPortalApp(ctx, initialMe) {
         renderIcon('arrowLeft', { size: 20 }),
       ),
       h('div', { class: 'portal-screen-title' }, h('h2', {}, title), subtitle ? h('p', {}, subtitle) : null),
+      action,
     );
     content.classList.remove('is-refresh');
     clear(content).append(h('div', { class: 'portal-tab-body portal-screen' }, head, h('div', { class: 'portal-loading' }, 'Loading…')));
@@ -5285,7 +5397,7 @@ function renderPortalApp(ctx, initialMe) {
             'div',
             { class: 'portal-error' },
             h('p', {}, err.message || 'Could not load this page'),
-            h('button', { class: 'btn', type: 'button', onclick: () => openScreen({ title, subtitle, render }) }, 'Try again'),
+            h('button', { class: 'btn', type: 'button', onclick: () => openScreen({ title, subtitle, render, action, onBack }) }, 'Try again'),
           ),
         ),
       );
@@ -5295,6 +5407,7 @@ function renderPortalApp(ctx, initialMe) {
   async function switchTab(key) {
     // Leaving a pushed screen through the tab bar: drop its history entry
     // too, so the next back press is not swallowed by a screen already gone.
+    screenBack = null;
     if (screenOpen) {
       screenOpen = false;
       skipNextPop = true;
@@ -7668,6 +7781,7 @@ function renderPortalApp(ctx, initialMe) {
                   : 'Pick your exercises and set your own sets, reps and rest for each day.',
               ),
             ),
+            h('span', { class: 'portal-myplan-chev' }, renderIcon('chevronRight', { size: 20, stroke: 2.4 })),
           ),
     );
   }
@@ -7782,26 +7896,24 @@ function renderPortalApp(ctx, initialMe) {
       body.append(
         h(
           'div',
-          { class: 'portal-routine-card' },
+          { class: 'portal-noroutine' },
+          h('img', { class: 'portal-noroutine-art', src: '/images/workout/no-routine-mascot.webp', alt: '', width: 542, height: 808 }),
+          h('span', { class: 'portal-noroutine-burst', 'aria-hidden': 'true' }, h('i'), h('i')),
+          h('h2', { class: 'portal-noroutine-title' }, 'No routine ', h('span', {}, 'yet')),
           h(
-            'div',
-            { class: 'portal-routine-hero is-plain' },
-            h('h2', { class: 'portal-routine-day' }, 'No routine yet'),
-            h(
-              'p',
-              { class: 'portal-routine-note' },
-              'Build your own plan, ask a trainer to put you on one — or start a freestyle session and log whatever you do today.',
-            ),
+            'p',
+            { class: 'portal-noroutine-note' },
+            'Build your own plan, ask a trainer to put you on one — or start a freestyle session and log whatever you do today.',
           ),
           h(
             'div',
-            { class: 'portal-routine-sheet' },
+            { class: 'portal-noroutine-actions' },
             startButton('Start a freestyle workout', () => startSession('Freestyle workout', null)),
             h(
               'button',
-              { class: 'btn ghost block portal-pe-add-day', type: 'button', onclick: () => openPlanEditor() },
-              renderIcon('plus', { size: 16 }),
-              ' Create your own plan',
+              { class: 'btn block portal-noroutine-create', type: 'button', onclick: () => openPlanEditor() },
+              renderIcon('plus', { size: 20, stroke: 2.6 }),
+              h('span', {}, 'Create your own plan'),
             ),
           ),
         ),
@@ -7817,10 +7929,10 @@ function renderPortalApp(ctx, initialMe) {
       sectionHead("Today's stats", null, null, 'is-label'),
       h(
         'div',
-        { class: 'portal-stat-row' },
+        { class: 'portal-stat-row is-workout' },
         miniStat('weight', history.stats.total_workouts, 'Workouts', 'orange'),
         miniStat('trendUp', Math.round(history.stats.lifetime_volume_kg / 1000), 'Tonnes lifted', 'green'),
-        miniStat('trophy', prs.items.length, 'Records', 'orange'),
+        miniStat('trophy', prs.items.length, 'Records', 'purple'),
       ),
     );
 
@@ -7869,8 +7981,23 @@ function renderPortalApp(ctx, initialMe) {
       );
     }
 
+    /* Units: one switch, which sits in the empty-history card until there is history. */
+    const unitsRow = h(
+      'div',
+      {
+        class: 'portal-units-row',
+        onclick: () => {
+          weightUnit.set(weightUnit.get() === 'kg' ? 'lb' : 'kg');
+          switchTab('workout');
+        },
+      },
+      renderIcon('weight', { size: 20 }),
+      h('span', {}, 'Show weights in pounds'),
+      settingsSwitch(weightUnit.get() === 'lb', 'Show weights in pounds'),
+    );
+
     /* History */
-    body.append(h('h3', { class: 'portal-section-title' }, 'Recent workouts'));
+    body.append(sectionHead('Recent workouts', null, null, 'is-label'));
     body.append(
       history.items.length
         ? h(
@@ -7907,29 +8034,25 @@ function renderPortalApp(ctx, initialMe) {
               ),
             ),
           )
-        : h('div', { class: 'portal-empty' }, 'No workouts logged yet — your first session will show up here.'),
+        : h(
+            'div',
+            { class: 'portal-history-empty' },
+            h('img', { src: '/images/workout/empty-history.svg', alt: '', width: 240, height: 150 }),
+            h('strong', {}, 'No workouts logged yet'),
+            h('p', {}, 'Your first session will show up here.'),
+            unitsRow,
+          ),
     );
-
-    /* Units */
-    body.append(
-      h(
-        'button',
-        {
-          class: 'btn ghost block portal-settings-btn',
-          type: 'button',
-          onclick: () => {
-            weightUnit.set(weightUnit.get() === 'kg' ? 'lb' : 'kg');
-            switchTab('workout');
-          },
-        },
-        renderIcon('weight', { size: 15 }),
-        ` Show weights in ${weightUnit.get() === 'kg' ? 'pounds' : 'kilograms'}`,
-      ),
-    );
+    if (history.items.length) body.append(unitsRow);
 
     return body;
   }
 
+  /**
+   * One finished session as a page of its own, laid out the way Hevy's
+   * "Workout Detail" is: who and when, the headline numbers, the muscle split
+   * and every exercise's sets. Delete lives behind the ⋯ in the header.
+   */
   function openWorkoutLogDetail(log, onDeleted) {
     const byExercise = new Map();
     for (const set of log.sets) {
@@ -7937,58 +8060,563 @@ function renderPortalApp(ctx, initialMe) {
       byExercise.get(set.exercise_name).push(set);
     }
 
-    openModal({
-      title: log.workout_name,
-      body: h(
+    const records = log.sets.filter((set) => set.is_pr).length;
+    const volume = `${Math.round(toDisplayWeight(Number(log.total_volume_kg) || 0)).toLocaleString()} ${weightUnit.get()}`;
+
+    const share = async () => {
+      const lines = [
+        log.workout_name,
+        `${workoutTimeLabel(log.duration_seconds)} · ${volume} · ${log.total_sets} sets`,
+        '',
+        ...[...byExercise].map(([name, sets]) => `${name}: ${sets.map((set) => setSummary(set)).join(', ')}`),
+      ];
+      const text = lines.join('\n');
+      try {
+        if (navigator.share) await navigator.share({ title: log.workout_name, text });
+        else {
+          await navigator.clipboard.writeText(text);
+          toast('Workout copied — paste it anywhere');
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') toast('Could not share this workout', 'error');
+      }
+    };
+
+    const remove = () =>
+      confirmDialog({
+        title: 'Delete this workout?',
+        message: 'The session is removed from your history. Records you set stay on your wall.',
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: async () => {
+          await api.portal.deleteWorkoutLog(log.id);
+          toast('Workout deleted');
+          await onDeleted();
+        },
+      });
+
+    const edit = () => openWorkoutLogEditor(log, onDeleted);
+
+    const more = h(
+      'button',
+      {
+        class: 'portal-screen-action',
+        type: 'button',
+        'aria-label': 'More options',
+        onclick: () =>
+          actionSheet(log.workout_name, [
+            { icon: 'edit', label: 'Edit workout', onClick: edit },
+            { icon: 'upload', label: 'Share workout', onClick: share },
+            { icon: 'trash', label: 'Delete workout', danger: true, onClick: remove },
+          ]),
+      },
+      renderIcon('more', { size: 20 }),
+    );
+
+    openScreen({ title: 'Workout detail', action: more, render: () => workoutLogBody(log, byExercise, { records, volume, share, edit }) });
+  }
+
+  function workoutLogBody(log, byExercise, { records, volume, share, edit }) {
+    const member = me.member;
+    const started = new Date(`${String(log.started_at).replace(' ', 'T')}Z`);
+    const when = Number.isNaN(started.getTime())
+      ? longDate(log.log_date)
+      : `${started.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} · ${started
+          .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+          .toLowerCase()}`;
+
+    const stat = (label, value, extra) =>
+      h('div', { class: 'portal-wd-stat' }, h('span', {}, label), h('strong', {}, value, extra ?? null));
+
+    const split = muscleSplit(log.sets);
+
+    return h(
+      'div',
+      { class: 'portal-wd' },
+      h(
         'div',
-        { class: 'portal-log-detail' },
-        h(
-          'div',
-          { class: 'portal-summary-grid' },
-          h('div', {}, h('strong', {}, weightLabel(log.total_volume_kg)), h('span', {}, 'volume')),
-          h('div', {}, h('strong', {}, String(log.total_sets)), h('span', {}, 'sets')),
-          h('div', {}, h('strong', {}, String(log.total_reps)), h('span', {}, 'reps')),
-          h('div', {}, h('strong', {}, minutesLabel(log.duration_seconds)), h('span', {}, 'duration')),
-        ),
-        ...[...byExercise].map(([name, sets]) =>
-          h(
-            'div',
-            { class: 'portal-log-ex' },
-            h('h4', {}, name),
-            ...sets.map((set) =>
+        { class: 'portal-wd-who' },
+        member.photo_url
+          ? h('img', { class: 'portal-wd-avatar', src: member.photo_url, alt: '' })
+          : h('div', { class: 'portal-wd-avatar is-initials' }, initials(member.first_name, member.last_name)),
+        h('div', {}, h('strong', {}, `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()), h('span', {}, when)),
+      ),
+      h('h3', { class: 'portal-wd-title' }, log.workout_name),
+      log.notes ? h('p', { class: 'portal-wd-notes' }, log.notes) : null,
+      h(
+        'div',
+        { class: 'portal-wd-stats' },
+        stat('Time', workoutTimeLabel(log.duration_seconds)),
+        stat('Volume', volume),
+        stat('Sets', String(log.total_sets)),
+        stat('Records', String(records), records ? h('span', { class: 'portal-wd-medal' }, renderIcon('trophy', { size: 16 })) : null),
+      ),
+      h(
+        'div',
+        { class: 'portal-wd-actions' },
+        h('button', { class: 'portal-wd-action', type: 'button', onclick: share }, renderIcon('upload', { size: 18 }), h('span', {}, 'Share')),
+      ),
+
+      split.length
+        ? h(
+            'section',
+            { class: 'portal-wd-section' },
+            h('h4', { class: 'portal-wd-label' }, 'Muscle split'),
+            ...split.map(({ label, pct }) =>
               h(
                 'div',
-                { class: 'portal-log-set' },
-                h('span', { class: `portal-set-type t-${set.set_type}` }, SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '—'),
-                h('span', {}, setSummary(set)),
-                set.is_pr ? h('span', { class: 'badge amber' }, 'PR') : null,
-                h('span', { class: 'muted' }, set.est_1rm_kg ? `~${weightLabel(set.est_1rm_kg)} 1RM` : ''),
+                { class: 'portal-wd-split' },
+                h('span', { class: 'portal-wd-split-name' }, label),
+                h(
+                  'div',
+                  { class: 'portal-wd-split-row' },
+                  h('span', { class: 'portal-wd-split-bar', style: `--w:${(pct / split[0].pct) * 100}%` }),
+                  h('span', { class: 'portal-wd-split-pct' }, `${pct}%`),
+                ),
               ),
             ),
-          ),
+          )
+        : null,
+
+      h(
+        'section',
+        { class: 'portal-wd-section' },
+        h(
+          'div',
+          { class: 'portal-wd-label-row' },
+          h('h4', { class: 'portal-wd-label' }, 'Workout'),
+          h('button', { class: 'portal-wd-edit', type: 'button', onclick: edit }, 'Edit workout'),
         ),
+        ...[...byExercise].map(([name, sets]) => workoutLogExercise(name, sets)),
+      ),
+    );
+  }
+
+  /** One exercise of a finished session: its picture and name (tap for its
+   * progress), then the sets as Hevy lists them — W for a warm-up, working
+   * sets numbered, a medal on a record. */
+  function workoutLogExercise(name, sets) {
+    const exercise = { ...sets[0], name, exercise_name: name };
+    const type = logTypeOfSet(sets.find((set) => set.set_type !== 'warmup') ?? sets[0]);
+    const column = { weight_reps: 'Weight & reps', reps: 'Reps', duration: 'Time', distance_duration: 'Distance & time' }[type];
+    const text = (set) =>
+      type === 'weight_reps' ? `${weightLabel(Number(set.weight_kg) || 0)} × ${Number(set.reps) || 0} reps` : setSummary(set, type);
+
+    let working = 0;
+    return h(
+      'div',
+      { class: 'portal-wd-ex' },
+      h(
+        'button',
+        { class: 'portal-wd-ex-head', type: 'button', onclick: () => openExerciseDetail(exercise, { tab: 'history' }) },
+        h('span', { class: 'portal-wd-ex-thumb' }, pickerThumb(exercise)),
+        h('span', { class: 'portal-wd-ex-name' }, name),
+      ),
+      h('div', { class: 'portal-wd-set is-head' }, h('span', {}, 'Set'), h('span', {}, column)),
+      ...sets.map((set) => {
+        if (set.set_type !== 'warmup') working += 1;
+        const label = set.set_type === 'normal' ? String(working) : (SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '');
+        return h(
+          'div',
+          { class: `portal-wd-set t-${set.set_type}` },
+          h('span', { class: 'portal-wd-set-no' }, label),
+          h('span', {}, text(set)),
+          set.is_pr ? h('span', { class: 'portal-wd-medal', title: 'Personal record' }, renderIcon('trophy', { size: 16 })) : null,
+        );
+      }),
+    );
+  }
+
+  /**
+   * Hevy's "Edit Workout" for a finished session: its name, length, notes and
+   * every set, in the logger's own card and row style. Nothing is sent until
+   * Save, and back with changes asks first. The server works the totals and
+   * records out again from what is saved.
+   */
+  function openWorkoutLogEditor(log, onDeleted) {
+    // What the session recorded decides the columns, not the catalogue: a
+    // weighted pull-up logged with a load keeps its weight box even though
+    // the exercise is filed as bodyweight.
+    const typeOfLogged = (exercise, sets) =>
+      sets.some((set) => Number(set.weight_kg) > 0)
+        ? 'weight_reps'
+        : sets.some((set) => Number(set.distance_km) > 0)
+          ? 'distance_duration'
+          : sets.some((set) => Number(set.duration_seconds) > 0)
+            ? 'duration'
+            : logTypeOf(exercise);
+
+    const editableSet = (set) => ({
+      set_type: set.set_type,
+      weight_kg: Number(set.weight_kg) || 0,
+      weight_display: Number(set.weight_kg) > 0 ? String(toDisplayWeight(Number(set.weight_kg))) : '',
+      reps: Number(set.reps) > 0 ? Number(set.reps) : '',
+      duration_seconds: Number(set.duration_seconds) || 0,
+      distance_km: Number(set.distance_km) > 0 ? String(set.distance_km) : '',
+      rpe: set.rpe ?? null,
+      notes: set.notes ?? null,
+      completed: set.completed !== 0,
+    });
+
+    const grouped = new Map();
+    for (const set of log.sets) {
+      if (!grouped.has(set.exercise_name)) grouped.set(set.exercise_name, []);
+      grouped.get(set.exercise_name).push(set);
+    }
+    const draft = {
+      workout_name: log.workout_name,
+      minutes: String(Math.round((Number(log.duration_seconds) || 0) / 60)),
+      notes: log.notes ?? '',
+      exercises: [...grouped].map(([name, sets]) => {
+        const exercise = { ...sets[0], exercise_name: name };
+        return { ...exercise, log_type: typeOfLogged(exercise, sets), sets: sets.map(editableSet) };
+      }),
+    };
+    let dirty = false;
+    const touched = () => {
+      dirty = true;
+    };
+
+    const root = h('div', { class: 'portal-we' });
+
+    const blankSet = (last) => ({
+      set_type: 'normal',
+      weight_kg: last?.weight_kg ?? 0,
+      weight_display: last?.weight_display ?? '',
+      reps: last?.reps ?? '',
+      duration_seconds: last?.duration_seconds ?? 0,
+      distance_km: last?.distance_km ?? '',
+      rpe: null,
+      notes: null,
+      completed: true,
+    });
+
+    function setRow(exercise, set, index) {
+      const type = exercise.log_type;
+      const working = exercise.sets.slice(0, index + 1).filter((s) => s.set_type !== 'warmup').length;
+      const typeInfo = SET_TYPES.find((t) => t.key === set.set_type);
+
+      const number = (props, read, write) =>
+        h('input', {
+          class: 'portal-set-input',
+          type: 'number',
+          min: 0,
+          placeholder: '0',
+          value: read(),
+          oninput: (event) => {
+            write(event.target.value);
+            touched();
+          },
+          ...props,
+        });
+      const weight = () =>
+        number(
+          { inputmode: 'decimal', step: 0.5, 'aria-label': `Weight in ${weightUnit.get()}` },
+          () => set.weight_display,
+          (value) => {
+            set.weight_display = value;
+            set.weight_kg = toKg(value);
+          },
+        );
+      const reps = () =>
+        number({ inputmode: 'numeric', step: 1, 'aria-label': 'Reps' }, () => set.reps, (value) => {
+          set.reps = value === '' ? '' : Number(value);
+        });
+      const distance = () =>
+        number({ inputmode: 'decimal', step: 0.01, 'aria-label': 'Distance in km' }, () => set.distance_km, (value) => {
+          set.distance_km = value;
+        });
+      const time = () =>
+        h('input', {
+          class: 'portal-set-input is-time',
+          type: 'text',
+          inputmode: 'numeric',
+          autocomplete: 'off',
+          'aria-label': 'Time — digits fill in from the right',
+          placeholder: '0:00',
+          value: set.duration_seconds > 0 ? durationLabel(set.duration_seconds) : '',
+          oninput: (event) => {
+            const digits = timeDigitsOf(event.target.value);
+            set.duration_seconds = digits ? digitsToSeconds(digits) : 0;
+            event.target.value = formatTimeDigits(digits);
+            touched();
+          },
+        });
+
+      const inputs = {
+        weight_reps: () => [weight(), reps()],
+        reps: () => [reps()],
+        duration: () => [time()],
+        distance_duration: () => [distance(), time()],
+      }[type]();
+
+      return h(
+        'div',
+        { class: `portal-set-row is-edit${inputs.length === 1 ? ' is-single' : ''}` },
         h(
           'button',
           {
-            class: 'btn danger block',
+            class: `portal-set-type t-${set.set_type}`,
+            type: 'button',
+            title: `${typeInfo?.label ?? 'Normal'} set — tap to change type`,
+            'aria-label': `Set ${index + 1}, ${typeInfo?.label ?? 'Normal'}. Change set type`,
+            onclick: () => {
+              const order = ['normal', 'warmup', 'drop', 'failure'];
+              set.set_type = order[(order.indexOf(set.set_type) + 1) % order.length];
+              touched();
+              paint();
+            },
+          },
+          set.set_type === 'normal' ? String(working) : (typeInfo?.short ?? String(working)),
+        ),
+        ...inputs,
+        h(
+          'button',
+          {
+            class: 'portal-set-remove',
+            type: 'button',
+            'aria-label': `Remove set ${index + 1}`,
+            // The last set stays: an exercise is removed from its menu.
+            disabled: exercise.sets.length <= 1,
+            onclick: () => {
+              exercise.sets.splice(index, 1);
+              touched();
+              paint();
+            },
+          },
+          renderIcon('close', { size: 16, stroke: 2.2 }),
+        ),
+      );
+    }
+
+    function moveExercise(from, to) {
+      const [moved] = draft.exercises.splice(from, 1);
+      draft.exercises.splice(to, 0, moved);
+      touched();
+      paint();
+    }
+
+    function exerciseCard(exercise, exIndex) {
+      const columns = {
+        weight_reps: [weightUnit.get(), 'Reps'],
+        reps: ['Reps'],
+        duration: ['Time'],
+        distance_duration: ['Km', 'Time'],
+      }[exercise.log_type];
+      return h(
+        'div',
+        { class: 'portal-ex-card' },
+        h(
+          'div',
+          { class: 'portal-ex-head' },
+          exerciseThumbButton(exercise),
+          h(
+            'div',
+            { class: 'portal-ex-title' },
+            h('div', { class: 'portal-ex-name' }, exercise.exercise_name),
+            h('div', { class: 'portal-ex-meta' }, h('span', { class: 'portal-muscle-badge' }, capitalise(muscleLabel(exercise.muscle_group)))),
+          ),
+          h(
+            'button',
+            {
+              class: 'portal-ex-menu',
+              type: 'button',
+              'aria-label': `${exercise.exercise_name} options`,
+              onclick: () =>
+                actionSheet(exercise.exercise_name, [
+                  exIndex > 0 ? { icon: 'arrowUp', label: 'Move up', onClick: () => moveExercise(exIndex, exIndex - 1) } : null,
+                  exIndex < draft.exercises.length - 1
+                    ? { icon: 'arrowDown', label: 'Move down', onClick: () => moveExercise(exIndex, exIndex + 1) }
+                    : null,
+                  {
+                    icon: 'trash',
+                    label: 'Remove exercise',
+                    danger: true,
+                    onClick: () => {
+                      draft.exercises.splice(exIndex, 1);
+                      touched();
+                      paint();
+                    },
+                  },
+                ]),
+            },
+            renderIcon('more', { size: 20, stroke: 2.5 }),
+          ),
+        ),
+        h(
+          'div',
+          { class: `portal-set-row portal-set-header is-edit${columns.length === 1 ? ' is-single' : ''}` },
+          h('span', {}, 'Set'),
+          ...columns.map((label) => h('span', {}, label)),
+          h('span', {}, ''),
+        ),
+        ...exercise.sets.map((set, index) => setRow(exercise, set, index)),
+        h(
+          'button',
+          {
+            class: 'portal-ex-btn is-add',
+            type: 'button',
+            onclick: () => {
+              // A new set inherits the one above, as in the logger.
+              exercise.sets.push(blankSet(exercise.sets.at(-1)));
+              touched();
+              paint();
+            },
+          },
+          renderIcon('plus', { size: 18, stroke: 2.2 }),
+          h('span', {}, 'Add set'),
+        ),
+      );
+    }
+
+    function paint() {
+      clear(root).append(
+        h(
+          'div',
+          { class: 'portal-pe-head' },
+          h('input', {
+            class: 'portal-input portal-pe-name',
+            type: 'text',
+            maxlength: 120,
+            placeholder: 'Workout name',
+            'aria-label': 'Workout name',
+            value: draft.workout_name,
+            oninput: (event) => {
+              draft.workout_name = event.target.value;
+              touched();
+            },
+          }),
+          h(
+            'label',
+            { class: 'portal-pe-field portal-we-duration' },
+            h('span', {}, 'Duration (min)'),
+            h('input', {
+              class: 'portal-pe-input',
+              type: 'number',
+              inputmode: 'numeric',
+              min: 0,
+              max: 1440,
+              step: 1,
+              value: draft.minutes,
+              oninput: (event) => {
+                draft.minutes = event.target.value;
+                touched();
+              },
+            }),
+          ),
+          h(
+            'textarea',
+            {
+              class: 'portal-input portal-pe-notes',
+              rows: 2,
+              maxlength: 1000,
+              placeholder: 'Notes (optional)',
+              'aria-label': 'Workout notes',
+              oninput: (event) => {
+                draft.notes = event.target.value;
+                touched();
+              },
+            },
+            draft.notes,
+          ),
+        ),
+        ...draft.exercises.map(exerciseCard),
+        h(
+          'button',
+          {
+            class: 'portal-add-ex',
             type: 'button',
             onclick: () =>
-              confirmDialog({
-                title: 'Delete this workout?',
-                message: 'The session is removed from your history. Records you set stay on your wall.',
-                confirmLabel: 'Delete',
-                danger: true,
-                onConfirm: async () => {
-                  await api.portal.deleteWorkoutLog(log.id);
-                  toast('Workout deleted');
-                  closeModal();
-                  await onDeleted();
-                },
+              openExercisePicker((items) => {
+                for (const item of items) {
+                  const exercise = { exercise_name: item.name, muscle_group: item.muscle_group, ...demoFields(item) };
+                  draft.exercises.push({ ...exercise, log_type: logTypeOf(item), sets: [blankSet()] });
+                }
+                touched();
+                paint();
               }),
           },
-          'Delete this workout',
+          renderIcon('plus', { size: 20, stroke: 2.2 }),
+          h('span', {}, 'Add exercise'),
         ),
-      ),
+      );
+    }
+
+    /** The sets as the server takes them. Rows left empty are dropped, the
+     * way the logger drops them at Finish, and only the fields an exercise
+     * logs are sent, so a plank row cannot carry a stray weight. */
+    function payloadSets() {
+      return draft.exercises.flatMap((exercise) => {
+        const type = exercise.log_type;
+        const lifts = type === 'weight_reps';
+        const counts = lifts || type === 'reps';
+        const timed = type === 'duration' || type === 'distance_duration';
+        return exercise.sets
+          .map((set, index) => ({
+            exercise_name: exercise.exercise_name,
+            muscle_group: exercise.muscle_group,
+            set_number: index + 1,
+            set_type: set.set_type,
+            weight_kg: lifts ? Number(set.weight_kg) || 0 : 0,
+            reps: counts ? Number(set.reps) || 0 : 0,
+            duration_seconds: timed ? Number(set.duration_seconds) || 0 : 0,
+            distance_km: type === 'distance_duration' ? Number(set.distance_km) || 0 : 0,
+            rpe: set.rpe,
+            notes: set.notes,
+            completed: set.completed,
+          }))
+          .filter((set) => set.reps > 0 || set.weight_kg > 0 || set.duration_seconds > 0 || set.distance_km > 0);
+      });
+    }
+
+    const saveBtn = h('button', { class: 'btn primary portal-we-save', type: 'button', onclick: save }, 'Save');
+
+    async function save() {
+      const name = draft.workout_name.trim();
+      if (!name) {
+        toast('Give the workout a name', 'error');
+        return;
+      }
+      const sets = payloadSets();
+      if (!sets.length) {
+        toast('Log at least one set', 'error');
+        return;
+      }
+      saveBtn.disabled = true;
+      try {
+        const updated = await api.portal.updateWorkoutLog(log.id, {
+          workout_name: name,
+          duration_seconds: Math.max(0, Math.min(1440, Math.round(Number(draft.minutes) || 0))) * 60,
+          notes: draft.notes.trim(),
+          sets,
+        });
+        toast('Workout updated');
+        openWorkoutLogDetail(updated, onDeleted);
+      } catch (err) {
+        saveBtn.disabled = false;
+        toast(err.message || 'Could not save this workout', 'error');
+      }
+    }
+
+    const backToDetail = () => openWorkoutLogDetail(log, onDeleted);
+    paint();
+    openScreen({
+      title: 'Edit workout',
+      action: saveBtn,
+      render: () => root,
+      onBack: () => {
+        if (!dirty) {
+          backToDetail();
+          return;
+        }
+        confirmDialog({
+          title: 'Discard your changes?',
+          message: 'The workout stays as it was saved.',
+          confirmLabel: 'Discard',
+          danger: true,
+          onConfirm: backToDetail,
+        });
+      },
     });
   }
 

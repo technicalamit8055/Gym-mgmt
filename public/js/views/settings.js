@@ -496,6 +496,7 @@ export async function renderSettings({ reload }) {
       { id: 'crimson', name: 'Crimson Power', color: '#ef4444' },
       { id: 'cyber', name: 'Cyber Volt Lime', color: '#84cc16' },
       { id: 'ultramarine', name: 'Ultramarine Blue', color: '#3b82f6' },
+      { id: 'gold', name: 'Golden Amber', color: '#f4b400' },
     ];
   const currentTheme = getAppTheme() || (isLibrary() ? 'emerald' : 'flame');
 

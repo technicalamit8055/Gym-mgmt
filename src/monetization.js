@@ -483,8 +483,9 @@ function cleanVariants(raw) {
 /* ── Uploaded photos ──────────────────────────────────────────────────── */
 
 export const MAX_STORE_IMAGE_BYTES = 4 * 1024 * 1024;
-// p = product photo, b = banner, q = quality badge.
-const STORE_FILE_RE = /^(?:p\d+|b\d+|q\d+)-[a-f0-9]{10}\.(?:png|jpg|webp)$/;
+// p = product photo, b = banner, q = quality badge, nb<tab> = a member-app
+// menu badge (src/navBadges.js), which shares this folder and serving route.
+const STORE_FILE_RE = /^(?:p\d+|b\d+|q\d+|nb[a-z]+)-[a-f0-9]{10}\.(?:png|jpg|webp)$/;
 
 /** Where an uploaded store photo lives on disk, or null for a name that is not
  * one of ours — the serving route's only defence against path tricks. */
@@ -502,7 +503,7 @@ export function storeMediaUrl(file) {
 
 /** Saves one uploaded photo under a content-addressed name. Only still
  * images: the bytes decide the format, never the declared Content-Type. */
-function writeStoreImage(prefix, bytes) {
+export function writeStoreImage(prefix, bytes) {
   if (!bytes?.length) throw badRequest('That file is empty');
   if (bytes.length > MAX_STORE_IMAGE_BYTES) throw badRequest('That image is too large', { file: 'must be under 4 MB' });
   const format = sniffMedia(bytes);

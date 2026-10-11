@@ -4,7 +4,7 @@ import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { ATTENDANCE_SELECT, publicVisit } from '../checkin.js';
 import { all, get, getBusinessType, run, tx } from '../db.js';
 import { HttpError, badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
-import { listMuscleGroups } from '../exerciseCatalog.js';
+import { attachCatalogToExercises, listMuscleGroups } from '../exerciseCatalog.js';
 import {
   EQUIPMENT_TYPES,
   MEAL_TYPES,
@@ -14,6 +14,7 @@ import {
   fitnessAccessFor,
   muscleGroupOf,
   previousSetsFor,
+  reconcileEditedRecords,
   recordPersonalRecords,
   summariseSets,
 } from '../fitness.js';
@@ -80,6 +81,7 @@ import {
   storeOrder,
   storefront,
 } from '../monetization.js';
+import { portalNavBadges } from '../navBadges.js';
 import { verifyPaymentSignature } from '../razorpay.js';
 
 /**
@@ -531,6 +533,8 @@ portalRoutes.get('/me', requireMemberAuth, (req, res) => {
     // Which Store screen and which add-on paywall to draw — the operator's
     // switches, already downgraded where online payments are not set up.
     monetization: portalMonetization(),
+    // The operator's badges on the bottom tabs ("Offer" on Store, "New" on Diet).
+    nav_badges: portalNavBadges(),
   });
 });
 
@@ -1212,29 +1216,11 @@ portalRoutes.delete('/workouts/shared/:id', requireMemberAuth, requireModule('fi
   res.json({ ok: true });
 });
 
-/**
- * Saves a finished session.
- *
- * The active workout lives in the browser until the member taps Finish — a
- * running set table is a scratchpad, and round-tripping every checkbox to the
- * server would put a spinner between the member and their next set. The cost is
- * that a closed tab loses the session, which is why the client also keeps it in
- * localStorage.
- *
- * Totals and PRs are recomputed here from the sets rather than trusted from the
- * client: the volume on a PR wall has to be arithmetic on stored rows, not
- * whatever a request said it was.
- */
-portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
-  const body = parse(req.body, {
-    workout_name: { type: 'string', required: true, min: 1, max: 120 },
-    plan_id: { type: 'int', min: 1 },
-    day_id: { type: 'int', min: 1 },
-    duration_seconds: { type: 'int', min: 0, max: 86400, default: 0 },
-    notes: { type: 'string', max: 1000 },
-  });
-
-  const rawSets = Array.isArray(req.body?.sets) ? req.body.sets : [];
+/** A session's sets, checked field by field — the one shape both finishing a
+ * workout and editing it afterwards accept. Errors come back under the set's
+ * index ("sets.3.reps") so the client can point at the row. */
+function parseLogSets(raw) {
+  const rawSets = Array.isArray(raw) ? raw : [];
   if (!rawSets.length) throw badRequest('Log at least one set before finishing', { sets: 'is required' });
   if (rawSets.length > 200) throw badRequest('That is more sets than one session can hold', { sets: 'at most 200' });
 
@@ -1292,6 +1278,63 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
     };
   });
   if (Object.keys(errors).length) throw badRequest('Some sets need attention', errors);
+  return sets;
+}
+
+/** Writes `sets` under `logId` in order, with each set's estimated 1RM, and
+ * returns them with their new ids for the PR pass. */
+function insertLogSets(logId, sets) {
+  return sets.map((set, index) => {
+    const est1rm = estimate1rm(set.weight_kg, set.reps);
+    const id = run(
+      `INSERT INTO workout_log_sets
+         (log_id, exercise_name, muscle_group, set_number, set_type, weight_kg, reps,
+          duration_seconds, distance_km, rpe, est_1rm_kg, completed, notes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        logId,
+        set.exercise_name,
+        set.muscle_group,
+        set.set_number,
+        set.set_type,
+        set.weight_kg,
+        set.reps,
+        set.duration_seconds,
+        set.distance_km,
+        set.rpe,
+        est1rm,
+        set.completed,
+        set.notes,
+        index,
+      ],
+    ).lastInsertRowid;
+    return { ...set, id, est_1rm_kg: est1rm };
+  });
+}
+
+/**
+ * Saves a finished session.
+ *
+ * The active workout lives in the browser until the member taps Finish — a
+ * running set table is a scratchpad, and round-tripping every checkbox to the
+ * server would put a spinner between the member and their next set. The cost is
+ * that a closed tab loses the session, which is why the client also keeps it in
+ * localStorage.
+ *
+ * Totals and PRs are recomputed here from the sets rather than trusted from the
+ * client: the volume on a PR wall has to be arithmetic on stored rows, not
+ * whatever a request said it was.
+ */
+portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const body = parse(req.body, {
+    workout_name: { type: 'string', required: true, min: 1, max: 120 },
+    plan_id: { type: 'int', min: 1 },
+    day_id: { type: 'int', min: 1 },
+    duration_seconds: { type: 'int', min: 0, max: 86400, default: 0 },
+    notes: { type: 'string', max: 1000 },
+  });
+
+  const sets = parseLogSets(req.body?.sets);
 
   const totals = summariseSets(sets);
   // The gym's own calendar date, not UTC: a 5am session at an IST gym belongs
@@ -1331,32 +1374,7 @@ portalRoutes.post('/workouts/logs', requireMemberAuth, requireModule('fitness'),
       ],
     ).lastInsertRowid;
 
-    const stored = sets.map((set, index) => {
-      const est1rm = estimate1rm(set.weight_kg, set.reps);
-      const id = run(
-        `INSERT INTO workout_log_sets
-           (log_id, exercise_name, muscle_group, set_number, set_type, weight_kg, reps,
-            duration_seconds, distance_km, rpe, est_1rm_kg, completed, notes, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          logId,
-          set.exercise_name,
-          set.muscle_group,
-          set.set_number,
-          set.set_type,
-          set.weight_kg,
-          set.reps,
-          set.duration_seconds,
-          set.distance_km,
-          set.rpe,
-          est1rm,
-          set.completed,
-          set.notes,
-          index,
-        ],
-      ).lastInsertRowid;
-      return { ...set, id, est_1rm_kg: est1rm };
-    });
+    const stored = insertLogSets(logId, sets);
 
     // Inside the transaction: a session that rolls back must not leave a PR
     // pointing at a set that no longer exists.
@@ -1390,20 +1408,91 @@ portalRoutes.get('/workouts/logs', requireMemberAuth, requireModule('fitness'), 
   });
 });
 
-portalRoutes.get('/workouts/logs/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+/** The signed-in member's own log. notFound, not forbidden, for someone
+ * else's: whether a given id exists in this gym is not something a member gets
+ * to probe. */
+function ownWorkoutLog(req) {
   const log = get('SELECT * FROM workout_logs WHERE id = ?', [Number(req.params.id)]);
-  // notFound, not forbidden, for someone else's log: whether a given id exists
-  // in this gym is not something a member gets to probe.
   if (!log || log.member_id !== req.member.id) throw notFound('Workout not found');
-  res.json({
-    ...log,
-    sets: all('SELECT * FROM workout_log_sets WHERE log_id = ? ORDER BY sort_order, id', [log.id]),
+  return log;
+}
+
+/** A session with its sets, each carrying its exercise's demo so the detail
+ * screen can show the same thumbnail the member trained from. */
+const workoutLogDetail = (logId) => ({
+  ...get('SELECT * FROM workout_logs WHERE id = ?', [logId]),
+  sets: attachCatalogToExercises(all('SELECT * FROM workout_log_sets WHERE log_id = ? ORDER BY sort_order, id', [logId])),
+});
+
+portalRoutes.get('/workouts/logs/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  res.json(workoutLogDetail(ownWorkoutLog(req).id));
+});
+
+/**
+ * Edits a finished session: its name, length, notes and the whole set list,
+ * which the client sends back in full (Hevy's "Edit Workout"). The sets are
+ * replaced rather than diffed, as the routine builder does, and everything
+ * derived from them — totals, calories, PR marks and the PR wall — is worked
+ * out again here, for the same reason the first save does it.
+ *
+ * The day the session belongs to and when it started stay as logged.
+ */
+portalRoutes.put('/workouts/logs/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const log = ownWorkoutLog(req);
+  const body = parse(req.body, {
+    workout_name: { type: 'string', required: true, min: 1, max: 120 },
+    duration_seconds: { type: 'int', min: 0, max: 86400, default: 0 },
+    notes: { type: 'string', max: 1000 },
   });
+  const sets = parseLogSets(req.body?.sets);
+  const totals = summariseSets(sets);
+
+  const rpes = sets.filter((s) => s.completed && s.rpe !== null).map((s) => s.rpe);
+  const caloriesBurned = workoutCalories({
+    duration_seconds: body.duration_seconds,
+    total_sets: totals.total_sets,
+    avg_rpe: rpes.length ? rpes.reduce((a, b) => a + b, 0) / rpes.length : null,
+    weight_kg: weightOn(req.member.id, log.log_date),
+    intensity: nutritionProfile(req.member.id).training_intensity,
+  });
+
+  tx(() => {
+    // Read before the old rows go: deleting them nulls the record's link.
+    const owned = new Set(
+      all(
+        `SELECT p.exercise_name FROM exercise_prs p
+         JOIN workout_log_sets s ON s.id = p.log_set_id
+         WHERE p.member_id = ? AND s.log_id = ?`,
+        [req.member.id, log.id],
+      ).map((row) => row.exercise_name),
+    );
+    run(
+      `UPDATE workout_logs
+       SET workout_name = ?, duration_seconds = ?, ended_at = datetime(started_at, '+' || ? || ' seconds'),
+           total_volume_kg = ?, total_sets = ?, total_reps = ?, notes = ?, calories_burned = ?
+       WHERE id = ?`,
+      [
+        body.workout_name,
+        body.duration_seconds,
+        body.duration_seconds,
+        totals.total_volume_kg,
+        totals.total_sets,
+        totals.total_reps,
+        body.notes || null,
+        caloriesBurned,
+        log.id,
+      ],
+    );
+    run('DELETE FROM workout_log_sets WHERE log_id = ?', [log.id]);
+    const stored = insertLogSets(log.id, sets);
+    reconcileEditedRecords(req.member.id, get('SELECT * FROM workout_logs WHERE id = ?', [log.id]), stored, owned);
+  });
+
+  res.json(workoutLogDetail(log.id));
 });
 
 portalRoutes.delete('/workouts/logs/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
-  const log = get('SELECT * FROM workout_logs WHERE id = ?', [Number(req.params.id)]);
-  if (!log || log.member_id !== req.member.id) throw notFound('Workout not found');
+  const log = ownWorkoutLog(req);
   // The PR row survives on purpose: it records that the member once lifted it,
   // and deleting a mis-tapped session should not erase their best-ever bench.
   run('DELETE FROM workout_logs WHERE id = ?', [log.id]);

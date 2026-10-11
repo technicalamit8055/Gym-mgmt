@@ -45,6 +45,15 @@ import {
 } from '../foodCatalog.js';
 import { all, closeDb, get, tenantStorage } from '../db.js';
 import {
+  clearNavBadge,
+  clearNavBadgeImage,
+  listNavBadges,
+  NAV_BADGE_TABS,
+  NAV_BADGE_TONES,
+  setNavBadge,
+  setNavBadgeImage,
+} from '../navBadges.js';
+import {
   BANNER_LINKS,
   COLLECTION_MODES,
   FULFILLMENT_STATUSES,
@@ -773,6 +782,39 @@ platformAdminRoutes.get('/monetization', (_req, res) => {
 platformAdminRoutes.put('/monetization', (req, res) => {
   updateMonetizationSettings(req.body);
   res.json(monetizationState());
+});
+
+/* ── Member app menu badges ────────────────────────────────────────────── */
+
+/** "Offer" on the Store tab, "New" on Diet — see src/navBadges.js. */
+function navBadgeState() {
+  return { items: listNavBadges(), tabs: NAV_BADGE_TABS, tones: NAV_BADGE_TONES };
+}
+
+platformAdminRoutes.get('/nav-badges', (_req, res) => {
+  res.json(navBadgeState());
+});
+
+platformAdminRoutes.put('/nav-badges/:tab', (req, res) => {
+  setNavBadge(String(req.params.tab), req.body);
+  res.json(navBadgeState());
+});
+
+platformAdminRoutes.delete('/nav-badges/:tab', (req, res) => {
+  clearNavBadge(String(req.params.tab));
+  res.json(navBadgeState());
+});
+
+// The sticker goes up as the raw file; the console shrinks it first.
+platformAdminRoutes.put('/nav-badges/:tab/image', express.raw({ type: () => true, limit: MAX_STORE_IMAGE_BYTES }), (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw badRequest('Send the image as the request body');
+  setNavBadgeImage(String(req.params.tab), req.body);
+  res.json(navBadgeState());
+});
+
+platformAdminRoutes.delete('/nav-badges/:tab/image', (req, res) => {
+  clearNavBadgeImage(String(req.params.tab));
+  res.json(navBadgeState());
 });
 
 platformAdminRoutes.get('/store/products', (req, res) => {

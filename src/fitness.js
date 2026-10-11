@@ -241,6 +241,84 @@ export function recordPersonalRecords(memberId, sets) {
 }
 
 /**
+ * Puts records right after a session's sets were edited and re-inserted.
+ *
+ * `sets` are the session's new rows (with ids); `ownedNames` the exercises
+ * whose record pointed at one of the replaced rows, captured before they were
+ * deleted. Three things follow:
+ *
+ *  - A set in this session is marked is_pr when it beats every earlier
+ *    session's best on that exercise, which is what the flag meant when the
+ *    session was first logged.
+ *  - A record that came from this session is re-derived from everything the
+ *    member has logged, so fixing a 400 kg typo to 40 kg takes the record back
+ *    to their real best (or removes it when nothing qualifies any more).
+ *  - Any other record is only ever raised, exactly as at logging time.
+ *
+ * Runs inside the caller's transaction.
+ */
+export function reconcileEditedRecords(memberId, log, sets, ownedNames) {
+  const loggedAt = log.ended_at ?? log.started_at;
+  const bestIn = new Map();
+  for (const set of sets) {
+    if (!COUNTS_TOWARDS_PR.has(set.set_type) || !set.completed || !(set.est_1rm_kg > 0)) continue;
+    const incumbent = bestIn.get(set.exercise_name);
+    if (!incumbent || set.est_1rm_kg > incumbent.est_1rm_kg) bestIn.set(set.exercise_name, set);
+  }
+
+  const qualifying = `s.set_type IN ('normal', 'drop', 'failure') AND s.completed = 1 AND s.est_1rm_kg > 0`;
+  for (const [exerciseName, set] of bestIn) {
+    const earlier = get(
+      `SELECT MAX(s.est_1rm_kg) AS best
+       FROM workout_log_sets s JOIN workout_logs l ON l.id = s.log_id
+       WHERE l.member_id = ? AND s.exercise_name = ? AND ${qualifying}
+         AND (l.log_date < ? OR (l.log_date = ? AND l.id < ?))`,
+      [memberId, exerciseName, log.log_date, log.log_date, log.id],
+    ).best;
+    if (!earlier || set.est_1rm_kg > earlier) run('UPDATE workout_log_sets SET is_pr = 1 WHERE id = ?', [set.id]);
+  }
+
+  for (const exerciseName of new Set([...ownedNames, ...bestIn.keys()])) {
+    const record = get('SELECT * FROM exercise_prs WHERE member_id = ? AND exercise_name = ?', [memberId, exerciseName]);
+    if (ownedNames.has(exerciseName)) {
+      const best = get(
+        `SELECT s.id, s.weight_kg, s.reps, s.est_1rm_kg, COALESCE(l.ended_at, l.started_at) AS at
+         FROM workout_log_sets s JOIN workout_logs l ON l.id = s.log_id
+         WHERE l.member_id = ? AND s.exercise_name = ? AND ${qualifying}
+         ORDER BY s.est_1rm_kg DESC, l.log_date, s.id LIMIT 1`,
+        [memberId, exerciseName],
+      );
+      if (!best) {
+        run('DELETE FROM exercise_prs WHERE member_id = ? AND exercise_name = ?', [memberId, exerciseName]);
+      } else {
+        run(
+          `UPDATE exercise_prs SET max_weight_kg = ?, max_reps = ?, est_1rm_kg = ?, achieved_at = ?, log_set_id = ?
+           WHERE member_id = ? AND exercise_name = ?`,
+          [best.weight_kg, best.reps, best.est_1rm_kg, best.at, best.id, memberId, exerciseName],
+        );
+      }
+      continue;
+    }
+
+    const set = bestIn.get(exerciseName);
+    if (record && record.est_1rm_kg >= set.est_1rm_kg) continue;
+    if (record) {
+      run(
+        `UPDATE exercise_prs SET max_weight_kg = ?, max_reps = ?, est_1rm_kg = ?, achieved_at = ?, log_set_id = ?
+         WHERE id = ?`,
+        [set.weight_kg, set.reps, set.est_1rm_kg, loggedAt, set.id, record.id],
+      );
+    } else {
+      run(
+        `INSERT INTO exercise_prs (member_id, exercise_name, max_weight_kg, max_reps, est_1rm_kg, achieved_at, log_set_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [memberId, exerciseName, set.weight_kg, set.reps, set.est_1rm_kg, loggedAt, set.id],
+      );
+    }
+  }
+}
+
+/**
  * The member's last logged set for each of `exerciseNames`, which is the
  * "Previous" column in the set table — the single most useful number on the
  * screen, because it is what the member is trying to beat.

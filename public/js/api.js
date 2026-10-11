@@ -325,6 +325,13 @@ export const api = {
   platformUpdateBadge: (id, payload) => request('PATCH', `/platform/admin/store/badges/${id}`, payload, { token: platformSession.token }),
   platformBadgeImage: (id, file) => uploadFile(`/platform/admin/store/badges/${id}/image`, file, { token: platformSession.token }),
   platformDeleteBadge: (id) => request('DELETE', `/platform/admin/store/badges/${id}`, undefined, { token: platformSession.token }),
+  // Badges on the member app's bottom tabs.
+  platformNavBadges: () => request('GET', '/platform/admin/nav-badges', undefined, { token: platformSession.token }),
+  platformSetNavBadge: (tab, payload) => request('PUT', `/platform/admin/nav-badges/${tab}`, payload, { token: platformSession.token }),
+  platformClearNavBadge: (tab) => request('DELETE', `/platform/admin/nav-badges/${tab}`, undefined, { token: platformSession.token }),
+  platformNavBadgeImage: (tab, file) => uploadFile(`/platform/admin/nav-badges/${tab}/image`, file, { token: platformSession.token }),
+  platformClearNavBadgeImage: (tab) =>
+    request('DELETE', `/platform/admin/nav-badges/${tab}/image`, undefined, { token: platformSession.token }),
   platformRecordPayout: (slug, payload) =>
     request('POST', `/platform/admin/commissions/${slug}/payout`, payload, { token: platformSession.token }),
 
@@ -583,6 +590,7 @@ export const api = {
     saveWorkoutLog: (payload) => request('POST', '/portal/workouts/logs', payload, { member: true }),
     workoutLogs: (params) => request('GET', `/portal/workouts/logs${query(params)}`, undefined, { member: true }),
     workoutLog: (id) => request('GET', `/portal/workouts/logs/${id}`, undefined, { member: true }),
+    updateWorkoutLog: (id, payload) => request('PUT', `/portal/workouts/logs/${id}`, payload, { member: true }),
     deleteWorkoutLog: (id) => request('DELETE', `/portal/workouts/logs/${id}`, undefined, { member: true }),
     personalRecords: () => request('GET', '/portal/workouts/prs', undefined, { member: true }),
     exercises: (params) => request('GET', `/portal/workouts/exercises${query(params)}`, undefined, { member: true }),

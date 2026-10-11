@@ -247,6 +247,20 @@ body[data-vertical='gym'][data-theme='ultramarine'] {
   --muted: #829bc7;
 }
 
+/* Preset 5: Golden Amber */
+body[data-vertical='gym'][data-theme='gold'] {
+  --brand: #f4b400;
+  --brand-soft: rgba(244, 180, 0, 0.15);
+  --brand-glow: rgba(244, 180, 0, 0.22);
+  --bg: #110d06;
+  --bg-alt: #1a140a;
+  --surface: #241b0e;
+  --surface-2: #302412;
+  --border: #45341a;
+  --text: #fffaeb;
+  --muted: #bfa57a;
+}
+
 body[data-vertical='gym'] .btn.primary {
   color: #1a1005;
 }
@@ -258,6 +272,9 @@ body[data-vertical='gym'][data-theme='cyber'] .btn.primary {
 }
 body[data-vertical='gym'][data-theme='ultramarine'] .btn.primary {
   color: #041026;
+}
+body[data-vertical='gym'][data-theme='gold'] .btn.primary {
+  color: #261a00;
 }
 
 * { box-sizing: border-box; }
@@ -2842,7 +2859,8 @@ body[data-vertical='gym'][data-mode='light'],
 body[data-vertical='gym'][data-theme='flame'][data-mode='light'],
 body[data-vertical='gym'][data-theme='crimson'][data-mode='light'],
 body[data-vertical='gym'][data-theme='cyber'][data-mode='light'],
-body[data-vertical='gym'][data-theme='ultramarine'][data-mode='light'] {
+body[data-vertical='gym'][data-theme='ultramarine'][data-mode='light'],
+body[data-vertical='gym'][data-theme='gold'][data-mode='light'] {
   --bg: #f7f8fa;
   --bg-alt: #ffffff;
   --surface: #ffffff;
@@ -3190,6 +3208,24 @@ body[data-mode='light'] .login {
   font-size: 9.5px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; line-height: 1.35;
   color: #fff; background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 80%, #fff), var(--brand));
   box-shadow: 0 0 0 2px var(--surface), 0 2px 6px -1px color-mix(in srgb, var(--brand) 45%, transparent);
+}
+/* Operator-pinned badges (src/navBadges.js) in a colour other than the gym's. */
+.portal-tab-badge.tone-red { --nb: #ef4444; }
+.portal-tab-badge.tone-green { --nb: #16a34a; }
+.portal-tab-badge.tone-amber { --nb: #f59e0b; }
+.portal-tab-badge.tone-blue { --nb: #3b82f6; }
+.portal-tab-badge.tone-violet { --nb: #8b5cf6; }
+.portal-tab-badge[class*='tone-'] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nb) 80%, #fff), var(--nb));
+  box-shadow: 0 0 0 2px var(--surface), 0 2px 6px -1px color-mix(in srgb, var(--nb) 45%, transparent);
+}
+/* An uploaded sticker (a sale seal, a "new" burst) instead of the text pill. */
+/* Pinned to the icon's top-right corner rather than the wide pill's, so it
+ * reads as part of the icon. */
+.portal-tab-badge.is-image {
+  top: -8px; right: 4px; width: 26px; height: 26px; padding: 0; border-radius: 0;
+  object-fit: contain; background: none; box-shadow: none;
+  filter: drop-shadow(0 0 1.5px var(--surface)) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.18));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4229,6 +4265,36 @@ body[data-mode='light'] .portal-greeting-art img { mix-blend-mode: multiply; }
 .portal-mini-stat-bars i:nth-child(3) { height: 24px; opacity: 0.7; }
 .portal-mini-stat-bars i:nth-child(4) { height: 34px; opacity: 0.9; }
 
+/* The Workout tab's stats: a round icon, taller bars and a wave of the card's
+   own colour rising from the bottom edge. */
+.portal-stat-row.is-workout .portal-mini-stat {
+  padding: 14px 12px 16px; border-radius: 20px; isolation: isolate;
+  border-color: color-mix(in srgb, var(--tone) 22%, var(--border));
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tone) 4%, var(--surface)) 0%, color-mix(in srgb, var(--tone) 11%, var(--surface)) 100%);
+  box-shadow: 0 14px 24px -20px var(--tone), var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-stat-row.is-workout .portal-mini-stat::after {
+  content: ''; position: absolute; z-index: -1; inset: auto 0 0 0; height: 46%; pointer-events: none;
+  background: color-mix(in srgb, var(--tone) 22%, transparent);
+  -webkit-mask: url('/images/member/waves.svg') bottom / 100% 100% no-repeat;
+  mask: url('/images/member/waves.svg') bottom / 100% 100% no-repeat;
+  transform: scaleX(-1);
+}
+.portal-stat-row.is-workout .portal-mini-stat-icon { width: 44px; height: 44px; border-radius: 50%; }
+.portal-stat-row.is-workout .portal-mini-stat-icon svg { width: 22px; height: 22px; stroke-width: 2.6; }
+.portal-stat-row.is-workout .portal-mini-stat-value { margin-top: 12px; font-size: 28px; }
+.portal-stat-row.is-workout .portal-mini-stat-label { font-size: 13px; color: color-mix(in srgb, var(--text) 65%, var(--muted)); }
+.portal-stat-row.is-workout .portal-mini-stat-bars { top: 16px; gap: 4px; }
+.portal-stat-row.is-workout .portal-mini-stat-bars i { width: 9px; background: linear-gradient(180deg, var(--tone), color-mix(in srgb, var(--tone) 75%, #000)); }
+.portal-stat-row.is-workout .portal-mini-stat-bars i:nth-child(1) { height: 12px; opacity: 0.4; }
+.portal-stat-row.is-workout .portal-mini-stat-bars i:nth-child(2) { height: 20px; opacity: 0.55; }
+.portal-stat-row.is-workout .portal-mini-stat-bars i:nth-child(3) { height: 30px; opacity: 0.8; }
+.portal-stat-row.is-workout .portal-mini-stat-bars i:nth-child(4) { height: 40px; opacity: 1; }
+@media (max-width: 380px) {
+  .portal-stat-row.is-workout .portal-mini-stat-bars { gap: 3px; right: 10px; }
+  .portal-stat-row.is-workout .portal-mini-stat-bars i { width: 7px; }
+}
+
 /* ------------------------------------------------------------ today's focus */
 /* Home's 1-tap Start Workout card and calorie-ring snippet — stacked full
    width like every other Home card rather than a side-by-side grid, since
@@ -4847,7 +4913,6 @@ button.portal-prof-row { cursor: pointer; }
 
 .portal-edit-profile > p { margin: 0 0 14px; font-size: 13px; line-height: 1.45; }
 
-.portal-settings-btn { justify-content: flex-start; gap: 10px; padding: 12px 14px; }
 .portal-support-body p { margin: 0 0 10px; }
 
 /* ---------------------------------------------------------- notifications */
@@ -5897,7 +5962,6 @@ body:not([data-mode='light']) .portal-paywall-panel { box-shadow: var(--shadow);
   min-height: 168px; padding: 20px 18px 38px;
   background: linear-gradient(105deg, color-mix(in srgb, var(--brand) 15%, var(--surface)) 0%, color-mix(in srgb, var(--brand) 7%, var(--surface)) 62%, var(--surface) 100%);
 }
-.portal-routine-hero.is-plain { min-height: 0; padding-bottom: 30px; }
 /* The PNG carries a hairline frame on its top edge, so it is scaled from the
    bottom-left corner to push that off the card. */
 .portal-routine-art {
@@ -5959,6 +6023,65 @@ body:not([data-mode='light']) .portal-paywall-panel { box-shadow: var(--shadow);
 .portal-routine-start { margin-top: 0; border-radius: 999px; padding: 16px 20px; font-size: 17px; }
 .portal-routine-start svg:first-child { fill: currentColor; }
 
+/*
+ * No routine yet: one brand-tinted card, the mascot standing in from the right
+ * edge on a soft halo, and the two actions riding over his shaker hand.
+ */
+.portal-noroutine {
+  position: relative; isolation: isolate; overflow: hidden;
+  padding: 24px 18px 20px;
+  border-radius: 26px;
+  border: 1px solid color-mix(in srgb, var(--brand) 16%, var(--border));
+  background:
+    radial-gradient(circle at 82% 34%, color-mix(in srgb, var(--brand) 20%, transparent) 0 30%, transparent 31%),
+    radial-gradient(circle at 82% 34%, color-mix(in srgb, var(--brand) 9%, transparent) 0 48%, transparent 49%),
+    linear-gradient(115deg, color-mix(in srgb, var(--brand) 6%, var(--surface)) 0%, color-mix(in srgb, var(--brand) 14%, var(--surface)) 55%, color-mix(in srgb, var(--brand) 26%, var(--surface)) 100%);
+  box-shadow: 0 22px 36px -24px var(--brand-glow), var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-noroutine-art {
+  position: absolute; z-index: -1; right: 0; bottom: 0;
+  width: auto; height: calc(100% - 10px); max-width: 60%;
+  object-fit: cover; object-position: right top; pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 22%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 22%);
+}
+.portal-noroutine-burst { position: absolute; z-index: -1; top: 26px; right: 12px; width: 26px; height: 34px; }
+.portal-noroutine-burst i {
+  position: absolute; display: block; width: 5px; height: 16px; border-radius: 3px; background: var(--brand);
+}
+.portal-noroutine-burst i:first-child { top: 0; left: 12px; transform: rotate(38deg); }
+.portal-noroutine-burst i:last-child { top: 16px; left: 8px; transform: rotate(68deg); }
+.portal-noroutine-title {
+  max-width: 62%; margin: 0;
+  font-size: clamp(24px, 7vw, 30px); font-weight: 850; letter-spacing: -0.03em; line-height: 1.1;
+}
+.portal-noroutine-title span { color: var(--brand); }
+.portal-noroutine-note { max-width: 58%; margin: 10px 0 0; font-size: 13.5px; line-height: 1.5; color: color-mix(in srgb, var(--text) 70%, var(--muted)); }
+.portal-noroutine-actions { display: flex; flex-direction: column; gap: 10px; width: 78%; min-width: 248px; max-width: 100%; margin-top: 18px; }
+.portal-noroutine .portal-start-btn {
+  margin: 0; padding: 13px 16px 13px 18px; gap: 10px; font-size: 14.5px; font-weight: 750;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 78%, #fff) 0%, var(--brand) 55%, color-mix(in srgb, var(--brand) 82%, #000) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 14px 24px -12px var(--brand);
+}
+.portal-noroutine .portal-start-btn span { flex: 1; text-align: left; white-space: nowrap; }
+.portal-noroutine .portal-start-btn svg:first-child { width: 20px; height: 20px; }
+/* White label on the deep gradient, as in the design; lime, amber and gold
+   keep their dark label, which is the readable one there. */
+body:not([data-theme='cyber']):not([data-theme='mocha']):not([data-theme='gold']) .portal-noroutine .portal-start-btn { color: #fff; }
+.portal-noroutine-create {
+  justify-content: flex-start; gap: 12px; margin: 0; padding: 12px 18px; border-radius: 999px;
+  font-size: 14.5px; font-weight: 750; color: var(--brand);
+  border: 1.5px solid var(--brand);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 10px 22px -16px var(--brand-glow);
+}
+.portal-noroutine-create:hover { background: var(--surface); color: var(--brand); border-color: var(--brand); }
+.portal-noroutine-create span { flex: 1; text-align: left; }
+@media (max-width: 360px) {
+  .portal-noroutine-note { max-width: 56%; font-size: 13px; }
+  .portal-noroutine-art { max-width: 52%; }
+}
+
 .portal-muscle-badge {
   flex: none; font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
   padding: 3px 7px; border-radius: 5px;
@@ -6009,7 +6132,10 @@ body:not([data-mode='light']) .portal-paywall-panel { box-shadow: var(--shadow);
 
 /* Section titles on the Workout tab are small caps labels, not Home's headlines. */
 .portal-section-head.is-label { margin: 2px 0 -6px; }
-.portal-section-head.is-label h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.portal-section-head.is-label h3 {
+  font-size: 13.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--brand) 40%, var(--text));
+}
 .portal-section-head.is-label .portal-section-link { font-size: 13.5px; }
 
 /* The best lift, with the barbell fading in from the right. The PNG is a crop of
@@ -6340,6 +6466,33 @@ button.portal-set-prev:hover { color: var(--brand); }
 }
 .portal-myplan-create:hover { background: color-mix(in srgb, var(--brand) 9%, var(--surface)); }
 .portal-myplan-create .portal-myplan-text small { white-space: normal; }
+.portal-myplan-create { padding: 16px 14px 16px 16px; gap: 14px; border-radius: 20px; }
+.portal-myplan-create .portal-myplan-ico { width: 50px; height: 50px; border-radius: 14px; }
+.portal-myplan-create .portal-myplan-text strong { font-size: 15.5px; font-weight: 800; }
+.portal-myplan-create .portal-myplan-text small { font-size: 12.5px; }
+.portal-myplan-chev { flex: none; display: grid; place-items: center; color: var(--brand); }
+
+/* Recent workouts, before the first one: an illustrated card that also holds
+   the units switch. With history, the switch sits on its own under the list. */
+.portal-history-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 18px 16px 18px; border-radius: 24px; text-align: center;
+  border: 1px solid color-mix(in srgb, var(--brand) 8%, var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 4%, var(--surface)), var(--surface));
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
+}
+.portal-history-empty img { width: 200px; height: auto; margin-bottom: 4px; }
+.portal-history-empty strong { font-size: 17px; font-weight: 800; letter-spacing: -0.015em; }
+.portal-history-empty p { margin: 0; font-size: 13.5px; color: var(--muted); }
+.portal-history-empty .portal-units-row { width: min(100%, 300px); margin-top: 12px; }
+.portal-units-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 18px; cursor: pointer;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  box-shadow: 0 8px 18px -14px rgba(15, 23, 42, 0.35);
+  color: var(--brand); font-size: 14px; font-weight: 600;
+}
+.portal-units-row > span { flex: 1; min-width: 0; color: var(--text); text-align: left; }
+.portal-units-row .portal-switch { flex: none; }
 
 /* A plan another member shared: every day laid out read-only before saving. */
 .portal-shared-days { display: flex; flex-direction: column; gap: 18px; }
@@ -6398,7 +6551,6 @@ button.portal-set-prev:hover { color: var(--brand); }
 .portal-pe-stepper button:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); }
 .portal-pe-sets-value { font-size: 15px; font-variant-numeric: tabular-nums; }
 .portal-pe-add-day { margin-top: 0; }
-.portal-routine-sheet .portal-pe-add-day { margin-top: 10px; }
 .portal-pe-toggle {
   display: flex; align-items: center; gap: 14px; padding: 14px;
   border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface);
@@ -7249,6 +7401,83 @@ body[data-mode='light'] .diet-fab-layer { background: rgba(15, 23, 42, 0.35); }
 .portal-screen-title { min-width: 0; }
 .portal-screen-title h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
 .portal-screen-title p { margin: 1px 0 0; font-size: 13px; color: var(--muted); }
+.portal-screen-action {
+  flex: none; margin-left: auto; width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; cursor: pointer;
+  color: var(--text); border: 0; background: transparent;
+}
+.portal-screen-action:active { transform: scale(0.94); }
+
+/* ------------------------------------------------- workout log detail */
+
+/* Hevy's "Workout Detail": who and when, the headline numbers, the muscle
+   split and every exercise's sets in a striped table. */
+.portal-wd { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.portal-wd-who { display: flex; align-items: center; gap: 12px; }
+.portal-wd-avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+.portal-wd-avatar.is-initials { display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); font-weight: 750; }
+.portal-wd-who > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.portal-wd-who strong { font-size: 16px; font-weight: 650; }
+.portal-wd-who span { font-size: 13px; color: var(--muted); }
+.portal-wd-title { margin: 2px 0 0; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+.portal-wd-notes { margin: -6px 0 0; font-size: 14px; color: var(--muted); white-space: pre-line; }
+
+.portal-wd-stats { display: flex; gap: 26px; flex-wrap: wrap; }
+.portal-wd-stat { display: flex; flex-direction: column; gap: 3px; }
+.portal-wd-stat span { font-size: 12.5px; color: var(--muted); }
+.portal-wd-stat strong { display: inline-flex; align-items: center; gap: 5px; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.portal-wd-medal { display: inline-flex; color: var(--amber); }
+
+.portal-wd-actions { display: flex; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.portal-wd-action {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 0;
+  border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.portal-wd-action:active { opacity: 0.6; }
+
+.portal-wd-section { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.portal-wd-label { margin: 0; font-size: 15px; font-weight: 550; color: var(--muted); }
+.portal-wd-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portal-wd-edit { padding: 4px 0; border: 0; background: transparent; color: var(--brand); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+
+/* Edit workout: the logger's cards, with a remove button where the tick was. */
+.portal-we { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.portal-we-duration { max-width: 160px; }
+.portal-we-save { flex: none; margin-left: auto; min-width: 76px; }
+.portal-set-row.is-edit { grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) 32px; }
+.portal-set-row.is-edit.is-single { grid-template-columns: 30px minmax(0, 2fr) 32px; }
+.portal-set-remove {
+  width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; padding: 0; cursor: pointer;
+  border: 0; background: transparent; color: var(--muted);
+}
+.portal-set-remove:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.portal-set-remove:disabled { opacity: 0.35; cursor: not-allowed; }
+.portal-wd-split { display: flex; flex-direction: column; gap: 6px; }
+.portal-wd-split-name { font-size: 15px; font-weight: 550; }
+.portal-wd-split-row { display: flex; align-items: center; gap: 10px; }
+.portal-wd-split-bar {
+  height: 18px; width: calc(var(--w) * 0.84); min-width: 8px; border-radius: 4px; background: var(--brand);
+}
+.portal-wd-split-pct { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.portal-wd-ex { display: flex; flex-direction: column; margin: 4px -18px 6px; }
+.portal-wd-ex-head {
+  display: flex; align-items: center; gap: 12px; padding: 4px 18px 10px; border: 0; background: transparent;
+  text-align: left; font: inherit; cursor: pointer;
+}
+.portal-wd-ex-thumb { flex: none; width: 48px; height: 48px; border-radius: 50%; overflow: hidden; border: 1px solid var(--border); background: #fff; display: grid; place-items: center; }
+.portal-wd-ex-thumb .portal-pick-thumb { width: 100%; height: 100%; border-radius: 0; object-fit: cover; }
+.portal-wd-ex-name { font-size: 17px; font-weight: 650; color: var(--brand); }
+.portal-wd-set {
+  display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 8px; padding: 12px 18px;
+  font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.portal-wd-set:not(.is-head):nth-child(even) { background: var(--surface-2); }
+.portal-wd-set.is-head { padding-block: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+.portal-wd-set-no { text-align: center; font-weight: 700; }
+.portal-wd-set.is-head > span:first-child { text-align: center; }
+.portal-wd-set.t-warmup .portal-wd-set-no { color: var(--amber); }
+.portal-wd-set.t-drop .portal-wd-set-no { color: var(--blue); }
+.portal-wd-set.t-failure .portal-wd-set-no { color: var(--red); }
 
 /* ---------------------------------------------------- nutrition insights */
 
@@ -8566,6 +8795,8 @@ body:not([data-mode='light']) .stg-logo-btn.danger { color: var(--red); }
 .stg-card:has(.stg-swatches) { container-type: inline-size; }
 .stg-swatches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 @container (min-width: 600px) { .stg-swatches { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Five presets (gym) sit 3 + 2 rather than leaving one stranded under four. */
+@container (min-width: 600px) { .stg-swatches:has(> :nth-child(5)) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .stg-swatch {
   justify-content: flex-start; gap: 10px; min-height: 38px; padding: 0 12px;
   font-size: 13px; font-weight: 550; border-radius: 9px;
@@ -8642,8 +8873,8 @@ body:not([data-mode='light']) .stg-logo-btn.danger { color: var(--red); }
 .stg-domain-text code { background: none; border: 0; padding: 0; font: inherit; color: inherit; }
 
 /* White call-to-action labels on a slightly deeper gradient, as in the design;
-   lime and amber keep their dark label, which is the readable one there. */
-body:not([data-theme='cyber']):not([data-theme='mocha']) .stg-page .btn.primary:not(.stg-swatch) {
+   lime, amber and gold keep their dark label, which is the readable one there. */
+body:not([data-theme='cyber']):not([data-theme='mocha']):not([data-theme='gold']) .stg-page .btn.primary:not(.stg-swatch) {
   color: #fff;
   background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 85%, #fff) 0%, var(--brand) 45%, color-mix(in srgb, var(--brand) 88%, #000) 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 10px 22px -10px var(--brand);
@@ -9751,3 +9982,73 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .fit-food-portion:hover { border-color: var(--brand); background: var(--brand-soft); }
 .fit-food-portion strong { font-size: 13.5px; }
 .fit-food-portion span { font-size: 12px; color: var(--muted); }
+
+/* -------------------------------------------- operator console: menu badges */
+
+.nb-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.nb-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; }
+.nb-row + .nb-row { border-top: 1px solid var(--border); }
+.nb-row.ended .nb-row-badge { opacity: 0.45; }
+.nb-row-icon {
+  display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px;
+  background: var(--brand-soft); color: var(--brand);
+}
+.nb-row-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.nb-row-main small { font-size: 12px; }
+.nb-row-badge { flex: none; min-width: 70px; text-align: right; font-size: 12.5px; }
+.nb-row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.nb-row-actions .btn span { display: inline-flex; align-items: center; gap: 4px; }
+/* The member app's pill, laid inline instead of perched on a tab icon. */
+.nb-pill.portal-tab-badge { position: static; display: inline-block; box-shadow: none; }
+
+.nb-preview { display: flex; justify-content: center; padding: 18px; border-radius: 12px; background: var(--surface-2, var(--bg)); border: 1px dashed var(--border); }
+.nb-preview-tab { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.nb-preview-icon {
+  position: relative; display: grid; place-items: center; width: 56px; height: 36px; border-radius: 999px;
+  background: var(--brand-soft); color: var(--brand);
+}
+.nb-preview-icon .nb-pill.portal-tab-badge { position: absolute; top: -9px; right: -14px; box-shadow: 0 0 0 2px var(--surface); }
+.nb-preview-icon .nb-pill.portal-tab-badge.is-image { top: -8px; right: 1px; box-shadow: none; }
+.nb-sticker { display: inline-block; width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
+
+.nb-style { display: inline-flex; gap: 4px; padding: 4px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2, var(--bg)); }
+.nb-style-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 0; border-radius: 7px;
+  background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.nb-style-btn.active { background: var(--surface); color: var(--text, inherit); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+.nb-style-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* The editor's rows hold buttons, so they are divs, not label.field (a label
+ * would forward a click on its caption to the first button inside). */
+.nb-form div.field { display: block; margin-bottom: 14px; }
+.nb-form div.field > span { display: block; margin-bottom: 6px; font-size: 12.5px; font-weight: 550; color: var(--muted); letter-spacing: 0.01em; }
+.nb-upload { display: flex; align-items: center; gap: 14px; }
+.nb-upload-thumb {
+  display: grid; place-items: center; flex: none; width: 64px; height: 64px; border-radius: 12px;
+  border: 1px dashed var(--border); color: var(--muted);
+  background: repeating-conic-gradient(color-mix(in srgb, var(--muted) 12%, transparent) 0 25%, transparent 0 50%) 0 0 / 12px 12px;
+}
+.nb-upload-thumb .nb-sticker { width: 52px; height: 52px; }
+.nb-upload-text { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.nb-preview-label { font-size: 12px; font-weight: 650; }
+
+.nb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.nb-chip {
+  padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  color: inherit; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.nb-chip:hover { border-color: var(--brand); }
+.nb-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.nb-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.nb-swatch {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  border: 2px solid transparent; background: var(--sw); color: #fff; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--border);
+}
+.nb-swatch.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--sw); }
+.nb-swatch:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+
+@media (max-width: 560px) {
+  .nb-row { flex-wrap: wrap; }
+  .nb-row-badge { min-width: 0; }
+}
