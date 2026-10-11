@@ -27,6 +27,7 @@ process.env.PLATFORM_ADMIN_PASSWORD = 'operator-pass-123';
 const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
 const { closeRegistryDb } = await import('../src/tenants.js');
+const { setMediaFetch } = await import('../src/exerciseCatalog.js');
 
 const TENANT = 'catgym';
 
@@ -257,6 +258,80 @@ describe('demo media', () => {
     assert.ok(fs.existsSync(path.join(process.env.EXERCISE_MEDIA_DIR, file)));
     await call('DELETE', `/api/platform/admin/catalog/exercises/${made.body.id}`, undefined, { token: ops });
     assert.equal(fs.existsSync(path.join(process.env.EXERCISE_MEDIA_DIR, file)), false);
+  });
+});
+
+describe('demo from a URL', () => {
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(24, 4)]);
+  let exercise;
+  let requested;
+  let restore;
+
+  // Answers like a CDN would, without leaving the machine. IP-literal hosts
+  // keep the public-address check off DNS.
+  const fakeCdn = (routes) => async (url) => {
+    requested.push(url);
+    const route = routes[url];
+    if (!route) return new Response('nope', { status: 404 });
+    return new Response(route.body ?? null, { status: route.status ?? 200, headers: route.headers ?? {} });
+  };
+
+  const fromUrl = (url, id = exercise.id) => call('POST', `/api/platform/admin/catalog/exercises/${id}/media-url`, { url }, { token: ops });
+
+  before(async () => {
+    exercise = (await catalog('?q=Romanian')).body.items[0]
+      ?? (await call('POST', '/api/platform/admin/catalog/exercises', { name: 'Romanian Deadlift', muscle_group: 'hamstrings', equipment: 'barbell' }, { token: ops })).body;
+  });
+
+  after(() => restore && setMediaFetch(restore));
+
+  it('downloads a CDN clip and stores it as an ordinary demo', async () => {
+    requested = [];
+    restore = setMediaFetch(fakeCdn({ 'https://93.184.216.34/exercise-assets/rdl.mp4': { body: MP4, headers: { 'content-type': 'video/mp4' } } }));
+    const res = await fromUrl('https://93.184.216.34/exercise-assets/rdl.mp4');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.media_type, 'video');
+    assert.match(res.body.media_url, /^\/api\/exercise-media\/\d+-[a-f0-9]{8}\.mp4$/);
+    assert.deepEqual(Buffer.from(await (await fetch(`${base}${res.body.media_url}`)).arrayBuffer()), MP4);
+  });
+
+  it('follows a redirect, checking where it lands', async () => {
+    requested = [];
+    setMediaFetch(fakeCdn({
+      'https://93.184.216.34/old.mp4': { status: 302, headers: { location: 'https://93.184.216.35/new.mp4' } },
+      'https://93.184.216.35/new.mp4': { body: MP4 },
+      'https://93.184.216.34/sneaky.mp4': { status: 301, headers: { location: 'http://169.254.169.254/latest/meta-data' } },
+    }));
+    assert.equal((await fromUrl('https://93.184.216.34/old.mp4')).status, 200);
+    const sneaky = await fromUrl('https://93.184.216.34/sneaky.mp4');
+    assert.equal(sneaky.status, 400);
+    assert.match(sneaky.body.error, /private network/);
+    assert.ok(!requested.some((u) => u.includes('169.254')), 'the private hop is refused before it is requested');
+  });
+
+  it('refuses links into the server\'s own network without requesting them', async () => {
+    requested = [];
+    setMediaFetch(fakeCdn({}));
+    for (const url of ['http://127.0.0.1/x.mp4', 'http://10.1.2.3/x.mp4', 'http://[::1]/x.mp4', 'http://[::ffff:192.168.0.1]/x.mp4', 'http://localhost/x.mp4']) {
+      const res = await fromUrl(url);
+      assert.equal(res.status, 400, url);
+    }
+    assert.deepEqual(requested, []);
+  });
+
+  it('refuses what is not a usable link or not a demo', async () => {
+    setMediaFetch(fakeCdn({
+      'https://93.184.216.34/page.html': { body: '<html><script>alert(1)</script></html>' },
+      'https://93.184.216.34/huge.mp4': { body: Buffer.concat([MP4, Buffer.alloc(9 * 1024 * 1024)]) },
+    }));
+    assert.equal((await fromUrl('ftp://93.184.216.34/x.mp4')).status, 400);
+    assert.equal((await fromUrl('not a url')).status, 400);
+    assert.equal((await fromUrl('https://93.184.216.34/missing.mp4')).status, 400);
+    assert.equal((await fromUrl('https://93.184.216.34/page.html')).status, 400);
+    const huge = await fromUrl('https://93.184.216.34/huge.mp4');
+    assert.equal(huge.status, 400);
+    assert.match(huge.body.error, /too large/);
+    assert.equal((await fromUrl('https://93.184.216.34/x.mp4', 999999)).status, 404);
   });
 });
 

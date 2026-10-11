@@ -3125,6 +3125,34 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
   box-shadow: 0 12px 22px -10px var(--brand-glow);
 }
 
+/* A session already running: the stopwatch leads, with set progress under it.
+   No athlete art — the numbers need the full width. */
+.portal-focus-live { gap: 14px; }
+.portal-live-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  background: var(--green); color: var(--green);
+  animation: portal-dot-pulse 1.8s ease-in-out infinite;
+}
+.portal-focus-live .portal-focus-kicker { color: var(--green); }
+.portal-live-time { display: flex; align-items: center; gap: 10px; color: var(--brand); }
+.portal-live-clock {
+  font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.portal-live-progress { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.portal-live-progress > span {
+  display: block; height: 100%; border-radius: inherit; background: var(--brand);
+  transition: width 0.3s ease;
+}
+.portal-live-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.portal-live-stat {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent); border: 1px solid var(--border); min-width: 0;
+}
+.portal-live-stat strong { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.portal-live-stat span { font-size: 12px; color: var(--muted); }
+.portal-live-next { display: flex; flex-wrap: wrap; gap: 6px; font-size: 14px; font-weight: 600; }
+
 .portal-focus-diet { flex-direction: row; align-items: center; gap: 18px; }
 .portal-focus-diet .portal-macro-stack { min-width: 0; gap: 14px; }
 
@@ -4668,6 +4696,12 @@ button.portal-set-prev:hover { color: var(--brand); }
 }
 .portal-myplan-create:hover { background: color-mix(in srgb, var(--brand) 9%, var(--surface)); }
 .portal-myplan-create .portal-myplan-text small { white-space: normal; }
+
+/* A plan another member shared: every day laid out read-only before saving. */
+.portal-shared-days { display: flex; flex-direction: column; gap: 18px; }
+.portal-shared-day { display: flex; flex-direction: column; gap: 8px; }
+.portal-shared-day h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.portal-shared-desc { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
 
 /* The plan editor. */
 .portal-pe { gap: 14px; }

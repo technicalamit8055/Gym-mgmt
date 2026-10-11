@@ -4606,25 +4606,106 @@ function renderPortalApp(ctx, initialMe) {
    * a member without the add-on, or on any fetch hiccup: Home is a dashboard,
    * not the place to chase someone into an upsell.
    */
+  /**
+   * Home's card for a session already under way: the live stopwatch, how far
+   * through the sets the member is and what comes next, with one tap back into
+   * the logger. Read straight from the device copy (see activeSession), so it
+   * shows the same state the Workout tab will resume.
+   */
+  function runningWorkoutCard(state) {
+    const sets = state.exercises.flatMap((ex) => ex.sets);
+    const doneSets = sets.filter((set) => set.completed);
+    const doneExercises = state.exercises.filter((ex) => ex.sets.length && ex.sets.every((set) => set.completed)).length;
+    const volume = doneSets.reduce((sum, set) => sum + (Number(set.weight_kg) || 0) * (Number(set.reps) || 0), 0);
+    const pct = sets.length ? doneSets.length / sets.length : 0;
+
+    const nextExercise = state.exercises.find((ex) => ex.sets.some((set) => !set.completed));
+    const nextSet = nextExercise ? nextExercise.sets.findIndex((set) => !set.completed) + 1 : 0;
+
+    const clockNode = h('strong', { class: 'portal-live-clock' }, '00:00:00');
+    const paintClock = () => {
+      // A refreshTab repaint replaces this card without a stopTicking, so an
+      // orphaned card stops its own interval.
+      if (clockNode.dataset.mounted && !clockNode.isConnected) {
+        clearInterval(clockInterval);
+        return;
+      }
+      if (clockNode.isConnected) clockNode.dataset.mounted = '1';
+      clockNode.textContent = clockFrom((Date.now() - state.started_at) / 1000);
+    };
+    paintClock();
+    const clockInterval = setInterval(paintClock, 1000);
+    registerCleanup(() => clearInterval(clockInterval));
+
+    const stat = (value, label) => h('div', { class: 'portal-live-stat' }, h('strong', {}, value), h('span', {}, label));
+
+    return h(
+      'div',
+      { class: 'portal-focus-card portal-focus-workout portal-focus-live' },
+      h('div', { class: 'portal-focus-kicker' }, h('span', { class: 'portal-live-dot' }), h('span', {}, 'Workout in progress')),
+      h('div', { class: 'portal-focus-title' }, state.workout_name),
+      h('div', { class: 'portal-live-time' }, renderIcon('timer', { size: 22, stroke: 2 }), clockNode),
+      h(
+        'div',
+        { class: 'portal-live-progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': sets.length, 'aria-valuenow': doneSets.length },
+        h('span', { style: `width:${Math.round(pct * 100)}%` }),
+      ),
+      h(
+        'div',
+        { class: 'portal-live-stats' },
+        stat(`${doneSets.length}/${sets.length}`, 'Sets'),
+        stat(`${doneExercises}/${state.exercises.length}`, 'Exercises'),
+        stat(weightLabel(Math.round(volume * 10) / 10), 'Volume'),
+      ),
+      nextExercise
+        ? h(
+            'div',
+            { class: 'portal-live-next' },
+            h('span', { class: 'muted' }, 'Up next'),
+            h('span', {}, `${nextExercise.exercise_name} · Set ${nextSet}`),
+          )
+        : sets.length
+          ? h('div', { class: 'portal-live-next' }, h('span', {}, 'All sets done — finish to save it'))
+          : null,
+      h(
+        'button',
+        { class: 'btn primary portal-start-btn', type: 'button', onclick: () => switchTab('workout') },
+        renderIcon('play', { size: 14 }),
+        ' Resume workout',
+      ),
+    );
+  }
+
   async function renderTodaysFocus() {
     if (isLibrary()) return null;
-    let status;
+    const running = activeSession.read();
+    let status = null;
     try {
       status = await api.portal.fitnessStatus();
     } catch {
-      return null;
+      // Fall through: a session already on the device still gets its card.
     }
-    if (!status.has_access) return null;
+    if (!status?.has_access) {
+      if (!running) return null;
+      return h(
+        'div',
+        { class: 'portal-section' },
+        sectionHead("Today's focus", 'Resume', () => switchTab('workout')),
+        h('div', { class: 'portal-focus-grid' }, runningWorkoutCard(running)),
+      );
+    }
 
     const [current, dietPlan, dietDayRes] = await Promise.all([
-      api.portal.currentWorkout().catch(() => null),
+      running ? null : api.portal.currentWorkout().catch(() => null),
       api.portal.currentDiet().catch(() => null),
       api.portal.dietDay(today()).catch(() => null),
     ]);
 
     const cards = [];
 
-    if (current?.today_day) {
+    if (running) {
+      cards.push(runningWorkoutCard(running));
+    } else if (current?.today_day) {
       const groups = [...new Set(current.today_day.exercises.map((e) => e.muscle_group))];
       cards.push(
         h(
@@ -4682,7 +4763,7 @@ function renderPortalApp(ctx, initialMe) {
     return h(
       'div',
       { class: 'portal-section' },
-      sectionHead("Today's focus", 'View plan', () => switchTab('workout')),
+      sectionHead("Today's focus", running ? 'Resume' : 'View plan', () => switchTab('workout')),
       h('div', { class: 'portal-focus-grid' }, ...cards),
     );
   }
@@ -6376,26 +6457,162 @@ function renderPortalApp(ctx, initialMe) {
     ]);
   }
 
+  /** Sends one of the member's own plans to a gym-mate, named by the phone
+   * number or member ID they would give you in person. */
+  function openSharePlan(plan) {
+    openModal({
+      title: `Share ${plan.name}`,
+      subtitle: 'They get their own copy to save — yours stays exactly as it is.',
+      icon: 'userPlus',
+      body: buildForm(
+        [
+          {
+            name: 'recipient',
+            label: 'Their phone number or member ID',
+            required: true,
+            full: true,
+            placeholder: 'e.g. 98765 43210',
+            hint: 'They need to be a member at this gym.',
+          },
+        ],
+        {
+          submitLabel: 'Share plan',
+          onSubmit: async ({ recipient }) => {
+            const res = await api.portal.shareRoutine(plan.id, recipient.trim());
+            closeModal();
+            toast(res.already_shared ? `Already waiting for ${res.recipient_name}` : `Shared with ${res.recipient_name}`);
+          },
+        },
+      ),
+    });
+  }
+
+  /** Copies a shared plan into the member's own plans. */
+  async function acceptSharedPlan(share, { activate = false, inModal = false } = {}) {
+    try {
+      const saved = await api.portal.acceptSharedRoutine(share.id, { activate });
+      if (inModal) closeModal();
+      toast(saved.active ? `Now training with ${saved.name}` : `${saved.name} saved to your plans`);
+      await switchTab('workout');
+    } catch (err) {
+      toast(err.message || 'Could not save that plan', 'error');
+    }
+  }
+
+  /** Turns a shared plan down. The sender isn't told — it just leaves the list. */
+  async function declineSharedPlan(share, { inModal = false } = {}) {
+    try {
+      await api.portal.declineSharedRoutine(share.id);
+      if (inModal) closeModal();
+      toast('Shared plan dismissed');
+      await switchTab('workout');
+    } catch (err) {
+      toast(err.message || 'Could not dismiss that plan', 'error');
+    }
+  }
+
+  /** A shared plan, read-only, day by day — what the member is agreeing to
+   * before it lands among their own. */
+  async function openSharedPlan(share) {
+    let preview;
+    try {
+      preview = await api.portal.sharedRoutine(share.id);
+    } catch (err) {
+      toast(err.message || 'Could not open that plan', 'error');
+      return switchTab('workout');
+    }
+    const { plan, sender_name: senderName } = preview;
+    const save = h(
+      'button',
+      {
+        class: 'btn primary',
+        type: 'button',
+        onclick: () => {
+          save.disabled = true;
+          acceptSharedPlan(share, { inModal: true }).finally(() => (save.disabled = false));
+        },
+      },
+      'Save to my plans',
+    );
+    openModal({
+      title: plan.name,
+      subtitle: `Shared by ${senderName} · ${daysLabel(plan.days.length)}`,
+      icon: 'gift',
+      className: 'portal-shared-modal',
+      body: h(
+        'div',
+        { class: 'portal-shared-days' },
+        plan.description ? h('p', { class: 'portal-shared-desc' }, plan.description) : null,
+        ...plan.days.map((day) =>
+          h(
+            'section',
+            { class: 'portal-shared-day' },
+            h('h3', {}, day.day_name),
+            day.notes ? h('p', { class: 'portal-shared-desc' }, day.notes) : null,
+            h('div', { class: 'portal-routine-exercises' }, ...day.exercises.map(routineExerciseRow)),
+          ),
+        ),
+      ),
+      footer: [
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => declineSharedPlan(share, { inModal: true }) }, 'Dismiss'),
+        save,
+      ],
+    });
+  }
+
+  /** One plan in a list: icon, name and a line about it, then either the
+   * live marker or a quick action, and the "more" sheet. */
+  const planRow = ({ icon, tone, title, sub, active, onUse, useLabel = 'Use', actions }) =>
+    h(
+      'div',
+      { class: `portal-myplan tone-${tone}${active ? ' is-active' : ''}` },
+      h('span', { class: 'portal-myplan-ico' }, renderIcon(icon, { size: 20 })),
+      h('div', { class: 'portal-myplan-text' }, h('strong', {}, title), h('small', {}, sub)),
+      active
+        ? h('span', { class: 'portal-myplan-active' }, renderIcon('check', { size: 13, stroke: 2.8 }), 'Active')
+        : h('button', { class: 'portal-myplan-use', type: 'button', onclick: onUse }, useLabel),
+      h(
+        'button',
+        { class: 'portal-ex-menu', type: 'button', 'aria-label': `${title} options`, onclick: () => actionSheet(title, actions) },
+        renderIcon('more', { size: 20 }),
+      ),
+    );
+
+  /** Plans other members have sent, waiting to be previewed, saved or
+   * dismissed. Absent when there are none. */
+  function sharedPlansSection(routines) {
+    if (!routines.shared?.length) return null;
+    return h(
+      'div',
+      { class: 'portal-section portal-myplans' },
+      sectionHead('Shared with you', null, null, 'is-label'),
+      h(
+        'div',
+        { class: 'portal-myplan-list' },
+        ...routines.shared.map((share) =>
+          planRow({
+            icon: 'gift',
+            tone: 'blue',
+            title: share.plan_name,
+            sub: `From ${share.sender_name} · ${daysLabel(share.day_count)} · ${share.exercise_count} exercise${share.exercise_count === 1 ? '' : 's'}`,
+            useLabel: 'View',
+            onUse: () => openSharedPlan(share),
+            actions: [
+              { icon: 'list', label: 'Preview plan', onClick: () => openSharedPlan(share) },
+              { icon: 'save', label: 'Save to my plans', onClick: () => acceptSharedPlan(share) },
+              { icon: 'play', label: 'Save & train with it', onClick: () => acceptSharedPlan(share, { activate: true }) },
+              { icon: 'close', label: 'Dismiss', danger: true, onClick: () => declineSharedPlan(share) },
+            ],
+          }),
+        ),
+      ),
+    );
+  }
+
   /** The member's plans on the Workout tab: the trainer's on top, their own
    * below, the live one marked and every other one a tap away. */
   function myPlansSection(routines) {
     const { trainer, items } = routines;
-
-    const planRow = ({ icon, tone, title, sub, active, onUse, actions }) =>
-      h(
-        'div',
-        { class: `portal-myplan tone-${tone}${active ? ' is-active' : ''}` },
-        h('span', { class: 'portal-myplan-ico' }, renderIcon(icon, { size: 20 })),
-        h('div', { class: 'portal-myplan-text' }, h('strong', {}, title), h('small', {}, sub)),
-        active
-          ? h('span', { class: 'portal-myplan-active' }, renderIcon('check', { size: 13, stroke: 2.8 }), 'Active')
-          : h('button', { class: 'portal-myplan-use', type: 'button', onclick: onUse }, 'Use'),
-        h(
-          'button',
-          { class: 'portal-ex-menu', type: 'button', 'aria-label': `${title} options`, onclick: () => actionSheet(title, actions) },
-          renderIcon('more', { size: 20 }),
-        ),
-      );
 
     const rows = [];
     if (trainer) {
@@ -6429,6 +6646,7 @@ function renderPortalApp(ctx, initialMe) {
             !active && { icon: 'check', label: 'Train with this plan', onClick: () => useWorkoutPlan(plan.id, plan.name) },
             { icon: 'edit', label: 'Edit plan', onClick: () => editOwnPlan(plan.id) },
             { icon: 'copy', label: 'Duplicate', onClick: () => copyPlanToEdit(plan.id) },
+            { icon: 'userPlus', label: 'Share with a gym member', onClick: () => openSharePlan(plan) },
             {
               icon: 'trash',
               label: 'Delete plan',
@@ -6609,6 +6827,8 @@ function renderPortalApp(ctx, initialMe) {
       );
     }
 
+    const shared = sharedPlansSection(routines);
+    if (shared) body.append(shared);
     body.append(myPlansSection(routines));
 
     /* Lifetime stats */

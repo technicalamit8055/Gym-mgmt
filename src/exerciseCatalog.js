@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns/promises';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { config } from './config.js';
 import { tenantStorage } from './db.js';
@@ -445,6 +447,116 @@ export function setCatalogMedia(id, bytes) {
   // stray file rather than an exercise pointing at nothing.
   if (current.media_file && current.media_file !== file) removeMediaFile(current.media_file);
   return getCatalogExercise(current.id);
+}
+
+/* ── Demo from a URL ──────────────────────────────────────────────────── */
+
+/**
+ * Pulls a demo from a link (e.g. a CDN's .mp4) and stores it exactly as if it
+ * had been uploaded: same sniffing, same size cap, same content-addressed
+ * file. Copying rather than hot-linking means a CDN that rotates or withdraws
+ * its URLs never leaves members staring at a broken clip.
+ *
+ * The server is the one making the request, so the URL must not be able to
+ * point it at itself or the private network behind it: every hop's host is
+ * resolved and refused if it lands on a loopback, private or link-local
+ * address, and redirects are followed by hand so each one is checked too.
+ */
+
+const MAX_REDIRECTS = 3;
+const FETCH_TIMEOUT_MS = 20_000;
+
+const PRIVATE_NETS = new net.BlockList();
+for (const [address, prefix] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
+  ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['224.0.0.0', 3],
+]) PRIVATE_NETS.addSubnet(address, prefix, 'ipv4');
+for (const [address, prefix] of [['::', 127], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]]) {
+  PRIVATE_NETS.addSubnet(address, prefix, 'ipv6');
+}
+
+function isPrivateAddress(address) {
+  const family = net.isIP(address);
+  if (family === 6) {
+    // An IPv4 address wearing IPv6 clothes (::ffff:10.0.0.1) is still that IPv4 address.
+    const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    if (mapped) return PRIVATE_NETS.check(mapped[1], 'ipv4');
+  }
+  return PRIVATE_NETS.check(address, family === 6 ? 'ipv6' : 'ipv4');
+}
+
+async function assertPublicHost(url) {
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const addresses = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true }).catch(() => [])).map((a) => a.address);
+  if (!addresses.length) throw badRequest(`Could not find the server "${host}"`, { url: 'host not found' });
+  if (addresses.some(isPrivateAddress)) throw badRequest('That URL points at a private network address', { url: 'not a public address' });
+}
+
+function parseMediaUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value ?? '').trim());
+  } catch {
+    throw badRequest('That is not a valid URL', { url: 'must be a full http(s) link' });
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw badRequest('Use an http or https link', { url: 'must be http(s)' });
+  if (url.username || url.password) throw badRequest('Use a link without a username or password in it', { url: 'no credentials' });
+  return url;
+}
+
+/** The network call, swappable so tests never reach a real CDN. */
+let mediaFetch = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+
+export function setMediaFetch(fn) {
+  const previous = mediaFetch;
+  mediaFetch = fn;
+  return previous;
+}
+
+/** The body, read up to the cap and no further — a server that lies about
+ * (or omits) Content-Length still cannot make us buffer a gigabyte. */
+async function readCapped(res) {
+  const declared = Number(res.headers.get('content-length'));
+  const tooLarge = () => badRequest('That file is too large', { file: `must be under ${MAX_MEDIA_BYTES / 1024 / 1024} MB` });
+  if (declared > MAX_MEDIA_BYTES) throw tooLarge();
+  if (!res.body) return Buffer.from(await res.arrayBuffer());
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of res.body) {
+    total += chunk.length;
+    if (total > MAX_MEDIA_BYTES) {
+      await res.body.cancel?.().catch(() => {});
+      throw tooLarge();
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+}
+
+export async function downloadMedia(rawUrl) {
+  let url = parseMediaUrl(rawUrl);
+  for (let hop = 0; ; hop += 1) {
+    await assertPublicHost(url);
+    let res;
+    try {
+      res = await mediaFetch(url.href, { redirect: 'manual', headers: { Accept: MEDIA_MIMES.join(', ') } });
+    } catch (err) {
+      const reason = err?.name === 'TimeoutError' ? 'took too long to answer' : 'could not be reached';
+      throw badRequest(`That URL ${reason}`, { url: reason });
+    }
+    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+      if (hop >= MAX_REDIRECTS) throw badRequest('That URL redirects too many times', { url: 'too many redirects' });
+      url = parseMediaUrl(new URL(res.headers.get('location'), url).href);
+      continue;
+    }
+    if (!res.ok) throw badRequest(`That URL answered ${res.status} — check the link opens in a browser`, { url: `HTTP ${res.status}` });
+    return readCapped(res);
+  }
+}
+
+export async function setCatalogMediaFromUrl(id, rawUrl) {
+  if (!db().prepare('SELECT id FROM catalog_exercises WHERE id = ?').get(Number(id))) throw notFound('Exercise not found');
+  return setCatalogMedia(id, await downloadMedia(rawUrl));
 }
 
 export function clearCatalogMedia(id) {

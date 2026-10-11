@@ -1247,6 +1247,32 @@ const MIGRATIONS = [
   // Set when staff end a member's free tracker trial early. NULL means the
   // gym-wide trial applies as usual (see fitnessAccessFor() in src/fitness.js).
   (db) => ensureColumn(db, 'members', 'fitness_trial_cancelled_at', 'TEXT'),
+
+  /* ------------------------------------------------ Shared member plans --- */
+  // One member offering one of their own plans to another at the same gym. The
+  // share points at the live plan rather than a snapshot, so a fix the sender
+  // makes before it is accepted still arrives; accepting copies it into the
+  // recipient's own plans, after which the two are independent. Deleting the
+  // plan withdraws any share still pending (CASCADE).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workout_plan_shares (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id      INTEGER NOT NULL REFERENCES workout_plans(id) ON DELETE CASCADE,
+        sender_id    INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        recipient_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined')),
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        responded_at TEXT
+      )
+    `);
+    // Sharing the same plan with the same person twice is one share, not two.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_share_pending ON workout_plan_shares(plan_id, recipient_id) WHERE status = 'pending'",
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_plan_share_inbox ON workout_plan_shares(recipient_id, status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_plan_share_sender ON workout_plan_shares(sender_id, created_at)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

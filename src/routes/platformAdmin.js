@@ -29,6 +29,7 @@ import {
   listCatalog,
   listMuscleGroups,
   setCatalogMedia,
+  setCatalogMediaFromUrl,
   setMuscleMedia,
   updateCatalogExercise,
 } from '../exerciseCatalog.js';
@@ -634,6 +635,12 @@ platformAdminRoutes.put(
     res.json(setCatalogMedia(Number(req.params.id), req.body));
   },
 );
+
+/** The same, from a link (e.g. a CDN's .mp4): the server downloads it and
+ * stores the copy, so the demo never depends on the link staying up. */
+platformAdminRoutes.post('/catalog/exercises/:id/media-url', async (req, res) => {
+  res.json(await setCatalogMediaFromUrl(Number(req.params.id), req.body?.url));
+});
 
 platformAdminRoutes.delete('/catalog/exercises/:id/media', (req, res) => {
   res.json(clearCatalogMedia(Number(req.params.id)));

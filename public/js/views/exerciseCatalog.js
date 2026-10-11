@@ -20,6 +20,28 @@ const stem = (filename) => filename.replace(/\.[^.]+$/, '');
 /** "ex-deadlift" is the same file as "deadlift": the prefix is a naming habit, not part of the exercise. */
 const withoutPrefix = (text) => text.replace(/^ex[-_ ]+/i, '');
 
+/** Everyday names for muscle groups, as filenames ("abs.png" is the
+ * abdominals picture) and reference sites' muscle lists write them. */
+const MUSCLE_ALIASES = {
+  abs: 'abdominals', core: 'abdominals', obliques: 'abdominals',
+  quads: 'quadriceps', hams: 'hamstrings', calf: 'calves',
+  delts: 'shoulders', deltoids: 'shoulders', pecs: 'chest', pectorals: 'chest',
+  glute: 'glutes', hips: 'glutes', bicep: 'biceps', tricep: 'triceps', forearm: 'forearms',
+  trap: 'traps', trapezius: 'traps', lat: 'lats', 'latissimus dorsi': 'lats',
+  'erector spinae': 'lower_back', 'full body': 'full_body',
+};
+
+/** "Lower Back", "lower-back", "Glute" and "abs" → the muscle group key, or null. */
+function muscleFromText(text, groups) {
+  const words = normalise(text);
+  if (!words) return null;
+  const key = words.replace(/ /g, '_');
+  if (groups.includes(key)) return key;
+  if (groups.includes(`${key}s`)) return `${key}s`;
+  const alias = MUSCLE_ALIASES[words];
+  return alias && groups.includes(alias) ? alias : null;
+}
+
 /* ── CSV ──────────────────────────────────────────────────────────────── */
 
 /** A small RFC-4180 reader: quoted fields, doubled quotes, commas and
@@ -117,6 +139,7 @@ function openExerciseModal(exercise, meta, onSaved) {
   const state = {
     secondary: new Set(exercise?.secondary_muscles ?? []),
     file: null,
+    mediaUrl: null,
     removeMedia: false,
   };
 
@@ -134,8 +157,45 @@ function openExerciseModal(exercise, meta, onSaved) {
   const tags = h('input', { type: 'text', value: (exercise?.tags ?? []).join(', '), placeholder: 'compound, unilateral…' });
   const instructions = h('textarea', { rows: 4, placeholder: 'How to perform it — shown to members.' }, exercise?.instructions ?? '');
 
+  /* Secondary muscles: chips to click, plus a text box showing the same
+     selection as "Glutes, Lower Back, …" so a list copied from a reference
+     site can be pasted in one go. Editing either one updates the other. */
   const chips = h('div', { class: 'cat-chips' });
+  const secondaryText = h('input', {
+    type: 'text',
+    placeholder: 'or paste a list: Glutes, Lower Back, Upper Back, Lats',
+    autocomplete: 'off',
+    style: 'margin-top:8px',
+  });
+  const syncSecondaryText = () => {
+    secondaryText.value = meta.muscle_groups.filter((m) => state.secondary.has(m)).map(capital).join(', ');
+  };
+  const applySecondaryText = () => {
+    const unknown = [];
+    const picked = new Set();
+    for (const part of secondaryText.value.split(/[,;\n]+/)) {
+      if (!part.trim()) continue;
+      const found = muscleFromText(part, meta.muscle_groups);
+      if (found) {
+        if (found !== muscle.value) picked.add(found);
+      } else {
+        unknown.push(part.trim());
+      }
+    }
+    state.secondary = picked;
+    drawChips();
+    if (unknown.length) toast(`Not a muscle group: ${unknown.join(', ')}`, 'error');
+  };
+  secondaryText.addEventListener('change', applySecondaryText);
+  // Enter applies the list rather than submitting the whole form.
+  secondaryText.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    applySecondaryText();
+  });
+
   const drawChips = () => {
+    syncSecondaryText();
     clear(chips).append(
       ...meta.muscle_groups
         .filter((m) => m !== muscle.value)
@@ -163,7 +223,8 @@ function openExerciseModal(exercise, meta, onSaved) {
   drawChips();
 
   /* Demo: current preview + picker. A newly chosen file previews locally
-     (object URL) before anything is uploaded. */
+     (object URL) and a pasted link straight from its source, before anything
+     is uploaded; on Save the server downloads the link and keeps its own copy. */
   const stage = h('div', { class: 'cat-stage' });
   const mediaNote = h('div', { class: 'muted', style: 'font-size:12px' });
   let objectUrl = null;
@@ -174,14 +235,50 @@ function openExerciseModal(exercise, meta, onSaved) {
     if (state.file) {
       objectUrl = URL.createObjectURL(state.file);
       shown = { media_url: objectUrl, media_type: state.file.type.startsWith('video/') ? 'video' : 'image' };
+    } else if (state.mediaUrl) {
+      shown = { media_url: state.mediaUrl, media_type: /\.(?:mp4|webm|m4v|mov)$/i.test(new URL(state.mediaUrl).pathname) ? 'video' : 'image' };
     }
     clear(stage).append(exerciseMedia(shown) ?? h('div', { class: 'cat-preview-empty' }, renderIcon('image', { size: 30 }), h('span', {}, 'No demo yet')));
     mediaNote.textContent = state.file
       ? `${state.file.name} · ${mb(state.file.size)} — saved when you press Save`
-      : shown?.media_bytes
-        ? `${capital(shown.media_type)} · ${mb(shown.media_bytes)}`
-        : `PNG, JPG, WebP, GIF, MP4 or WebM, up to ${mb(meta.media.max_bytes)}.`;
+      : state.mediaUrl
+        ? 'From link — downloaded and saved when you press Save'
+        : shown?.media_bytes
+          ? `${capital(shown.media_type)} · ${mb(shown.media_bytes)}`
+          : `PNG, JPG, WebP, GIF, MP4 or WebM, up to ${mb(meta.media.max_bytes)} — upload a file or paste a link.`;
   };
+
+  const urlInput = h('input', {
+    type: 'url',
+    placeholder: 'or paste a link: https://…/demo.mp4',
+    autocomplete: 'off',
+    style: 'font-size:13px',
+  });
+  const applyUrl = () => {
+    const value = urlInput.value.trim();
+    if (!value) {
+      state.mediaUrl = null;
+      return drawStage();
+    }
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return toast('That is not a valid link', 'error');
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return toast('Use an http or https link', 'error');
+    state.mediaUrl = url.href;
+    state.file = null;
+    state.removeMedia = false;
+    drawStage();
+  };
+  urlInput.addEventListener('change', applyUrl);
+  // Enter previews the link rather than submitting the whole form.
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    applyUrl();
+  });
 
   const fileInput = h('input', {
     type: 'file',
@@ -194,6 +291,8 @@ function openExerciseModal(exercise, meta, onSaved) {
       if (!meta.media.mimes.includes(file.type)) return toast('Use a PNG, JPG, WebP, GIF, MP4 or WebM file', 'error');
       if (file.size > meta.media.max_bytes) return toast(`That file is ${mb(file.size)} — the limit is ${mb(meta.media.max_bytes)}`, 'error');
       state.file = file;
+      state.mediaUrl = null;
+      urlInput.value = '';
       state.removeMedia = false;
       drawStage();
     },
@@ -205,6 +304,8 @@ function openExerciseModal(exercise, meta, onSaved) {
       type: 'button',
       onclick: () => {
         state.file = null;
+        state.mediaUrl = null;
+        urlInput.value = '';
         state.removeMedia = Boolean(exercise?.media_url);
         drawStage();
       },
@@ -232,6 +333,7 @@ function openExerciseModal(exercise, meta, onSaved) {
           };
           let saved = isNew ? await api.platformCreateExercise(payload) : await api.platformUpdateExercise(exercise.id, payload);
           if (state.file) saved = await api.platformUploadExerciseMedia(saved.id, state.file);
+          else if (state.mediaUrl) saved = await api.platformExerciseMediaFromUrl(saved.id, state.mediaUrl);
           else if (state.removeMedia) saved = await api.platformClearExerciseMedia(saved.id);
           closeModal();
           toast(isNew ? `${saved.name} added` : `${saved.name} saved`);
@@ -261,6 +363,7 @@ function openExerciseModal(exercise, meta, onSaved) {
           removeBtn,
           fileInput,
         ),
+        urlInput,
       ),
       h(
         'div',
@@ -272,7 +375,7 @@ function openExerciseModal(exercise, meta, onSaved) {
           h('label', { class: 'field' }, h('span', {}, 'Primary muscle'), muscle),
           h('label', { class: 'field' }, h('span', {}, 'Equipment'), equipment),
         ),
-        h('div', { class: 'field' }, h('span', {}, 'Secondary muscles'), chips),
+        h('div', { class: 'field' }, h('span', {}, 'Secondary muscles'), chips, secondaryText),
         h('label', { class: 'field' }, h('span', {}, 'Tags'), tags),
         h('label', { class: 'field' }, h('span', {}, 'Instructions'), instructions),
       ),
@@ -487,9 +590,6 @@ function openBulkMediaModal(items, meta, onDone) {
 }
 
 /* ── Muscle group pictures ────────────────────────────────────────────── */
-
-/** Filename shorthands for the bulk upload: "abs.png" is the abdominals picture. */
-const MUSCLE_ALIASES = { abs: 'abdominals', core: 'abdominals', quads: 'quadriceps', hams: 'hamstrings', delts: 'shoulders', glute: 'glutes', calf: 'calves', bicep: 'biceps', tricep: 'triceps', trap: 'traps', lat: 'lats', forearm: 'forearms', 'full body': 'full_body' };
 
 /** The muscle group a file is named after, or undefined. */
 function muscleForFile(filename, muscles) {

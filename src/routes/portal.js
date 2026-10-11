@@ -37,6 +37,7 @@ import {
   weightOn,
   workoutCalories,
 } from '../nutrition.js';
+import { notifyMember } from '../notifications.js';
 import { setMemberPhoto } from '../photo.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { dietPlanTree } from './diets.js';
@@ -621,6 +622,7 @@ portalRoutes.get('/workouts/routines', requireMemberAuth, requireModule('fitness
        ORDER BY wp.updated_at DESC, wp.id DESC`,
       [req.member.id],
     ),
+    shared: incomingShares(req.member.id),
     active: { source: live.source, plan_id: live.plan_id },
     trainer: assignment
       ? {
@@ -710,6 +712,134 @@ portalRoutes.put('/workouts/active', requireMemberAuth, requireModule('fitness')
   run('UPDATE members SET own_workout_plan_id = ? WHERE id = ?', [planId, req.member.id]);
   const live = liveWorkoutFor(req.member.id);
   res.json({ source: live.source, plan_id: live.plan_id });
+});
+
+/* ── Sharing plans between members ────────────────────────────────────── */
+
+/**
+ * A member sends one of their own plans to a gym-mate, who finds it under
+ * "Shared with you" and can save a copy. The recipient is named by phone
+ * number or member ID — what a friend can actually tell you — rather than
+ * picked from a list, so the portal never becomes a directory of everyone
+ * who trains here.
+ */
+const MAX_SHARES_PER_DAY = 20;
+
+/** "Rahul V." — enough for a gym-mate to recognise, without a full name. */
+const shortName = (m) => [m.first_name, m.last_name ? `${m.last_name[0].toUpperCase()}.` : ''].filter(Boolean).join(' ');
+
+/** Phone with the punctuation people type stripped, compared on its last ten
+ * digits so "+91 98765 00011" finds a member saved as "9876500011". */
+const PHONE_DIGITS_SQL = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '')";
+
+function findShareRecipient(identifier) {
+  const byCode = get('SELECT id, first_name, last_name FROM members WHERE code = ? COLLATE NOCASE', [identifier]);
+  if (byCode) return byCode;
+
+  const digits = identifier.replace(/\D/g, '');
+  if (digits.length < 7) return null;
+  const matches = all(
+    `SELECT id, first_name, last_name FROM members
+     WHERE phone IS NOT NULL AND substr(${PHONE_DIGITS_SQL}, -10) = ? LIMIT 2`,
+    [digits.slice(-10)],
+  );
+  // Families often share one number; guessing which of them was meant would
+  // send someone's plan to the wrong person.
+  if (matches.length > 1) throw conflict('More than one member uses that phone number — ask for their member ID instead');
+  return matches[0] ?? null;
+}
+
+function pendingShareOr404(memberId, shareId) {
+  const share = get("SELECT * FROM workout_plan_shares WHERE id = ? AND recipient_id = ? AND status = 'pending'", [shareId, memberId]);
+  if (!share) throw notFound('That shared plan is no longer available');
+  return share;
+}
+
+/** Plans waiting for this member's answer, newest first. */
+function incomingShares(memberId) {
+  return all(
+    `SELECT s.id, s.created_at, wp.name AS plan_name, wp.description,
+            (SELECT COUNT(*) FROM workout_plan_days d WHERE d.plan_id = wp.id) AS day_count,
+            (SELECT COUNT(*) FROM workout_plan_exercises e
+               JOIN workout_plan_days d ON d.id = e.day_id WHERE d.plan_id = wp.id) AS exercise_count,
+            m.first_name, m.last_name
+     FROM workout_plan_shares s
+     JOIN workout_plans wp ON wp.id = s.plan_id
+     JOIN members m ON m.id = s.sender_id
+     WHERE s.recipient_id = ? AND s.status = 'pending'
+     ORDER BY s.created_at DESC, s.id DESC`,
+    [memberId],
+  ).map(({ first_name, last_name, ...share }) => ({ ...share, sender_name: shortName({ first_name, last_name }) }));
+}
+
+portalRoutes.post('/workouts/routines/:id/share', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const plan = ownPlanOr404(req.member.id, Number(req.params.id));
+  const body = parse(req.body, { recipient: { type: 'string', required: true, min: 3, max: 60 } });
+
+  const recipient = findShareRecipient(body.recipient.trim());
+  if (!recipient) throw notFound('No member at this gym has that phone number or member ID');
+  if (recipient.id === req.member.id) throw badRequest("That's you — share it with someone else");
+
+  const existing = get(
+    "SELECT id FROM workout_plan_shares WHERE plan_id = ? AND recipient_id = ? AND status = 'pending'",
+    [plan.id, recipient.id],
+  );
+  if (existing) return res.json({ id: existing.id, recipient_name: shortName(recipient), already_shared: true });
+
+  const sentToday = get(
+    "SELECT COUNT(*) AS n FROM workout_plan_shares WHERE sender_id = ? AND created_at >= datetime('now', '-1 day')",
+    [req.member.id],
+  ).n;
+  if (sentToday >= MAX_SHARES_PER_DAY) throw tooManyRequests(`You can share up to ${MAX_SHARES_PER_DAY} plans a day — try again tomorrow`);
+
+  const shareId = Number(
+    run('INSERT INTO workout_plan_shares (plan_id, sender_id, recipient_id) VALUES (?, ?, ?)', [plan.id, req.member.id, recipient.id])
+      .lastInsertRowid,
+  );
+
+  // The share is saved either way; a push that fails to go out only means the
+  // recipient finds it the next time they open the Workout tab.
+  const sender = get('SELECT first_name, last_name FROM members WHERE id = ?', [req.member.id]);
+  notifyMember(recipient.id, {
+    category: 'workout',
+    title: `${shortName(sender)} shared a workout plan`,
+    body: `“${plan.name}” — open Workout to preview it and save a copy.`,
+    screen: 'workout',
+    dedupeKey: `plan-share-${shareId}`,
+    ttl: 24 * 60 * 60,
+  }).catch(() => {});
+
+  res.status(201).json({ id: shareId, recipient_name: shortName(recipient), already_shared: false });
+});
+
+/** A read-only look at a shared plan before saving it. */
+portalRoutes.get('/workouts/shared/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const share = pendingShareOr404(req.member.id, Number(req.params.id));
+  const { member_id: _sender, created_by: _staff, ...plan } = workoutPlanTree(share.plan_id, { withMedia: true });
+  const sender = get('SELECT first_name, last_name FROM members WHERE id = ?', [share.sender_id]);
+  res.json({ share_id: share.id, sender_name: shortName(sender), plan });
+});
+
+/** Saves a copy of the shared plan into the member's own plans. */
+portalRoutes.post('/workouts/shared/:id/accept', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const share = pendingShareOr404(req.member.id, Number(req.params.id));
+  const body = parse(req.body, { activate: { type: 'boolean', default: 0 } });
+  assertRoomForAnotherPlan(req.member.id);
+
+  const source = workoutPlanTree(share.plan_id);
+  const planId = tx(() => {
+    const id = insertOwnPlan(req.member.id, { name: source.name, description: source.description }, source.days);
+    run("UPDATE workout_plan_shares SET status = 'accepted', responded_at = datetime('now') WHERE id = ?", [share.id]);
+    maybeActivate(req.member.id, id, body.activate);
+    return id;
+  });
+  res.status(201).json({ ...workoutPlanTree(planId, { withMedia: true }), active: liveWorkoutFor(req.member.id).plan_id === planId });
+});
+
+portalRoutes.delete('/workouts/shared/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const share = pendingShareOr404(req.member.id, Number(req.params.id));
+  run("UPDATE workout_plan_shares SET status = 'declined', responded_at = datetime('now') WHERE id = ?", [share.id]);
+  res.json({ ok: true });
 });
 
 /**

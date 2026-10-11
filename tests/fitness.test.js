@@ -993,6 +993,152 @@ describe('Hevy-style plans a member builds for themselves', () => {
   });
 });
 
+describe('sharing a plan with another member', () => {
+  let senderToken;
+  let recipientToken;
+  let outsiderToken;
+  let sharedPlan;
+  let shareId;
+
+  const pushDay = {
+    name: 'Arjun PPL',
+    description: 'Three days, heavy compounds first.',
+    days: [
+      { day_name: 'Push', exercises: [{ exercise_name: 'Barbell Bench Press', muscle_group: 'chest', target_sets: 5, target_reps: '5' }] },
+      { day_name: 'Pull', exercises: [{ exercise_name: 'Deadlift', muscle_group: 'back', target_sets: 3, target_reps: '5' }] },
+    ],
+  };
+
+  const memberWithAddon = async (firstName, lastName, phone) => {
+    const created = await call('POST', '/api/members', { first_name: firstName, last_name: lastName, phone }, { token: adminToken });
+    assert.equal(created.status, 201);
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: created.body.id }, { token: adminToken });
+    const login = await call('POST', '/api/portal/login', { identifier: created.body.code, pin: phone.slice(-4) });
+    return { ...created.body, token: login.body.token };
+  };
+
+  before(async () => {
+    senderToken = (await memberWithAddon('Arjun', 'Mehta', '9876507001')).token;
+    recipientToken = (await memberWithAddon('Priya', 'Shah', '9876507002')).token;
+    outsiderToken = (await memberWithAddon('Kabir', 'Rao', '9876507003')).token;
+    sharedPlan = (await call('POST', '/api/portal/workouts/routines', pushDay, { token: senderToken })).body;
+  });
+
+  it('sends a plan to a member found by phone, however the number is typed', async () => {
+    const res = await call(
+      'POST',
+      `/api/portal/workouts/routines/${sharedPlan.id}/share`,
+      { recipient: '+91 98765-07002' },
+      { token: senderToken },
+    );
+    assert.equal(res.status, 201);
+    assert.equal(res.body.recipient_name, 'Priya S.', 'a short name, so the sender knows they got the right person');
+    assert.equal(res.body.already_shared, false);
+    shareId = res.body.id;
+
+    const again = await call('POST', `/api/portal/workouts/routines/${sharedPlan.id}/share`, { recipient: '9876507002' }, { token: senderToken });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.id, shareId, 'sharing twice is still one share');
+    assert.equal(again.body.already_shared, true);
+
+    const inbox = await call('GET', '/api/portal/notifications', undefined, { token: recipientToken });
+    const note = inbox.body.items.find((n) => n.title === 'Arjun M. shared a workout plan');
+    assert.ok(note, 'the recipient is told');
+    assert.equal(note.screen, 'workout');
+  });
+
+  it('refuses unknown members, the sender themselves, ambiguous numbers and plans that are not theirs', async () => {
+    const share = (planId, recipient, token = senderToken) =>
+      call('POST', `/api/portal/workouts/routines/${planId}/share`, { recipient }, { token });
+
+    assert.equal((await share(sharedPlan.id, '9000000000')).status, 404);
+    assert.equal((await share(sharedPlan.id, '9876507001')).status, 400, 'not to yourself');
+
+    // Two family members on one number: guessing would send it to the wrong one.
+    await call('POST', '/api/members', { first_name: 'Twin', last_name: 'One', phone: '9876507099' }, { token: adminToken });
+    await call('POST', '/api/members', { first_name: 'Twin', last_name: 'Two', phone: '9876507099' }, { token: adminToken });
+    assert.equal((await share(sharedPlan.id, '9876507099')).status, 409);
+
+    assert.equal((await share(sharedPlan.id, '9876507002', outsiderToken)).status, 404, 'only the owner can share it');
+    const trainerPlanId = (await call('GET', '/api/portal/workouts/routines', undefined, { token: memberToken })).body.trainer.plan_id;
+    assert.equal((await share(trainerPlanId, '9876507002', memberToken)).status, 404, "a trainer's plan is not the member's to hand out");
+  });
+
+  it('shows the recipient who sent it, and lets them preview it', async () => {
+    const routines = await call('GET', '/api/portal/workouts/routines', undefined, { token: recipientToken });
+    assert.equal(routines.body.shared.length, 1);
+    const [incoming] = routines.body.shared;
+    assert.equal(incoming.id, shareId);
+    assert.equal(incoming.plan_name, 'Arjun PPL');
+    assert.equal(incoming.sender_name, 'Arjun M.');
+    assert.equal(incoming.day_count, 2);
+    assert.equal(incoming.exercise_count, 2);
+    assert.deepEqual(routines.body.items, [], 'not one of their own plans until they save it');
+
+    const preview = await call('GET', `/api/portal/workouts/shared/${shareId}`, undefined, { token: recipientToken });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.sender_name, 'Arjun M.');
+    assert.equal(preview.body.plan.days[0].day_name, 'Push');
+    assert.equal(preview.body.plan.member_id, undefined, "the sender's member id stays private");
+
+    for (const [method, url] of [
+      ['GET', `/api/portal/workouts/shared/${shareId}`],
+      ['POST', `/api/portal/workouts/shared/${shareId}/accept`],
+      ['DELETE', `/api/portal/workouts/shared/${shareId}`],
+    ]) {
+      assert.equal((await call(method, url, undefined, { token: outsiderToken })).status, 404, `${method} ${url} by someone else`);
+    }
+  });
+
+  it('saves an independent copy, carrying any edit the sender made before it was accepted', async () => {
+    await call(
+      'PUT',
+      `/api/portal/workouts/routines/${sharedPlan.id}`,
+      { ...pushDay, days: [...pushDay.days, { day_name: 'Legs', exercises: [{ exercise_name: 'Back Squat', muscle_group: 'legs' }] }] },
+      { token: senderToken },
+    );
+
+    const saved = await call('POST', `/api/portal/workouts/shared/${shareId}/accept`, { activate: true }, { token: recipientToken });
+    assert.equal(saved.status, 201);
+    assert.notEqual(saved.body.id, sharedPlan.id);
+    assert.equal(saved.body.member_created, 1);
+    assert.equal(saved.body.name, 'Arjun PPL');
+    assert.equal(saved.body.description, 'Three days, heavy compounds first.');
+    assert.equal(saved.body.days.length, 3, 'the sender\'s later Legs day came along');
+    assert.equal(saved.body.active, true);
+
+    const current = await call('GET', '/api/portal/workouts/current', undefined, { token: recipientToken });
+    assert.equal(current.body.source, 'own');
+    assert.equal(current.body.plan.id, saved.body.id);
+
+    // From here the two plans go their own ways.
+    await call('PUT', `/api/portal/workouts/routines/${sharedPlan.id}`, pushDay, { token: senderToken });
+    const copy = await call('GET', `/api/portal/workouts/routines/${saved.body.id}`, undefined, { token: recipientToken });
+    assert.equal(copy.body.days.length, 3);
+    const editBySender = await call('PUT', `/api/portal/workouts/routines/${saved.body.id}`, pushDay, { token: senderToken });
+    assert.equal(editBySender.status, 404, 'the sender cannot reach into the copy');
+
+    const routines = await call('GET', '/api/portal/workouts/routines', undefined, { token: recipientToken });
+    assert.deepEqual(routines.body.shared, []);
+    assert.equal((await call('POST', `/api/portal/workouts/shared/${shareId}/accept`, undefined, { token: recipientToken })).status, 404);
+  });
+
+  it('lets the recipient dismiss a plan, and withdraws one the sender deletes', async () => {
+    const dismissed = await call('POST', `/api/portal/workouts/routines/${sharedPlan.id}/share`, { recipient: '9876507003' }, { token: senderToken });
+    assert.equal(dismissed.status, 201);
+    const declined = await call('DELETE', `/api/portal/workouts/shared/${dismissed.body.id}`, undefined, { token: outsiderToken });
+    assert.equal(declined.status, 200);
+    assert.deepEqual((await call('GET', '/api/portal/workouts/routines', undefined, { token: outsiderToken })).body.shared, []);
+
+    const another = (await call('POST', '/api/portal/workouts/routines', { ...pushDay, name: 'Short-lived' }, { token: senderToken })).body;
+    const pending = await call('POST', `/api/portal/workouts/routines/${another.id}/share`, { recipient: '9876507003' }, { token: senderToken });
+    assert.equal(pending.status, 201);
+    await call('DELETE', `/api/portal/workouts/routines/${another.id}`, undefined, { token: senderToken });
+    assert.deepEqual((await call('GET', '/api/portal/workouts/routines', undefined, { token: outsiderToken })).body.shared, []);
+    assert.equal((await call('GET', `/api/portal/workouts/shared/${pending.body.id}`, undefined, { token: outsiderToken })).status, 404);
+  });
+});
+
 describe('Lifesum-style diet logging in the portal', () => {
   it('serves the assigned targets', async () => {
     const res = await call('GET', '/api/portal/diets/current', undefined, { token: memberToken });

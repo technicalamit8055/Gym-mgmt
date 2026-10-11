@@ -267,6 +267,8 @@ export const api = {
     request('DELETE', `/platform/admin/catalog/exercises/${id}`, undefined, { token: platformSession.token }),
   platformUploadExerciseMedia: (id, file) =>
     uploadFile(`/platform/admin/catalog/exercises/${id}/media`, file, { token: platformSession.token }),
+  platformExerciseMediaFromUrl: (id, url) =>
+    request('POST', `/platform/admin/catalog/exercises/${id}/media-url`, { url }, { token: platformSession.token }),
   platformClearExerciseMedia: (id) =>
     request('DELETE', `/platform/admin/catalog/exercises/${id}/media`, undefined, { token: platformSession.token }),
   platformImportExercises: (rows) =>
@@ -526,6 +528,13 @@ export const api = {
     updateRoutine: (id, payload) => request('PUT', `/portal/workouts/routines/${id}`, payload, { member: true }),
     deleteRoutine: (id) => request('DELETE', `/portal/workouts/routines/${id}`, undefined, { member: true }),
     setActivePlan: (planId) => request('PUT', '/portal/workouts/active', { plan_id: planId }, { member: true }),
+    // Plans passed between members: send one of your own by phone or member
+    // ID; incoming ones arrive in routines().shared to preview, save or dismiss.
+    shareRoutine: (id, recipient) => request('POST', `/portal/workouts/routines/${id}/share`, { recipient }, { member: true }),
+    sharedRoutine: (shareId) => request('GET', `/portal/workouts/shared/${shareId}`, undefined, { member: true }),
+    acceptSharedRoutine: (shareId, payload = {}) =>
+      request('POST', `/portal/workouts/shared/${shareId}/accept`, payload, { member: true }),
+    declineSharedRoutine: (shareId) => request('DELETE', `/portal/workouts/shared/${shareId}`, undefined, { member: true }),
     currentDiet: () => request('GET', '/portal/diets/current', undefined, { member: true }),
     dietDay: (date) => request('GET', `/portal/diets/daily${query({ date })}`, undefined, { member: true }),
     dietSummary: (params) => request('GET', `/portal/diets/summary${query(params)}`, undefined, { member: true }),
