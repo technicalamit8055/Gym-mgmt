@@ -118,7 +118,6 @@ export function publicMember(row) {
     portal_password_hash,
     portal_password_temp,
     portal_reset_hash,
-    portal_reset_expires_at,
     portal_reset_sent_at,
     ...rest
   } = row;

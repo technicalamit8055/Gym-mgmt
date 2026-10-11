@@ -134,7 +134,7 @@ describe('member self-service portal', () => {
   it('lets the desk issue a temporary password, shown once', async () => {
     const res = await call('POST', `/api/members/${memberId}/app-login`, { deliver: 'show' }, { token: staffToken, tenant: 'portalgym' });
     assert.equal(res.status, 200);
-    assert.match(res.body.password, /^[a-z2-9]{4}-[a-z2-9]{4}$/);
+    assert.match(res.body.password, /^[a-z]+\d{4}$/, 'a word and four digits, like tiger4821');
     assert.equal(res.body.member.portal_access, 'temporary');
     tempPassword = res.body.password;
   });
@@ -296,7 +296,7 @@ describe('member self-service portal', () => {
       const message = sentInMemory.at(-1);
       assert.equal(message.phone, '9876543210');
       assert.ok(message.message.includes(memberCode) && message.message.includes('/#/portal'));
-      const waPassword = message.message.match(/Temporary password: (\S+)/)[1];
+      const waPassword = message.message.match(/Password: (\S+)/)[1];
 
       const logs = await call('GET', '/api/whatsapp/logs', null, { token: staffToken, tenant: 'portalgym' });
       assert.ok(!logs.body.items[0].message.includes(waPassword), 'the delivery log masks the password');
@@ -322,15 +322,22 @@ describe('member self-service portal', () => {
     }
   });
 
-  it('lets the WhatsApp password lapse after a day unused', async () => {
+  it('keeps the WhatsApp password working past a day, until a new one replaces it', async () => {
     process.env.WHATSAPP_TRANSPORT = 'memory';
     try {
       const other = await call('POST', '/api/members', { first_name: 'Late', phone: '9000000006' }, { token: staffToken, tenant: 'portalgym' });
-      assert.equal((await call('POST', '/api/portal/password/whatsapp', { identifier: other.body.code }, { tenant: 'portalgym' })).status, 200);
-      const waPassword = sentInMemory.at(-1).message.match(/Temporary password: (\S+)/)[1];
-      inGym(() => run("UPDATE members SET portal_reset_expires_at = datetime('now', '-1 minute') WHERE id = ?", [other.body.id]));
-      const late = await call('POST', '/api/portal/login', { identifier: other.body.code, password: waPassword }, { tenant: 'portalgym' });
-      assert.equal(late.status, 401);
+      const ask = () => call('POST', '/api/portal/password/whatsapp', { identifier: other.body.code }, { tenant: 'portalgym' });
+      const signIn = (password) => call('POST', '/api/portal/login', { identifier: other.body.code, password }, { tenant: 'portalgym' });
+      assert.equal((await ask()).status, 200);
+      const first = sentInMemory.at(-1).message.match(/Password: (\S+)/)[1];
+      assert.match(first, /^[a-z]+\d{4}$/);
+
+      // Two days on, the password still works, and they may ask again.
+      inGym(() => run("UPDATE members SET portal_reset_sent_at = datetime('now', '-2 days') WHERE id = ?", [other.body.id]));
+      assert.equal((await ask()).status, 200);
+      const second = sentInMemory.at(-1).message.match(/Password: (\S+)/)[1];
+      if (second !== first) assert.equal((await signIn(first)).status, 401, 'the new one replaces the old one');
+      assert.equal((await signIn(second)).status, 200);
     } finally {
       delete process.env.WHATSAPP_TRANSPORT;
     }

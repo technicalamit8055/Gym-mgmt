@@ -25,8 +25,26 @@ const CODE_TTL_MINUTES = 15;
 const CODE_MAX_ATTEMPTS = 5;
 const CODE_RESEND_SECONDS = 60;
 
-/** No 0/o, 1/l/i: a temporary password gets read off a phone and typed in. */
-const TEMP_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+/**
+ * Temporary passwords are one of these plus four digits — "tiger4821" — so a
+ * member can read it once and type it from memory. All lowercase, everyday,
+ * easy to spell. That's ~1.3M combinations: fine for a password that must be
+ * replaced at first sign-in, behind a login limit of a few tries per window.
+ */
+const TEMP_WORDS = [
+  'apple', 'arrow', 'beach', 'bear', 'bird', 'blue', 'boat', 'brave', 'bread', 'brick',
+  'cake', 'candy', 'chair', 'chess', 'cloud', 'coin', 'coral', 'crown', 'dance', 'delta',
+  'dream', 'drum', 'eagle', 'earth', 'falcon', 'field', 'fire', 'flame', 'flash', 'flower',
+  'forest', 'fox', 'fresh', 'frog', 'fruit', 'garden', 'giant', 'gold', 'grape', 'green',
+  'happy', 'hawk', 'heart', 'hero', 'hill', 'honey', 'horse', 'iron', 'island', 'jungle',
+  'kite', 'lake', 'lemon', 'light', 'lion', 'lotus', 'lucky', 'magic', 'mango', 'maple',
+  'metal', 'moon', 'mountain', 'music', 'ocean', 'olive', 'orange', 'panda', 'paper', 'peach',
+  'pearl', 'pepper', 'piano', 'pilot', 'planet', 'power', 'queen', 'rain', 'river', 'robin',
+  'rock', 'rocket', 'rose', 'royal', 'ruby', 'sail', 'shark', 'silver', 'sky', 'smile',
+  'snow', 'speed', 'spark', 'spring', 'star', 'steel', 'stone', 'storm', 'strong', 'sugar',
+  'summer', 'sun', 'swift', 'tea', 'thunder', 'tiger', 'tower', 'train', 'tree', 'tulip',
+  'wave', 'whale', 'wind', 'winter', 'wolf', 'zebra',
+];
 
 /** Throws a 400 naming `field` when a new password breaks the rules. */
 export function assertGoodPassword(password, member, field = 'new_password') {
@@ -59,7 +77,7 @@ export function setMemberPassword(memberId, password, { temporary = false, keepS
   tx(() => {
     run(
       `UPDATE members SET portal_password_hash = ?, portal_password_temp = ?, portal_password_set_at = datetime('now'),
-         portal_reset_hash = NULL, portal_reset_expires_at = NULL
+         portal_reset_hash = NULL
        WHERE id = ?`,
       [hashPassword(password), temporary ? 1 : 0, memberId],
     );
@@ -69,17 +87,16 @@ export function setMemberPassword(memberId, password, { temporary = false, keepS
   });
 }
 
-/** Ten characters as "abcd-2345": easy to read out and type, ~45 bits. */
+/** A word and four digits, e.g. "tiger4821" — always 8+ characters. */
 export function generateTemporaryPassword() {
-  const pick = () => TEMP_ALPHABET[crypto.randomInt(TEMP_ALPHABET.length)];
-  const group = () => Array.from({ length: 4 }, pick).join('');
-  return `${group()}-${group()}`;
+  const word = TEMP_WORDS[crypto.randomInt(TEMP_WORDS.length)];
+  const digits = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
+  return `${word}${digits}`;
 }
 
 /* ── "Forgot password? Get it on WhatsApp" ── */
 
 const RESET_COOLDOWN_HOURS = 24;
-const RESET_VALID_HOURS = 24;
 
 /**
  * Reserves this member's one self-service WhatsApp send for the next
@@ -108,18 +125,17 @@ export function releaseWhatsAppReset(memberId, previous) {
   run('UPDATE members SET portal_reset_sent_at = ? WHERE id = ?', [previous, memberId]);
 }
 
-/** Keeps the sent password beside the real one until it's used or expires. */
+/**
+ * Keeps the sent password beside the real one. It has no expiry: it works
+ * until the member signs in with it, sets a password some other way, or asks
+ * again (a day later at the soonest) and gets a new one in its place.
+ */
 export function storeResetPassword(memberId, password) {
-  run(
-    "UPDATE members SET portal_reset_hash = ?, portal_reset_expires_at = datetime('now', ?) WHERE id = ?",
-    [hashPassword(password), `+${RESET_VALID_HOURS} hours`, memberId],
-  );
+  run('UPDATE members SET portal_reset_hash = ? WHERE id = ?', [hashPassword(password), memberId]);
 }
 
 export function checkResetPassword(member, password) {
-  if (!member.portal_reset_hash) return false;
-  const live = get("SELECT portal_reset_expires_at > datetime('now') AS live FROM members WHERE id = ?", [member.id]);
-  return Boolean(live?.live) && verifyPassword(String(password ?? ''), member.portal_reset_hash);
+  return Boolean(member.portal_reset_hash) && verifyPassword(String(password ?? ''), member.portal_reset_hash);
 }
 
 /** "in 5 hours" / "in 40 minutes" for a wait in seconds. */
@@ -143,17 +159,20 @@ export async function sendLoginOnWhatsApp(req, member, password, { reason = 'iss
   const reset = reason === 'reset';
   const lines = (secret) =>
     [
-      reset
-        ? `Hi ${member.first_name}, you asked to reset your app password for ${gymName}. Your login details:`
-        : `Hi ${member.first_name}, here is your app login for ${gymName}:`,
-      '',
-      `App: ${base}/#/portal`,
-      `${currentVertical().key === 'library' ? 'Student' : 'Member'} ID: ${member.code}`,
-      `Temporary password: ${secret}`,
+      `Hi ${member.first_name} 👋`,
       '',
       reset
-        ? `It works for ${RESET_VALID_HOURS} hours, and you'll choose your own password after you sign in. Didn't ask for this? Ignore it — your current password still works.`
-        : "You'll choose your own password after you sign in. Don't share this message with anyone.",
+        ? `You asked to reset your app password for *${gymName}* 🔐`
+        : `Here's your app login for *${gymName}* 💪`,
+      '',
+      `🌐 App: ${base}/#/portal`,
+      `🆔 ${currentVertical().key === 'library' ? 'Student' : 'Member'} ID: ${member.code}`,
+      `🔑 Password: ${secret}`,
+      '',
+      '✅ Sign in with these, then choose your own password.',
+      reset
+        ? "🙅 Didn't ask for this? Just ignore this message — your current password still works."
+        : "🔒 Please don't share this message with anyone.",
     ].join('\n');
   return sendWhatsAppMessage({ phone: member.phone, message: lines(password), logMessage: lines('••••••••'), memberId: member.id });
 }

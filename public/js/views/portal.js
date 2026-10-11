@@ -1587,7 +1587,7 @@ function renderPortalLogin(ctx) {
       avatar('whatsapp'),
       title('Check your WhatsApp'),
       sub(
-        `We sent your login details to ${phoneHint}. Sign in with the temporary password in the message — it works for 24 hours, then you'll choose your own.`,
+        `We sent your login details to ${phoneHint}. Sign in with the password in the message, then choose your own.`,
       ),
       cta('Sign in', () => go('password')),
       h('p', { class: 'portal-login-note' }, "Didn't get it? You can ask again in 24 hours, or ask at the front desk."),

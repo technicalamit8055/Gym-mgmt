@@ -1399,11 +1399,11 @@ const MIGRATIONS = [
   // "Forgot password? Get it on WhatsApp": a temporary password sent from the
   // gym's linked WhatsApp, held beside the member's real one rather than
   // replacing it — anyone who knows a member ID can ask, so asking must not
-  // lock the real member out. Signing in with it is what swaps it in.
+  // lock the real member out. Signing in with it is what swaps it in; it has
+  // no expiry of its own.
   // `portal_reset_sent_at` enforces one self-service send a day.
   (db) => {
     ensureColumn(db, 'members', 'portal_reset_hash', 'TEXT');
-    ensureColumn(db, 'members', 'portal_reset_expires_at', 'TEXT');
     ensureColumn(db, 'members', 'portal_reset_sent_at', 'TEXT');
   },
 ];
