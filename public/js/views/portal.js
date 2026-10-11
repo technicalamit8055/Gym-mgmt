@@ -431,7 +431,7 @@ const MUSCLE_KEYS = [
   'abdominals', 'abductors', 'adductors', 'biceps', 'calves', 'cardio', 'chest', 'forearms', 'full_body', 'glutes',
   'hamstrings', 'lats', 'lower_back', 'neck', 'quadriceps', 'shoulders', 'traps', 'triceps', 'upper_back', 'other',
 ];
-const EQUIPMENT_KEYS = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
+const EQUIPMENT_KEYS = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'plate', 'band', 'bodyweight', 'cardio', 'other'];
 
 /** The drawn icon a muscle group falls back on until the operator uploads its picture. */
 const MUSCLE_ICONS = {
@@ -464,6 +464,7 @@ const EQUIPMENT_ICONS = {
   machine: 'equipment',
   smith_machine: 'barbell',
   kettlebell: 'weight',
+  plate: 'weight',
   band: 'activity',
   bodyweight: 'yoga',
   cardio: 'heartPulse',

@@ -126,7 +126,7 @@ const KEY_ALIASES = {
 /** Everyday names for the equipment types. */
 const EQUIPMENT_ALIASES = {
   barbells: 'barbell', ez_bar: 'barbell', trap_bar: 'barbell',
-  dumbbells: 'dumbbell', kettlebells: 'kettlebell',
+  dumbbells: 'dumbbell', kettlebells: 'kettlebell', plates: 'plate', weight_plate: 'plate', weight_plates: 'plate',
   cables: 'cable', cable_machine: 'cable', machines: 'machine', smith: 'smith_machine',
   bands: 'band', resistance_band: 'band', resistance_bands: 'band',
   body_weight: 'bodyweight', none: 'bodyweight', no_equipment: 'bodyweight',

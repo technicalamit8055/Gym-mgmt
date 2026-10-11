@@ -19,7 +19,7 @@ import { addDays, addMonths, today } from './validate.js';
 
 export { MUSCLE_GROUPS, muscleGroupOf, muscleLabel } from './muscles.js';
 /** What an exercise is performed with — Hevy's list, trimmed to what a gym floor has. */
-export const EQUIPMENT_TYPES = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
+export const EQUIPMENT_TYPES = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'plate', 'band', 'bodyweight', 'cardio', 'other'];
 export const SET_TYPES = ['normal', 'warmup', 'drop', 'failure'];
 export const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'pre_workout', 'post_workout'];
 export const WORKOUT_GOALS = ['muscle_gain', 'fat_loss', 'strength', 'endurance', 'general_fitness'];

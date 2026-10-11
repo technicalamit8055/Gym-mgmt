@@ -65,7 +65,7 @@ const FOOD_CATEGORIES = [
   { value: 'general', label: 'Other' },
 ];
 
-const EQUIPMENT = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'band', 'bodyweight', 'cardio', 'other'];
+const EQUIPMENT = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'kettlebell', 'plate', 'band', 'bodyweight', 'cardio', 'other'];
 
 const labelOf = (options, value) => options.find((o) => o.value === value)?.label ?? value;
 
