@@ -5091,7 +5091,7 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'div',
           { class: 'portal-focus-card portal-focus-workout' },
-          h('img', { class: 'portal-focus-art', src: '/images/portal/portal-workout-pull.png', alt: '' }),
+          h('img', { class: 'portal-focus-art', src: '/images/portal/portal-workout-pull.webp', alt: '' }),
           h('div', { class: 'portal-focus-kicker' }, renderIcon('weight', { size: 16 }), h('span', {}, current.plan.name)),
           h('div', { class: 'portal-focus-title' }, current.today_day.day_name),
           h(
@@ -5278,7 +5278,7 @@ function renderPortalApp(ctx, initialMe) {
         { class: `portal-greeting${isLibrary() ? '' : ' has-art'}` },
         isLibrary()
           ? null
-          : h('div', { class: 'portal-greeting-art' }, h('img', { src: '/images/portal/portal-hero-athlete.png', alt: '' })),
+          : h('div', { class: 'portal-greeting-art' }, h('img', { src: '/images/portal/portal-hero-athlete.webp', alt: '' })),
         // First name only: beside the athlete art a full name split mid-word on small phones.
         h('h2', {}, `Hi, ${me.member.first_name} 👋`),
         h('p', {}, isLibrary() ? 'Have a productive day.' : 'Ready for today’s workout?'),
