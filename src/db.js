@@ -1443,6 +1443,8 @@ const MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_ai_plan_member_day ON ai_plan_generations(member_id, created_at)');
   },
+  // Ensure screen column exists on member_notifications for existing tenant databases
+  (db) => ensureColumn(db, 'member_notifications', 'screen', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

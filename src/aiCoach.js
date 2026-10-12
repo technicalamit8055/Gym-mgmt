@@ -397,14 +397,28 @@ export function contextSteps(context) {
   return steps;
 }
 
+function stripCodeFences(str) {
+  const text = String(str ?? '').trim();
+  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
+  return match ? match[1].trim() : text;
+}
+
 /** The model's JSON, checked: an answer is required, a suggestion is kept
  * only when every field is a usable number. */
 export function parseReply(raw) {
   let data;
+  const cleaned = stripCodeFences(raw);
   try {
-    data = JSON.parse(String(raw ?? '').trim());
+    data = JSON.parse(cleaned);
   } catch {
-    throw new Error('Coach reply was not JSON');
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try {
+        data = JSON.parse(cleaned.slice(start, end + 1));
+      } catch {}
+    }
+    if (!data) throw new Error('Coach reply was not JSON');
   }
   const answer = typeof data?.answer === 'string' ? data.answer.trim() : '';
   if (!answer) throw new Error('Coach reply had no answer');
@@ -518,10 +532,18 @@ const clampInt = (value, lo, hi, fallback) => {
  */
 export function parsePlanReply(raw, library, { days: wantedDays } = {}) {
   let data;
+  const cleaned = stripCodeFences(raw);
   try {
-    data = JSON.parse(String(raw ?? '').trim());
+    data = JSON.parse(cleaned);
   } catch {
-    throw new Error('Plan reply was not JSON');
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try {
+        data = JSON.parse(cleaned.slice(start, end + 1));
+      } catch {}
+    }
+    if (!data) throw new Error('Plan reply was not JSON');
   }
   const byName = new Map(library.map((item) => [item.name.trim().toLowerCase(), item]));
   const dropped = [];

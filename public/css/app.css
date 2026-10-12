@@ -506,7 +506,7 @@ a:has(> .svg-icon) { display: inline-flex; align-items: center; gap: 6px; }
 }
 .brand .logo.logo-default .logo-img { object-fit: contain; border-radius: 50%; }
 .brand:has(.logo-default) .brand-name {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
   white-space: normal; line-height: 1.2; font-size: 15px;
 }
 .settings-logo-container {
@@ -3630,7 +3630,7 @@ body:not([data-mode='light']) .bk-tag.best { color: #fdba74; background: rgba(25
 .bk-pd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 2px; }
 .bk-card-name {
   margin-top: 4px; font-size: 13.5px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 /* Option line and price on the left, Add beside both on the right. */
 .bk-card-foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 8px; row-gap: 2px; margin-top: auto; }
@@ -3950,7 +3950,7 @@ body.bk-page-open { overflow: hidden; }
 .bk-line.oos { opacity: 0.7; }
 .bk-line-thumb { flex: none; display: grid; place-items: center; width: 56px; height: 56px; overflow: hidden; border-radius: 12px; color: var(--muted); background: var(--bk-tile); border: 1px solid var(--border); }
 .bk-line-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.bk-line-text strong { font-size: 13.5px; font-weight: 650; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bk-line-text strong { font-size: 13.5px; font-weight: 650; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bk-line-text small { font-size: 12px; color: var(--muted); }
 .bk-line-text em { font-style: normal; font-size: 11.5px; font-weight: 700; color: var(--red); }
 .bk-line-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
@@ -4543,7 +4543,7 @@ body:not([data-mode='light']) .portal-sched {
 .portal-sched-name { font-size: 15.5px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
 .portal-sched-desc {
   margin-top: 3px; font-size: 12.5px; line-height: 1.35; color: var(--muted);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .portal-sched-spots {
   --c: #10b981; grid-area: spots; align-self: start; justify-self: end;
@@ -8427,7 +8427,7 @@ body:not([data-mode='light']) .portal-add-food { border-color: color-mix(in srgb
 .qt-qty:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .qt-qty-input {
   width: 5ch; min-width: 0; border: none; outline: none; background: none; text-align: right; color: var(--text);
-  font: inherit; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+  font: inherit; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield;
 }
 .qt-qty-input::-webkit-inner-spin-button, .qt-qty-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .qt-qty-hint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: var(--muted); }

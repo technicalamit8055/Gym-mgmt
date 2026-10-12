@@ -513,6 +513,14 @@ describe('Ask Coach helpers', () => {
       { exercise: 'Bench Press', weight_kg: 62.5, reps: 8 },
     );
     assert.equal(parseReply('{"answer":"Ok","suggestion":{"exercise":"Bench","weight_kg":60,"reps":0}}').suggestion, null);
+    assert.deepEqual(
+      parseReply('```json\n{"answer":"Drop to 10 kg."}\n```'),
+      { answer: 'Drop to 10 kg.', suggestion: null },
+    );
+    assert.deepEqual(
+      parseReply('Here is your recommendation: {"answer":"Push for 10 reps."} Hope this helps!'),
+      { answer: 'Push for 10 reps.', suggestion: null },
+    );
     assert.throws(() => parseReply('not json'));
     assert.throws(() => parseReply('{"answer":""}'));
   });
