@@ -1406,6 +1406,43 @@ const MIGRATIONS = [
     ensureColumn(db, 'members', 'portal_reset_hash', 'TEXT');
     ensureColumn(db, 'members', 'portal_reset_sent_at', 'TEXT');
   },
+  // Ask Coach (src/aiCoach.js): every question a member asked and the answer,
+  // with the tokens it cost. Today's rows are the daily cap and the chat's
+  // short memory; the token counts are what the Vertex bill is made of.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_coach_messages (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        screen        TEXT NOT NULL CHECK (screen IN ('workout', 'diet')),
+        question      TEXT NOT NULL,
+        answer        TEXT NOT NULL,
+        input_tokens  INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_ai_coach_member_day ON ai_coach_messages(member_id, created_at)');
+    // The gym's own off switch, beside the add-on it rides on.
+    ensureColumn(db, 'fitness_addon_settings', 'ai_coach_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  },
+  // The AI workout generator (generatePlan in src/aiCoach.js): what the member
+  // asked for and the draft that came back, which they then edit and save as
+  // an ordinary plan. Today's rows are its daily cap; the tokens are its cost.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_plan_generations (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        request       TEXT NOT NULL,
+        plan          TEXT NOT NULL,
+        input_tokens  INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_ai_plan_member_day ON ai_plan_generations(member_id, created_at)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

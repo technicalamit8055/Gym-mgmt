@@ -4,6 +4,24 @@ import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { ATTENDANCE_SELECT, publicVisit } from '../checkin.js';
 import { all, get, getBusinessType, run, tx } from '../db.js';
 import { HttpError, badRequest, conflict, notFound, paymentRequired, tooManyRequests, unauthorized } from '../errors.js';
+import {
+  COACH_SCREENS,
+  MAX_QUESTION_LENGTH,
+  PLAN_EQUIPMENT,
+  PLAN_FOCUS,
+  PLAN_GOALS,
+  PLAN_LEVELS,
+  askCoach,
+  buildCoachContext,
+  coachConfigured,
+  contextSteps,
+  generatePlan,
+  libraryForPlan,
+  plansToday,
+  questionsToday,
+  recentTurns,
+  streamCoach,
+} from '../aiCoach.js';
 import { attachCatalogToExercises, listMuscleGroups } from '../exerciseCatalog.js';
 import {
   EQUIPMENT_TYPES,
@@ -12,6 +30,8 @@ import {
   estimate1rm,
   exerciseHistory,
   fitnessAccessFor,
+  fitnessSettings,
+  lastSessionSetsFor,
   muscleGroupOf,
   previousSetsFor,
   reconcileEditedRecords,
@@ -876,7 +896,7 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
   const { assignment, source, plan_id: planId } = liveWorkoutFor(req.member.id);
 
   if (!planId) {
-    return res.json({ assignment: null, source: null, plan: null, today_day: null, previous: {}, streak_days: 0 });
+    return res.json({ assignment: null, source: null, plan: null, today_day: null, previous: {}, last_session: {}, streak_days: 0 });
   }
 
   const plan = workoutPlanTree(planId, { withMedia: true });
@@ -910,6 +930,8 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
     plan,
     today_day: todayDay,
     previous: previousSetsFor(req.member.id, names),
+    // The whole of last session per exercise, for the next-set suggestion.
+    last_session: lastSessionSetsFor(req.member.id, names),
     sessions_logged: sessionsLogged,
     last_workout: get(
       'SELECT * FROM workout_logs WHERE member_id = ? ORDER BY log_date DESC, id DESC LIMIT 1',
@@ -1531,14 +1553,216 @@ portalRoutes.get('/workouts/exercise-history', requireMemberAuth, requireModule(
  */
 portalRoutes.get('/workouts/exercises', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
   const items = exercisePickerRows(req.query).slice(0, 300);
-  const previous = previousSetsFor(req.member.id, items.map((e) => e.name));
+  const names = items.map((e) => e.name);
+  const previous = previousSetsFor(req.member.id, names);
+  const lastSession = lastSessionSetsFor(req.member.id, names);
 
   res.json({
-    items: items.map((item) => ({ ...item, previous: previous[item.name] ?? null })),
+    items: items.map((item) => ({ ...item, previous: previous[item.name] ?? null, last_session: lastSession[item.name] ?? null })),
     // The picker's two filter sheets: muscle groups with the operator's
     // highlighted-body pictures, and the equipment list.
     muscle_groups: listMuscleGroups(),
     equipment: EQUIPMENT_TYPES,
+  });
+});
+
+/* ── Ask Coach ────────────────────────────────────────────────────────── */
+
+/** A burst guard on top of the daily cap: a stuck button or a script should
+ * not be able to spend a member's whole day — or the gym's bill — in a minute. */
+const coachBurstLimiter = createLimiter({ maxAttempts: 6, windowMs: 60_000, lockoutMs: 60_000 });
+
+/** Whether this gym's members get the coach: the platform has Vertex set up
+ * and the gym has not switched it off. */
+const coachEnabled = () => coachConfigured() && fitnessSettings().ai_coach_enabled !== 0;
+
+portalRoutes.get('/coach/status', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const enabled = coachEnabled();
+  const limit = config.aiCoach.dailyLimit;
+  res.json({
+    enabled,
+    daily_limit: limit,
+    remaining_today: enabled ? Math.max(0, limit - questionsToday(req.member.id)) : 0,
+    plan_daily_limit: config.aiCoach.planDailyLimit,
+    plans_remaining_today: enabled ? Math.max(0, config.aiCoach.planDailyLimit - plansToday(req.member.id)) : 0,
+    plan_defaults: enabled ? planDefaults(req.member.id) : null,
+  });
+});
+
+/**
+ * One question to the coach. The phone sends the question, which screen it was
+ * asked from and — mid-workout — the live session, which exists only on the
+ * phone until Finish. Everything else the coach knows is read here, for this
+ * member only.
+ *
+ * A provider failure is a 502 and is not counted against the day's questions:
+ * the member got nothing for it.
+ *
+ * Asked with `Accept: text/event-stream` the reply is streamed, so the sheet
+ * can show the coach at work: `step` events for what it is reading, `thought`
+ * for Gemini's thought summaries, `answer` for the reply as it is written, then
+ * one `done` with the same body the JSON reply has — or `error`. Anything
+ * refused before Gemini is called is still a plain JSON error.
+ */
+portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, async (req, res) => {
+  if (!coachEnabled()) throw new HttpError(503, 'The coach is not available at this gym', { code: 'ai_disabled' });
+
+  const question = String(req.body?.question ?? '').trim();
+  const screen = String(req.body?.screen ?? 'workout');
+  if (!question) throw badRequest('Ask the coach a question', { question: 'is required' });
+  if (question.length > MAX_QUESTION_LENGTH) {
+    throw badRequest(`Keep questions under ${MAX_QUESTION_LENGTH} characters`, { question: 'is too long' });
+  }
+  if (!COACH_SCREENS.includes(screen)) throw badRequest('Unknown screen', { screen: `must be one of ${COACH_SCREENS.join(', ')}` });
+
+  const limit = config.aiCoach.dailyLimit;
+  const asked = questionsToday(req.member.id);
+  if (asked >= limit) {
+    throw tooManyRequests(`That's your ${limit} coach questions for today — ask again tomorrow`, { code: 'coach_limit_reached' });
+  }
+  const burstKey = `${req.tenant?.slug ?? ''}:${req.member.id}`;
+  const burst = coachBurstLimiter.check(burstKey);
+  if (burst.locked) {
+    throw tooManyRequests(`Slow down a little — try again in ${burst.retryAfterSeconds}s`, { code: 'coach_burst' });
+  }
+  coachBurstLimiter.recordAttempt(burstKey);
+
+  const context = buildCoachContext(req.member.id, {
+    screen,
+    session: req.body?.session,
+    unit: req.body?.unit,
+    planId: liveWorkoutFor(req.member.id).plan_id,
+  });
+  const history = recentTurns(req.member.id, screen);
+  const unavailable = 'The coach could not answer just now — try again in a moment';
+
+  const save = (reply) => {
+    run(
+      `INSERT INTO ai_coach_messages (member_id, screen, question, answer, input_tokens, output_tokens)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.member.id, screen, question, reply.answer, reply.input_tokens, reply.output_tokens],
+    );
+    return {
+      answer: reply.answer,
+      suggestion: reply.suggestion,
+      remaining_today: Math.max(0, limit - asked - 1),
+    };
+  };
+
+  if (!String(req.get('accept') ?? '').includes('text/event-stream')) {
+    let reply;
+    try {
+      reply = await askCoach({ context, question, history });
+    } catch (err) {
+      console.error('Ask Coach request failed:', err?.message ?? err);
+      throw new HttpError(502, unavailable, { code: 'coach_unavailable' });
+    }
+    return res.json(save(reply));
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    // Stop a reverse proxy holding the stream back until it ends.
+    'X-Accel-Buffering': 'no',
+  });
+  const emit = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // The member closed the app mid-answer: stop paying for the rest of it.
+  const gone = new AbortController();
+  res.on('close', () => {
+    if (!res.writableFinished) gone.abort();
+  });
+
+  for (const text of contextSteps(context)) emit('step', { text });
+  try {
+    const reply = await streamCoach({
+      context,
+      question,
+      history,
+      signal: gone.signal,
+      onThought: (text) => emit('thought', { text }),
+      onAnswer: (text) => emit('answer', { text }),
+    });
+    emit('done', save(reply));
+  } catch (err) {
+    if (!gone.signal.aborted) {
+      console.error('Ask Coach request failed:', err?.message ?? err);
+      emit('error', { error: unavailable, code: 'coach_unavailable' });
+    }
+  }
+  res.end();
+});
+
+/** The generator sheet's starting answers, from what the member already told
+ * the Diet settings: their training days and whether they want to lose or gain. */
+function planDefaults(memberId) {
+  const profile = nutritionProfile(memberId);
+  const goal = { lose: 'fat_loss', gain: 'muscle_gain' }[profile.goal] ?? 'general_fitness';
+  return { goal, days_per_week: Math.min(6, Math.max(2, Number(profile.training_days) || 3)) };
+}
+
+const PLAN_REQUEST_FIELDS = {
+  goal: { type: 'enum', values: PLAN_GOALS, required: true },
+  level: { type: 'enum', values: PLAN_LEVELS, required: true },
+  days_per_week: { type: 'int', min: 1, max: 7, required: true },
+  minutes: { type: 'int', min: 20, max: 150, default: 60 },
+  equipment: { type: 'enum', values: Object.keys(PLAN_EQUIPMENT), default: 'full_gym' },
+  focus: { type: 'enum', values: PLAN_FOCUS, default: 'balanced' },
+  notes: { type: 'string', max: 300 },
+};
+
+/**
+ * The AI workout generator. Builds a week from this gym's own exercise library
+ * (catalogue plus the gym's custom moves, cut to the member's equipment) and
+ * returns it as a draft — nothing is saved here. The phone opens it in the
+ * plan builder, where the member edits and saves it through POST
+ * /workouts/routines like any plan they wrote themselves.
+ */
+portalRoutes.post('/coach/plan', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, async (req, res) => {
+  if (!coachEnabled()) throw new HttpError(503, 'The coach is not available at this gym', { code: 'ai_disabled' });
+  const request = parse(req.body, PLAN_REQUEST_FIELDS);
+
+  const limit = config.aiCoach.planDailyLimit;
+  const made = plansToday(req.member.id);
+  if (made >= limit) {
+    throw tooManyRequests(`That's your ${limit} AI plans for today — edit the last one, or try again tomorrow`, {
+      code: 'plan_limit_reached',
+    });
+  }
+  const burstKey = `${req.tenant?.slug ?? ''}:${req.member.id}`;
+  const burst = coachBurstLimiter.check(burstKey);
+  if (burst.locked) {
+    throw tooManyRequests(`Slow down a little — try again in ${burst.retryAfterSeconds}s`, { code: 'coach_burst' });
+  }
+  coachBurstLimiter.recordAttempt(burstKey);
+
+  const library = libraryForPlan(exercisePickerRows({}), request.equipment);
+  if (library.length < 4) throw badRequest('There are not enough exercises in this gym’s library for that equipment yet');
+  const context = buildCoachContext(req.member.id, {
+    screen: 'workout',
+    planId: liveWorkoutFor(req.member.id).plan_id,
+  });
+
+  let result;
+  try {
+    result = await generatePlan({ request, context, library });
+  } catch (err) {
+    console.error('AI plan generation failed:', err?.message ?? err);
+    throw new HttpError(502, 'Could not build a plan just now — try again in a moment', { code: 'coach_unavailable' });
+  }
+
+  run(
+    `INSERT INTO ai_plan_generations (member_id, request, plan, input_tokens, output_tokens)
+     VALUES (?, ?, ?, ?, ?)`,
+    [req.member.id, JSON.stringify(request), JSON.stringify(result.plan), result.input_tokens, result.output_tokens],
+  );
+
+  res.json({
+    plan: result.plan,
+    // Names the model made up and the server threw away — reported so a
+    // short day is explained rather than mysterious.
+    dropped: result.dropped,
+    plans_remaining_today: Math.max(0, limit - made - 1),
   });
 });
 

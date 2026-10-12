@@ -360,7 +360,9 @@ workoutRoutes.get('/logs/:id', (req, res) => {
   if (!log) throw notFound('Workout log not found');
   res.json({
     ...log,
-    sets: all('SELECT * FROM workout_log_sets WHERE log_id = ? ORDER BY sort_order, id', [log.id]),
+    // With each exercise's demo, so the detail reads with the same pictures the
+    // member sees in the app.
+    sets: attachCatalogToExercises(all('SELECT * FROM workout_log_sets WHERE log_id = ? ORDER BY sort_order, id', [log.id])),
   });
 });
 

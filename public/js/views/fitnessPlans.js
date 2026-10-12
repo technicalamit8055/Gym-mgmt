@@ -1730,6 +1730,18 @@ async function renderAddonSettings(reload) {
         full: true,
         value: settings.description,
       },
+      {
+        name: 'ai_coach_enabled',
+        label: 'AI coach in the member app',
+        type: 'select',
+        value: String(settings.ai_coach_enabled ?? 1),
+        options: [
+          { value: '1', label: 'On — members can ask the coach while logging' },
+          { value: '0', label: 'Off — hide Ask Coach' },
+        ],
+        full: true,
+        hint: 'Answers questions like “what weight for my next set?” using the member’s own logs. Next-set suggestions on the set table stay either way.',
+      },
     ],
     {
       submitLabel: 'Save settings',
@@ -1739,6 +1751,7 @@ async function renderAddonSettings(reload) {
           monthly_price: Number(values.monthly_price),
           trial_days: Number(values.trial_days),
           description: values.description,
+          ai_coach_enabled: values.ai_coach_enabled === '1',
         });
         toast('Add-on settings saved');
         await reload();

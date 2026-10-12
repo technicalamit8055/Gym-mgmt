@@ -23,7 +23,9 @@ import {
   verifiedTick,
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
+import { coachStatus, openCoachSheet, openPlanGenerator } from '../coach.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
+import { EFFORTS, suggestNextSet } from '../nextSet.js';
 import { cropAndResizeImage } from '../photo.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
 import { createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
@@ -31,6 +33,15 @@ import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, sn
 import * as push from '../push.js';
 import * as sound from '../sound.js';
 import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
+import {
+  EXERCISE_THUMBS,
+  distanceLabel,
+  durationLabel,
+  logTypeOfSet,
+  setsByExercise,
+  workoutDetailBody,
+  workoutTimeLabel,
+} from '../workoutDetail.js';
 
 /**
  * The member/student self-service app: a phone-first mini-app a member signs
@@ -154,15 +165,6 @@ function sectionHead(title, linkLabel, onLink, className = '') {
 
 /** Exercises that have a thumbnail in /images/workout, keyed by lower-cased
  * name. Anything else gets a dumbbell tile rather than a broken image. */
-const EXERCISE_THUMBS = {
-  deadlift: 'deadlift',
-  'pull-up': 'pullup',
-  'seated cable row': 'cable-row',
-  'face pull': 'face-pull',
-  'barbell curl': 'barbell-curl',
-  'hammer curl': 'hammer-curl',
-};
-
 const EXERCISE_BLURBS = {
   deadlift: 'Build overall back strength',
   'pull-up': 'Great for lats and upper back',
@@ -1779,58 +1781,6 @@ const clockFrom = (seconds) => {
 
 const minutesLabel = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
 
-/** A session's length the way Hevy writes it: "48min", "1h 5min". */
-function workoutTimeLabel(seconds) {
-  const minutes = Math.max(1, Math.round((Number(seconds) || 0) / 60));
-  return minutes < 60 ? `${minutes}min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
-}
-
-/** The body regions a session's muscle split is told in — Hevy's, coarser than
- * the groups an exercise is filed under. */
-const SPLIT_REGIONS = {
-  abdominals: 'Core',
-  biceps: 'Arms',
-  triceps: 'Arms',
-  forearms: 'Arms',
-  chest: 'Chest',
-  lats: 'Back',
-  upper_back: 'Back',
-  lower_back: 'Back',
-  traps: 'Back',
-  shoulders: 'Shoulders',
-  quadriceps: 'Legs',
-  hamstrings: 'Legs',
-  glutes: 'Legs',
-  calves: 'Legs',
-  abductors: 'Legs',
-  adductors: 'Legs',
-  cardio: 'Cardio',
-  full_body: 'Full body',
-};
-
-/** Each region's share of a session's working sets, biggest first. Warm-ups
- * are left out: they prime a muscle, they do not train it. Percentages are
- * rounded so they still add up to 100. */
-function muscleSplit(sets) {
-  const working = sets.filter((set) => set.set_type !== 'warmup');
-  const counted = working.length ? working : sets;
-  const tally = new Map();
-  for (const set of counted) {
-    const region = SPLIT_REGIONS[set.muscle_group] ?? 'Other';
-    tally.set(region, (tally.get(region) ?? 0) + 1);
-  }
-  const rows = [...tally]
-    .map(([label, n]) => ({ label, exact: (n / counted.length) * 100 }))
-    .sort((a, b) => b.exact - a.exact)
-    .map((row) => ({ ...row, pct: Math.floor(row.exact) }));
-  let spare = 100 - rows.reduce((sum, row) => sum + row.pct, 0);
-  for (const row of [...rows].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {
-    if (spare-- <= 0) break;
-    row.pct += 1;
-  }
-  return rows.map(({ label, pct }) => ({ label, pct }));
-}
-
 /** The burst of rays and confetti around the workout summary's emoji. Rays are
  * [angle°, inner radius, outer radius] about the emoji's centre. */
 function summaryConfetti() {
@@ -1902,28 +1852,6 @@ function logTypeOf(exercise) {
   if (exercise?.equipment === 'bodyweight') return 'reps';
   return 'weight_reps';
 }
-
-/** A logged set's type from what it recorded — for history rows, which carry
- * no equipment. */
-const logTypeOfSet = (set) =>
-  Number(set.distance_km) > 0
-    ? 'distance_duration'
-    : Number(set.duration_seconds) > 0
-      ? 'duration'
-      : Number(set.weight_kg) > 0
-        ? 'weight_reps'
-        : 'reps';
-
-/** Seconds as m:ss, or h:mm:ss from an hour up — a stopwatch's reading. */
-function durationLabel(seconds) {
-  const s = Math.max(0, Math.round(Number(seconds) || 0));
-  const hh = Math.floor(s / 3600);
-  const mm = Math.floor((s % 3600) / 60);
-  const ss = String(s % 60).padStart(2, '0');
-  return hh ? `${hh}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
-}
-
-const distanceLabel = (km) => `${Math.round((Number(km) || 0) * 100) / 100} km`;
 
 /** One set as a line of text: "60 kg × 10", "12 reps", "1:00", "5 km · 25:00". */
 function setSummary(set, type = logTypeOfSet(set)) {
@@ -2626,32 +2554,33 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
  *
  * One instance per active session rather than one per set: only one rest can be
  * running at a time, and a per-set timer would leave stray intervals behind
- * every time the set table repainted. stop() is called from the session's own
- * teardown so leaving the tab mid-rest cannot leave an interval running.
+ * every time the set table repainted.
+ *
+ * The running rest is handed to `save` as `{ ends_at, total }` and read back
+ * through `load`, so it lives in the session state: a trip to the Diet or
+ * Store tab and back picks the countdown up where the clock says it is,
+ * instead of losing it. detach() is what the session's teardown calls — it
+ * stops the interval without forgetting the rest; stop() forgets it.
  */
-function restTimer() {
+function restTimer({ load = () => null, save = () => {} } = {}) {
   const label = h('div', { class: 'portal-rest-time' }, '0:00');
   const bar = h('i');
   const node = h(
     'div',
     { class: 'portal-rest-timer hidden' },
-    h('div', { class: 'portal-rest-icon' }, renderIcon('timer', { size: 16 })),
     h(
       'div',
-      { class: 'portal-rest-body' },
-      h('div', { class: 'portal-rest-label' }, 'Rest'),
+      { class: 'portal-rest-row' },
+      h('button', { class: 'portal-rest-adj', type: 'button', title: 'Take off 15 seconds', onclick: () => extend(-15) }, '−15'),
       label,
-      h('div', { class: 'portal-rest-bar' }, bar),
+      h('button', { class: 'portal-rest-adj', type: 'button', title: 'Add 15 seconds', onclick: () => extend(15) }, '+15'),
+      h('button', { class: 'portal-rest-skip', type: 'button', title: 'Skip rest', onclick: () => stop() }, 'Skip'),
     ),
-    h(
-      'div',
-      { class: 'portal-rest-actions' },
-      h('button', { class: 'portal-rest-btn', type: 'button', title: 'Add 30 seconds', onclick: () => extend(30) }, '+30'),
-      h('button', { class: 'portal-rest-btn', type: 'button', title: 'Skip rest', onclick: () => stop() }, renderIcon('close', { size: 14 })),
-    ),
+    h('div', { class: 'portal-rest-bar' }, bar),
   );
 
   let interval = null;
+  let hideTimeout = null;
   let endsAt = 0;
   let total = 0;
   // Runs every 250ms, so a plain "remaining === 3" check would fire the tick
@@ -2662,7 +2591,7 @@ function restTimer() {
   function tick() {
     const remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
     label.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
-    bar.style.width = `${total ? (remaining / total) * 100 : 0}%`;
+    bar.style.width = `${total ? Math.min(remaining / total, 1) * 100 : 0}%`;
     node.classList.toggle('urgent', remaining <= 10 && remaining > 0);
 
     if (remaining !== lastTickSecond) {
@@ -2677,41 +2606,78 @@ function restTimer() {
     if (remaining <= 0) {
       clearInterval(interval);
       interval = null;
+      save(null);
       node.classList.add('done');
       sound.playRestEnd();
-      setTimeout(() => stop(), 2500);
+      // Only hides: the rest is already forgotten above, and a delayed save
+      // could land after Finish has cleared the session.
+      hideTimeout = setTimeout(hide, 2500);
     }
   }
 
-  function start(seconds) {
-    if (!seconds) return;
+  function hide() {
+    clearTimeout(hideTimeout);
+    hideTimeout = null;
+    node.classList.add('hidden');
+    node.classList.remove('done', 'urgent');
+  }
+
+  function run() {
     clearInterval(interval);
-    total = seconds;
-    endsAt = Date.now() + seconds * 1000;
+    clearTimeout(hideTimeout);
     lastTickSecond = null;
     node.classList.remove('hidden', 'done');
-    sound.playRestStart();
     tick();
     // Wall-clock driven, not a decrementing counter: a phone that sleeps
     // mid-rest must come back showing the real remaining time.
     interval = setInterval(tick, 250);
   }
 
+  function start(seconds) {
+    if (!seconds) return;
+    total = seconds;
+    endsAt = Date.now() + seconds * 1000;
+    save({ ends_at: endsAt, total });
+    sound.playRestStart();
+    run();
+  }
+
+  /** Picks up a rest saved before the member left the tab. One that ran out
+   * while they were away is simply dropped — no late beep on return. */
+  function resume() {
+    const saved = load();
+    if (!saved || !(saved.ends_at > Date.now())) {
+      if (saved) save(null);
+      return;
+    }
+    endsAt = saved.ends_at;
+    total = saved.total || Math.ceil((endsAt - Date.now()) / 1000);
+    run();
+  }
+
   function extend(seconds) {
-    if (!interval) return start(seconds);
+    if (!interval) return seconds > 0 ? start(seconds) : undefined;
     endsAt += seconds * 1000;
-    total += seconds;
+    total = Math.max(1, total + seconds);
+    // −15 past zero is the same as skipping.
+    if (endsAt <= Date.now()) return stop();
+    save({ ends_at: endsAt, total });
     return tick();
   }
 
-  function stop() {
+  function detach() {
     clearInterval(interval);
     interval = null;
-    node.classList.add('hidden');
-    node.classList.remove('done', 'urgent');
+    clearTimeout(hideTimeout);
   }
 
-  return { node, start, stop };
+  function stop() {
+    detach();
+    save(null);
+    hide();
+  }
+
+  return { node, start, stop, resume, detach };
 }
 
 /* ── Active workout session ────────────────────────────────────────────── */
@@ -5234,6 +5200,47 @@ function renderPortalApp(ctx, initialMe) {
   // the workout stopwatch and its rest timer, alongside the pass ticker below.
   let cleanups = [];
   const registerCleanup = (fn) => cleanups.push(fn);
+
+  /**
+   * Rings the end of a rest the member left the Workout tab during.
+   *
+   * The on-screen countdown (restTimer) only lives while the Workout tab is
+   * open; this covers the rest of the app. The Workout tab disarms it on the
+   * way in and arms it on the way out, and it is armed at start-up too, for a
+   * reload that lands on another tab mid-rest. It reads the rest back from the
+   * session when it fires, so a Skip, a Finish or a Discard since it was armed
+   * leaves it silent.
+   */
+  let restAlarmTimeout = null;
+  const restAlarm = {
+    arm() {
+      restAlarm.disarm();
+      const rest = activeSession.read()?.rest;
+      if (!rest || !(rest.ends_at > Date.now())) return;
+      restAlarmTimeout = setTimeout(ringRestAlarm, rest.ends_at - Date.now());
+    },
+    disarm() {
+      clearTimeout(restAlarmTimeout);
+      restAlarmTimeout = null;
+    },
+  };
+  function ringRestAlarm() {
+    restAlarmTimeout = null;
+    // Signed out, or replaced by a fresh portal with an alarm of its own.
+    if (!content.isConnected) return;
+    const state = activeSession.read();
+    if (!state?.rest) return;
+    // Extended on another device since this was armed.
+    if (state.rest.ends_at > Date.now() + 500) return restAlarm.arm();
+    const overBy = Date.now() - state.rest.ends_at;
+    state.rest = null;
+    activeSession.write(state);
+    // A phone that slept through the end wakes the timer late; a beep for a
+    // rest that ended minutes ago would only confuse.
+    if (overBy > 30_000) return;
+    sound.playRestEnd();
+    toast('Rest over — time for your next set');
+  }
   /** Which day the Diet tab is showing. Held here rather than inside the tab so
    * scrolling back to yesterday and then logging a meal repaints yesterday,
    * not today. */
@@ -5465,7 +5472,7 @@ function renderPortalApp(ctx, initialMe) {
    * workout" button can fire the exact same 1-tap flow the Workout tab uses
    * instead of routing the member through an extra tap into that tab first.
    */
-  function startWorkoutSession({ name, day, planId, previous }) {
+  function startWorkoutSession({ name, day, planId, previous, lastSession }) {
     const state = {
       workout_name: name,
       plan_id: planId ?? null,
@@ -5479,6 +5486,8 @@ function renderPortalApp(ctx, initialMe) {
         target_reps: exercise.target_reps,
         rest_seconds: exercise.rest_seconds,
         previous: previous?.[exercise.exercise_name] ?? null,
+        // Every set of last time, for the next-set suggestion (nextSet.js).
+        last_session: lastSession?.[exercise.exercise_name] ?? null,
         sets: Array.from({ length: exercise.target_sets }, () => ({
           set_type: 'normal',
           weight_display: '',
@@ -5631,6 +5640,7 @@ function renderPortalApp(ctx, initialMe) {
                   day: current.today_day,
                   planId: current.plan.id,
                   previous: current.previous,
+                  lastSession: current.last_session,
                 }),
             },
             renderIcon('play', { size: 14 }),
@@ -6347,15 +6357,24 @@ function renderPortalApp(ctx, initialMe) {
    * locked phone or a closed tab does not lose the session — see activeSession.
    */
   function renderActiveWorkout(state, { onFinish, onDiscard }) {
-    const rest = restTimer();
+    const persist = () => activeSession.write(state);
+    const rest = restTimer({
+      load: () => state.rest,
+      save: (saved) => {
+        state.rest = saved;
+        persist();
+      },
+    });
     const body = h('div', { class: 'portal-tab-body portal-session' });
     const clockNode = h('div', { class: 'portal-session-clock' }, '00:00:00');
     let clockInterval = null;
 
-    const persist = () => activeSession.write(state);
-
+    // detach, not stop: leaving for the Diet tab mid-rest keeps the rest in
+    // the session so it is still counting on the way back, and the shell's
+    // alarm rings its end if the member is still away.
     const teardown = () => {
-      rest.stop();
+      rest.detach();
+      restAlarm.arm();
       if (clockInterval) clearInterval(clockInterval);
       clockInterval = null;
     };
@@ -6381,6 +6400,144 @@ function renderPortalApp(ctx, initialMe) {
     // The set ticked by the last tap, so only its check pops — not every done
     // check on each repaint.
     let justTicked = null;
+
+    // The set whose "how did it feel?" row is open: the last one ticked, until
+    // the member picks an effort or ticks another set.
+    let effortSet = null;
+
+    // Whether this gym has Ask Coach; the logger paints without it and adds
+    // the button once the status arrives.
+    let coachOn = false;
+    // One node kept across repaints, so the button can appear when the status
+    // arrives without a repaint stealing focus from a box being typed in.
+    const coachSlot = h('span', { class: 'portal-coach-slot' });
+
+    /** The row the suggestion chip sits on: the first working set not yet done. */
+    const suggestionIndex = (exercise) =>
+      exercise.sets.findIndex((set) => !set.completed && (set.set_type === 'normal' || set.set_type === 'failure'));
+
+    /** What nextSet.js proposes for this exercise's next set, from this
+     * session's ticked sets and every set of last time. */
+    const suggestionFor = (exercise) =>
+      suggestNextSet({
+        targetReps: exercise.target_reps,
+        equipment: exercise.equipment,
+        unit: weightUnit.get(),
+        logType: logTypeOf(exercise),
+        doneThisSession: exercise.sets
+          .filter((set) => set.completed)
+          .map((set) => ({ set_type: set.set_type, weight_kg: Number(set.weight_kg) || 0, reps: Number(set.reps) || 0, rpe: set.rpe ?? null })),
+        // A session started before last_session existed still has the one
+        // "previous" set, which is enough for a first suggestion.
+        lastSession: exercise.last_session ?? (exercise.previous ? [exercise.previous] : []),
+      });
+
+    /** Puts a weight and reps into this exercise's next set — from the chip or
+     * from the coach's "use this" button. */
+    const fillSet = (exercise, { weight_kg: kg, reps }) => {
+      const index = suggestionIndex(exercise);
+      let set = exercise.sets[index >= 0 ? index : exercise.sets.findIndex((s) => !s.completed)];
+      if (!set) {
+        // Every planned set is done and the coach says go again: that is one
+        // more set, as if the member had tapped Add set.
+        set = { set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false };
+        exercise.sets.push(set);
+      }
+      if (logTypeOf(exercise) === 'weight_reps' && kg > 0) {
+        set.weight_display = String(toDisplayWeight(kg));
+        set.weight_kg = kg;
+      }
+      set.reps = reps;
+      persist();
+      paint();
+      return true;
+    };
+
+    /** The live session as the coach sees it: what is planned, what is done,
+     * how hard it felt, and what the chip is suggesting. */
+    const sessionSnapshot = () => ({
+      workout_name: state.workout_name,
+      elapsed_seconds: Math.round((Date.now() - state.started_at) / 1000),
+      exercises: state.exercises.map((exercise) => {
+        const suggestion = suggestionFor(exercise);
+        return {
+          name: exercise.exercise_name,
+          equipment: exercise.equipment ?? undefined,
+          target_sets: exercise.target_sets,
+          target_reps: exercise.target_reps || undefined,
+          rest_seconds: exercise.rest_seconds,
+          sets: exercise.sets.map((set) => ({
+            set_type: set.set_type,
+            weight_kg: Number(set.weight_kg) || 0,
+            reps: Number(set.reps) || 0,
+            rpe: set.rpe ?? undefined,
+            completed: Boolean(set.completed),
+          })),
+          suggestion: suggestion ? { weight_kg: suggestion.weight_kg, reps: suggestion.reps } : undefined,
+        };
+      }),
+    });
+
+    const askCoach = (initialQuestion) =>
+      openCoachSheet({
+        screen: 'workout',
+        getSession: sessionSnapshot,
+        unit: weightUnit.get(),
+        weightLabel,
+        initialQuestion,
+        onApply: (suggestion) => {
+          const name = suggestion.exercise.trim().toLowerCase();
+          const exercise = state.exercises.find((ex) => ex.exercise_name.trim().toLowerCase() === name);
+          return exercise ? fillSet(exercise, suggestion) : false;
+        },
+      });
+
+    /** The chip's "why?": the rule behind the number, with the coach one tap
+     * further for anything the rule doesn't cover. */
+    function openSuggestionWhy(exercise, suggestion) {
+      const numbers =
+        suggestion.weight_kg > 0 ? `${weightLabel(suggestion.weight_kg)} × ${suggestion.reps}` : `${suggestion.reps} reps`;
+      openModal({
+        title: 'Suggested next set',
+        icon: 'sparkle',
+        body: h(
+          'div',
+          { class: 'portal-suggest-why' },
+          h('div', { class: 'portal-suggest-why-num' }, numbers),
+          h('p', {}, suggestion.reason),
+          h('p', { class: 'muted' }, 'Worked out from your target, your last session and the sets you have done today. Tap the chip to fill it in.'),
+        ),
+        footer: [
+          coachOn
+            ? h(
+                'button',
+                {
+                  class: 'btn ghost',
+                  type: 'button',
+                  onclick: () => {
+                    closeModal();
+                    askCoach(`Why ${numbers} for my next set of ${exercise.exercise_name}?`);
+                  },
+                },
+                renderIcon('sparkle', { size: 15 }),
+                ' Ask Coach',
+              )
+            : null,
+          h(
+            'button',
+            {
+              class: 'btn primary',
+              type: 'button',
+              onclick: () => {
+                closeModal();
+                fillSet(exercise, suggestion);
+              },
+            },
+            'Use it',
+          ),
+        ].filter(Boolean),
+      });
+    }
 
     // Holds whose stopwatch is running. The session clock's tick rewrites just
     // their boxes rather than repainting, so a box being typed in elsewhere
@@ -6462,6 +6619,10 @@ function renderPortalApp(ctx, initialMe) {
             stopHold(set);
             set.completed = !set.completed;
             justTicked = set.completed ? set : null;
+            // Ask how it felt — the one thing the next suggestion can't read
+            // off the numbers. Only for counted sets: a plank's effort is its time.
+            if (set.completed && (type === 'weight_reps' || type === 'reps')) effortSet = set;
+            else if (effortSet === set) effortSet = null;
             if (set.completed) fillFromPrevious();
             persist();
             if (set.completed) {
@@ -6584,6 +6745,89 @@ function renderPortalApp(ctx, initialMe) {
         distance_duration: () => [distanceInput(), timeInput],
       }[type]();
 
+      // The suggestion chip, on the next working set only — one number to
+      // look at, not one per row. Hidden once the boxes already hold it.
+      let suggestNode = null;
+      if (!set.completed && index === suggestionIndex(exercise)) {
+        const suggestion = suggestionFor(exercise);
+        const alreadyIn =
+          suggestion &&
+          Number(set.reps) === suggestion.reps &&
+          (type !== 'weight_reps' || Math.abs((Number(set.weight_kg) || 0) - suggestion.weight_kg) < 0.05);
+        if (suggestion && !alreadyIn) {
+          const numbers = type === 'weight_reps' ? `${weightLabel(suggestion.weight_kg)} × ${suggestion.reps}` : `${suggestion.reps} reps`;
+          suggestNode = h(
+            'div',
+            { class: 'portal-set-suggest' },
+            h(
+              'button',
+              {
+                class: 'portal-set-suggest-use',
+                type: 'button',
+                title: 'Fill in the suggested set',
+                onclick: () => fillSet(exercise, suggestion),
+              },
+              renderIcon('sparkle', { size: 13, stroke: 2 }),
+              h('span', { class: 'portal-set-suggest-label' }, 'Try'),
+              h('strong', {}, numbers),
+            ),
+            h(
+              'button',
+              {
+                class: 'portal-set-suggest-why',
+                type: 'button',
+                title: 'Why this suggestion?',
+                'aria-label': 'Why this suggestion?',
+                onclick: () => openSuggestionWhy(exercise, suggestion),
+              },
+              '?',
+            ),
+          );
+        }
+      }
+
+      // "How did it feel?" under the set just ticked; once answered it shrinks
+      // to a small tag that reopens it.
+      const effortInfo = EFFORTS.find((e) => e.rpe === Number(set.rpe));
+      let effortNode = null;
+      if (set.completed && effortSet === set) {
+        effortNode = h(
+          'div',
+          { class: 'portal-set-effort' },
+          h('span', { class: 'portal-set-effort-q' }, 'How was it?'),
+          ...EFFORTS.map((effort) =>
+            h(
+              'button',
+              {
+                class: `portal-effort-chip is-${effort.key}${effort.rpe === Number(set.rpe) ? ' on' : ''}`,
+                type: 'button',
+                onclick: () => {
+                  set.rpe = effort.rpe;
+                  effortSet = null;
+                  persist();
+                  paint();
+                },
+              },
+              effort.label,
+            ),
+          ),
+        );
+      } else if (set.completed && effortInfo) {
+        effortNode = h(
+          'button',
+          {
+            class: `portal-set-effort-tag is-${effortInfo.key}`,
+            type: 'button',
+            title: 'Change how this set felt',
+            onclick: () => {
+              effortSet = set;
+              paint();
+            },
+          },
+          effortInfo.label,
+        );
+      }
+
       return h(
         'div',
         { class: `portal-set-row${inputs.length === 1 ? ' is-single' : ''}${set.completed ? ' completed' : ''}` },
@@ -6606,6 +6850,7 @@ function renderPortalApp(ctx, initialMe) {
           : h('div', { class: 'portal-set-prev is-empty' }, '—'),
         ...inputs,
         check,
+        effortNode,
         oneRm > 0
           ? h(
               'div',
@@ -6618,6 +6863,7 @@ function renderPortalApp(ctx, initialMe) {
               h('strong', {}, weightLabel(oneRm)),
             )
           : null,
+        suggestNode,
       );
     }
 
@@ -6779,6 +7025,7 @@ function renderPortalApp(ctx, initialMe) {
             // A run or a row is usually one block, with nothing to rest for.
             rest_seconds: logTypeOf(item) === 'distance_duration' ? 0 : 90,
             previous: item.previous ?? null,
+            last_session: item.last_session ?? null,
             sets: [{ set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false }],
           });
         }
@@ -6813,6 +7060,9 @@ function renderPortalApp(ctx, initialMe) {
               set_number: index + 1,
               set_type: set.set_type,
               ...values,
+              // The effort tap, as RPE; it feeds the next session's suggestion
+              // and the calorie estimate.
+              rpe: set.completed && set.rpe != null ? Number(set.rpe) : null,
               completed: Boolean(set.completed),
             }))
         );
@@ -7034,9 +7284,14 @@ function renderPortalApp(ctx, initialMe) {
               renderIcon('edit', { size: 17 }),
             ),
             h(
-              'button',
-              { class: 'portal-session-more', type: 'button', title: 'Workout options', 'aria-label': 'Workout options', onclick: openSessionMenu },
-              renderIcon('more', { size: 22, stroke: 2.6 }),
+              'div',
+              { class: 'portal-session-top-actions' },
+              coachSlot,
+              h(
+                'button',
+                { class: 'portal-session-more', type: 'button', title: 'Workout options', 'aria-label': 'Workout options', onclick: openSessionMenu },
+                renderIcon('more', { size: 22, stroke: 2.6 }),
+              ),
             ),
           ),
           h(
@@ -7086,6 +7341,26 @@ function renderPortalApp(ctx, initialMe) {
     clockInterval = setInterval(paintClock, 1000);
 
     paint();
+    coachStatus().then((s) => {
+      if (!s.enabled) return;
+      coachOn = true;
+      coachSlot.replaceChildren(
+        h(
+          'button',
+          {
+            class: 'portal-coach-btn',
+            type: 'button',
+            title: 'Ask Coach',
+            'aria-label': 'Ask Coach',
+            onclick: () => askCoach(),
+          },
+          renderIcon('sparkle', { size: 18, stroke: 2 }),
+        ),
+      );
+    });
+    // The on-screen countdown takes over from the shell's alarm.
+    restAlarm.disarm();
+    rest.resume();
     return body;
   }
 
@@ -7104,6 +7379,9 @@ function renderPortalApp(ctx, initialMe) {
     muscle_group: exercise.muscle_group,
     target_sets: exercise.target_sets ?? 3,
     target_reps: exercise.target_reps ?? '8-12',
+    // Not edited here, but kept: a trainer's or the AI's effort target should
+    // survive the member tweaking the plan.
+    target_rpe: exercise.target_rpe ?? null,
     rest_seconds: exercise.rest_seconds ?? 90,
     notes: exercise.notes ?? null,
     ...demoFields(exercise),
@@ -7171,6 +7449,7 @@ function renderPortalApp(ctx, initialMe) {
             muscle_group: e.muscle_group,
             target_sets: e.target_sets,
             target_reps: String(e.target_reps).trim() || '8-12',
+            target_rpe: e.target_rpe ?? null,
             rest_seconds: e.rest_seconds,
             notes: e.notes,
           })),
@@ -7698,6 +7977,18 @@ function renderPortalApp(ctx, initialMe) {
 
   /** The member's plans on the Workout tab: the trainer's on top, their own
    * below, the live one marked and every other one a tap away. */
+  /** The AI generator's draft goes straight into the plan builder: the member
+   * sees every day, can swap or drop anything, and nothing is saved until Save. */
+  function openAiPlan() {
+    openPlanGenerator({
+      onPlan: (plan, res) => {
+        openPlanEditor(plan);
+        const skipped = res.dropped?.length ? ` (${res.dropped.length} unknown exercise${res.dropped.length === 1 ? '' : 's'} left out)` : '';
+        toast(`Your AI plan is ready${skipped} — check it over and tap Save`);
+      },
+    });
+  }
+
   function myPlansSection(routines) {
     const { trainer, items } = routines;
 
@@ -7758,11 +8049,32 @@ function renderPortalApp(ctx, initialMe) {
       );
     }
 
+    // Create with AI: shown once the coach status says this gym has it.
+    const aiSlot = h('div', { class: 'portal-coach-slot' });
+    coachStatus().then((s) => {
+      if (!s.enabled) return;
+      aiSlot.replaceChildren(
+        h(
+          'button',
+          { class: 'portal-myplan-create is-ai', type: 'button', onclick: openAiPlan },
+          h('span', { class: 'portal-myplan-ico' }, renderIcon('sparkle', { size: 22, stroke: 2.2 })),
+          h(
+            'span',
+            { class: 'portal-myplan-text' },
+            h('strong', {}, 'Create a plan with AI'),
+            h('small', {}, 'Pick your goal, days and kit — get a full week from this gym’s exercises, ready to edit.'),
+          ),
+          h('span', { class: 'portal-myplan-chev' }, renderIcon('chevronRight', { size: 20, stroke: 2.4 })),
+        ),
+      );
+    });
+
     return h(
       'div',
       { class: 'portal-section portal-myplans' },
       sectionHead('My plans', 'New plan', () => openPlanEditor(), 'is-label'),
       rows.length ? h('div', { class: 'portal-myplan-list' }, ...rows) : null,
+      aiSlot,
       items.length
         ? null
         : h(
@@ -7820,7 +8132,7 @@ function renderPortalApp(ctx, initialMe) {
     const body = h('div', { class: 'portal-tab-body' });
 
     const startSession = (name, day) =>
-      startWorkoutSession({ name, day, planId: current.plan?.id, previous: current.previous });
+      startWorkoutSession({ name, day, planId: current.plan?.id, previous: current.previous, lastSession: current.last_session });
 
     const startButton = (label, onclick) =>
       h(
@@ -8054,13 +8366,7 @@ function renderPortalApp(ctx, initialMe) {
    * and every exercise's sets. Delete lives behind the ⋯ in the header.
    */
   function openWorkoutLogDetail(log, onDeleted) {
-    const byExercise = new Map();
-    for (const set of log.sets) {
-      if (!byExercise.has(set.exercise_name)) byExercise.set(set.exercise_name, []);
-      byExercise.get(set.exercise_name).push(set);
-    }
-
-    const records = log.sets.filter((set) => set.is_pr).length;
+    const byExercise = setsByExercise(log.sets);
     const volume = `${Math.round(toDisplayWeight(Number(log.total_volume_kg) || 0)).toLocaleString()} ${weightUnit.get()}`;
 
     const share = async () => {
@@ -8113,118 +8419,20 @@ function renderPortalApp(ctx, initialMe) {
       renderIcon('more', { size: 20 }),
     );
 
-    openScreen({ title: 'Workout detail', action: more, render: () => workoutLogBody(log, byExercise, { records, volume, share, edit }) });
-  }
-
-  function workoutLogBody(log, byExercise, { records, volume, share, edit }) {
-    const member = me.member;
-    const started = new Date(`${String(log.started_at).replace(' ', 'T')}Z`);
-    const when = Number.isNaN(started.getTime())
-      ? longDate(log.log_date)
-      : `${started.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} · ${started
-          .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-          .toLowerCase()}`;
-
-    const stat = (label, value, extra) =>
-      h('div', { class: 'portal-wd-stat' }, h('span', {}, label), h('strong', {}, value, extra ?? null));
-
-    const split = muscleSplit(log.sets);
-
-    return h(
-      'div',
-      { class: 'portal-wd' },
-      h(
-        'div',
-        { class: 'portal-wd-who' },
-        member.photo_url
-          ? h('img', { class: 'portal-wd-avatar', src: member.photo_url, alt: '' })
-          : h('div', { class: 'portal-wd-avatar is-initials' }, initials(member.first_name, member.last_name)),
-        h('div', {}, h('strong', {}, `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()), h('span', {}, when)),
-      ),
-      h('h3', { class: 'portal-wd-title' }, log.workout_name),
-      log.notes ? h('p', { class: 'portal-wd-notes' }, log.notes) : null,
-      h(
-        'div',
-        { class: 'portal-wd-stats' },
-        stat('Time', workoutTimeLabel(log.duration_seconds)),
-        stat('Volume', volume),
-        stat('Sets', String(log.total_sets)),
-        stat('Records', String(records), records ? h('span', { class: 'portal-wd-medal' }, renderIcon('trophy', { size: 16 })) : null),
-      ),
-      h(
-        'div',
-        { class: 'portal-wd-actions' },
-        h('button', { class: 'portal-wd-action', type: 'button', onclick: share }, renderIcon('upload', { size: 18 }), h('span', {}, 'Share')),
-      ),
-
-      split.length
-        ? h(
-            'section',
-            { class: 'portal-wd-section' },
-            h('h4', { class: 'portal-wd-label' }, 'Muscle split'),
-            ...split.map(({ label, pct }) =>
-              h(
-                'div',
-                { class: 'portal-wd-split' },
-                h('span', { class: 'portal-wd-split-name' }, label),
-                h(
-                  'div',
-                  { class: 'portal-wd-split-row' },
-                  h('span', { class: 'portal-wd-split-bar', style: `--w:${(pct / split[0].pct) * 100}%` }),
-                  h('span', { class: 'portal-wd-split-pct' }, `${pct}%`),
-                ),
-              ),
-            ),
-          )
-        : null,
-
-      h(
-        'section',
-        { class: 'portal-wd-section' },
-        h(
-          'div',
-          { class: 'portal-wd-label-row' },
-          h('h4', { class: 'portal-wd-label' }, 'Workout'),
-          h('button', { class: 'portal-wd-edit', type: 'button', onclick: edit }, 'Edit workout'),
-        ),
-        ...[...byExercise].map(([name, sets]) => workoutLogExercise(name, sets)),
-      ),
-    );
-  }
-
-  /** One exercise of a finished session: its picture and name (tap for its
-   * progress), then the sets as Hevy lists them — W for a warm-up, working
-   * sets numbered, a medal on a record. */
-  function workoutLogExercise(name, sets) {
-    const exercise = { ...sets[0], name, exercise_name: name };
-    const type = logTypeOfSet(sets.find((set) => set.set_type !== 'warmup') ?? sets[0]);
-    const column = { weight_reps: 'Weight & reps', reps: 'Reps', duration: 'Time', distance_duration: 'Distance & time' }[type];
-    const text = (set) =>
-      type === 'weight_reps' ? `${weightLabel(Number(set.weight_kg) || 0)} × ${Number(set.reps) || 0} reps` : setSummary(set, type);
-
-    let working = 0;
-    return h(
-      'div',
-      { class: 'portal-wd-ex' },
-      h(
-        'button',
-        { class: 'portal-wd-ex-head', type: 'button', onclick: () => openExerciseDetail(exercise, { tab: 'history' }) },
-        h('span', { class: 'portal-wd-ex-thumb' }, pickerThumb(exercise)),
-        h('span', { class: 'portal-wd-ex-name' }, name),
-      ),
-      h('div', { class: 'portal-wd-set is-head' }, h('span', {}, 'Set'), h('span', {}, column)),
-      ...sets.map((set) => {
-        if (set.set_type !== 'warmup') working += 1;
-        const label = set.set_type === 'normal' ? String(working) : (SET_TYPES.find((t) => t.key === set.set_type)?.short ?? '');
-        return h(
-          'div',
-          { class: `portal-wd-set t-${set.set_type}` },
-          h('span', { class: 'portal-wd-set-no' }, label),
-          h('span', {}, text(set)),
-          set.is_pr ? h('span', { class: 'portal-wd-medal', title: 'Personal record' }, renderIcon('trophy', { size: 16 })) : null,
-        );
-      }),
-    );
+    openScreen({
+      title: 'Workout detail',
+      action: more,
+      render: () =>
+        workoutDetailBody(log, {
+          person: me.member,
+          unit: weightUnit.get(),
+          toDisplay: toDisplayWeight,
+          thumb: pickerThumb,
+          onExercise: (exercise) => openExerciseDetail(exercise, { tab: 'history' }),
+          share,
+          edit,
+        }),
+    });
   }
 
   /**
@@ -8801,6 +9009,29 @@ function renderPortalApp(ctx, initialMe) {
         ),
       ),
     );
+
+    // Ask Coach, for today only — the coach reads today's food against the
+    // targets, so on a past day its answer would be about the wrong day.
+    if (logDate === today()) {
+      const coachSlot = h('div', { class: 'portal-coach-slot' });
+      body.append(coachSlot);
+      coachStatus().then((s) => {
+        if (!s.enabled) return;
+        coachSlot.replaceChildren(
+          h(
+            'button',
+            {
+              class: 'portal-coach-cta',
+              type: 'button',
+              onclick: () => openCoachSheet({ screen: 'diet', unit: weightUnit.get(), weightLabel }),
+            },
+            h('span', { class: 'portal-coach-cta-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })),
+            h('span', { class: 'portal-coach-cta-text' }, h('strong', {}, 'Ask Coach'), h('span', {}, 'What should I eat next?')),
+            renderIcon('chevronRight', { size: 16 }),
+          ),
+        );
+      });
+    }
 
     // Where today's numbers come from, and the way into Diet settings.
     const planRow = (() => {
@@ -9759,6 +9990,11 @@ function renderPortalApp(ctx, initialMe) {
           }),
         }),
         profileRow({
+          icon: 'timer', tone: 'blue', title: 'Rest timer sound', sub: 'Plays when a rest is over',
+          value: sound.restEndSoundLabel(),
+          onclick: () => openRestSoundPicker(repaint),
+        }),
+        profileRow({
           icon: 'smartphone', tone: 'green', title: 'Vibration', sub: 'Vibrate for important actions',
           control: settingsSwitch(sound.getHapticsEnabled(), 'Vibration', () => {
             sound.setHapticsEnabled(!sound.getHapticsEnabled());
@@ -9789,6 +10025,41 @@ function renderPortalApp(ctx, initialMe) {
         ),
       ),
     ];
+  }
+
+  /** Picks the "rest over" sound. Tapping one chooses it and plays it, so the
+   * member hears each in turn without a separate preview button. */
+  function openRestSoundPicker(repaintSettings) {
+    const list = h('div', { class: 'portal-sound-pick' });
+    const paintList = () => {
+      const current = sound.getRestEndSound();
+      // append() rather than replaceChildren: the native call would print the
+      // empty hint slot as the text "null".
+      append(clear(list), [
+        sound.getSoundEnabled() ? null : h('p', { class: 'portal-sound-pick-hint' }, 'Sound effects are off — turn them on to hear these.'),
+        sound.restEndSoundOptions().map(({ key, label, sub }) =>
+          h(
+            'button',
+            {
+              class: `portal-sound-opt${key === current ? ' active' : ''}`,
+              type: 'button',
+              'aria-pressed': String(key === current),
+              onclick: () => {
+                sound.setRestEndSound(key);
+                sound.previewRestEndSound(key);
+                paintList();
+                repaintSettings();
+              },
+            },
+            h('span', { class: 'portal-sound-opt-play' }, renderIcon('play', { size: 14 })),
+            h('span', { class: 'portal-sound-opt-text' }, h('strong', {}, label), h('small', {}, sub)),
+            key === current ? h('span', { class: 'portal-sound-opt-check' }, renderIcon('check', { size: 18, stroke: 2.6 })) : null,
+          ),
+        ),
+      ]);
+    };
+    paintList();
+    openModal({ title: 'Rest timer sound', subtitle: 'Tap one to hear it', icon: 'timer', className: 'portal-sound-modal', body: list });
   }
 
   /** Profile → Notifications & Sounds: every alert, sound and vibration
@@ -10275,6 +10546,8 @@ function renderPortalApp(ctx, initialMe) {
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
   const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
   const restored = lastTab.get();
+  // A reload mid-rest that lands on another tab; the Workout tab disarms it.
+  restAlarm.arm();
   switchTab(reachable.has(requested) ? requested : reachable.has(restored) ? restored : 'home');
   if (requested === 'notifications') openNotificationCenter();
 

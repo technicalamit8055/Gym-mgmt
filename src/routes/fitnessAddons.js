@@ -24,6 +24,9 @@ const SETTINGS_FIELDS = {
   monthly_price: { type: 'number', min: 0, max: 1000000 },
   trial_days: { type: 'int', min: 0, max: 365 },
   description: { type: 'string', max: 500 },
+  // Ask Coach in the member app (src/aiCoach.js) — on by default wherever the
+  // platform has it configured; this is the gym's own off switch.
+  ai_coach_enabled: { type: 'boolean' },
 };
 
 fitnessAddonRoutes.get('/settings', (_req, res) => {

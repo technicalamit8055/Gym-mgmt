@@ -40,7 +40,7 @@ let hapticsEnabled = readBool(HAPTICS_KEY, true);
 const listeners = new Set();
 const notify = () => listeners.forEach((fn) => fn(getSettings()));
 
-export const getSettings = () => ({ soundEnabled, soundVolume, hapticsEnabled });
+export const getSettings = () => ({ soundEnabled, soundVolume, hapticsEnabled, restEndSound });
 
 /** Lets the Profile settings panel repaint itself when a preference changes
  * from elsewhere (e.g. the session bar's quick mute button) without polling. */
@@ -215,9 +215,133 @@ export function playRestTick() {
   triggerHaptic([25]);
 }
 
+/** A referee's whistle: a high tone warbled fast by a second oscillator,
+ * which is what makes a real pea whistle cut through a noisy gym. */
+function playWhistle({ startTime = 0, duration = 0.45, gain = 0.3 } = {}) {
+  if (!soundEnabled) return;
+  const audioCtx = getContext();
+  if (!audioCtx) return;
+  try {
+    const at = audioCtx.currentTime + startTime;
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 2600;
+    const lfo = audioCtx.createOscillator();
+    lfo.frequency.value = 28;
+    const depth = audioCtx.createGain();
+    depth.gain.value = 140;
+    lfo.connect(depth).connect(osc.frequency);
+    // Held flat rather than envelopeGain's decay: a whistle blast is loud for
+    // its whole length, then stops.
+    const env = audioCtx.createGain();
+    const peak = Math.max(0.0001, gain * soundVolume);
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(peak, at + 0.02);
+    env.gain.setValueAtTime(peak, at + duration - 0.05);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    osc.connect(env).connect(audioCtx.destination);
+    osc.start(at);
+    lfo.start(at);
+    osc.stop(at + duration + 0.05);
+    lfo.stop(at + duration + 0.05);
+  } catch {
+    // See playTone.
+  }
+}
+
+/**
+ * The sounds a member can pick for "rest over", quietest first. Chime is the
+ * original; the rest exist because a soft chord is easy to miss over gym
+ * music, so the loud ones are built from square waves and high pitches that
+ * small phone speakers carry best.
+ */
+const REST_END_SOUNDS = {
+  chime: {
+    label: 'Chime',
+    sub: 'Soft rising notes',
+    play() {
+      playChord([659.25, 830.6, 987.77, 1318.5], { duration: 0.6, staggerMs: 70, type: 'sawtooth', gain: 0.15 });
+      triggerHaptic([120, 60, 120, 60, 200]);
+    },
+  },
+  bell: {
+    label: 'Boxing bell',
+    sub: 'Three ringing strikes',
+    play() {
+      // A bell's partials are not whole multiples of each other — that is
+      // what makes it read as metal rather than as a chord.
+      for (const strike of [0, 0.32, 0.64]) {
+        playTone({ freq: 830, type: 'sine', duration: 1.1, gain: 0.32, startTime: strike });
+        playTone({ freq: 1318, type: 'sine', duration: 0.8, gain: 0.16, startTime: strike });
+        playTone({ freq: 2237, type: 'sine', duration: 0.5, gain: 0.1, startTime: strike });
+      }
+      triggerHaptic([150, 170, 150, 170, 150]);
+    },
+  },
+  digital: {
+    label: 'Digital watch',
+    sub: 'Beep-beep-beep-beep, twice',
+    play() {
+      for (const burst of [0, 0.75]) {
+        for (let i = 0; i < 4; i += 1) {
+          playTone({ freq: 2048, type: 'square', duration: 0.07, gain: 0.2, startTime: burst + i * 0.12 });
+        }
+      }
+      triggerHaptic([70, 50, 70, 50, 70, 50, 70, 300, 70, 50, 70, 50, 70, 50, 70]);
+    },
+  },
+  whistle: {
+    label: 'Whistle',
+    sub: "Two sharp referee's blasts",
+    play() {
+      playWhistle({ startTime: 0, duration: 0.3 });
+      playWhistle({ startTime: 0.42, duration: 0.6 });
+      triggerHaptic([300, 120, 600]);
+    },
+  },
+  alarm: {
+    label: 'Alarm',
+    sub: 'Loudest — a two-second siren',
+    play() {
+      for (let i = 0; i < 14; i += 1) {
+        playTone({ freq: i % 2 ? 1320 : 990, type: 'square', duration: 0.13, gain: 0.32, startTime: i * 0.14 });
+      }
+      triggerHaptic([400, 100, 400, 100, 400, 100, 600]);
+    },
+  },
+};
+
+const REST_SOUND_KEY = 'gymbook.portal.restEndSound';
+let restEndSound = (() => {
+  try {
+    const saved = localStorage.getItem(REST_SOUND_KEY);
+    return saved in REST_END_SOUNDS ? saved : 'chime';
+  } catch {
+    return 'chime';
+  }
+})();
+
+/** [{ key, label, sub }] in the order the settings picker lists them. */
+export const restEndSoundOptions = () =>
+  Object.entries(REST_END_SOUNDS).map(([key, { label, sub }]) => ({ key, label, sub }));
+export const getRestEndSound = () => restEndSound;
+export const restEndSoundLabel = () => REST_END_SOUNDS[restEndSound].label;
+export function setRestEndSound(key) {
+  if (!(key in REST_END_SOUNDS)) return;
+  restEndSound = key;
+  try {
+    localStorage.setItem(REST_SOUND_KEY, key);
+  } catch {
+    // See setSoundEnabled.
+  }
+  notify();
+}
+
+/** The picker's audition: plays `key` without choosing it. */
+export const previewRestEndSound = (key) => REST_END_SOUNDS[key]?.play();
+
 export function playRestEnd() {
-  playChord([659.25, 830.6, 987.77, 1318.5], { duration: 0.6, staggerMs: 70, type: 'sawtooth', gain: 0.15 });
-  triggerHaptic([120, 60, 120, 60, 200]);
+  REST_END_SOUNDS[restEndSound].play();
 }
 
 function playPrBurst() {

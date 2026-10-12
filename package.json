@@ -20,6 +20,7 @@
     "seed:store": "node --no-warnings=ExperimentalWarning scripts/seed-store.js"
   },
   "dependencies": {
+    "@google/genai": "^2.28.0",
     "@simplewebauthn/server": "^13.3.2",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "express": "^5.2.1",

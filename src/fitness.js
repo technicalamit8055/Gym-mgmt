@@ -347,6 +347,45 @@ export function previousSetsFor(memberId, exerciseNames) {
   return out;
 }
 
+/**
+ * Every working set of each exercise's most recent session, in the order they
+ * were done — what the next-set suggestion (public/js/nextSet.js) reads to
+ * decide whether the member earned a heavier weight. previousSetsFor's single
+ * set cannot tell "12 reps on all three sets" from "12, then 9, then 7".
+ *
+ * Warmups are left out (they say nothing about working capacity); drop sets
+ * stay in with their type so the engine can skip them itself.
+ */
+export function lastSessionSetsFor(memberId, exerciseNames) {
+  if (!exerciseNames.length) return {};
+  const placeholders = exerciseNames.map(() => '?').join(', ');
+  const rows = all(
+    `SELECT s.exercise_name, s.log_id, s.set_type, s.weight_kg, s.reps, s.rpe, l.log_date
+     FROM workout_log_sets s
+     JOIN workout_logs l ON l.id = s.log_id
+     WHERE l.member_id = ? AND s.exercise_name IN (${placeholders})
+       AND s.set_type != 'warmup' AND s.completed = 1
+     ORDER BY s.exercise_name, l.log_date DESC, l.id DESC, s.set_number, s.id`,
+    [memberId, ...exerciseNames],
+  );
+
+  const out = {};
+  const sessionOf = {};
+  for (const row of rows) {
+    // Rows arrive newest session first per exercise; only that session counts.
+    sessionOf[row.exercise_name] ??= row.log_id;
+    if (row.log_id !== sessionOf[row.exercise_name]) continue;
+    (out[row.exercise_name] ??= []).push({
+      set_type: row.set_type,
+      weight_kg: row.weight_kg,
+      reps: row.reps,
+      rpe: row.rpe,
+      log_date: row.log_date,
+    });
+  }
+  return out;
+}
+
 const round1 = (value) => Math.round(value * 10) / 10;
 const round2 = (value) => Math.round(value * 100) / 100;
 

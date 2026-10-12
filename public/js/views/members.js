@@ -27,6 +27,7 @@ import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
 import { isLibrary, t, tl } from '../vertical.js';
+import { workoutDetailBody } from '../workoutDetail.js';
 
 /**
  * A function, not a module-level constant: every view here is statically
@@ -333,22 +334,7 @@ const dayDiff = (from, to) =>
 function fitnessSection(member, { reload }) {
   const mount = h('div', { class: 'md-stack' }, h('div', { class: 'empty', style: 'padding:20px' }, 'Loading fitness…'));
 
-  const SET_TYPE_SHORT = { normal: '—', warmup: 'W', drop: 'D', failure: 'F' };
   const minutes = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
-  const clock = (seconds) => {
-    const s = Math.round(seconds);
-    const hh = Math.floor(s / 3600);
-    const mm = Math.floor((s % 3600) / 60);
-    const ss = String(s % 60).padStart(2, '0');
-    return hh ? `${hh}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
-  };
-  // A set in the terms it was logged in: a run, a timed hold, or weight × reps.
-  const setLine = (set) => {
-    const parts = [set.distance_km > 0 ? `${set.distance_km} km` : null, set.duration_seconds > 0 ? clock(set.duration_seconds) : null].filter(Boolean);
-    if (parts.length) return parts.join(' · ');
-    return set.weight_kg > 0 ? `${set.weight_kg} kg × ${set.reps}` : `${set.reps} reps`;
-  };
-
   function openAssignForm({ kind, templates, current }) {
     const isWorkout = kind === 'workout';
     openModal({
@@ -828,46 +814,12 @@ function fitnessSection(member, { reload }) {
     );
 
     /* Logs */
+    // The member app's own "Workout detail", read-only: a trainer checking a
+    // session sees it exactly as the member who logged it does.
     async function openSessionDetail(log) {
       try {
         const full = await api.workoutLog(log.id);
-        const byExercise = new Map();
-        for (const set of full.sets) {
-          if (!byExercise.has(set.exercise_name)) byExercise.set(set.exercise_name, []);
-          byExercise.get(set.exercise_name).push(set);
-        }
-        openModal({
-          title: `${full.workout_name} · ${date(full.log_date)}`,
-          body: h(
-            'div',
-            { class: 'fit-preview' },
-            h(
-              'div',
-              { class: 'fit-plan-stats' },
-              h('div', {}, h('strong', {}, `${Math.round(full.total_volume_kg)} kg`), h('span', {}, 'volume')),
-              h('div', {}, h('strong', {}, full.total_sets), h('span', {}, 'sets')),
-              h('div', {}, h('strong', {}, full.total_reps), h('span', {}, 'reps')),
-              h('div', {}, h('strong', {}, minutes(full.duration_seconds)), h('span', {}, 'duration')),
-            ),
-            ...[...byExercise].map(([name, sets]) =>
-              h(
-                'div',
-                { class: 'fit-preview-day' },
-                h('h4', {}, name),
-                ...sets.map((set) =>
-                  h(
-                    'div',
-                    { class: 'row', style: 'gap:10px;font-size:13px;padding:3px 0' },
-                    h('span', { class: 'badge grey' }, SET_TYPE_SHORT[set.set_type] ?? set.set_type),
-                    h('span', {}, setLine(set)),
-                    set.is_pr ? h('span', { class: 'badge amber' }, 'PR') : null,
-                    h('span', { class: 'muted' }, set.est_1rm_kg ? `~${set.est_1rm_kg} kg 1RM` : ''),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        });
+        openModal({ title: 'Workout detail', body: workoutDetailBody(full, { person: member }) });
       } catch (err) {
         toast(err.message || 'Could not open that session', 'error');
       }

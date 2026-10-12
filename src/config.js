@@ -63,6 +63,24 @@ export const config = {
   // ever reads the gym's own library — for servers without outbound internet.
   foodSearchOnline: process.env.FOOD_SEARCH_ONLINE !== 'false',
   foodSearchTimeoutMs: Number(process.env.FOOD_SEARCH_TIMEOUT_MS || 4000),
+  // The member app's Ask Coach chat (src/aiCoach.js): Gemini on Google Vertex
+  // AI, billed to this Google Cloud project. Off until GOOGLE_CLOUD_PROJECT is
+  // set. Credentials are Google's Application Default Credentials — on a
+  // server, GOOGLE_APPLICATION_CREDENTIALS pointing at a service-account JSON
+  // with the "Vertex AI User" role. The model id changes with Google's
+  // releases, so it is a setting rather than code; check the Vertex console.
+  aiCoach: {
+    project: process.env.GOOGLE_CLOUD_PROJECT || '',
+    location: process.env.GOOGLE_CLOUD_LOCATION || 'global',
+    model: process.env.AI_COACH_MODEL || 'gemini-3.8-flash',
+    // Questions per member per day — the cost ceiling. The next-set chip is
+    // worked out on the phone and never counts.
+    dailyLimit: Number(process.env.AI_COACH_DAILY_LIMIT || 20),
+    // AI-generated workout plans per member per day. Each one sends the whole
+    // exercise library, so it costs several questions' worth.
+    planDailyLimit: Number(process.env.AI_PLAN_DAILY_LIMIT || 3),
+    timeoutMs: Number(process.env.AI_COACH_TIMEOUT_MS || 20000),
+  },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
@@ -80,9 +98,9 @@ export const config = {
   // Opt-in only: trusting X-Forwarded-For without a real proxy in front lets
   // a client spoof its own IP and dodge the rate limiter below.
   trustProxy: process.env.TRUST_PROXY === 'true',
-  loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS || 5),
+  loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS || 15),
   loginWindowMs: Number(process.env.LOGIN_WINDOW_MS || 15 * 60_000),
-  loginLockoutMs: Number(process.env.LOGIN_LOCKOUT_MS || 15 * 60_000),
+  loginLockoutMs: Number(process.env.LOGIN_LOCKOUT_MS || 2 * 60_000),
   signupMaxAttempts: Number(process.env.SIGNUP_MAX_ATTEMPTS || 10),
   signupWindowMs: Number(process.env.SIGNUP_WINDOW_MS || 60 * 60_000),
   signupLockoutMs: Number(process.env.SIGNUP_LOCKOUT_MS || 60 * 60_000),

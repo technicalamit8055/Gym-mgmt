@@ -184,6 +184,51 @@ async function request(method, path, body, { token, anonymous = false, member = 
   return payload;
 }
 
+/**
+ * A member POST answered as Server-Sent Events: every event is handed to
+ * onEvent(name, data) as it arrives, and the promise resolves once the stream
+ * ends. When the server answers with plain JSON instead — a refusal before it
+ * started streaming, or the service worker's offline reply — that payload is
+ * returned, or thrown as an ApiError, just as request() would.
+ */
+async function streamRequest(path, body, onEvent) {
+  const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
+  if (memberSession.token) headers.Authorization = `Bearer ${memberSession.token}`;
+  const res = await fetch(`${pathPrefix}/api${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+
+  if (res.status === 401) {
+    memberSession.clear();
+    window.dispatchEvent(new CustomEvent('gymbook:member-signed-out'));
+    throw new ApiError(401, 'Your session expired — please sign in again');
+  }
+  if (!res.body || !String(res.headers.get('Content-Type')).startsWith('text/event-stream')) {
+    const text = await res.text();
+    const payload = text ? JSON.parse(text) : {};
+    if (!res.ok) throw new ApiError(res.status, payload.error || res.statusText, payload.details);
+    return payload;
+  }
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return null;
+    buffer += value.replace(/\r\n/g, '\n');
+    let cut;
+    while ((cut = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      let event = 'message';
+      const data = [];
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+      }
+      if (data.length) onEvent(event, JSON.parse(data.join('\n')));
+    }
+  }
+}
+
 const query = (params = {}) => {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -595,6 +640,14 @@ export const api = {
     personalRecords: () => request('GET', '/portal/workouts/prs', undefined, { member: true }),
     exercises: (params) => request('GET', `/portal/workouts/exercises${query(params)}`, undefined, { member: true }),
     exerciseHistory: (name) => request('GET', `/portal/workouts/exercise-history${query({ name })}`, undefined, { member: true }),
+    // Ask Coach (public/js/coach.js): whether this gym has it and how many
+    // questions are left today, and one question with the live session.
+    coachStatus: () => request('GET', '/portal/coach/status', undefined, { member: true }),
+    // Streamed: onEvent gets step / thought / answer / done / error as the
+    // coach works (see the route in src/routes/portal.js).
+    coachAskStream: (payload, onEvent) => streamRequest('/portal/coach/ask', payload, onEvent),
+    // The AI workout generator: a draft plan to open in the plan builder.
+    coachPlan: (payload) => request('POST', '/portal/coach/plan', payload, { member: true }),
     // The member's own plans, and which plan (theirs or the trainer's) the
     // Workout tab follows. setActivePlan(null) goes back to the trainer's.
     routines: () => request('GET', '/portal/workouts/routines', undefined, { member: true }),

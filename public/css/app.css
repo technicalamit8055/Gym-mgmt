@@ -3223,7 +3223,7 @@ body[data-mode='light'] .login {
 /* Pinned to the icon's top-right corner rather than the wide pill's, so it
  * reads as part of the icon. */
 .portal-tab-badge.is-image {
-  top: -8px; right: 4px; width: 26px; height: 26px; padding: 0; border-radius: 0;
+  top: -6px; right: 6px; width: 20px; height: 20px; padding: 0; border-radius: 0;
   object-fit: contain; background: none; box-shadow: none;
   filter: drop-shadow(0 0 1.5px var(--surface)) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.18));
 }
@@ -4837,6 +4837,28 @@ button.portal-prof-row { cursor: pointer; }
   box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--brand) 80%, transparent);
 }
 
+/* Rest timer sound picker: one tappable row per sound, the chosen one ticked */
+.portal-sound-modal { width: min(440px, 100%); }
+.portal-sound-pick { display: flex; flex-direction: column; gap: 8px; }
+.portal-sound-pick-hint { margin: 0 0 4px; font-size: 13px; color: var(--amber); }
+.portal-sound-opt {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.portal-sound-opt:hover { border-color: color-mix(in srgb, var(--brand) 50%, var(--border)); }
+.portal-sound-opt:active { transform: scale(0.99); }
+.portal-sound-opt.active { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, var(--surface)); }
+.portal-sound-opt-play {
+  flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+.portal-sound-opt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.portal-sound-opt-text strong { font-size: 15px; font-weight: 700; }
+.portal-sound-opt-text small { font-size: 12.5px; color: var(--muted); }
+.portal-sound-opt-check { flex: none; color: var(--brand); display: grid; }
+
 /* Test sound: a tinted strip inside the audio card */
 .portal-prof-test {
   --t: #f43f5e; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 14px;
@@ -6408,6 +6430,216 @@ button.portal-set-prev:hover { color: var(--brand); }
 .portal-set-1rm.beats strong,
 .portal-set-row.completed .portal-set-1rm.beats strong { color: color-mix(in srgb, var(--amber) 60%, var(--text)); }
 
+/*
+ * The next-set suggestion (public/js/nextSet.js): a pill under the next
+ * working set's Previous and input columns, with a "?" for the reason.
+ */
+.portal-set-suggest {
+  grid-column: 2 / -2; justify-self: center; margin-top: 1px;
+  display: inline-flex; align-items: stretch; height: 24px;
+  border-radius: 999px; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border));
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface));
+}
+.portal-set-suggest button {
+  border: none; background: none; font: inherit; color: var(--brand); cursor: pointer;
+  display: inline-flex; align-items: center;
+}
+.portal-set-suggest-use { gap: 5px; padding: 0 10px 0 9px; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.portal-set-suggest-label { font-size: 10px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.85; }
+.portal-set-suggest-use strong { font-weight: 700; color: var(--text); }
+.portal-set-suggest-why {
+  padding: 0 9px; font-size: 12px; font-weight: 700;
+  border-left: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border)) !important;
+}
+.portal-set-suggest button:hover { background: color-mix(in srgb, var(--brand) 12%, transparent); }
+
+.portal-suggest-why { display: flex; flex-direction: column; gap: 8px; }
+.portal-suggest-why p { margin: 0; font-size: 14px; line-height: 1.45; }
+.portal-suggest-why .muted { font-size: 12.5px; }
+.portal-suggest-why-num { font-size: 26px; font-weight: 750; color: var(--brand); font-variant-numeric: tabular-nums; }
+
+/* "How did it feel?" under a just-ticked set: four chips, stored as RPE. */
+.portal-set-effort {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  justify-content: center; padding: 2px 0 1px;
+}
+.portal-set-effort-q { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-right: 2px; }
+.portal-effort-chip,
+.portal-set-effort-tag {
+  height: 24px; padding: 0 10px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 650;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.portal-effort-chip:hover { border-color: var(--brand); }
+.portal-effort-chip.on,
+.portal-set-effort-tag { border-color: transparent; }
+.portal-effort-chip.is-easy.on, .portal-set-effort-tag.is-easy { background: color-mix(in srgb, var(--blue) 18%, var(--surface)); color: var(--blue); }
+.portal-effort-chip.is-good.on, .portal-set-effort-tag.is-good { background: color-mix(in srgb, var(--green) 20%, var(--surface)); color: color-mix(in srgb, var(--green) 70%, var(--text)); }
+.portal-effort-chip.is-hard.on, .portal-set-effort-tag.is-hard { background: color-mix(in srgb, var(--amber) 20%, var(--surface)); color: color-mix(in srgb, var(--amber) 75%, var(--text)); }
+.portal-effort-chip.is-failed.on, .portal-set-effort-tag.is-failed { background: color-mix(in srgb, var(--red) 18%, var(--surface)); color: var(--red); }
+/* Answered: a small tag under the Previous column, beside the 1RM pill. */
+.portal-set-effort-tag { grid-column: 2; justify-self: center; height: 20px; padding: 0 9px; font-size: 11px; }
+
+/* Ask Coach entry points. The slot keeps one node across logger repaints. */
+.portal-coach-slot { display: contents; }
+.portal-session-top-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.portal-coach-btn {
+  flex: none; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--border));
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-2)); color: var(--brand);
+  transition: background 0.15s ease;
+}
+.portal-coach-btn:hover { background: color-mix(in srgb, var(--brand) 20%, var(--surface-2)); }
+.portal-coach-cta {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 14px; border-radius: 18px; text-align: left; font: inherit; cursor: pointer; color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface));
+}
+.portal-coach-cta:hover { border-color: var(--brand); }
+.portal-coach-cta-ico {
+  flex: none; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.portal-coach-cta-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; }
+.portal-coach-cta-text strong { color: var(--text); font-size: 14px; }
+
+/* The Ask Coach sheet (public/js/coach.js). */
+.coach-sheet { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.coach-thread {
+  display: flex; flex-direction: column; gap: 10px;
+  min-height: 140px; max-height: min(52vh, 460px); overflow-y: auto; padding: 2px;
+}
+.coach-empty { margin: auto 0; display: flex; flex-direction: column; gap: 4px; text-align: center; padding: 18px 8px; font-size: 13px; color: var(--muted); }
+.coach-empty strong { color: var(--text); font-size: 14.5px; }
+.coach-msg { max-width: 88%; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.coach-msg.is-user {
+  align-self: flex-end; padding: 9px 13px; border-radius: 16px 16px 4px 16px;
+  background: var(--brand); color: #fff;
+}
+.coach-msg.is-coach { align-self: flex-start; display: flex; gap: 8px; align-items: flex-start; }
+.coach-msg-icon {
+  flex: none; width: 24px; height: 24px; margin-top: 2px; border-radius: 8px; display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.coach-msg-text {
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+  padding: 9px 13px; border-radius: 4px 16px 16px 16px; background: var(--surface-2); color: var(--text);
+  white-space: pre-line;
+}
+.coach-msg.is-error .coach-msg-text { background: color-mix(in srgb, var(--red) 12%, var(--surface)); color: var(--red); }
+/* A reply being worked on: the sparkle turns and pulses, what the coach is
+   reading ticks off, the thinking headline shimmers, then the answer types in.
+   Entrance animations only run while .is-live, so reopening the sheet does not
+   replay them on finished replies. */
+.coach-msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.coach-msg-text.is-empty { display: none; }
+.coach-actions:empty { display: none; }
+.coach-msg.is-live .coach-msg-text { animation: coach-rise 0.3s ease both; }
+.coach-msg.is-live .coach-msg-icon { animation: coach-pulse 1.6s ease-in-out infinite; }
+.coach-msg.is-live .coach-msg-icon svg { animation: coach-spin 2.4s linear infinite; }
+
+.coach-think { width: 100%; }
+.coach-think-head {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0; cursor: pointer;
+  border: none; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; text-align: left;
+}
+.coach-think-head svg { flex: none; transition: transform 0.25s ease; }
+.coach-think:not(.is-open) .coach-think-head svg { transform: rotate(-90deg); }
+.coach-think.is-live .coach-think-label {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 38%, var(--text) 50%, var(--muted) 62%, var(--muted) 100%);
+  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: coach-shimmer 1.8s linear infinite;
+}
+.coach-think-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.3s ease; }
+.coach-think.is-open .coach-think-body { grid-template-rows: 1fr; }
+.coach-think-inner { min-height: 0; overflow: hidden; }
+
+.coach-steps { list-style: none; margin: 6px 0 2px; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.coach-step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+.coach-step.is-active { color: var(--text); }
+.coach-step-dot {
+  flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+  border: 1.5px solid var(--border); color: transparent; transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.coach-step.is-active .coach-step-dot {
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--border)); border-top-color: var(--brand);
+  animation: coach-spin 0.8s linear infinite;
+}
+.coach-step.is-done .coach-step-dot { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.coach-thoughts {
+  display: flex; flex-direction: column; gap: 8px; margin: 8px 0 2px; padding-left: 10px; max-height: 200px; overflow-y: auto;
+  border-left: 2px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+}
+.coach-thoughts:empty { display: none; }
+.coach-thought { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.coach-thought strong { display: block; color: var(--text); font-weight: 650; }
+.coach-thought p { margin: 2px 0 0; }
+.coach-thought strong:empty, .coach-thought p:empty { display: none; }
+
+.coach-msg.is-live .coach-step,
+.coach-msg.is-live .coach-thought { animation: coach-rise 0.3s ease both; }
+.coach-msg.is-live .coach-step.is-done .coach-step-dot svg { animation: coach-pop 0.25s ease both; }
+.coach-msg.is-live .coach-word { animation: coach-word 0.45s ease both; }
+.coach-caret {
+  display: inline-block; width: 8px; height: 8px; margin-left: 3px; border-radius: 50%; vertical-align: middle;
+  background: var(--brand); animation: coach-blink 1s ease-in-out infinite;
+}
+.coach-apply { animation: coach-rise 0.3s ease both; }
+
+@keyframes coach-spin { to { transform: rotate(360deg); } }
+@keyframes coach-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 40%, transparent); }
+  60% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 0%, transparent); }
+}
+@keyframes coach-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+@keyframes coach-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes coach-pop { from { transform: scale(0.3); } to { transform: scale(1); } }
+@keyframes coach-word { from { opacity: 0; filter: blur(3px); } to { opacity: 1; filter: none; } }
+@keyframes coach-blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.75); } }
+@media (prefers-reduced-motion: reduce) {
+  .coach-msg *, .coach-msg { animation: none !important; transition: none !important; }
+  .coach-think.is-live .coach-think-label { background: none; color: var(--text); }
+}
+.coach-apply {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 10px; cursor: pointer;
+  border: none; background: var(--brand); color: #fff; font: inherit; font-size: 12.5px; font-weight: 650;
+  white-space: normal; text-align: left;
+}
+.coach-notice {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 12px;
+  background: var(--surface-2); color: var(--muted); font-size: 12.5px; line-height: 1.4;
+}
+.coach-notice svg { flex: none; margin-top: 1px; color: var(--brand); }
+.coach-notice-ok {
+  flex: none; margin-left: auto; height: 26px; padding: 0 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; font-weight: 600;
+}
+.coach-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 1px; }
+.coach-chips::-webkit-scrollbar { display: none; }
+.coach-chip {
+  flex: none; height: 30px; padding: 0 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface)); color: var(--text);
+  font: inherit; font-size: 12.5px; font-weight: 600;
+}
+.coach-chip:hover { border-color: var(--brand); }
+.coach-compose { display: flex; align-items: flex-end; gap: 8px; }
+.coach-input {
+  flex: 1; min-width: 0; min-height: 40px; max-height: 120px; resize: none;
+  padding: 9px 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; line-height: 1.4;
+}
+.coach-input:focus { outline: none; border-color: var(--brand); box-shadow: var(--ring); background: var(--surface); }
+.coach-send {
+  flex: none; width: 40px; height: 40px; border-radius: 12px; border: none; cursor: pointer;
+  display: grid; place-items: center; background: var(--brand); color: #fff;
+}
+.coach-send:disabled { opacity: 0.5; cursor: default; }
+.coach-remaining { font-size: 11.5px; color: var(--muted); text-align: center; min-height: 14px; }
+
 .portal-add-ex {
   width: 100%; height: 42px; display: flex; align-items: center; justify-content: center; gap: 12px;
   border-radius: 14px; cursor: pointer; font: inherit; font-size: 16px; font-weight: 600;
@@ -6471,6 +6703,35 @@ button.portal-set-prev:hover { color: var(--brand); }
 .portal-myplan-create .portal-myplan-text strong { font-size: 15.5px; font-weight: 800; }
 .portal-myplan-create .portal-myplan-text small { font-size: 12.5px; }
 .portal-myplan-chev { flex: none; display: grid; place-items: center; color: var(--brand); }
+/* Create with AI: the same card as "Build your own plan", solid instead of dashed. */
+.portal-myplan-create.is-ai {
+  border-style: solid; border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 12%, var(--surface)), var(--surface) 70%);
+}
+.portal-myplan-create.is-ai .portal-myplan-ico { background: var(--brand); color: #fff; }
+
+/* The AI plan generator sheet (openPlanGenerator in public/js/coach.js). */
+.gen-sheet { display: flex; flex-direction: column; gap: 14px; }
+.gen-field { display: flex; flex-direction: column; gap: 7px; }
+.gen-label { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.gen-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gen-chip {
+  height: 34px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 13.5px; font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.gen-chip:hover { border-color: var(--brand); }
+.gen-chip.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.gen-notes { width: 100%; min-height: 64px; font-size: 14px; }
+.gen-foot { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+/* flex: none — the phone rule for footer buttons (flex: 1 1 130px) would
+   make this 130px tall in a column. */
+.gen-foot .gen-go { flex: none; width: 100%; justify-content: center; gap: 8px; height: 46px; font-size: 15px; }
+.gen-go.is-busy { opacity: 0.8; cursor: progress; }
+.gen-go.is-busy svg { animation: gen-spin 1.2s linear infinite; }
+@keyframes gen-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gen-go.is-busy svg { animation: none; } }
 
 /* Recent workouts, before the first one: an illustrated card that also holds
    the units switch. With history, the switch sits on its own under the list. */
@@ -6583,9 +6844,9 @@ button.portal-set-prev:hover { color: var(--brand); }
 .portal-rest-timer {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(96px + var(--safe-bottom)); z-index: 40;
-  width: min(340px, calc(100vw - 32px));
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 16px;
+  width: min(400px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px 14px; border-radius: 16px;
   border: 1px solid var(--brand);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(16px) saturate(180%);
@@ -6593,28 +6854,34 @@ button.portal-set-prev:hover { color: var(--brand); }
   box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline);
 }
 .portal-rest-timer.hidden { display: none; }
-.portal-rest-icon { flex: none; color: var(--brand); display: grid; place-items: center; }
-.portal-rest-body { flex: 1; min-width: 0; }
-.portal-rest-label {
-  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
-  font-weight: 800; color: var(--muted);
+/* Hevy's layout: −15 and +15 flank the countdown, which sits centred
+   between them, with Skip at the end and the progress bar underneath. */
+.portal-rest-row { display: flex; align-items: center; gap: 8px; }
+.portal-rest-time {
+  flex: 1; min-width: 0; text-align: center;
+  font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
 }
-.portal-rest-time { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-.portal-rest-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
-.portal-rest-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 2px; }
-.portal-rest-actions { display: flex; gap: 4px; flex: none; }
-.portal-rest-btn {
-  border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
-  border-radius: 9px; padding: 6px 8px; cursor: pointer;
-  font-size: 11px; font-weight: 700; display: grid; place-items: center;
+.portal-rest-adj {
+  flex: none; min-width: 52px; height: 40px; padding: 0 10px;
+  border: none; border-radius: 10px; background: transparent; color: var(--brand);
+  font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
 }
-.portal-rest-btn:hover { color: var(--text); border-color: var(--brand); }
+.portal-rest-adj:hover { background: var(--surface-2); }
+.portal-rest-skip {
+  flex: none; height: 40px; padding: 0 18px;
+  border: none; border-radius: 10px; background: var(--brand); color: #fff;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.portal-rest-skip:hover { filter: brightness(1.08); }
+.portal-rest-adj:active, .portal-rest-skip:active { transform: scale(0.96); }
+.portal-rest-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.portal-rest-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 3px; transition: width 0.25s linear; }
 
 .portal-rest-timer.urgent { border-color: var(--amber); animation: rest-pulse 1s ease-in-out infinite; }
-.portal-rest-timer.urgent .portal-rest-time, .portal-rest-timer.urgent .portal-rest-icon { color: var(--amber); }
+.portal-rest-timer.urgent .portal-rest-time { color: var(--amber); }
 .portal-rest-timer.urgent .portal-rest-bar > i { background: var(--amber); }
 .portal-rest-timer.done { border-color: var(--green); }
-.portal-rest-timer.done .portal-rest-time, .portal-rest-timer.done .portal-rest-icon { color: var(--green); }
+.portal-rest-timer.done .portal-rest-time { color: var(--green); }
 
 @keyframes rest-pulse {
   0%, 100% { box-shadow: var(--shadow-lg), inset 0 1px 0 var(--hairline), 0 0 0 0 rgba(251, 191, 36, 0.4); }
@@ -7409,35 +7676,39 @@ body[data-mode='light'] .diet-fab-layer { background: rgba(15, 23, 42, 0.35); }
 
 /* ------------------------------------------------- workout log detail */
 
-/* Hevy's "Workout Detail": who and when, the headline numbers, the muscle
-   split and every exercise's sets in a striped table. */
-.portal-wd { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
-.portal-wd-who { display: flex; align-items: center; gap: 12px; }
-.portal-wd-avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
-.portal-wd-avatar.is-initials { display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); font-weight: 750; }
-.portal-wd-who > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.portal-wd-who strong { font-size: 16px; font-weight: 650; }
-.portal-wd-who span { font-size: 13px; color: var(--muted); }
-.portal-wd-title { margin: 2px 0 0; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
-.portal-wd-notes { margin: -6px 0 0; font-size: 14px; color: var(--muted); white-space: pre-line; }
+/* Hevy's "Workout Detail" (public/js/workoutDetail.js): who and when, the
+   headline numbers, the muscle split and every exercise's sets in a striped
+   table. Shared by the member app and the staff member page. The set rows run
+   edge to edge, so --wd-bleed is the padding of whatever holds the page. */
+.wd { --wd-bleed: 18px; display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.modal-body > .wd { --wd-bleed: 22px; margin-top: 0; }
+@media (max-width: 560px) { .modal-body > .wd { --wd-bleed: 18px; } }
+.wd-who { display: flex; align-items: center; gap: 12px; }
+.wd-avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+.wd-avatar.is-initials { display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); font-weight: 750; }
+.wd-who > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wd-who strong { font-size: 16px; font-weight: 650; }
+.wd-who span { font-size: 13px; color: var(--muted); }
+.wd-title { margin: 2px 0 0; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+.wd-notes { margin: -6px 0 0; font-size: 14px; color: var(--muted); white-space: pre-line; }
 
-.portal-wd-stats { display: flex; gap: 26px; flex-wrap: wrap; }
-.portal-wd-stat { display: flex; flex-direction: column; gap: 3px; }
-.portal-wd-stat span { font-size: 12.5px; color: var(--muted); }
-.portal-wd-stat strong { display: inline-flex; align-items: center; gap: 5px; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.portal-wd-medal { display: inline-flex; color: var(--amber); }
+.wd-stats { display: flex; gap: 26px; flex-wrap: wrap; }
+.wd-stat { display: flex; flex-direction: column; gap: 3px; }
+.wd-stat span { font-size: 12.5px; color: var(--muted); }
+.wd-stat strong { display: inline-flex; align-items: center; gap: 5px; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wd-medal { display: inline-flex; color: var(--amber); }
 
-.portal-wd-actions { display: flex; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.portal-wd-action {
+.wd-actions { display: flex; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.wd-action {
   flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 0;
   border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
 }
-.portal-wd-action:active { opacity: 0.6; }
+.wd-action:active { opacity: 0.6; }
 
-.portal-wd-section { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
-.portal-wd-label { margin: 0; font-size: 15px; font-weight: 550; color: var(--muted); }
-.portal-wd-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.portal-wd-edit { padding: 4px 0; border: 0; background: transparent; color: var(--brand); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.wd-section { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.wd-label { margin: 0; font-size: 15px; font-weight: 550; color: var(--muted); }
+.wd-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wd-edit { padding: 4px 0; border: 0; background: transparent; color: var(--brand); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
 
 /* Edit workout: the logger's cards, with a remove button where the tick was. */
 .portal-we { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
@@ -7451,33 +7722,34 @@ body[data-mode='light'] .diet-fab-layer { background: rgba(15, 23, 42, 0.35); }
 }
 .portal-set-remove:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
 .portal-set-remove:disabled { opacity: 0.35; cursor: not-allowed; }
-.portal-wd-split { display: flex; flex-direction: column; gap: 6px; }
-.portal-wd-split-name { font-size: 15px; font-weight: 550; }
-.portal-wd-split-row { display: flex; align-items: center; gap: 10px; }
-.portal-wd-split-bar {
+.wd-split { display: flex; flex-direction: column; gap: 6px; }
+.wd-split-name { font-size: 15px; font-weight: 550; }
+.wd-split-row { display: flex; align-items: center; gap: 10px; }
+.wd-split-bar {
   height: 18px; width: calc(var(--w) * 0.84); min-width: 8px; border-radius: 4px; background: var(--brand);
 }
-.portal-wd-split-pct { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wd-split-pct { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.portal-wd-ex { display: flex; flex-direction: column; margin: 4px -18px 6px; }
-.portal-wd-ex-head {
-  display: flex; align-items: center; gap: 12px; padding: 4px 18px 10px; border: 0; background: transparent;
-  text-align: left; font: inherit; cursor: pointer;
+.wd-ex { display: flex; flex-direction: column; margin: 4px calc(-1 * var(--wd-bleed)) 6px; }
+.wd-ex-head {
+  display: flex; align-items: center; gap: 12px; padding: 4px var(--wd-bleed) 10px; border: 0; background: transparent;
+  text-align: left; font: inherit; color: inherit;
 }
-.portal-wd-ex-thumb { flex: none; width: 48px; height: 48px; border-radius: 50%; overflow: hidden; border: 1px solid var(--border); background: #fff; display: grid; place-items: center; }
-.portal-wd-ex-thumb .portal-pick-thumb { width: 100%; height: 100%; border-radius: 0; object-fit: cover; }
-.portal-wd-ex-name { font-size: 17px; font-weight: 650; color: var(--brand); }
-.portal-wd-set {
-  display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 8px; padding: 12px 18px;
+button.wd-ex-head { cursor: pointer; }
+.wd-ex-thumb { flex: none; width: 48px; height: 48px; border-radius: 50%; overflow: hidden; border: 1px solid var(--border); background: #fff; color: #64748b; display: grid; place-items: center; }
+.wd-ex-thumb .portal-pick-thumb, .wd-thumb-media { width: 100%; height: 100%; border-radius: 0; object-fit: cover; }
+.wd-ex-name { font-size: 17px; font-weight: 650; color: var(--brand); }
+.wd-set {
+  display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 8px; padding: 12px var(--wd-bleed);
   font-size: 15px; font-variant-numeric: tabular-nums;
 }
-.portal-wd-set:not(.is-head):nth-child(even) { background: var(--surface-2); }
-.portal-wd-set.is-head { padding-block: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
-.portal-wd-set-no { text-align: center; font-weight: 700; }
-.portal-wd-set.is-head > span:first-child { text-align: center; }
-.portal-wd-set.t-warmup .portal-wd-set-no { color: var(--amber); }
-.portal-wd-set.t-drop .portal-wd-set-no { color: var(--blue); }
-.portal-wd-set.t-failure .portal-wd-set-no { color: var(--red); }
+.wd-set:not(.is-head):nth-child(even) { background: var(--surface-2); }
+.wd-set.is-head { padding-block: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+.wd-set-no { text-align: center; font-weight: 700; }
+.wd-set.is-head > span:first-child { text-align: center; }
+.wd-set.t-warmup .wd-set-no { color: var(--amber); }
+.wd-set.t-drop .wd-set-no { color: var(--blue); }
+.wd-set.t-failure .wd-set-no { color: var(--red); }
 
 /* ---------------------------------------------------- nutrition insights */
 
@@ -10008,7 +10280,7 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
   background: var(--brand-soft); color: var(--brand);
 }
 .nb-preview-icon .nb-pill.portal-tab-badge { position: absolute; top: -9px; right: -14px; box-shadow: 0 0 0 2px var(--surface); }
-.nb-preview-icon .nb-pill.portal-tab-badge.is-image { top: -8px; right: 1px; box-shadow: none; }
+.nb-preview-icon .nb-pill.portal-tab-badge.is-image { top: -6px; right: 3px; box-shadow: none; }
 .nb-sticker { display: inline-block; width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
 
 .nb-style { display: inline-flex; gap: 4px; padding: 4px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2, var(--bg)); }
