@@ -1,11 +1,17 @@
 import { ApiError, api, memberSession } from './api.js';
-import { h, openModal, closeModal, renderIcon, toast } from './ui.js';
+import { SETTLE_CHARS, answerTokens, plainLength } from './coachText.js';
+import { h, openModal, closeModal, renderIcon, svg, toast } from './ui.js';
 
 /**
  * Ask Coach: the member app's chat sheet, opened from the workout logger, the
  * next-set chip's "why?" and the Diet tab. The server (src/aiCoach.js) adds
  * everything it knows about the member; all the phone has to send is the
  * question and, mid-workout, the session that exists only on the phone.
+ *
+ * The sheet follows the design: what the coach can help with, the mascot and
+ * its speech bubble, then the thread on a white card, with today's macro rings
+ * under a diet answer and meal ideas to tap, and the quick prompts and the
+ * composer docked at the bottom.
  *
  * Replies are streamed, and the bubble shows the coach at work the way the big
  * assistants do: what it is reading ticks off line by line, Gemini's thinking
@@ -18,9 +24,63 @@ import { h, openModal, closeModal, renderIcon, toast } from './ui.js';
  */
 
 const QUICK_PROMPTS = {
-  workout: ['What weight for my next set?', 'How many reps should I do?', 'Suggest a swap for this exercise', 'Am I ready to go heavier?'],
-  diet: ['What should I eat next?', 'How much protein do I have left?', 'Is today on track for my goal?'],
+  workout: [
+    ['barbell', 'What weight for my next set?'],
+    ['sets', 'How many reps should I do?'],
+    ['refresh', 'Suggest a swap for this exercise'],
+    ['trendUp', 'Am I ready to go heavier?'],
+  ],
+  diet: [
+    ['utensils', 'What should I eat next?'],
+    ['barChart', 'How much protein do I have left?'],
+    ['fileText', 'Suggest a meal plan'],
+    ['target', 'Is today on track for my goal?'],
+  ],
 };
+const FEATURES = [
+  ['dumbbell', 'Personalised', 'advice', 'blue'],
+  ['apple', 'Nutrition', 'guidance', 'green'],
+  ['target', 'Workout', 'suggestions', 'blue'],
+];
+/** The diet sheet's "Recommended for you": each card asks the coach for that
+ * kind of meal, fitted to what the member has left today. */
+const MEAL_IDEAS = [
+  {
+    title: 'High Protein Meal',
+    sub: 'Chicken + Rice + Veggies',
+    art: 'food-protein-meal',
+    emoji: '🍗',
+    tone: 'peach',
+    ask: 'Give me a high-protein meal, like chicken with rice and veggies, that fits what I have left today.',
+  },
+  {
+    title: 'Quick & Healthy Snack',
+    sub: 'Greek Yogurt + Fruits',
+    art: 'food-yogurt-snack',
+    emoji: '🥣',
+    tone: 'blue',
+    ask: 'Suggest a quick healthy snack, like Greek yogurt with fruit, that fits my macros.',
+  },
+  {
+    title: 'Healthy Fats Option',
+    sub: 'Avocado + Nuts',
+    art: 'food-healthy-fats',
+    emoji: '🥑',
+    tone: 'green',
+    ask: 'Suggest a healthy-fats option, like avocado or nuts, that fits what I have left today.',
+  },
+];
+const MORE_IDEAS = 'Give me a few more meal ideas that fit what I have left today.';
+const RINGS = [
+  ['calories', 'Calories', 'flame', ' kcal'],
+  ['protein_g', 'Protein', 'leaf', 'g'],
+  ['carbs_g', 'Carbs', 'wheat', 'g'],
+  ['fats_g', 'Fats', 'droplet', 'g'],
+];
+const asset = (name) => `/images/coach/${name}.webp`;
+/** An illustration that is simply left out until its file exists. */
+const art = (name, attrs = {}) => h('img', { src: asset(name), alt: '', decoding: 'async', onerror: (e) => e.currentTarget.remove(), ...attrs });
+
 const UNAVAILABLE = 'The coach could not answer just now — try again in a moment';
 /** Gap between the "reading" lines, so they read as work being done. */
 const STEP_MS = 260;
@@ -67,6 +127,10 @@ const markNoticeSeen = () => {
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 const grow = () => activeSheet?.onGrow();
 
+/** The coach's face: the mascot once its picture loads, the sparkle until then. */
+const coachAvatar = () =>
+  h('span', { class: 'coach-avatar' }, renderIcon('sparkle', { size: 18, stroke: 2 }), art('coach-avatar', { width: 48, height: 48 }));
+
 /**
  * Gemini's thought summaries are short markdown sections, each opening with a
  * bold headline ("**Checking the last set**"). Read from the whole text so far
@@ -89,10 +153,21 @@ function thoughtSections(raw) {
   return sections;
 }
 
+/** One token of the answer (see coachText.js): a word, a bold run or a
+ * coloured number chip. `animate` gives it the fade-in. */
+function tokenNode(token, animate) {
+  const fade = animate ? ' coach-word' : '';
+  if (token.kind === 'kcal' || token.kind === 'protein') return h('span', { class: `coach-num is-${token.kind}${fade}` }, token.text);
+  if (token.kind === 'bold') return h('strong', { class: fade.trim() || null }, token.text);
+  return animate ? h('span', { class: 'coach-word' }, token.text) : document.createTextNode(token.text);
+}
+
 /**
- * Types text into `node` a word at a time, each word fading in, behind a
- * blinking caret. `push` adds streamed text (a half-arrived word waits for the
- * rest); `end` marks the text complete and resolves once it is all on screen.
+ * Types the answer into `node` a token at a time, each fading in, behind a
+ * blinking caret. `push` adds streamed text; the last few characters wait
+ * until they cannot turn into a chip or a bold run any more, so nothing on
+ * screen changes shape. `end` marks the text complete and resolves once it is
+ * all on screen.
  */
 function createTyper(node) {
   const caret = h('span', { class: 'coach-caret', 'aria-hidden': 'true' });
@@ -105,23 +180,26 @@ function createTyper(node) {
   let resolveDone;
   const finished = new Promise((resolve) => (resolveDone = resolve));
 
-  const words = () => {
-    const list = target.match(/\S+\s*/g) ?? [];
-    if (!final && list.length && !/\s$/.test(list.at(-1))) list.pop();
-    return list;
+  const ready = () => {
+    const tokens = answerTokens(target);
+    if (final) return tokens;
+    const settled = plainLength(target) - SETTLE_CHARS;
+    let n = 0;
+    while (n < tokens.length && tokens[n].end <= settled) n++;
+    return tokens.slice(0, n);
   };
   const tick = (now) => {
     raf = 0;
-    const list = words();
-    const backlog = list.length - shown;
+    const tokens = ready();
+    const backlog = tokens.length - shown;
     if (backlog > 0 && now - last >= WORD_MS) {
       const n = reducedMotion() ? backlog : Math.min(backlog, backlog > 24 ? 4 : backlog > 10 ? 2 : 1);
-      for (const word of list.slice(shown, shown + n)) caret.before(h('span', { class: 'coach-word' }, word));
+      for (const token of tokens.slice(shown, shown + n)) caret.before(tokenNode(token, true));
       shown += n;
       last = now;
       grow();
     }
-    if (shown < list.length) raf = requestAnimationFrame(tick);
+    if (shown < tokens.length) raf = requestAnimationFrame(tick);
     else if (final) resolveDone();
   };
   const kick = () => {
@@ -144,8 +222,42 @@ function createTyper(node) {
   };
 }
 
+/** Today's four macros as rings, eaten against target, under a diet answer. */
+function macroRings(diet) {
+  const R = 27;
+  const C = 2 * Math.PI * R;
+  const cards = RINGS.filter(([key]) => Number(diet?.targets?.[key]) > 0).map(([key, label, icon, unit]) => {
+    const eaten = Math.round(Number(diet.eaten?.[key]) || 0);
+    const target = Math.round(diet.targets[key]);
+    const left = C * (1 - Math.min(1, eaten / target));
+    return h(
+      'div',
+      { class: `coach-ring is-${key.replace('_g', '')}` },
+      h(
+        'div',
+        { class: 'coach-ring-dial' },
+        svg(
+          'svg',
+          { viewBox: '0 0 64 64', 'aria-hidden': 'true' },
+          svg('circle', { cx: 32, cy: 32, r: R, class: 'coach-ring-track' }),
+          svg('circle', { cx: 32, cy: 32, r: R, class: 'coach-ring-bar', 'stroke-dasharray': C, 'stroke-dashoffset': left, style: `--full: ${C}` }),
+        ),
+        h(
+          'div',
+          { class: 'coach-ring-mid' },
+          renderIcon(icon, { size: 15, stroke: 2 }),
+          h('strong', {}, unit === 'g' ? `${eaten}g` : eaten.toLocaleString()),
+          h('small', {}, `/ ${unit === 'g' ? `${target}g` : `${target.toLocaleString()} kcal`}`),
+        ),
+      ),
+      h('span', { class: 'coach-ring-label' }, label),
+    );
+  });
+  return cards.length ? h('div', { class: 'coach-rings', role: 'img', 'aria-label': 'Today’s macros against your targets' }, ...cards) : null;
+}
+
 /**
- * One coach bubble, live from the moment the question is sent. Its methods
+ * One coach reply, live from the moment the question is sent. Its methods
  * are fed the stream's events; the turn object keeps what it ends up saying.
  */
 function createCoachView(turn) {
@@ -174,12 +286,14 @@ function createCoachView(turn) {
   const answer = h('div', { class: 'coach-answer' });
   const actions = h('div', { class: 'coach-actions' });
   const bubble = h('div', { class: 'coach-msg-text is-empty' }, answer, actions);
-  const node = h(
+  const extras = h('div', { class: 'coach-extras' });
+  const row = h(
     'div',
     { class: 'coach-msg is-coach is-live', 'aria-busy': 'true' },
-    h('span', { class: 'coach-msg-icon' }, renderIcon('sparkle', { size: 14, stroke: 2 })),
+    coachAvatar(),
     h('div', { class: 'coach-msg-body' }, think, bubble),
   );
+  const node = h('div', { class: 'coach-turn' }, row, extras);
   const typer = createTyper(answer);
 
   const setOpen = (open) => {
@@ -228,6 +342,11 @@ function createCoachView(turn) {
     label.textContent = `Thought for ${thoughtFor}s`;
     if (!userToggled) setOpen(false);
   };
+  const settle = () => {
+    if (!turn.steps.length && !turn.thoughts) think.remove();
+    row.classList.remove('is-live');
+    row.removeAttribute('aria-busy');
+  };
 
   return {
     node,
@@ -270,10 +389,10 @@ function createCoachView(turn) {
       bubble.classList.remove('is-empty');
       await typer.end(reply.answer);
       Object.assign(turn, { live: false, text: reply.answer, suggestion: reply.suggestion ?? null });
-      answer.replaceChildren(reply.answer);
-      if (!turn.steps.length && !turn.thoughts) think.remove();
-      node.classList.remove('is-live');
-      node.removeAttribute('aria-busy');
+      settle();
+      answer.replaceChildren(...answerTokens(reply.answer).map((token) => tokenNode(token, false)));
+      const rings = reply.diet ? macroRings(reply.diet) : null;
+      if (rings) extras.append(rings);
       activeSheet?.paintActions(turn);
       grow();
     },
@@ -281,13 +400,11 @@ function createCoachView(turn) {
     fail(message) {
       stopThinking();
       Object.assign(turn, { live: false, error: true, text: message });
-      if (!turn.steps.length && !turn.thoughts) think.remove();
-      else label.textContent = 'Stopped';
+      if (turn.steps.length || turn.thoughts) label.textContent = 'Stopped';
+      settle();
       answer.replaceChildren(message);
       bubble.classList.remove('is-empty');
-      node.classList.remove('is-live');
-      node.classList.add('is-error');
-      node.removeAttribute('aria-busy');
+      row.classList.add('is-error');
       grow();
     },
 
@@ -313,9 +430,6 @@ export function openCoachSheet({ screen, getSession, onApply, initialQuestion, u
   let stick = true;
 
   const list = h('div', { class: 'coach-thread', 'aria-live': 'polite' });
-  list.addEventListener('scroll', () => {
-    stick = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
-  });
   const remainingNode = h('span', { class: 'coach-remaining' });
   const input = h('textarea', {
     class: 'coach-input',
@@ -327,7 +441,7 @@ export function openCoachSheet({ screen, getSession, onApply, initialQuestion, u
   const sendBtn = h(
     'button',
     { class: 'coach-send', type: 'button', 'aria-label': 'Send', title: 'Send' },
-    renderIcon('arrowUp', { size: 18, stroke: 2.4 }),
+    renderIcon('send', { size: 22, stroke: 2.2 }),
   );
 
   const paintRemaining = () => {
@@ -358,31 +472,116 @@ export function openCoachSheet({ screen, getSession, onApply, initialQuestion, u
         )
       : null;
 
-  const scrollDown = () => {
-    if (stick) list.scrollTop = list.scrollHeight;
-  };
-
   const turnNode = (turn) => {
-    if (turn.role === 'user') return h('div', { class: 'coach-msg is-user' }, turn.text);
+    if (turn.role === 'user') {
+      return h(
+        'div',
+        { class: 'coach-msg is-user' },
+        h('div', { class: 'coach-msg-text' }, turn.text),
+        h('span', { class: 'coach-user-avatar' }, renderIcon('user', { size: 18, stroke: 2 })),
+      );
+    }
     turn.view.setActions(applyButton(turn));
     return turn.view.node;
   };
 
-  const paintThread = () => {
-    list.replaceChildren(
-      ...(thread.length
-        ? thread.map(turnNode)
-        : [
-            h(
-              'div',
-              { class: 'coach-empty' },
-              h('strong', {}, screen === 'diet' ? 'Your food, your targets, one question away.' : 'Ask about the set in front of you.'),
-              h('span', {}, 'The coach sees your plan, your history and this session — no need to explain.'),
+  const chipButtons = QUICK_PROMPTS[screen].map(([icon, prompt]) =>
+    h('button', { class: 'coach-chip', type: 'button', onclick: () => send(prompt) }, renderIcon(icon, { size: 16, stroke: 2.2 }), h('span', {}, prompt)),
+  );
+  /** The chip for the question last asked stays lit, as in the design. */
+  const markChips = () => {
+    const asked = thread.findLast((turn) => turn.role === 'user')?.text;
+    chipButtons.forEach((chip, i) => chip.classList.toggle('is-on', QUICK_PROMPTS[screen][i][1] === asked));
+  };
+
+  const hint = h('p', { class: 'coach-empty' }, 'The coach sees your plan, your history and this session — no need to explain.');
+
+  const notice = noticeSeen()
+    ? null
+    : h(
+        'div',
+        { class: 'coach-notice' },
+        renderIcon('info', { size: 16 }),
+        h('span', {}, 'The coach uses your profile and your workout and diet logs to answer. Questions are processed by Google Gemini.'),
+        h(
+          'button',
+          {
+            class: 'coach-notice-ok',
+            type: 'button',
+            onclick: (event) => {
+              markNoticeSeen();
+              event.currentTarget.closest('.coach-notice')?.remove();
+            },
+          },
+          'Got it',
+        ),
+      );
+
+  const ideas =
+    screen === 'diet'
+      ? h(
+          'section',
+          { class: 'coach-ideas' },
+          h(
+            'div',
+            { class: 'coach-ideas-head' },
+            h('h3', {}, 'Recommended for you'),
+            h('button', { class: 'coach-ideas-more', type: 'button', onclick: () => send(MORE_IDEAS) }, 'See more', renderIcon('arrowRight', { size: 16, stroke: 2.2 })),
+          ),
+          h(
+            'div',
+            { class: 'coach-ideas-row' },
+            ...MEAL_IDEAS.map((idea, i) =>
+              h(
+                'button',
+                { class: `coach-idea tone-${idea.tone}`, type: 'button', onclick: () => send(idea.ask) },
+                h('span', { class: 'coach-idea-art', 'data-emoji': idea.emoji }, art(idea.art, { width: 64, height: 64, loading: 'lazy' })),
+                h('span', { class: 'coach-idea-text' }, h('strong', {}, idea.title), h('small', {}, idea.sub)),
+                h('span', { class: `coach-idea-go${i === 0 ? ' is-primary' : ''}` }, renderIcon('chevronRight', { size: 15, stroke: 2.4 })),
+              ),
             ),
-          ]),
-    );
+          ),
+        )
+      : null;
+
+  const scroller = h(
+    'div',
+    { class: 'coach-scroll' },
+    h(
+      'div',
+      { class: 'coach-pills' },
+      ...FEATURES.map(([icon, first, second, tone]) =>
+        h(
+          'div',
+          { class: `coach-pill tone-${tone}` },
+          h('span', { class: 'coach-pill-ico' }, renderIcon(icon, { size: 15, stroke: 2.2 })),
+          h('span', {}, first, h('br'), second),
+        ),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'coach-hero' },
+      h('p', { class: 'coach-hero-bubble' }, 'Got a question about food, workouts or your goals? I’m here to help! 💪'),
+      art('coach-hero', { class: 'coach-hero-art', width: 180, height: 200 }),
+    ),
+    h('div', { class: 'coach-card' }, notice, hint, list, ideas),
+  );
+  scroller.addEventListener('scroll', () => {
+    stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+  });
+
+  const scrollDown = () => {
+    if (stick) scroller.scrollTop = scroller.scrollHeight;
+  };
+
+  const paintThread = () => {
+    hint.hidden = thread.length > 0;
+    list.replaceChildren(...thread.map(turnNode));
+    markChips();
     stick = true;
-    scrollDown();
+    // Opened fresh: start at the top, with the hero. Opened mid-chat: the latest reply.
+    if (thread.length) scrollDown();
   };
 
   const sheet = {
@@ -414,8 +613,9 @@ export function openCoachSheet({ screen, getSession, onApply, initialQuestion, u
     turn.view = createCoachView(turn);
     thread.push({ role: 'user', text }, turn);
     // Appended rather than repainted, so earlier bubbles don't replay their entrance.
-    list.querySelector('.coach-empty')?.remove();
+    hint.hidden = true;
     list.append(turnNode(thread.at(-2)), turnNode(turn));
+    markChips();
     stick = true;
     scrollDown();
 
@@ -460,50 +660,35 @@ export function openCoachSheet({ screen, getSession, onApply, initialQuestion, u
     input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
   });
 
-  const notice = noticeSeen()
-    ? null
-    : h(
-        'div',
-        { class: 'coach-notice' },
-        renderIcon('info', { size: 16 }),
-        h('span', {}, 'The coach uses your profile and your workout and diet logs to answer. Questions are processed by Google Gemini.'),
-        h(
-          'button',
-          {
-            class: 'coach-notice-ok',
-            type: 'button',
-            onclick: (event) => {
-              markNoticeSeen();
-              event.currentTarget.closest('.coach-notice')?.remove();
-            },
-          },
-          'Got it',
-        ),
-      );
-
-  const chips = h(
-    'div',
-    { class: 'coach-chips' },
-    ...QUICK_PROMPTS[screen].map((prompt) => h('button', { class: 'coach-chip', type: 'button', onclick: () => send(prompt) }, prompt)),
-  );
-
   openModal({
     title: 'Ask Coach',
+    subtitle: 'Your AI fitness assistant',
     icon: 'sparkle',
-    className: 'coach-modal',
+    className: 'coach-chat-modal',
     body: h(
       'div',
       { class: 'coach-sheet' },
-      notice,
-      list,
-      chips,
-      h('div', { class: 'coach-compose' }, input, sendBtn),
-      remainingNode,
+      scroller,
+      h(
+        'div',
+        { class: 'coach-dock' },
+        h('div', { class: 'coach-chips' }, ...chipButtons),
+        h(
+          'div',
+          { class: 'coach-compose' },
+          h('label', { class: 'coach-field' }, h('span', { class: 'coach-field-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })), input),
+          sendBtn,
+        ),
+        remainingNode,
+      ),
     ),
     onClose: () => {
       if (activeSheet === sheet) activeSheet = null;
     },
   });
+  // openModal focuses the first field, which on a phone would pop the
+  // keyboard over the sheet before the member has seen it.
+  input.blur();
 
   paintThread();
   sheet.setBusy(inFlight[screen]);

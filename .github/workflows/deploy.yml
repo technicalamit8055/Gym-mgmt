@@ -15,8 +15,13 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          # Stop at the first failing command, so a failed `git pull` shows as a
+          # red run instead of restarting the old code under a green tick.
+          script_stop: true
           script: |
             cd /home/ubuntu/gymbook
-            git pull origin main
+            git pull --ff-only origin main
             npm ci --omit=dev
-            pm2 restart gymbook
+            pm2 restart gymbook --update-env
+            echo "Deployed commit: $(git log --oneline -1)"
+            pm2 list

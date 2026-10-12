@@ -36,11 +36,11 @@ export function parseRepRange(text) {
 }
 
 /** The smallest sensible jump on this kit, in the member's display unit: a
- * pair of 1.25 kg plates on a bar, the next dumbbell in the rack, the next pin
- * on a stack. */
+ * pair of 2.5 kg plates on a bar (gyms rarely have 1.25 kg ones), the next
+ * dumbbell in the rack, the next pin on a stack. */
 export function weightStep(equipment, unit = 'kg') {
   if (unit === 'lb') return equipment === 'machine' ? 10 : 5;
-  if (equipment === 'machine') return 5;
+  if (equipment === 'machine' || equipment === 'barbell' || equipment === 'smith_machine') return 5;
   if (equipment === 'kettlebell') return 4;
   return 2.5;
 }

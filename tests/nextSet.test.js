@@ -16,7 +16,8 @@ describe('parseRepRange', () => {
 
 describe('weightStep', () => {
   it('steps by kit and unit', () => {
-    assert.equal(weightStep('barbell'), 2.5);
+    assert.equal(weightStep('barbell'), 5);
+    assert.equal(weightStep('smith_machine'), 5);
     assert.equal(weightStep('dumbbell'), 2.5);
     assert.equal(weightStep('machine'), 5);
     assert.equal(weightStep('barbell', 'lb'), 5);
@@ -55,13 +56,13 @@ describe('suggestNextSet — mid-session', () => {
   it('drops a step after a failed set', () => {
     const next = suggestNextSet({ targetReps: '8-12', equipment: 'barbell', doneThisSession: [set(30, 9, { rpe: 10 })] });
     assert.equal(next.code, 'drop_failed');
-    assert.equal(next.weight_kg, 27.5);
+    assert.equal(next.weight_kg, 25);
   });
 
   it('goes up after an easy set or one past the top of the range', () => {
     const easy = suggestNextSet({ targetReps: '8-12', equipment: 'barbell', doneThisSession: [set(30, 10, { rpe: 6 })] });
     assert.equal(easy.code, 'up_easy');
-    assert.equal(easy.weight_kg, 32.5);
+    assert.equal(easy.weight_kg, 35);
     const tooMany = suggestNextSet({ targetReps: '8-12', equipment: 'machine', doneThisSession: [set(40, 15)] });
     assert.equal(tooMany.weight_kg, 45);
     assert.ok(tooMany.reps >= 8 && tooMany.reps <= 12);
@@ -95,7 +96,7 @@ describe('suggestNextSet — first set from last session', () => {
       lastSession: [set(30, 12, { rpe: 8 }), set(30, 12), set(30, 12, { rpe: 7 })],
     });
     assert.equal(next.code, 'progress');
-    assert.equal(next.weight_kg, 32.5);
+    assert.equal(next.weight_kg, 35);
     assert.ok(next.reps >= 8 && next.reps <= 12);
   });
 
@@ -113,7 +114,7 @@ describe('suggestNextSet — first set from last session', () => {
 
     const all = suggestNextSet({ targetReps: '8-12', equipment: 'barbell', lastSession: [set(30, 6), set(30, 5)] });
     assert.equal(all.code, 'reset');
-    assert.equal(all.weight_kg, 27.5);
+    assert.equal(all.weight_kg, 25);
   });
 
   it('asks for one more rep at the same weight otherwise', () => {

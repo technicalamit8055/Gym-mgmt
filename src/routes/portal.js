@@ -1646,6 +1646,9 @@ portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), req
       answer: reply.answer,
       suggestion: reply.suggestion,
       remaining_today: Math.max(0, limit - asked - 1),
+      // The figures the answer was worked from, for the macro rings under a
+      // diet answer — the same numbers the coach was given.
+      ...(screen === 'diet' && { diet: { eaten: context.diet_today.eaten, targets: context.diet_today.targets } }),
     };
   };
 
