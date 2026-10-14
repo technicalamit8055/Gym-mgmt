@@ -523,7 +523,8 @@ function pickerThumb(item) {
 }
 
 /** A Hevy-style action sheet: a column of full-width rows, each closing the
- * sheet before it runs so a follow-up dialog opens on a clean stack. */
+ * sheet before it runs so a follow-up dialog opens on a clean stack. A row's
+ * optional `hint` sits muted at its right edge. */
 function actionSheet(title, actions) {
   openModal({
     title,
@@ -545,6 +546,7 @@ function actionSheet(title, actions) {
           },
           renderIcon(action.icon, { size: 18 }),
           h('span', {}, action.label),
+          action.hint ? h('small', { class: 'portal-action-hint' }, action.hint) : null,
         ),
       ),
     ),
@@ -1828,6 +1830,9 @@ const minutesLabel = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`
 
 /** The longest session the server will store (its duration_seconds cap). */
 const MAX_SESSION_SECONDS = 86400;
+
+/** How many plans of their own a member may keep (MAX_OWN_PLANS on the server). */
+const MAX_OWN_PLANS = 20;
 
 /** How long a session has run: from its start to now — or to the moment it
  * was paused — less the time it already spent paused. */
@@ -3513,6 +3518,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
       h(
         'div',
         { class: 'qt-list-foot-actions' },
+        planPick && query.trim() ? createFromPlanButton('qt-chip-btn is-primary') : null,
         h('button', { class: 'qt-chip-btn', type: 'button', onclick: () => show('custom') }, renderIcon('edit', { size: 15 }), 'Custom food'),
         h('button', { class: 'qt-chip-btn', type: 'button', onclick: () => show('scan') }, renderIcon('scan', { size: 15 }), 'Scan barcode'),
       ),
@@ -3528,9 +3534,34 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
     planPick = { plan, item, tick };
     meal = MEAL_SLOTS.find((slot) => slot.key === planMeal.meal_type) ?? meal;
     paintMeals();
-    searchInput.value = item.food_name;
+    searchInput.value = searchTermFor(item.food_name);
     searchInput.dispatchEvent(new Event('input'));
   }
+
+  /** The plan's food as something a search can match: "Paneer (Cottage
+   * Cheese)" searches for "Paneer" — every word must match, and "(cottage"
+   * never does. */
+  const searchTermFor = (name) =>
+    name
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || name;
+
+  /** Not in the library or online, or not close enough: the plan's food as a
+   * custom food, its figures already filled in from the coach. */
+  function createFromPlan() {
+    if (!planPick) return;
+    customFrom = planPick.item;
+    show('custom');
+  }
+  const createFromPlanButton = (className) =>
+    h(
+      'button',
+      { class: className, type: 'button', onclick: createFromPlan },
+      renderIcon('sparkle', { size: 15 }),
+      'Create with plan’s nutrition',
+    );
 
   function backToPlan() {
     planPick = null;
@@ -3548,7 +3579,8 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
         'div',
         { class: 'qt-plan-pick-text' },
         h('strong', {}, `${planPick.item.food_name} · ${planPick.item.portion}`),
-        h('small', {}, `Plan says about ${planPick.item.calories} kcal, ${Math.round(planPick.item.protein_g)}g protein. Pick the closest food and set what you ate.`),
+        h('small', {}, `Plan says about ${planPick.item.calories} kcal, ${Math.round(planPick.item.protein_g)}g protein. Pick the closest food and set what you ate — or create it with the plan’s numbers.`),
+        createFromPlanButton('qt-plan-create'),
       ),
       h('button', { class: 'qt-chip-btn', type: 'button', onclick: backToPlan }, renderIcon('arrowLeft', { size: 15 }), 'Plan'),
     );
@@ -3965,6 +3997,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
   /* ── Custom view ── */
 
   const customBody = h('div', {});
+  const customNote = h('p', { class: 'qt-pane-note' });
   const customPane = h(
     'div',
     { class: 'qt-pane hidden' },
@@ -3974,21 +4007,36 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
       h('button', { class: 'qt-back', type: 'button', 'aria-label': 'Back', onclick: () => show('list') }, renderIcon('arrowLeft', { size: 19 })),
       h('span', { class: 'qt-subhead-title' }, 'Custom food'),
     ),
-    h('p', { class: 'qt-pane-note' }, 'Type the numbers for what you actually ate — the whole portion, not per 100 g.'),
+    customNote,
     customBody,
   );
-  function paintCustom() {
+  /** A meal-plan food to open the form on, filled in from the coach's
+   * figures — set just before show('custom'), used once. */
+  let customFrom = null;
+  function paintCustom(planItem = null) {
+    customNote.textContent = planItem
+      ? 'Filled in from your meal plan — the coach’s estimate for this portion. Check it, change anything, then track it.'
+      : 'Type the numbers for what you actually ate — the whole portion, not per 100 g.';
     clear(customBody).append(
       buildForm(
         [
-          { name: 'food_name', label: 'What did you eat?', required: true, full: true, placeholder: 'e.g. Cafe protein shake', value: query.trim() },
-          { name: 'calories', label: 'Calories', type: 'number', required: true, min: 0 },
-          { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1' },
-          { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1' },
-          { name: 'fats_g', label: 'Fats (g)', type: 'number', min: 0, step: '0.1' },
+          {
+            name: 'food_name',
+            label: 'What did you eat?',
+            required: true,
+            full: true,
+            placeholder: 'e.g. Cafe protein shake',
+            value: planItem?.food_name ?? query.trim(),
+          },
+          // The plan's portion rides along as the serving, so the diary reads "100 g" under it.
+          planItem ? { name: 'serving_unit', label: 'Portion', full: true, value: planItem.portion } : null,
+          { name: 'calories', label: 'Calories', type: 'number', required: true, min: 0, value: planItem?.calories },
+          { name: 'protein_g', label: 'Protein (g)', type: 'number', min: 0, step: '0.1', value: planItem?.protein_g },
+          { name: 'carbs_g', label: 'Carbs (g)', type: 'number', min: 0, step: '0.1', value: planItem?.carbs_g },
+          { name: 'fats_g', label: 'Fats (g)', type: 'number', min: 0, step: '0.1', value: planItem?.fats_g },
           { name: 'fiber_g', label: 'Fibre (g)', type: 'number', min: 0, step: '0.1' },
           { name: 'sugar_g', label: 'Sugar (g)', type: 'number', min: 0, step: '0.1' },
-        ],
+        ].filter(Boolean),
         {
           submitLabel: 'Track food',
           onSubmit: async (values) => {
@@ -4000,7 +4048,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
               fiber_g: Number(values.fiber_g || 0),
               sugar_g: Number(values.sugar_g || 0),
             };
-            const payload = { food_name: values.food_name, serving_unit: 'serving', quantity: 1, ...scaled };
+            const payload = { food_name: values.food_name, serving_unit: values.serving_unit?.trim() || 'serving', quantity: 1, ...scaled };
             await track({ id: null, name: values.food_name }, payload, scaled);
             show('list');
           },
@@ -4212,7 +4260,10 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
     paintTrackedBar();
     if (view !== 'detail') onMealChange = null;
     if (view === 'list') paintList();
-    if (view === 'custom') paintCustom();
+    if (view === 'custom') {
+      paintCustom(customFrom);
+      customFrom = null;
+    }
     if (view === 'scan') {
       clear(scanResult);
       digits.value = '';
@@ -6808,12 +6859,9 @@ function renderPortalApp(ctx, initialMe) {
     // the member picks an effort or ticks another set.
     let effortSet = null;
 
-    // Whether this gym has Ask Coach; the logger paints without it and adds
-    // the button once the status arrives.
+    // Whether this gym has Ask Coach, for the suggestion's "why?" sheet; false
+    // until the status arrives.
     let coachOn = false;
-    // One node kept across repaints, so the button can appear when the status
-    // arrives without a repaint stealing focus from a box being typed in.
-    const coachSlot = h('span', { class: 'portal-coach-slot' });
 
     /** The row the suggestion chip sits on: the first working set not yet done. */
     const suggestionIndex = (exercise) =>
@@ -7845,7 +7893,6 @@ function renderPortalApp(ctx, initialMe) {
             h(
               'div',
               { class: 'portal-session-top-actions' },
-              coachSlot,
               h(
                 'button',
                 { class: 'portal-session-more', type: 'button', title: 'Workout options', 'aria-label': 'Workout options', onclick: openSessionMenu },
@@ -7912,26 +7959,15 @@ function renderPortalApp(ctx, initialMe) {
 
     paint();
     coachStatus().then((s) => {
-      if (!s.enabled) return;
-      coachOn = true;
-      coachSlot.replaceChildren(
-        h(
-          'button',
-          {
-            class: 'portal-coach-btn',
-            type: 'button',
-            title: 'Ask Coach',
-            'aria-label': 'Ask Coach',
-            onclick: () => askCoach(),
-          },
-          renderIcon('sparkle', { size: 18, stroke: 2 }),
-        ),
-      );
+      coachOn = Boolean(s.enabled);
     });
     // The on-screen countdown takes over from the shell's alarm.
     restAlarm.disarm();
     rest.resume();
-    return body;
+    // The coach button is a sibling of the body for the same reason as the
+    // Diet tab's +: the body's entry animation would pin it to the body. It
+    // also stays out of paint(), so a repaint never rebuilds it.
+    return h('div', { class: 'portal-session-wrap' }, body, coachFab('workout', () => askCoach()));
   }
 
   /* ---------------------------------------------------- Member-built plans */
@@ -7964,8 +8000,11 @@ function renderPortalApp(ctx, initialMe) {
    * screen, not a sheet — and hands back to the Workout tab on save or cancel.
    * `plan` is a full tree to edit, or null for a new one; a new plan's
    * `activate` sets where its "Train with this plan now" switch starts.
+   * `unsaved` is for a plan handed in already changed (a workout saved as a
+   * routine): Cancel then asks first even before the member touches it.
+   * `showDay` scrolls that day into view once the editor is up.
    */
-  function openPlanEditor(plan = null) {
+  function openPlanEditor(plan = null, { unsaved = false, showDay = null } = {}) {
     stopTicking();
     // A screen it is opened from (a workout's detail) is left behind for good.
     dropScreen();
@@ -7978,7 +8017,7 @@ function renderPortalApp(ctx, initialMe) {
         : [{ day_name: 'Day 1', notes: null, exercises: [] }],
       activate: plan?.activate ?? true,
     };
-    const pristine = JSON.stringify(draft);
+    const pristine = unsaved ? null : JSON.stringify(draft);
     const body = h('div', { class: 'portal-tab-body portal-pe' });
     const leave = () => switchTab('workout');
 
@@ -8338,6 +8377,8 @@ function renderPortalApp(ctx, initialMe) {
     paint();
     clear(content).append(body);
     content.scrollTop = 0;
+    // scrollIntoView rather than scrollTop: on a phone the document scrolls, not `content`.
+    if (showDay !== null) body.querySelectorAll('.portal-pe-day')[showDay]?.scrollIntoView({ block: 'start' });
   }
 
   /** Points the Workout tab at a plan: one of the member's own, or null for
@@ -9024,10 +9065,9 @@ function renderPortalApp(ctx, initialMe) {
       startWorkoutSession({ name: log.workout_name, day: { exercises }, previous, lastSession });
     };
 
-    /** Hevy's "Save as Routine": the routine builder, filled in from this
-     * session — one day, each exercise's working sets and the reps it hit.
-     * Nothing is saved until the member taps Save there. */
-    const saveAsRoutine = () => {
+    /** This session as one plan day: each exercise's working sets and the
+     * reps it hit. */
+    const routineDay = () => {
       const exercises = [...byExercise].slice(0, 30).map(([name, sets]) => {
         const type = loggedTypeOf(sets[0], sets);
         const working = sets.filter((set) => set.set_type !== 'warmup');
@@ -9056,14 +9096,65 @@ function renderPortalApp(ctx, initialMe) {
           rest_seconds: type === 'distance_duration' ? 0 : 90,
         };
       });
-      openPlanEditor({
-        name: log.workout_name.slice(0, 100),
-        description: null,
-        // A past session saved for later shouldn't take over the Workout tab
-        // unless the member flips the switch.
-        activate: false,
-        days: [{ day_name: log.workout_name.slice(0, 120), notes: null, exercises }],
-      });
+      return { day_name: log.workout_name.slice(0, 120), notes: null, exercises };
+    };
+
+    const saveAsNewPlan = () =>
+      openPlanEditor(
+        {
+          name: log.workout_name.slice(0, 100),
+          description: null,
+          // A past session saved for later shouldn't take over the Workout tab
+          // unless the member flips the switch.
+          activate: false,
+          days: [routineDay()],
+        },
+        { unsaved: true },
+      );
+
+    /** The session as one more day at the end of a plan the member already
+     * has, opened in the builder to check before Save. */
+    const addToPlan = async (planId) => {
+      try {
+        const plan = await api.portal.routine(planId);
+        openPlanEditor({ ...plan, days: [...plan.days, routineDay()] }, { unsaved: true, showDay: plan.days.length });
+        toast(`Added as day ${plan.days.length + 1} — tap Save to keep it`);
+      } catch (err) {
+        toast(err.message || 'Could not open that plan', 'error');
+      }
+    };
+
+    /** Hevy's "Save as Routine", with a choice of where it goes: a new plan,
+     * or a new day in one of the member's own. A trainer's plan isn't the
+     * member's to change, so it isn't offered. Nothing is saved until the
+     * member taps Save in the builder. */
+    const saveAsRoutine = async () => {
+      let routines;
+      try {
+        routines = await api.portal.routines();
+      } catch (err) {
+        toast(err.message || 'Could not load your plans', 'error');
+        return;
+      }
+      if (!routines.items.length) return saveAsNewPlan();
+      const full = routines.items.length >= MAX_OWN_PLANS;
+      actionSheet('Save to', [
+        {
+          icon: 'plus',
+          label: 'New plan',
+          hint: full ? `${MAX_OWN_PLANS} plans max` : null,
+          disabled: full,
+          onClick: saveAsNewPlan,
+        },
+        ...routines.items.map((plan) => ({
+          icon: 'list',
+          label: plan.name,
+          // A plan is a week: seven days and it's full.
+          hint: plan.day_count >= 7 ? 'Full' : daysLabel(plan.day_count),
+          disabled: plan.day_count >= 7,
+          onClick: () => addToPlan(plan.id),
+        })),
+      ]);
     };
 
     const more = h(
@@ -9682,39 +9773,18 @@ function renderPortalApp(ctx, initialMe) {
       ),
     );
 
-    // Ask Coach, for today only — the coach reads today's food against the
-    // targets, so on a past day its answer would be about the wrong day.
-    if (logDate === today()) {
-      const coachSlot = h('div', { class: 'portal-coach-slot' });
-      body.append(coachSlot);
-      coachStatus().then((s) => {
-        if (!s.enabled) return;
-        coachSlot.replaceChildren(
-          h(
-            'button',
-            {
-              class: 'portal-coach-cta',
-              type: 'button',
-              onclick: () =>
-                openCoachSheet({
-                  screen: 'diet',
-                  unit: weightUnit.get(),
-                  weightLabel,
-                  // "Track foods" on a meal plan: the coach makes way for
-                  // Quick track, open on that plan.
-                  onTrackPlan: (saved) => {
-                    closeModal();
-                    openFoodSearch({ logDate, onAdded: reload, startTab: 'plans', openPlanId: saved.id });
-                  },
-                }),
-            },
-            h('span', { class: 'portal-coach-cta-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })),
-            h('span', { class: 'portal-coach-cta-text' }, h('strong', {}, 'Ask Coach'), h('span', {}, 'What should I eat next?')),
-            renderIcon('chevronRight', { size: 16 }),
-          ),
-        );
+    const askCoach = () =>
+      openCoachSheet({
+        screen: 'diet',
+        unit: weightUnit.get(),
+        weightLabel,
+        // "Track foods" on a meal plan: the coach makes way for Quick track,
+        // open on that plan.
+        onTrackPlan: (saved) => {
+          closeModal();
+          openFoodSearch({ logDate, onAdded: reload, startTab: 'plans', openPlanId: saved.id });
+        },
       });
-    }
 
     // Where today's numbers come from, and the way into Diet settings.
     const planRow = (() => {
@@ -10100,8 +10170,50 @@ function renderPortalApp(ctx, initialMe) {
 
     // A sibling of the tab body rather than inside it: the body's entry
     // animation transforms it, and a transformed ancestor would pin the
-    // fixed-position button to the body instead of the screen.
-    return h('div', { class: 'portal-diet-wrap' }, body, dietFab({ logDate, onAdded: reload }));
+    // fixed-position button to the body instead of the screen. Ask Coach is
+    // for today only — the coach reads today's food against the targets, so
+    // on a past day its answer would be about the wrong day.
+    return h(
+      'div',
+      { class: 'portal-diet-wrap' },
+      body,
+      logDate === today() ? coachFab('diet', askCoach) : null,
+      dietFab({ logDate, onAdded: reload }),
+    );
+  }
+
+  // Screens whose coach button has already shown its label this visit.
+  const coachPeeked = new Set();
+
+  /**
+   * Ask Coach as a floating button, so the coach is one tap away however far
+   * down the screen is scrolled. The slot stays empty unless this gym has the
+   * coach. The first time a screen shows it, its label slides out for a few
+   * seconds so the member knows what the face is.
+   */
+  function coachFab(screen, onOpen) {
+    const slot = h('div', { class: 'coach-fab-slot' });
+    coachStatus().then((s) => {
+      if (!s.enabled) return;
+      const peek = !coachPeeked.has(screen);
+      coachPeeked.add(screen);
+      slot.replaceChildren(
+        h(
+          'button',
+          { class: `coach-fab${peek ? ' peek' : ''}`, type: 'button', title: 'Ask Coach', 'aria-label': 'Ask Coach', onclick: onOpen },
+          h('span', { class: 'coach-fab-label', 'aria-hidden': 'true' }, 'Ask Coach'),
+          h(
+            'span',
+            { class: 'coach-fab-face' },
+            renderIcon('sparkle', { size: 24, stroke: 2 }),
+            // The sparkle stands in until the face loads, or if it never does.
+            h('img', { src: '/images/coach/coach-avatar.webp', alt: '', decoding: 'async', onerror: (e) => e.currentTarget.remove() }),
+          ),
+          h('span', { class: 'coach-fab-badge' }, renderIcon('sparkle', { size: 11, stroke: 2.6 })),
+        ),
+      );
+    });
+    return slot;
   }
 
   /**

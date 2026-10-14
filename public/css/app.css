@@ -6582,29 +6582,10 @@ button.portal-set-prev:hover { color: var(--brand); }
 /* Answered: a small tag under the Previous column, beside the 1RM pill. */
 .portal-set-effort-tag { grid-column: 2; justify-self: center; height: 20px; padding: 0 9px; font-size: 11px; }
 
-/* Ask Coach entry points. The slot keeps one node across logger repaints. */
+/* Create with AI's slot on the Workout tab; the floating Ask Coach button is
+   under "coach floating button". */
 .portal-coach-slot { display: contents; }
 .portal-session-top-actions { display: flex; align-items: center; gap: 4px; flex: none; }
-.portal-coach-btn {
-  flex: none; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--border));
-  background: color-mix(in srgb, var(--brand) 12%, var(--surface-2)); color: var(--brand);
-  transition: background 0.15s ease;
-}
-.portal-coach-btn:hover { background: color-mix(in srgb, var(--brand) 20%, var(--surface-2)); }
-.portal-coach-cta {
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  padding: 12px 14px; border-radius: 18px; text-align: left; font: inherit; cursor: pointer; color: var(--muted);
-  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
-  background: color-mix(in srgb, var(--brand) 7%, var(--surface));
-}
-.portal-coach-cta:hover { border-color: var(--brand); }
-.portal-coach-cta-ico {
-  flex: none; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
-  background: var(--brand-soft); color: var(--brand);
-}
-.portal-coach-cta-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; }
-.portal-coach-cta-text strong { color: var(--text); font-size: 14px; }
 
 @font-face {
   font-family: 'Patrick Hand';
@@ -7764,6 +7745,91 @@ button.portal-set-prev:hover { color: var(--brand); }
   color: #94a3b8;
 }
 
+/* Voice: the mic shares Send's spot (one shows at a time), and while it
+   records the field turns into a red recording bar with a live level dot. */
+.coach-compose > [hidden] { display: none; }
+.coach-mic {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: #ffffff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+  transition: transform 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.coach-mic:active { transform: scale(0.92); }
+.coach-mic.is-recording { background: #16a34a; box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4); }
+/* Writing it down: a ring chases round the mic until the words arrive. */
+.coach-mic.is-writing { cursor: progress; }
+.coach-mic.is-writing::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  border-top-color: #7c3aed;
+  animation: coach-mic-spin 0.8s linear infinite;
+}
+@keyframes coach-mic-spin { to { transform: rotate(360deg); } }
+.coach-rec {
+  --level: 0;
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 4px;
+  border-radius: 999px;
+  background: #fef2f2;
+  border: 1.5px solid #fecaca;
+}
+.coach-rec-cancel {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.coach-rec-cancel:hover { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
+.coach-rec-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #dc2626;
+  /* Swells with the voice, so the member can see the mic hears them. */
+  box-shadow: 0 0 0 calc(var(--level) * 7px) rgba(220, 38, 38, 0.22);
+  transition: box-shadow 0.08s linear;
+}
+.coach-rec-time { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: #0f172a; }
+.coach-rec-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
+  font-size: 12.5px;
+  color: #94a3b8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .coach-mic.is-writing::after { animation-duration: 2.4s; }
+  .coach-rec-dot { transition: none; }
+}
+
 /* The composer textarea sits inside the pill-shaped .coach-field, which draws
    the border and focus ring. The global textarea:focus rule outranks
    .coach-input and would paint a second, brand-coloured box inside the pill. */
@@ -8042,6 +8108,17 @@ body:not([data-mode='light']) .coach-field .coach-input::placeholder {
 body:not([data-mode='light']) .coach-remaining {
   color: var(--muted);
 }
+body:not([data-mode='light']) .coach-rec {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+body:not([data-mode='light']) .coach-rec-time {
+  color: var(--text);
+}
+body:not([data-mode='light']) .coach-rec-cancel,
+body:not([data-mode='light']) .coach-rec-hint {
+  color: var(--muted);
+}
 
 @media (max-width: 480px) {
   .modal.coach-chat-modal {
@@ -8185,6 +8262,9 @@ body:not([data-mode='light']) .coach-remaining {
 .portal-pe-notes { resize: vertical; min-height: 44px; font: inherit; font-size: 14px; }
 .portal-pe-day {
   display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  /* Clear of the app bar and the editor's sticky Cancel/Save bar when a day
+     is scrolled to (a workout saved into a plan). */
+  scroll-margin-top: 160px;
   border-radius: 20px; border: 1px solid var(--border);
   background: color-mix(in srgb, var(--brand) 3%, var(--surface));
   box-shadow: var(--shadow-sm), inset 0 1px 0 var(--hairline);
@@ -8247,6 +8327,8 @@ body:not([data-mode='light']) .coach-remaining {
 .portal-action-row:hover { background: var(--surface-2); }
 .portal-action-row.danger, .portal-action-row.danger svg { color: var(--red); }
 .portal-action-row:disabled { opacity: 0.45; cursor: not-allowed; }
+.portal-action-row > span { min-width: 0; overflow-wrap: anywhere; }
+.portal-action-hint { flex: none; margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 500; }
 
 /* The session clock's Duration sheet. */
 .portal-duration-sheet { display: flex; flex-direction: column; gap: 6px; }
@@ -8936,6 +9018,13 @@ body:not([data-mode='light']) .portal-add-food { border-color: color-mix(in srgb
 .qt-plan-pick-text strong { font-size: 13.5px; overflow-wrap: anywhere; }
 .qt-plan-pick-text small { font-size: 12px; line-height: 1.35; color: var(--muted); }
 .qt-plan-pick .qt-chip-btn { flex: none; height: 32px; padding: 0 11px; }
+.qt-plan-create {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; padding: 0;
+  border: none; background: none; color: var(--brand); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.qt-plan-create:hover { text-decoration: underline; }
+.qt-chip-btn.is-primary { border-color: var(--brand); background: var(--brand); color: #fff; }
+.qt-chip-btn.is-primary:hover { color: #fff; filter: brightness(1.05); }
 
 .qt-skel { display: flex; flex-direction: column; gap: 7px; padding: 15px 4px; border-bottom: 1px solid var(--border); }
 .qt-skel i {
@@ -9080,6 +9169,65 @@ body[data-mode='light'] .diet-fab-layer { background: rgba(15, 23, 42, 0.35); }
 @media (prefers-reduced-motion: reduce) {
   .qt-skel i, .qt-tracked { animation: none; }
   .diet-fab svg, .diet-fab-menu, .diet-fab-layer { transition: none; }
+}
+
+/* ------------------------------------------------ coach floating button */
+
+/* The coach's face in a brand-gradient ring, bottom right on the Workout
+   logger and stacked over the + on Diet. Pinned like .diet-fab: to the
+   screen on a phone, to the phone frame on a wide screen. Under the + menu's
+   dimming layer (z 45), so an open menu covers it. */
+.coach-fab {
+  position: fixed; z-index: 44; right: calc(18px + var(--safe-right)); bottom: calc(100px + var(--safe-bottom));
+  width: 54px; height: 54px; padding: 3px; border: none; border-radius: 50%; cursor: pointer;
+  background: conic-gradient(from 200deg, var(--brand), #8b5cf6, #38bdf8, var(--brand));
+  box-shadow: 0 12px 28px -10px #8b5cf6, 0 4px 12px rgba(0, 0, 0, 0.26);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.2s var(--ease), bottom 0.25s var(--ease);
+}
+@media (min-width: 640px) { .coach-fab { position: absolute; } }
+.coach-fab:active { transform: scale(0.93); }
+.coach-fab-face {
+  position: relative; display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden;
+  border-radius: 50%; border: 2px solid var(--surface); background: #e0f2fe; color: #2563eb;
+}
+.coach-fab-face img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* The sparkle badge: the "this is AI" mark. */
+.coach-fab-badge {
+  position: absolute; top: -3px; right: -3px; width: 21px; height: 21px; border-radius: 50%;
+  display: grid; place-items: center; border: 2px solid var(--bg);
+  background: linear-gradient(135deg, #8b5cf6, var(--brand)); color: #fff;
+}
+/* Slides out to the left on the first showing, and on hover with a mouse. */
+.coach-fab-label {
+  position: absolute; right: calc(100% + 10px); top: 50%;
+  padding: 7px 12px; border-radius: 999px; white-space: nowrap; pointer-events: none;
+  font-size: 13.5px; font-weight: 700; color: var(--text);
+  background: var(--surface); border: 1px solid color-mix(in srgb, #8b5cf6 35%, var(--border)); box-shadow: var(--shadow-lg);
+  opacity: 0; transform: translate(8px, -50%); transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.coach-fab.peek .coach-fab-label { animation: coach-fab-peek 4.2s var(--ease) 0.5s backwards; }
+@keyframes coach-fab-peek {
+  0% { opacity: 0; transform: translate(8px, -50%); }
+  8%, 88% { opacity: 1; transform: translate(0, -50%); }
+  100% { opacity: 0; transform: translate(8px, -50%); }
+}
+@media (hover: hover) {
+  .coach-fab:hover .coach-fab-label { opacity: 1; transform: translate(0, -50%); }
+}
+
+/* Workout: room under Add exercise, and lifted clear of the rest timer
+   (96px up, about 84px tall) while one is counting. */
+.portal-session-wrap:has(.coach-fab) > .portal-session { padding-bottom: 66px; }
+.portal-session-wrap:has(.portal-rest-timer:not(.hidden)) .coach-fab { bottom: calc(192px + var(--safe-bottom)); }
+/* Diet: centred over the 58px + with a 14px gap, and more room under the
+   last meal card for the taller stack. */
+.portal-diet-wrap .coach-fab { right: calc(20px + var(--safe-right)); bottom: calc(172px + var(--safe-bottom)); }
+.portal-diet-wrap:has(.coach-fab) > .portal-diet { padding-bottom: 136px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .coach-fab, .coach-fab-label { transition: none; }
+  .coach-fab.peek .coach-fab-label { animation: none; }
 }
 
 /* ------------------------------------------------- budget, fibre, sugar */

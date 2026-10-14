@@ -18,7 +18,7 @@ const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
 const { closeRegistryDb } = await import('../src/tenants.js');
 const { config } = await import('../src/config.js');
-const { cleanMealPlan, contextSteps, parsePlanReply, parseReply, partialAnswer, sanitiseSession, setAiClientForTests } = await import(
+const { cleanMealPlan, contextSteps, parsePlanReply, parseReply, parseTranscript, partialAnswer, sanitiseSession, setAiClientForTests } = await import(
   '../src/aiCoach.js'
 );
 const { today } = await import('../src/validate.js');
@@ -51,6 +51,8 @@ const fake = {
   thoughts: [],
   fail: false,
   failMidStream: false,
+  busyOnce: false,
+  replies: [],
   models: {
     generateContentStream: async (params) => {
       fake.calls.push(params);
@@ -67,6 +69,14 @@ const fake = {
     generateContent: async (params) => {
       fake.calls.push(params);
       if (fake.fail) throw new Error('vertex down');
+      if (fake.busyOnce) {
+        fake.busyOnce = false;
+        throw Object.assign(new Error('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}'), { status: 429 });
+      }
+      // A queue of replies, one per call, for flows that make more than one.
+      if (fake.replies.length) {
+        return { text: fake.replies.shift(), usageMetadata: { promptTokenCount: 1500, candidatesTokenCount: 60, thoughtsTokenCount: 40 } };
+      }
       return { text: fake.reply, usageMetadata: { promptTokenCount: 1500, candidatesTokenCount: 60, thoughtsTokenCount: 40 } };
     },
   },
@@ -126,6 +136,8 @@ beforeEach(() => {
   fake.thoughts = [];
   fake.fail = false;
   fake.failMidStream = false;
+  fake.busyOnce = false;
+  fake.replies = [];
   fake.reply = JSON.stringify({ answer: 'Drop to 15 kg and aim for 12.' });
 });
 
@@ -662,5 +674,168 @@ describe('Ask Coach helpers', () => {
     assert.equal(clean.workout_name.length, 80);
     assert.deepEqual(clean.exercises[0].sets[0], { type: 'normal', kg: 0, reps: 0, rpe: 10, done: true });
     assert.equal(sanitiseSession('nope'), null);
+  });
+});
+
+describe('Coach voice questions', () => {
+  // A member of their own, so the daily counts above are left alone.
+  let voiceToken;
+  let voiceMemberId;
+  // Any bytes do: the fake Gemini never listens.
+  const audio = Buffer.from('fake opus clip').toString('base64');
+  const transcribe = (body, token = voiceToken) => call('POST', '/api/portal/coach/transcribe', body, { token });
+
+  before(async () => {
+    const member = await call('POST', '/api/members', { first_name: 'Rohit', last_name: 'Jain', phone: '9876500031' }, { token: adminToken });
+    voiceMemberId = member.body.id;
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    voiceToken = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+  });
+
+  /** The member's logged clips, newest first, read from the gym's own database. */
+  const clipRows = async (memberId = voiceMemberId) => {
+    const { all, tenantStorage } = await import('../src/db.js');
+    const { tenantDbPath } = await import('../src/tenants.js');
+    return tenantStorage.run({ dbFile: tenantDbPath(TENANT), businessType: 'gym' }, () =>
+      all('SELECT * FROM ai_voice_transcriptions WHERE member_id = ? ORDER BY id DESC', [memberId]),
+    );
+  };
+
+  it('writes a spoken question down — Hinglish in Roman letters — without counting it', async () => {
+    fake.reply = JSON.stringify({ text: '  bhai next set mein\n kitna weight lagaun? ' });
+    const res = await transcribe({ audio, mime_type: 'audio/webm;codecs=opus', screen: 'workout' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { text: 'bhai next set mein kitna weight lagaun?' });
+
+    const params = fake.calls[0];
+    assert.deepEqual(params.contents[0].parts[0], { inlineData: { mimeType: 'audio/webm', data: audio } });
+    assert.match(params.config.systemInstruction, /Hinglish/);
+    assert.match(params.config.systemInstruction, /never translate/);
+
+    // Not a question: nothing saved, nothing used up.
+    const status = await call('GET', '/api/portal/coach/status', undefined, { token: voiceToken });
+    assert.equal(status.body.remaining_today, 3);
+  });
+
+  it('hands back an empty text when nothing was said', async () => {
+    fake.reply = JSON.stringify({ text: '' });
+    const res = await transcribe({ audio, mime_type: 'audio/mp4', screen: 'diet' });
+    assert.deepEqual(res.body, { text: '' });
+    assert.match(fake.calls[0].contents[0].parts[1].text, /food/);
+  });
+
+  it('refuses an unknown format, a missing or oversized clip and an unknown screen without calling Gemini', async () => {
+    assert.equal((await transcribe({ audio, mime_type: 'video/mp4' })).status, 400);
+    assert.equal((await transcribe({ audio: '', mime_type: 'audio/webm' })).status, 400);
+    assert.equal((await transcribe({ audio: 'not base64!', mime_type: 'audio/webm' })).status, 400);
+    assert.equal((await transcribe({ audio: 'A'.repeat(3 * 1024 * 1024), mime_type: 'audio/webm' })).status, 400);
+    assert.equal((await transcribe({ audio, mime_type: 'audio/webm', screen: 'store' })).status, 400);
+    assert.equal(fake.calls.length, 0);
+  });
+
+  it('is a 502 when Gemini fails or does not reply with the JSON asked for', async () => {
+    fake.fail = true;
+    const down = await transcribe({ audio, mime_type: 'audio/ogg' });
+    assert.equal(down.status, 502);
+    assert.equal(down.body.details.code, 'coach_unavailable');
+    fake.fail = false;
+    fake.reply = 'bhai next set?';
+    assert.equal((await transcribe({ audio, mime_type: 'audio/ogg' })).status, 502);
+  });
+
+  it('tries once more when Vertex is busy', async () => {
+    fake.busyOnce = true;
+    fake.reply = JSON.stringify({ text: 'aaj kitna cardio karun?' });
+    const res = await transcribe({ audio, mime_type: 'audio/webm' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.text, 'aaj kitna cardio karun?');
+    assert.equal(fake.calls.length, 2);
+  });
+
+  it('rewrites Hindi that came back in Devanagari into Roman letters', async () => {
+    fake.replies = [
+      JSON.stringify({ text: 'आज मेरा protein बहुत कम हुआ है, dinner में क्या खाऊं?' }),
+      JSON.stringify({ text: 'Aaj mera protein bahut kam hua hai, dinner mein kya khaun?' }),
+    ];
+    const res = await transcribe({ audio, mime_type: 'audio/webm', screen: 'diet' });
+    assert.equal(res.body.text, 'Aaj mera protein bahut kam hua hai, dinner mein kya khaun?');
+    assert.equal(fake.calls.length, 2);
+    // The second call is text only: the Devanagari, no audio.
+    assert.deepEqual(fake.calls[1].contents[0].parts, [{ text: 'आज मेरा protein बहुत कम हुआ है, dinner में क्या खाऊं?' }]);
+    assert.match(fake.calls[1].config.systemInstruction, /never translate/);
+  });
+
+  it('keeps the Devanagari when the rewrite fails', async () => {
+    fake.replies = [JSON.stringify({ text: 'कितने reps?' }), 'not json'];
+    const res = await transcribe({ audio, mime_type: 'audio/webm' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.text, 'कितने reps?');
+  });
+
+  it('logs each clip written down — its size and tokens, never the words', async () => {
+    fake.reply = JSON.stringify({ text: 'kal leg day hai, aaj kya karun?' });
+    await transcribe({ audio, mime_type: 'audio/ogg;codecs=opus', screen: 'diet' });
+    const [row] = await clipRows();
+    assert.equal(row.screen, 'diet');
+    assert.equal(row.mime_type, 'audio/ogg');
+    assert.equal(row.audio_bytes, Math.round(audio.length * 0.75));
+    assert.equal(row.heard, 1);
+    assert.equal(row.input_tokens, 1500);
+    assert.equal(row.output_tokens, 100);
+    assert.ok(!JSON.stringify(row).includes('leg day'));
+
+    fake.reply = JSON.stringify({ text: '' });
+    await transcribe({ audio, mime_type: 'audio/webm' });
+    assert.equal((await clipRows())[0].heard, 0);
+  });
+
+  it('counts the Devanagari rewrite’s tokens with the clip’s', async () => {
+    fake.replies = [JSON.stringify({ text: 'कितने sets?' }), JSON.stringify({ text: 'kitne sets?' })];
+    await transcribe({ audio, mime_type: 'audio/webm' });
+    const [row] = await clipRows();
+    assert.equal(row.input_tokens, 3000);
+    assert.equal(row.output_tokens, 200);
+  });
+
+  it('stops at its own daily cap, and a failed clip does not count', async () => {
+    // A member of their own: the clips above already fill this minute's burst allowance.
+    const member = await call('POST', '/api/members', { first_name: 'Kabir', last_name: 'Sen', phone: '9876500032' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    const token = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+
+    fake.reply = JSON.stringify({ text: 'kitna cardio?' });
+    assert.equal((await transcribe({ audio, mime_type: 'audio/webm' }, token)).status, 200);
+    fake.fail = true;
+    assert.equal((await transcribe({ audio, mime_type: 'audio/webm' }, token)).status, 502);
+    fake.fail = false;
+    assert.equal((await clipRows(member.body.id)).length, 1);
+
+    fake.calls = [];
+    const cap = config.aiCoach.voiceDailyLimit;
+    config.aiCoach.voiceDailyLimit = 1;
+    try {
+      const capped = await transcribe({ audio, mime_type: 'audio/webm' }, token);
+      assert.equal(capped.status, 429);
+      assert.equal(capped.body.details.code, 'voice_limit_reached');
+      assert.equal(fake.calls.length, 0);
+    } finally {
+      config.aiCoach.voiceDailyLimit = cap;
+    }
+  });
+
+  it('stops once the day’s questions are used up', async () => {
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await call('POST', '/api/portal/coach/ask', { question: `Q${i}?` }, { token: voiceToken })).status, 200);
+    }
+    const capped = await transcribe({ audio, mime_type: 'audio/webm' });
+    assert.equal(capped.status, 429);
+    assert.equal(capped.body.details.code, 'coach_limit_reached');
+  });
+
+  it('keeps a transcript to one line no longer than a typed question', () => {
+    const fenced = `\`\`\`json\n${JSON.stringify({ text: 'aaj\n dinner mein   kya khaun?' })}\n\`\`\``;
+    assert.equal(parseTranscript(fenced), 'aaj dinner mein kya khaun?');
+    assert.equal(parseTranscript(JSON.stringify({ text: 'x'.repeat(900) })).length, 500);
+    assert.throws(() => parseTranscript('{"answer":"hi"}'));
   });
 });

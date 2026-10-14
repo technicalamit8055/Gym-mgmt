@@ -7,6 +7,7 @@ import { HttpError, badRequest, conflict, notFound, paymentRequired, tooManyRequ
 import {
   COACH_SCREENS,
   MAX_QUESTION_LENGTH,
+  MAX_VOICE_BYTES,
   PLAN_EQUIPMENT,
   PLAN_FOCUS,
   PLAN_GOALS,
@@ -22,6 +23,9 @@ import {
   questionsToday,
   recentTurns,
   streamCoach,
+  transcribeVoice,
+  VOICE_MIME_TYPES,
+  voiceClipsToday,
 } from '../aiCoach.js';
 import { attachCatalogToExercises, listMuscleGroups } from '../exerciseCatalog.js';
 import {
@@ -1705,6 +1709,72 @@ portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), req
     }
   }
   res.end();
+});
+
+/** Voice questions get their own burst guard: a clip that came out wrong is
+ * recorded again, so a few in a minute is normal — a stream of them is not. */
+const voiceBurstLimiter = createLimiter({ maxAttempts: 10, windowMs: 60_000, lockoutMs: 60_000 });
+
+/**
+ * A spoken question written out for the composer, in whatever language it was
+ * spoken — Hindi and Hinglish in Roman letters (src/aiCoach.js). The phone
+ * sends the clip as base64 with its type. It is not a question: the member
+ * checks the words and sends them, and only that counts. Each clip written
+ * down is logged (size and tokens, never the audio or the words) against its
+ * own daily cap. Refused once the day's questions are used up, since the
+ * words could not be sent anyway.
+ */
+portalRoutes.post('/coach/transcribe', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, async (req, res) => {
+  if (!coachEnabled()) throw new HttpError(503, 'The coach is not available at this gym', { code: 'ai_disabled' });
+
+  const mimeType = String(req.body?.mime_type ?? '').split(';')[0].trim().toLowerCase();
+  const audio = String(req.body?.audio ?? '');
+  const screen = String(req.body?.screen ?? 'workout');
+  if (!VOICE_MIME_TYPES.includes(mimeType)) {
+    throw badRequest('This phone recorded in a format the coach cannot read — type the question instead', {
+      mime_type: `must be one of ${VOICE_MIME_TYPES.join(', ')}`,
+    });
+  }
+  if (!audio || !/^[A-Za-z0-9+/]+={0,2}$/.test(audio)) throw badRequest('Record a question first', { audio: 'must be base64 audio' });
+  if (audio.length * 0.75 > MAX_VOICE_BYTES) {
+    throw badRequest('Keep voice questions under a minute', { audio: 'is too long' });
+  }
+  if (!COACH_SCREENS.includes(screen)) throw badRequest('Unknown screen', { screen: `must be one of ${COACH_SCREENS.join(', ')}` });
+
+  const limit = config.aiCoach.dailyLimit;
+  if (questionsToday(req.member.id) >= limit) {
+    throw tooManyRequests(`That's your ${limit} coach questions for today — ask again tomorrow`, { code: 'coach_limit_reached' });
+  }
+  const voiceLimit = config.aiCoach.voiceDailyLimit;
+  if (voiceClipsToday(req.member.id) >= voiceLimit) {
+    throw tooManyRequests(`That's your ${voiceLimit} voice questions for today — type your question instead`, {
+      code: 'voice_limit_reached',
+    });
+  }
+  const burstKey = `${req.tenant?.slug ?? ''}:${req.member.id}`;
+  const burst = voiceBurstLimiter.check(burstKey);
+  if (burst.locked) {
+    throw tooManyRequests(`Slow down a little — try again in ${burst.retryAfterSeconds}s`, { code: 'coach_burst' });
+  }
+  voiceBurstLimiter.recordAttempt(burstKey);
+
+  let result;
+  try {
+    result = await transcribeVoice({ audio, mimeType, screen });
+  } catch (err) {
+    console.error('Coach voice transcription failed:', err?.message ?? err);
+    throw new HttpError(502, 'Could not make out that recording — try again or type it', { code: 'coach_unavailable' });
+  }
+  const audioBytes = Math.round(audio.length * 0.75);
+  run(
+    `INSERT INTO ai_voice_transcriptions (member_id, screen, mime_type, audio_bytes, heard, input_tokens, output_tokens)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [req.member.id, screen, mimeType, audioBytes, result.text ? 1 : 0, result.input_tokens, result.output_tokens],
+  );
+  // Only the clip's shape, never what was said: enough to tell a silent mic
+  // (a tiny clip) or an unusual recorder from Gemini mishearing.
+  if (!result.text) console.warn(`Coach voice: nothing heard in a ${Math.round(audioBytes / 1024)} KB ${mimeType} clip`);
+  res.json({ text: result.text });
 });
 
 /** The generator sheet's starting answers, from what the member already told

@@ -67,12 +67,12 @@ How to answer:
 - When you recommend a specific next set for one exercise in the session, also fill "suggestion" with that exercise's exact name, the weight in kilograms and the reps. Leave it out for anything else.
 - Be conservative around anything listed under limitations and around pain: suggest a lighter or alternative movement and seeing a trainer or doctor. Never diagnose or treat medical conditions, and never recommend drugs, supplements beyond basics like protein or creatine, or extreme diets.
 - Stay on fitness, exercise, recovery and nutrition. Politely decline anything else.
-- Answer in the language the member writes in.
+- Answer in the language the member writes in. Many members write Hinglish — Hindi in Roman letters mixed with English ("bhai next set mein kitna weight lagaun?"); answer them in the same casual Hinglish in Roman letters, keeping exercise names, units and numbers in English.
 
 Meal plans — you can and should make them. Whenever the member asks for a meal plan, a diet for the day, what to eat, or a meal or snack idea, fill "meal_plan"; the app shows it as a card they can save and then track food by food from the food library. Never say you cannot make a meal plan.
 - Scope: "a meal plan" or "rest of today" covers the meals still to come today, fitted to what is left (targets minus eaten; skip meal types in "meals_logged"). If nothing is eaten yet, or they ask for a full day or tomorrow, plan the whole day against the full targets. A single meal or snack idea is a meal_plan with just that one meal.
 - Land the plan's total within about 10% of the calories and protein it is meant to cover. Hitting protein matters most.
-- Real, everyday foods with a concrete portion each ("150 g", "2 eggs", "1 cup cooked", "1 medium banana"). The member searches a food database for each food_name, so name the plain food the way a database does ("Chicken breast", "Rolled oats", "Paneer", "Brown rice"); put how it is cooked in the portion ("150 g, grilled"), not the name. Give each food's calories, protein, carbs and fats for that portion from standard nutrition values; calories should be close to 4 × protein + 4 × carbs + 9 × fats.
+- Real, everyday foods with a concrete portion each ("150 g", "2 eggs", "1 cup cooked", "1 medium banana"). The member searches a food database for each food_name, so name the plain food the way a database does ("Chicken breast", "Rolled oats", "Paneer", "Brown rice"); put how it is cooked in the portion ("150 g, grilled"), not the name. No brackets or second names in food_name: "Paneer", not "Paneer (Cottage Cheese)". Give each food's calories, protein, carbs and fats for that portion from standard nutrition values; calories should be close to 4 × protein + 4 × carbs + 9 × fats.
 - meal_type is one of breakfast, lunch, dinner, snack, pre_workout, post_workout. 2 to 5 foods per meal.
 - Follow any diet, cuisine, allergy or food the member mentions now or earlier (vegetarian, no eggs, Indian food) and their limitations.
 - With a meal_plan, "answer" is 1 to 3 sentences: what the plan covers and how its total sits against what is left, with the key numbers in bold. Do not list the foods in the answer — the card shows them.`;
@@ -396,6 +396,118 @@ export async function streamCoach({ context, question, history = [], signal, onT
     }
   }
   return { ...parseReply(raw), ...usageOf(usage) };
+}
+
+/* ── Voice questions ──────────────────────────────────────────────────── */
+
+/** What the phone's recorder makes: Chrome, Edge and Firefox record WebM or
+ * Ogg Opus, Safari MP4 (AAC). The codecs part of a type is dropped first. */
+export const VOICE_MIME_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/mpeg', 'audio/wav'];
+/** The phone stops at a minute: about 250 KB of Opus, 1 MB of AAC. */
+export const MAX_VOICE_BYTES = 2 * 1024 * 1024;
+
+const TRANSCRIBE_INSTRUCTION = `You write down a gym member's spoken question to their AI coach, word for word, so it can go into the chat box. You never answer it.
+
+- The member may speak any language. Write it in the language spoken; never translate it.
+- Hindi, and Hinglish (Hindi mixed with English, the way people talk in Indian gyms), are ALWAYS written in Roman letters, never Devanagari, the way people type them on WhatsApp: "bhai next set mein kitna weight lagaun?", "aaj protein kam reh gaya, dinner mein kya khaun?". English words keep their English spelling. Every other language uses its usual script.
+- Numbers as digits, with the usual units: "20 kg", "3 sets of 12", "2 roti".
+- Spell gym and food words properly: bench press, RDL, RPE, reps, whey, paneer, roti, dal, poha.
+- Add punctuation, but do not add, drop or tidy up words. Leave out filler sounds (um, uh, hmm, matlab when it is filler).
+- The phone is in a gym: expect music, clanking weights and other people. The member is the nearest, clearest voice — write that down and ignore song lyrics and background chatter. Faint, fast, accented or partly drowned-out speech still gets your best reading; never leave out words you can make out.
+- "text" is empty ONLY when the member says nothing at all.`;
+
+const TRANSCRIBE_SCHEMA = {
+  type: 'object',
+  properties: { text: { type: 'string', description: 'What the member said, or "" when nothing clear was said.' } },
+  required: ['text'],
+};
+
+/** The transcript out of Gemini's JSON, as one line no longer than a typed
+ * question may be. Throws on anything that is not the JSON asked for. */
+export function parseTranscript(raw) {
+  const parsed = JSON.parse(stripCodeFences(String(raw ?? '')));
+  if (typeof parsed?.text !== 'string') throw new Error('Transcript reply has no text');
+  return parsed.text.replace(/\s+/g, ' ').trim().slice(0, MAX_QUESTION_LENGTH);
+}
+
+/**
+ * A recorded question as text, for the member to check and send. `audio` is
+ * base64; `screen` tells Gemini which words to expect. Resolves to { text,
+ * input_tokens, output_tokens }, text '' when nothing was said; throws like
+ * askCoach.
+ */
+export async function transcribeVoice({ audio, mimeType, screen }) {
+  const ai = await getClient();
+  const topic = screen === 'diet' ? 'food, meals and macros' : 'the workout in front of them';
+  const response = await voiceCall(ai, TRANSCRIBE_INSTRUCTION, [
+    { inlineData: { mimeType, data: audio } },
+    { text: `The member is asking about ${topic}. Write down what they said — Hindi or Hinglish in Roman letters.` },
+  ]);
+  const usage = usageOf(response?.usageMetadata);
+  let text = parseTranscript(response?.text);
+  // Now and then — most often over music — Gemini writes Hindi in Devanagari
+  // despite the instruction, and the coach would answer in Devanagari too.
+  // Rewriting the script is a cheap text-only call; if it fails, the
+  // Devanagari is still a usable question.
+  if (DEVANAGARI.test(text)) {
+    try {
+      const rewrite = await voiceCall(ai, ROMANISE_INSTRUCTION, [{ text }]);
+      // Billed whether or not its reply is usable.
+      const more = usageOf(rewrite?.usageMetadata);
+      usage.input_tokens += more.input_tokens;
+      usage.output_tokens += more.output_tokens;
+      text = parseTranscript(rewrite?.text) || text;
+    } catch (err) {
+      console.error('Coach voice: could not rewrite Devanagari in Roman letters:', err?.message ?? err);
+    }
+  }
+  return { text, ...usage };
+}
+
+/** Voice clips this member had written down in the last day: the voice cap. */
+export function voiceClipsToday(memberId) {
+  return get(
+    "SELECT COUNT(*) AS n FROM ai_voice_transcriptions WHERE member_id = ? AND created_at >= datetime('now', '-1 day')",
+    [memberId],
+  ).n;
+}
+
+const DEVANAGARI = /[ऀ-ॿ]/;
+
+const ROMANISE_INSTRUCTION = `You are given a gym member's question in Hindi or Hinglish written in Devanagari. Rewrite it in Roman letters the way people type Hinglish on WhatsApp ("aaj protein kam reh gaya, dinner mein kya khaun?"), with English words (protein, dinner, bench press, reps) in their English spelling. Change only the script: never translate, shorten or answer it. Anything already in Roman letters stays as it is.`;
+
+/** A transcript usually comes back in 2–8 s, so one stuck past this is
+ * retried rather than left spinning for the chat's 45 s. */
+const VOICE_TIMEOUT_MS = 15_000;
+const VOICE_RETRY_MS = 1500;
+const isRateLimited = (err) => err?.status === 429 || /RESOURCE_EXHAUSTED/.test(String(err?.message ?? ''));
+const isTimeout = (err) => err?.name === 'AbortError' || err?.name === 'TimeoutError' || /aborted/i.test(String(err?.message ?? ''));
+
+/** One short JSON { text } call for the voice path. Vertex's shared capacity
+ * turns away a burst with a 429 that clears in a second or two, and the odd
+ * call stalls: either way one more try beats making the member say it again. */
+async function voiceCall(ai, systemInstruction, parts) {
+  const params = () => ({
+    model: config.aiCoach.model,
+    contents: [{ role: 'user', parts }],
+    config: {
+      systemInstruction,
+      responseMimeType: 'application/json',
+      responseJsonSchema: TRANSCRIBE_SCHEMA,
+      temperature: 0,
+      maxOutputTokens: 1024,
+      // Writing down is not reasoning; the smallest budget every model takes.
+      thinkingConfig: { thinkingBudget: 128 },
+      abortSignal: AbortSignal.timeout(VOICE_TIMEOUT_MS),
+    },
+  });
+  try {
+    return await ai.models.generateContent(params());
+  } catch (err) {
+    if (!isRateLimited(err) && !isTimeout(err)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, VOICE_RETRY_MS));
+    return ai.models.generateContent(params());
+  }
 }
 
 const JSON_ESCAPES = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };

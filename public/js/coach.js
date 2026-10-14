@@ -82,6 +82,109 @@ const asset = (name) => `/images/coach/${name}.webp`;
 const art = (name, attrs = {}) => h('img', { src: asset(name), alt: '', decoding: 'async', onerror: (e) => e.currentTarget.remove(), ...attrs });
 
 const UNAVAILABLE = 'The coach could not answer just now — try again in a moment';
+/** The longest question, typed or spoken (MAX_QUESTION_LENGTH on the server). */
+const MAX_QUESTION = 500;
+
+/* ── Voice questions ── */
+
+/** A spoken question stops itself here; the server takes up to about this much. */
+const VOICE_MAX_MS = 60_000;
+/** What to record in, best first: Opus where the browser has it, AAC on Safari. */
+const VOICE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+
+/** Whether this browser can record from the mic at all (not on plain http). */
+const voiceSupported = () => Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder && window.isSecureContext);
+
+/** A blob as bare base64, for a JSON body. */
+const blobBase64 = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+/**
+ * Starts recording one voice question; throws if the mic is refused. Returns
+ * a handle: `stop()` resolves to the clip (a Blob, null if nothing came out)
+ * and `cancel()` throws it away — either way the mic is released. The
+ * handle's `onTick(ms)` is called a few times a second with the time so far,
+ * and `onLevel(0..1)` every frame with the loudness, for the meter.
+ */
+async function recordVoice({ onLevel }) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  const type = VOICE_TYPES.find((t) => window.MediaRecorder.isTypeSupported?.(t));
+  let recorder;
+  try {
+    // Speech needs little: 32 kbps keeps a minute around 250 KB.
+    recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32_000 } : {});
+  } catch {
+    recorder = new MediaRecorder(stream);
+  }
+  const chunks = [];
+  recorder.ondataavailable = (event) => {
+    if (event.data.size) chunks.push(event.data);
+  };
+  const stopped = new Promise((resolve) => {
+    recorder.onstop = resolve;
+  });
+
+  const handle = { onTick: null, heardNothing: false };
+
+  // The level meter: the dot that swells with the voice, and the loudest
+  // moment, so a muted or wrong mic is caught on the phone instead of coming
+  // back from Gemini as "nothing said". A nicety: recording works without it.
+  let audioCtx = null;
+  let frame = 0;
+  let peak = 0;
+  try {
+    audioCtx = new AudioContext();
+    // Safari starts it suspended, and a suspended meter reads silence.
+    audioCtx.resume?.().catch(() => {});
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    const measure = () => {
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const v of samples) sum += ((v - 128) / 128) ** 2;
+      const level = Math.min(1, Math.sqrt(sum / samples.length) * 5);
+      peak = Math.max(peak, level);
+      onLevel(level);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+  } catch {}
+
+  const started = Date.now();
+  const ticker = setInterval(() => handle.onTick?.(Date.now() - started), 250);
+  recorder.start();
+
+  let ended = null;
+  const end = (keep) => {
+    ended ??= (async () => {
+      clearInterval(ticker);
+      cancelAnimationFrame(frame);
+      if (recorder.state !== 'inactive') recorder.stop();
+      await stopped;
+      // Judged only on a meter that really ran: speech peaks well above
+      // 0.2, a quiet room sits under 0.03, a muted mic is a flat 0.
+      handle.heardNothing = audioCtx?.state === 'running' && peak < 0.03;
+      audioCtx?.close().catch(() => {});
+      for (const track of stream.getTracks()) track.stop();
+      // Under half a second is a mis-tap, not a question.
+      if (!keep || !chunks.length || Date.now() - started < 500) return null;
+      return new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
+    })();
+    return ended;
+  };
+  handle.stop = () => end(true);
+  handle.cancel = () => end(false);
+  return handle;
+}
 /** Gap between the "reading" lines, so they read as work being done. */
 const STEP_MS = 260;
 /** Gap between typed words; a backlog is typed faster so a long reply never lags. */
@@ -641,11 +744,12 @@ export function openCoachSheet({
 
   const list = h('div', { class: 'coach-thread', 'aria-live': 'polite' });
   const remainingNode = h('span', { class: 'coach-remaining' });
+  const placeholder = screen === 'diet' ? 'Ask about food, macros, your goal…' : 'Ask about this workout…';
   const input = h('textarea', {
     class: 'coach-input',
     rows: 1,
-    maxlength: 500,
-    placeholder: screen === 'diet' ? 'Ask about food, macros, your goal…' : 'Ask about this workout…',
+    maxlength: MAX_QUESTION,
+    placeholder,
     'aria-label': 'Ask the coach',
   });
   const sendBtn = h(
@@ -653,6 +757,123 @@ export function openCoachSheet({
     { class: 'coach-send', type: 'button', 'aria-label': 'Send', title: 'Send' },
     renderIcon('send', { size: 22, stroke: 2.2 }),
   );
+  const field = h(
+    'label',
+    { class: 'coach-field' },
+    h('span', { class: 'coach-field-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })),
+    input,
+  );
+  // Voice: WhatsApp's pattern — the mic sits where Send is while the box is
+  // empty. Tapping it records (the field becomes a recording bar), ✓ stops
+  // and the words land in the box to check before sending, since a misheard
+  // question would still use one of the day's questions.
+  const voiceOn = voiceSupported();
+  let voiceState = 'idle'; // 'recording' | 'writing'
+  let recording = null;
+  const micBtn = h(
+    'button',
+    { class: 'coach-mic', type: 'button', 'aria-label': 'Ask by voice', title: 'Ask by voice' },
+    renderIcon('mic', { size: 22, stroke: 2.2 }),
+  );
+  const recClock = h('span', { class: 'coach-rec-time' }, '0:00');
+  const recBar = h(
+    'div',
+    { class: 'coach-rec', hidden: true },
+    h(
+      'button',
+      { class: 'coach-rec-cancel', type: 'button', 'aria-label': 'Cancel recording', title: 'Cancel', onclick: () => endVoice(false) },
+      renderIcon('trash', { size: 18 }),
+    ),
+    h('span', { class: 'coach-rec-dot' }),
+    recClock,
+    h('span', { class: 'coach-rec-hint' }, 'Listening — any language'),
+  );
+
+  /** Which of the composer's controls show for the box and the mic's state. */
+  function paintCompose() {
+    const recordingNow = voiceState === 'recording';
+    field.hidden = recordingNow;
+    recBar.hidden = !recordingNow;
+    input.disabled = voiceState === 'writing';
+    input.placeholder = voiceState === 'writing' ? 'Writing down what you said…' : placeholder;
+    if (!voiceOn) return;
+    const typed = input.value.trim() !== '';
+    sendBtn.hidden = voiceState !== 'idle' || !typed;
+    micBtn.hidden = voiceState === 'idle' && typed;
+    micBtn.classList.toggle('is-recording', recordingNow);
+    micBtn.classList.toggle('is-writing', voiceState === 'writing');
+    micBtn.disabled = voiceState === 'writing';
+    micBtn.setAttribute('aria-label', recordingNow ? 'Done — write it down' : 'Ask by voice');
+    micBtn.title = micBtn.getAttribute('aria-label');
+    micBtn.replaceChildren(renderIcon(recordingNow ? 'check' : 'mic', { size: 22, stroke: recordingNow ? 2.6 : 2.2 }));
+  }
+
+  async function startVoice() {
+    if (!navigator.onLine) {
+      toast('Voice questions need a connection', 'error');
+      return;
+    }
+    if (status && status.remaining_today <= 0) {
+      toast(`That's your ${status.daily_limit} coach questions for today`, 'error');
+      return;
+    }
+    try {
+      recording = await recordVoice({ onLevel: (level) => recBar.style.setProperty('--level', level.toFixed(2)) });
+    } catch (err) {
+      toast(
+        err?.name === 'NotAllowedError' ? 'Allow the microphone for this app to ask by voice' : 'Could not start the microphone',
+        'error',
+      );
+      return;
+    }
+    voiceState = 'recording';
+    recClock.textContent = '0:00';
+    recording.onTick = (ms) => {
+      const seconds = Math.floor(ms / 1000);
+      recClock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+      if (ms >= VOICE_MAX_MS) endVoice(true);
+    };
+    paintCompose();
+  }
+
+  /** Stops the recording: kept, it is written down into the box; not, it is thrown away. */
+  async function endVoice(keep) {
+    if (voiceState !== 'recording') return;
+    // Straight to the next state: the recorder takes a moment to hand over the clip.
+    voiceState = keep ? 'writing' : 'idle';
+    paintCompose();
+    const handle = recording;
+    const clip = await (keep ? handle.stop() : handle.cancel());
+    recording = null;
+    if (!clip || clip.size === 0 || handle.heardNothing) {
+      voiceState = 'idle';
+      paintCompose();
+      if (keep && handle.heardNothing) {
+        toast("Your microphone didn't pick up any sound — check it isn't muted, or that the right mic is selected", 'error');
+      } else if (keep) {
+        toast('Nothing was recorded — tap the mic and speak', 'error');
+      }
+      return;
+    }
+    voiceState = 'writing';
+    paintCompose();
+    try {
+      const { text } = await api.portal.coachTranscribe({ audio: await blobBase64(clip), mime_type: clip.type, screen });
+      if (!text) {
+        toast("Didn't catch that — try again a little closer to the phone", 'error');
+      } else {
+        // Added to anything already typed, so a question can be part typed, part spoken.
+        const typed = input.value.trim();
+        input.value = (typed ? `${typed} ${text}` : text).slice(0, MAX_QUESTION);
+        growInput();
+      }
+    } catch (err) {
+      toast(err instanceof ApiError && err.message ? err.message : 'Could not make out that recording — try again', 'error');
+    } finally {
+      voiceState = 'idle';
+      paintCompose();
+    }
+  }
 
   const paintRemaining = () => {
     if (!status?.enabled) return;
@@ -820,6 +1041,7 @@ export function openCoachSheet({
     sheet.setBusy(true);
     input.value = '';
     input.style.height = '';
+    paintCompose();
     const turn = { role: 'coach', live: true, steps: [], thoughts: '', text: '' };
     turn.view = createCoachView(turn);
     thread.push({ role: 'user', text }, turn);
@@ -866,10 +1088,15 @@ export function openCoachSheet({
     }
   });
   // Grow with the question, up to a few lines.
-  input.addEventListener('input', () => {
+  function growInput() {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+  }
+  input.addEventListener('input', () => {
+    growInput();
+    paintCompose();
   });
+  micBtn.addEventListener('click', () => (voiceState === 'recording' ? endVoice(true) : startVoice()));
 
   openModal({
     title: 'Ask Coach',
@@ -887,7 +1114,9 @@ export function openCoachSheet({
         h(
           'div',
           { class: 'coach-compose' },
-          h('label', { class: 'coach-field' }, h('span', { class: 'coach-field-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })), input),
+          field,
+          recBar,
+          voiceOn ? micBtn : null,
           sendBtn,
         ),
         remainingNode,
@@ -895,6 +1124,8 @@ export function openCoachSheet({
     ),
     onClose: () => {
       if (activeSheet === sheet) activeSheet = null;
+      // Never leave the mic on behind a closed sheet.
+      recording?.cancel();
     },
   });
   // openModal focuses the first field, which on a phone would pop the
@@ -902,6 +1133,7 @@ export function openCoachSheet({
   input.blur();
 
   paintThread();
+  paintCompose();
   sheet.setBusy(inFlight[screen]);
   coachStatus().then(paintRemaining);
   if (initialQuestion) send(initialQuestion);

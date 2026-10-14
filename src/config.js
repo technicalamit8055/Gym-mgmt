@@ -79,6 +79,10 @@ export const config = {
     // AI-generated workout plans per member per day. Each one sends the whole
     // exercise library, so it costs several questions' worth.
     planDailyLimit: Number(process.env.AI_PLAN_DAILY_LIMIT || 3),
+    // Voice questions written down per member per day. Writing one down is
+    // not a question (only sending it is), so it has its own ceiling: twice
+    // the questions leaves room to re-record a misheard one.
+    voiceDailyLimit: Number(process.env.AI_VOICE_DAILY_LIMIT || 40),
     // A diet answer with a meal plan, after up to ~1000 tokens of thinking,
     // takes 7–17 s and sometimes more; at 20 s ordinary slow replies were cut
     // off. The sheet shows the coach working meanwhile, so waiting is fine.

@@ -1462,6 +1462,26 @@ const MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_member_meal_plans_member ON member_meal_plans(member_id)');
   },
+  // Voice questions (transcribeVoice in src/aiCoach.js): one row per clip
+  // written down — never the audio or the words, only its size and the
+  // tokens it cost. Today's rows are its daily cap; the tokens join the
+  // questions' and plans' on the Vertex bill.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_voice_transcriptions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        screen        TEXT NOT NULL CHECK (screen IN ('workout', 'diet')),
+        mime_type     TEXT NOT NULL,
+        audio_bytes   INTEGER NOT NULL,
+        heard         INTEGER NOT NULL CHECK (heard IN (0, 1)),
+        input_tokens  INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_ai_voice_member_day ON ai_voice_transcriptions(member_id, created_at)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

@@ -646,6 +646,8 @@ export const api = {
     // Streamed: onEvent gets step / thought / answer / done / error as the
     // coach works (see the route in src/routes/portal.js).
     coachAskStream: (payload, onEvent) => streamRequest('/portal/coach/ask', payload, onEvent),
+    // A spoken question as text, for the composer: { audio (base64), mime_type, screen }.
+    coachTranscribe: (payload) => request('POST', '/portal/coach/transcribe', payload, { member: true }),
     // The AI workout generator: a draft plan to open in the plan builder.
     coachPlan: (payload) => request('POST', '/portal/coach/plan', payload, { member: true }),
     // The member's own plans, and which plan (theirs or the trainer's) the
