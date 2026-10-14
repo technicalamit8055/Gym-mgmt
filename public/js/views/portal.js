@@ -10,10 +10,13 @@ import {
   date,
   dateField,
   exerciseMedia,
+  goBack,
   h,
   initials,
   money,
   openModal,
+  pushBackLayer,
+  removeBackLayer,
   renderIcon,
   statusBadge,
   svg,
@@ -756,18 +759,38 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   }
 
   const keyOf = (item) => item.name.toLowerCase();
+
+  // Each row is built once and reused across searches, filters and taps, so
+  // its thumbnail isn't fetched and decoded again on every keystroke. Keyed
+  // by section too: an exercise can sit in Recent and the full list at once.
+  const rows = new Map();
+  function rowFor(item, section) {
+    const id = `${section}:${keyOf(item)}`;
+    let row = rows.get(id);
+    if (!row) rows.set(id, (row = pickRow(item)));
+    paintRow(row, selected.has(keyOf(item)));
+    return row;
+  }
+  function paintRow(row, isOn) {
+    row.classList.toggle('selected', isOn);
+    row.querySelector('.portal-pick-main').setAttribute('aria-pressed', String(isOn));
+  }
+
   function toggle(item) {
-    if (selected.has(keyOf(item))) selected.delete(keyOf(item));
-    else selected.set(keyOf(item), item);
-    paintList();
+    const key = keyOf(item);
+    if (selected.has(key)) selected.delete(key);
+    else selected.set(key, item);
+    for (const section of ['recent', 'all']) {
+      const row = rows.get(`${section}:${key}`);
+      if (row) paintRow(row, selected.has(key));
+    }
     paintFooter();
   }
 
   function pickRow(item) {
-    const isOn = selected.has(keyOf(item));
     return h(
       'div',
-      { class: `portal-pick-row${isOn ? ' selected' : ''}` },
+      { class: 'portal-pick-row' },
       h(
         'button',
         {
@@ -780,7 +803,7 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
       ),
       h(
         'button',
-        { class: 'portal-pick-main', type: 'button', 'aria-pressed': String(isOn), onclick: () => toggle(item) },
+        { class: 'portal-pick-main', type: 'button', 'aria-pressed': 'false', onclick: () => toggle(item) },
         h(
           'span',
           { class: 'portal-pick-text' },
@@ -826,7 +849,7 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
     if (recents.length) {
       list.append(
         h('h3', { class: 'portal-pick-caption' }, 'Recent Exercises'),
-        h('div', { class: 'portal-pick-group' }, ...recents.map((item) => pickRow(item))),
+        h('div', { class: 'portal-pick-group' }, ...recents.map((item) => rowFor(item, 'recent'))),
       );
     }
 
@@ -843,7 +866,7 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
       );
       return;
     }
-    list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 150).map((item) => pickRow(item))));
+    list.append(h('div', { class: 'portal-pick-group' }, ...matches.slice(0, 150).map((item) => rowFor(item, 'all'))));
   }
 
   /* The two filter buttons, which read their current choice like Hevy's do. */
@@ -902,10 +925,13 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
       'aria-label': 'Search exercise',
       oninput: (event) => {
         query = event.target.value;
-        paintList();
+        // One repaint per pause in typing, not per letter.
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(paintList, 90);
       },
     }),
   );
+  let searchTimer = 0;
 
   openModal({
     title,
@@ -927,23 +953,42 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   // openModal focuses the first input; browsing is the common case, so the
   // keyboard stays down until the member taps the search box.
   search.querySelector('input').blur();
+
+  function useLibrary(res) {
+    if (res.muscle_groups?.length) muscles = res.muscle_groups;
+    if (res.equipment?.length) equipment = res.equipment;
+    // The member's own creations, minus any the library has since gained.
+    const names = new Set(res.items.map((e) => e.name.toLowerCase()));
+    const mine = customExercises
+      .read()
+      .filter((e) => !names.has(e.name.toLowerCase()))
+      .map((e) => ({ ...e, source: 'member', previous: null, media_url: null, media_type: null }));
+    library = [...res.items, ...mine];
+    // Rows hold their library item for the detail sheet, so fresh data means fresh rows.
+    rows.clear();
+    paintFilters();
+    paintList();
+  }
+
+  // The last list paints at once; the fetch then refreshes it in place, and
+  // only repaints when something (say a new "previous" set) has changed.
+  const token = memberSession.token;
+  const cached = exerciseLibraryCache?.token === token ? exerciseLibraryCache : null;
+  if (cached) useLibrary(cached.res);
   api.portal
     .exercises()
     .then((res) => {
-      if (res.muscle_groups?.length) muscles = res.muscle_groups;
-      if (res.equipment?.length) equipment = res.equipment;
-      // The member's own creations, minus any the library has since gained.
-      const names = new Set(res.items.map((e) => e.name.toLowerCase()));
-      const mine = customExercises
-        .read()
-        .filter((e) => !names.has(e.name.toLowerCase()))
-        .map((e) => ({ ...e, source: 'member', previous: null, media_url: null, media_type: null }));
-      library = [...res.items, ...mine];
-      paintFilters();
-      paintList();
+      const body = JSON.stringify(res);
+      exerciseLibraryCache = { token, res, body };
+      if (body !== cached?.body) useLibrary(res);
     })
-    .catch((err) => clear(list).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load exercises')));
+    .catch((err) => {
+      if (!cached) clear(list).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load exercises'));
+    });
 }
+
+/** The member's exercise library from the last picker open, so the next one paints without waiting. */
+let exerciseLibraryCache = null;
 
 
 /**
@@ -3839,8 +3884,21 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
 
   const panes = { list: listPane, detail: detailPane, scan: scanPane, custom: customPane };
   let currentView = 'list';
+  /** Off the list, the phone's back does what the view's own back arrow
+   * does, rather than closing the whole sheet. */
+  let viewLayer = null;
   function show(view) {
     currentView = view;
+    if (view === 'list') {
+      removeBackLayer(viewLayer);
+      viewLayer = null;
+    } else if (!viewLayer) {
+      viewLayer = pushBackLayer(() => {
+        viewLayer = null;
+        if (!sheet.isConnected) return false;
+        show(currentView === 'detail' ? detailFrom : 'list');
+      });
+    }
     for (const [key, pane] of Object.entries(panes)) pane.classList.toggle('hidden', key !== view);
     paintTrackedBar();
     if (view !== 'detail') onMealChange = null;
@@ -3953,6 +4011,7 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
     className: 'qt-modal',
     body: sheet,
     onClose: () => {
+      removeBackLayer(viewLayer);
       stopScan();
       clearTimeout(searchTimer);
       if (tracked.changed) onAdded({ calories: trackedTotal('calories'), protein_g: trackedTotal('protein_g') });
@@ -5331,32 +5390,26 @@ function renderPortalApp(ctx, initialMe) {
    * arrow, as opposed to a bottom sheet — for detail that needs room to read.
    * The tab bar stays put, Lifesum-style.
    *
-   * Opening one adds a history entry so the phone's back button or gesture
-   * pops it. Tab switches never touch the URL (see the module header), so a
-   * popstate while a screen is open can only mean "leave this screen".
+   * Opening one registers a back layer (see pushBackLayer in ui.js) so the
+   * phone's back button or gesture pops it rather than closing the app.
    *
    * A screen opened from another one (Edit workout from its detail) passes
-   * `onBack`: back then re-arms the history entry and hands over to it, so
-   * the arrow and the phone's gesture both land on the screen it came from.
+   * `onBack`: back then re-arms the layer and hands over to it, so the arrow
+   * and the phone's gesture both land on the screen it came from.
    */
   let screenOpen = false;
-  let skipNextPop = false;
+  let screenLayer = null;
   let screenBack = null;
 
-  function onPopState() {
-    // A portal instance replaced by a re-render (or a sign-out) must stop
-    // listening, or it would repaint a detached tab on the next back press.
-    if (!content.isConnected) {
-      window.removeEventListener('popstate', onPopState);
-      return;
-    }
-    if (skipNextPop) {
-      skipNextPop = false;
-      return;
-    }
+  // A portal instance replaced by a re-render (or a sign-out) answers false,
+  // so the press goes to whatever is under it instead of repainting a
+  // detached tab.
+  function onScreenBack() {
+    screenLayer = null;
+    if (!content.isConnected) return false;
     if (screenOpen && screenBack) {
       const back = screenBack;
-      history.pushState({ portalScreen: true }, '', window.location.href);
+      screenLayer = pushBackLayer(onScreenBack);
       back();
       return;
     }
@@ -5365,13 +5418,31 @@ function renderPortalApp(ctx, initialMe) {
       switchTab(active);
     }
   }
-  window.addEventListener('popstate', onPopState);
+
+  /**
+   * Back from a tab other than Home goes Home (or from Invoices back to
+   * Profile, the tab it opened from) — the way native bottom-tab apps
+   * behave — and only back on Home leaves the app.
+   */
+  let tabLayer = null;
+  function syncTabLayer() {
+    if (active === 'home') {
+      removeBackLayer(tabLayer);
+      tabLayer = null;
+    } else if (!tabLayer) {
+      tabLayer = pushBackLayer(() => {
+        tabLayer = null;
+        if (!content.isConnected) return false;
+        switchTab(TAB_HOME_OF[active] ?? 'home');
+      });
+    }
+  }
 
   async function openScreen({ title, subtitle, render, action = null, onBack = null }) {
     stopTicking();
     screenBack = onBack;
     if (!screenOpen) {
-      history.pushState({ portalScreen: true }, '', window.location.href);
+      screenLayer = pushBackLayer(onScreenBack);
       screenOpen = true;
     }
     const head = h(
@@ -5379,7 +5450,7 @@ function renderPortalApp(ctx, initialMe) {
       { class: 'portal-screen-head' },
       h(
         'button',
-        { class: 'portal-screen-back', type: 'button', 'aria-label': 'Back', onclick: () => history.back() },
+        { class: 'portal-screen-back', type: 'button', 'aria-label': 'Back', onclick: goBack },
         renderIcon('arrowLeft', { size: 20 }),
       ),
       h('div', { class: 'portal-screen-title' }, h('h2', {}, title), subtitle ? h('p', {}, subtitle) : null),
@@ -5412,16 +5483,15 @@ function renderPortalApp(ctx, initialMe) {
   }
 
   async function switchTab(key) {
-    // Leaving a pushed screen through the tab bar: drop its history entry
-    // too, so the next back press is not swallowed by a screen already gone.
+    // Leaving a pushed screen through the tab bar: drop its back layer too,
+    // so the next back press is not swallowed by a screen already gone.
     screenBack = null;
-    if (screenOpen) {
-      screenOpen = false;
-      skipNextPop = true;
-      history.back();
-    }
+    screenOpen = false;
+    removeBackLayer(screenLayer);
+    screenLayer = null;
     stopTicking();
     active = key;
+    syncTabLayer();
     lastTab.set(key);
     paintTabbar();
     topbarSub.textContent = TOPBAR_SUBTITLES[key] ?? '';
@@ -9458,12 +9528,24 @@ function renderPortalApp(ctx, initialMe) {
     );
     const layer = h('div', { class: 'diet-fab-layer', onclick: (event) => event.target === layer && setOpen(false) }, menu);
 
+    let backLayer = null;
     function setOpen(open) {
       layer.classList.toggle('open', open);
       fab.classList.toggle('open', open);
       fab.setAttribute('aria-expanded', String(open));
       if (open) document.addEventListener('keydown', onKey);
       else document.removeEventListener('keydown', onKey);
+      // The phone's back closes the open menu, not the app.
+      if (open && !backLayer) {
+        backLayer = pushBackLayer(() => {
+          backLayer = null;
+          if (!layer.isConnected) return false;
+          setOpen(false);
+        });
+      } else if (!open) {
+        removeBackLayer(backLayer);
+        backLayer = null;
+      }
     }
     fab.addEventListener('click', () => setOpen(!fab.classList.contains('open')));
 

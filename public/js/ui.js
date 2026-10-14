@@ -1150,18 +1150,116 @@ export function toast(message, kind = 'success') {
   }, kind === 'error' ? 6000 : 3200);
 }
 
+/* -------------------------------------------------------------- back stack */
+
+/**
+ * What the phone's back button (or gesture) closes, innermost first: a sheet,
+ * a pushed screen, a store page, a tab other than Home. Without an entry of
+ * ours in history, a back press in the installed app has nothing to undo and
+ * closes the whole app.
+ *
+ * However many layers are open, they share a single history entry (the
+ * "trap"): a back press pops it, the top layer's onBack runs, and the trap is
+ * re-armed while anything is left. A layer closed in code (an X, a Save) just
+ * leaves the stack — history never has to be rewound by a count that a
+ * navigation in the meantime could have made wrong.
+ */
+const backLayers = [];
+/** The trap entry's URL while history sits on it, otherwise null. */
+let trapUrl = null;
+let ignoreNextPop = false;
+let listening = false;
+
+function armTrap() {
+  // Hooked up on first use rather than at import, so ui.js still loads
+  // where there is no real window (the unit tests).
+  if (!listening) {
+    window.addEventListener('popstate', onPopState);
+    listening = true;
+  }
+  if (trapUrl === window.location.href) return;
+  history.pushState({ backTrap: true }, '', window.location.href);
+  trapUrl = window.location.href;
+}
+
+/** Drops the trap once nothing is left to close, so the next back press
+ * leaves the app the way it would on its home screen. Deferred a tick: a
+ * close is often followed straight away by a new sheet (which keeps the
+ * trap) or a route change (which leaves it behind, harmlessly). */
+function releaseTrap() {
+  setTimeout(() => {
+    if (backLayers.length || trapUrl === null) return;
+    const onTrap = window.location.href === trapUrl;
+    trapUrl = null;
+    if (!onTrap) return;
+    ignoreNextPop = true;
+    history.back();
+  });
+}
+
+function onPopState() {
+  if (ignoreNextPop) {
+    ignoreNextPop = false;
+    return;
+  }
+  if (trapUrl === null) return; // Not ours: the hash router's own history.
+  const sameUrl = window.location.href === trapUrl;
+  trapUrl = null;
+  if (!sameUrl) {
+    // A route change, not a back press: the layers belonged to the old view.
+    backLayers.length = 0;
+    return;
+  }
+  closeTopLayer();
+  if (backLayers.length) armTrap();
+}
+
+/** An onBack returns false when what it would close is already gone (its view
+ * was replaced), so the press falls through to the layer under it instead of
+ * doing nothing. */
+function closeTopLayer() {
+  let layer;
+  while ((layer = backLayers.pop()) && layer.onBack() === false);
+}
+
+/** Registers something the back button should close; `onBack` closes it. */
+export function pushBackLayer(onBack) {
+  const layer = { onBack };
+  backLayers.push(layer);
+  armTrap();
+  return layer;
+}
+
+/** For a layer closed some other way (its X, a Save): back no longer has it to close. */
+export function removeBackLayer(layer) {
+  const index = backLayers.indexOf(layer);
+  if (index === -1) return;
+  backLayers.splice(index, 1);
+  if (!backLayers.length) releaseTrap();
+}
+
+/** An on-screen back arrow: closes the top layer exactly as the phone's back would. */
+export function goBack() {
+  if (!backLayers.length) return;
+  closeTopLayer();
+  if (!backLayers.length) releaseTrap();
+}
+
 /* ------------------------------------------------------------------- modal */
 
 let modalCount = 0;
 
+function dismissModal(backdrop) {
+  removeBackLayer(backdrop.backLayer);
+  if (backdrop.onCloseCallback) backdrop.onCloseCallback();
+  backdrop.remove();
+  modalCount--;
+}
+
 export function closeModal() {
   const root = document.getElementById('modal-root');
   const last = root.lastElementChild;
-  if (last) {
-    if (last.onCloseCallback) last.onCloseCallback();
-    last.remove();
-    modalCount--;
-  }
+  if (last) dismissModal(last);
 }
 
 document.addEventListener('keydown', (event) => {
@@ -1201,12 +1299,40 @@ export function openModal({ title, subtitle, icon, className, body, footer, wide
     ),
   );
   backdrop.onCloseCallback = onClose;
+  backdrop.backLayer = pushBackLayer(() => {
+    if (!backdrop.isConnected) return false;
+    dismissModal(backdrop);
+  });
   root.append(backdrop);
   modalCount++;
 
   const firstInput = backdrop.querySelector('input, select, textarea');
   if (firstInput) firstInput.focus();
   return backdrop;
+}
+
+/** Runs `load` once `el` comes within a screen of view; at once without IntersectionObserver. */
+const nearViewportLoads = new WeakMap();
+const nearViewport =
+  typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            nearViewport.unobserve(entry.target);
+            nearViewportLoads.get(entry.target)?.();
+            nearViewportLoads.delete(entry.target);
+          }
+        },
+        // scrollMargin stretches the scrolling list's own clip too, so rows
+        // just under a sheet's fold load before they slide in.
+        { rootMargin: '400px 0px', scrollMargin: '400px 0px' },
+      )
+    : null;
+function whenNearViewport(el, load) {
+  if (!nearViewport) return load();
+  nearViewportLoads.set(el, load);
+  nearViewport.observe(el);
 }
 
 /**
@@ -1216,7 +1342,10 @@ export function openModal({ title, subtitle, icon, className, body, footer, wide
  *
  * `still` is for thumbnails in a list: a clip shows its first frame and a GIF
  * its first frame on a canvas, so a screen of rows isn't decoding a dozen
- * animations at once. The demo only moves once the member opens it.
+ * animations at once. The demo only moves once the member opens it. Stills
+ * also wait until they scroll near the viewport before fetching anything, as
+ * `loading="lazy"` does for an <img> — a list of 150 rows would otherwise pull
+ * every GIF and clip header up front.
  */
 export function exerciseMedia(item, { className = '', still = false } = {}) {
   if (!item?.media_url) return null;
@@ -1226,7 +1355,6 @@ export function exerciseMedia(item, { className = '', still = false } = {}) {
     const src = still && !item.media_url.includes('#') ? `${item.media_url}#t=0.001` : item.media_url;
     const video = h('video', {
       class: className,
-      src,
       loop: '',
       playsinline: '',
       preload: 'metadata',
@@ -1234,18 +1362,22 @@ export function exerciseMedia(item, { className = '', still = false } = {}) {
     });
     video.muted = true;
     video.autoplay = !still;
+    if (still) whenNearViewport(video, () => (video.src = src));
+    else video.src = src;
     return video;
   }
   if (still && item.media_type === 'gif') {
     const canvas = h('canvas', { class: className, 'aria-hidden': 'true' });
-    const frame = new Image();
-    frame.decoding = 'async';
-    frame.onload = () => {
-      canvas.width = frame.naturalWidth;
-      canvas.height = frame.naturalHeight;
-      canvas.getContext('2d')?.drawImage(frame, 0, 0);
-    };
-    frame.src = item.media_url;
+    whenNearViewport(canvas, () => {
+      const frame = new Image();
+      frame.decoding = 'async';
+      frame.onload = () => {
+        canvas.width = frame.naturalWidth;
+        canvas.height = frame.naturalHeight;
+        canvas.getContext('2d')?.drawImage(frame, 0, 0);
+      };
+      frame.src = item.media_url;
+    });
     return canvas;
   }
   return h('img', { class: className, src: item.media_url, alt: '', loading: 'lazy', decoding: 'async' });

@@ -151,7 +151,7 @@ function cleanRow(raw) {
   if (row.equipment !== undefined) row.equipment = EQUIPMENT_ALIASES[asKey(row.equipment)] ?? asKey(row.equipment);
   if (row.secondary_muscles !== undefined) row.secondary_muscles = [...new Set(asList(row.secondary_muscles).map(muscleKey))];
   if (row.tags !== undefined) row.tags = asList(row.tags).map((t) => t.toLowerCase());
-  if (Array.isArray(row.instructions)) row.instructions = row.instructions.join(' ');
+  if (Array.isArray(row.instructions)) row.instructions = row.instructions.join('\n');
   for (const key of ['secondary_muscles', 'tags']) if (row[key]?.length === 0) delete row[key];
   return row;
 }
@@ -175,8 +175,8 @@ export function textToExercises(text) {
 
 const CSV_TEMPLATE = toCsv(
   [
-    { name: 'Landmine Press', muscle_group: 'shoulders', equipment: 'barbell', secondary_muscles: ['chest', 'triceps'], tags: ['unilateral', 'compound'], instructions: 'Hold the end of the bar at shoulder height. Press it up and slightly forward until the arm is straight, then lower under control.' },
-    { name: 'Incline Dumbbell Curl', muscle_group: 'biceps', equipment: 'dumbbell', secondary_muscles: ['forearms'], tags: ['isolation'], instructions: 'Sit back on a 45° bench with the arms hanging. Curl both dumbbells up, keeping the elbows back behind the torso.' },
+    { name: 'Landmine Press', muscle_group: 'shoulders', equipment: 'barbell', secondary_muscles: ['chest', 'triceps'], tags: ['unilateral', 'compound'], instructions: '1. Hold the end of the bar at shoulder height. 2. Press it up and slightly forward until the arm is straight. 3. Lower under control.' },
+    { name: 'Incline Dumbbell Curl', muscle_group: 'biceps', equipment: 'dumbbell', secondary_muscles: ['forearms'], tags: ['isolation'], instructions: '1. Sit back on a 45° bench with the arms hanging. 2. Curl both dumbbells up, keeping the elbows back behind the torso. 3. Lower with control.' },
   ],
   COLUMNS,
 );
@@ -517,10 +517,10 @@ export function buildExerciseAiPrompt({ topic, count, format, muscleGroups, equi
     `- equipment is exactly one of: ${equipment.join(', ')}. (band is a resistance band; bodyweight needs no equipment beyond a bar or bench; cardio is a treadmill, bike, rower or other cardio machine; EZ-bar and trap-bar moves are barbell.)`,
     '- secondary_muscles lists the other muscles that work hard, from the same muscle_group list, never repeating the primary one. Leave it empty if there are none.',
     '- tags: up to 4 lowercase words, each 24 characters or fewer, e.g. compound, isolation, unilateral, push, pull, hinge, squat, plyometric, mobility.',
-    '- instructions: 2–4 short sentences a member can follow mid-workout — the setup, the movement, and one key form cue. Plain text with no numbering or line breaks, under 400 characters.',
+    '- instructions: write instructions step-wise (e.g. 1, 2, 3, 4 etc.) that a member can follow mid-workout — covering setup, the movement, and key form cues, under 500 characters.',
     '- Only real, well-established exercises. Leave out anything you are not sure about rather than invent one.',
   ];
-  if (format !== 'json') lines.push('- Wrap any value that contains a comma in double quotes. secondary_muscles and tags hold several values separated by commas, e.g. "glutes, hamstrings".');
+  if (format !== 'json') lines.push('- Wrap any value that contains a comma or line break in double quotes. secondary_muscles and tags hold several values separated by commas, e.g. "glutes, hamstrings".');
   if (skipNames.length) {
     lines.push('', `These exercises are already in the library — do not include them or near-duplicates of them:\n${skipNames.join('; ')}`);
   }

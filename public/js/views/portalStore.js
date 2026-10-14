@@ -1,5 +1,5 @@
 import { api, pathSlug } from '../api.js';
-import { append, clear, closeModal, date, h, money, openModal, renderIcon, toast } from '../ui.js';
+import { append, clear, closeModal, date, goBack, h, money, openModal, pushBackLayer, removeBackLayer, renderIcon, toast } from '../ui.js';
 import { memberSynced } from '../memberSync.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
 
@@ -177,20 +177,23 @@ function createPager(anchor) {
     setTimeout(() => layer.remove(), 220);
   }
 
-  function onPop() {
-    // The store tab was replaced while pages sat in history: tidy up and let
-    // the portal's own back handling have this one.
+  // Each page is a back layer (see pushBackLayer in ui.js), so the phone's
+  // back gesture closes the top page instead of the app.
+  function onBack() {
+    // The store tab was replaced while pages were open: tidy up and let the
+    // press fall through to the portal's own back handling.
     if (!anchor.isConnected) {
-      window.removeEventListener('popstate', onPop);
-      stack.splice(0).forEach((l) => l.remove());
+      stack.splice(0).forEach((l) => {
+        removeBackLayer(l.backLayer);
+        l.remove();
+      });
       sync();
-      return;
+      return false;
     }
     const top = stack.pop();
     if (top) drop(top);
     sync();
   }
-  window.addEventListener('popstate', onPop);
 
   return {
     push(node) {
@@ -200,7 +203,7 @@ function createPager(anchor) {
       const layer = h('div', { class: 'bk-page' }, node);
       host.append(layer);
       stack.push(layer);
-      history.pushState({ storePage: stack.length }, '', window.location.href);
+      layer.backLayer = pushBackLayer(onBack);
       sync();
       return layer;
     },
@@ -210,9 +213,13 @@ function createPager(anchor) {
       const top = stack[stack.length - 1];
       if (top) fill(top, node);
     },
-    back: () => history.back(),
+    back: () => goBack(),
     closeAll() {
-      if (stack.length) history.go(-stack.length);
+      stack.splice(0).forEach((l) => {
+        removeBackLayer(l.backLayer);
+        drop(l);
+      });
+      sync();
     },
   };
 }

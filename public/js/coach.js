@@ -38,7 +38,7 @@ const QUICK_PROMPTS = {
   ],
 };
 const FEATURES = [
-  ['dumbbell', 'Personalised', 'advice', 'blue'],
+  ['barbell', 'Personalised', 'advice', 'blue'],
   ['apple', 'Nutrition', 'guidance', 'green'],
   ['target', 'Workout', 'suggestions', 'blue'],
 ];

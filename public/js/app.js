@@ -2,6 +2,7 @@ import { ApiError, api, landingBrand, pathSlug, session } from './api.js';
 import {
   buildForm,
   clear,
+  closeModal,
   h,
   isFullscreen,
   openModal,
@@ -644,7 +645,7 @@ function openPasswordModal() {
         onSubmit: async (values) => {
           await api.changePassword(values);
           toast('Password updated');
-          document.getElementById('modal-root').replaceChildren();
+          closeModal();
         },
       },
     ),
@@ -1010,4 +1011,24 @@ onFullscreenChange((active) => {
   updateFullscreenButtons(active);
 });
 
+/** The boot splash in index.html stays up until the first screen — whichever
+ * renderer paints it, a login card, the shell's skeleton or a boot-failure
+ * notice — lands in #app, then fades out and removes itself. Watching #app
+ * rather than calling this from each renderer means a new entry path can't
+ * forget to. */
+function dismissSplash() {
+  const splash = document.getElementById('splash');
+  if (!splash) return;
+  const observer = new MutationObserver(() => {
+    if (!root().childElementCount) return;
+    observer.disconnect();
+    splash.classList.add('is-done');
+    // A timer, not transitionend: under reduced motion there's no transition
+    // to end. Matches the 0.32s fade in app.css with a little to spare.
+    setTimeout(() => splash.remove(), 400);
+  });
+  observer.observe(root(), { childList: true });
+}
+
+dismissSplash();
 boot();

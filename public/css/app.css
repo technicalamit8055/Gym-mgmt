@@ -348,10 +348,103 @@ a:has(> .svg-icon) { display: inline-flex; align-items: center; gap: 6px; }
    squashing them, and hand the stroke its colour from the parent. */
 .svg-icon { flex: none; display: block; stroke: currentColor; }
 
-/* The doubled height/min-height declarations through this file are a fallback
-   pair, not a mistake: mobile browser chrome makes 100vh taller than what you
-   can actually see, so dvh takes over wherever it's understood. */
-.app-loading { display: grid; place-items: center; height: 100vh; height: 100dvh; color: var(--muted); }
+/* ------------------------------------------------------------- boot splash */
+
+/* Shown from first paint until the first screen lands in #app. It has to suit
+   GymBook and SeatBook alike — the vertical isn't known until /api answers —
+   so it is drawn in --text/--muted only and never the brand colour (which at
+   this point would still be the gym default). The motif is a check-in tick,
+   the one thing a gym front desk and a study hall share. Motion is slow and
+   soft on purpose: on a warm cache it's gone before it shows, and on a slow
+   line it has to be something you can watch for a few seconds without fatigue. */
+.splash {
+  position: fixed; inset: 0; z-index: 2000;
+  display: grid; place-items: center;
+  background: var(--bg); color: var(--text);
+  transition: opacity 0.32s var(--ease), visibility 0s linear 0.32s;
+}
+.splash.is-done { opacity: 0; visibility: hidden; pointer-events: none; }
+/* In front of the member sign-in, which is black and gold in either mode (see
+   .portal-login) — set by index.html's pre-paint script. Tokens are pinned on
+   the splash itself so boot() flipping body's mode can't repaint it mid-fade. */
+html[data-splash='ink'] .splash {
+  --bg: #0a0a0b; --text: #f2f2f3; --muted: rgba(255, 255, 255, 0.62);
+  --border: rgba(255, 255, 255, 0.1); --hairline: rgba(255, 255, 255, 0.07);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+/* Held back a beat so a fast boot goes straight from blank to app instead of
+   flashing the mark for a frame. */
+.splash-inner {
+  display: grid; justify-items: center; gap: 22px;
+  animation: splash-in 0.5s var(--ease) 0.15s backwards;
+}
+@keyframes splash-in { from { opacity: 0; transform: translateY(6px) scale(0.97); } }
+
+.splash-mark { position: relative; width: 88px; height: 88px; display: grid; place-items: center; }
+.splash-ring { position: absolute; inset: 0; width: 100%; height: 100%; animation: splash-turn 2.4s linear infinite; }
+.splash-ring circle { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.splash-track { stroke: color-mix(in srgb, var(--muted) 18%, transparent); }
+.splash-arc {
+  stroke: color-mix(in srgb, var(--text) 72%, transparent);
+  stroke-dasharray: 18 82;
+  animation: splash-breathe 2.8s ease-in-out infinite;
+}
+@keyframes splash-turn { to { transform: rotate(360deg); } }
+/* The arc lengthens and shortens as it turns, so the eye reads progress
+   rather than a mechanical spinner. */
+@keyframes splash-breathe {
+  0%, 100% { stroke-dasharray: 14 86; }
+  50% { stroke-dasharray: 38 62; }
+}
+
+.splash-tile {
+  width: 56px; height: 56px; border-radius: 16px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--hairline), var(--shadow-sm);
+  animation: splash-float 2.8s ease-in-out infinite;
+}
+.splash-tile svg { width: 30px; height: 30px; overflow: visible; }
+@keyframes splash-float { 50% { transform: scale(1.04); } }
+/* Draws in, holds, fades, and starts again — a check-in, on a loop. */
+.splash-check {
+  fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: splash-tick 2.8s var(--ease) infinite;
+}
+@keyframes splash-tick {
+  0%, 8% { stroke-dashoffset: 1; opacity: 1; }
+  38%, 72% { stroke-dashoffset: 0; opacity: 1; }
+  90%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+.splash-text {
+  margin: 0; display: flex; align-items: baseline; gap: 6px;
+  font-size: 13.5px; font-weight: 500; letter-spacing: 0.01em; color: var(--muted);
+}
+.splash-dots { display: inline-flex; gap: 3px; }
+.splash-dots i {
+  width: 4px; height: 4px; border-radius: 50%; background: currentColor;
+  animation: splash-dot 1.4s ease-in-out infinite;
+}
+.splash-dots i:nth-child(2) { animation-delay: 0.16s; }
+.splash-dots i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes splash-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* No turning, drawing or bouncing: the tick sits finished and the whole mark
+   just breathes, which still says "working" without movement. */
+@media (prefers-reduced-motion: reduce) {
+  .splash-inner { animation: none; }
+  .splash-ring, .splash-arc, .splash-tile, .splash-check, .splash-dots i { animation: none; }
+  .splash-check { stroke-dashoffset: 0; }
+  .splash-dots i { opacity: 0.5; }
+  .splash-mark { animation: splash-calm 2.4s ease-in-out infinite; }
+  @keyframes splash-calm { 50% { opacity: 0.55; } }
+}
 
 /* ------------------------------------------------------------------- login */
 
@@ -6540,7 +6633,8 @@ button.portal-set-prev:hover { color: var(--brand); }
   z-index: 10;
 }
 .modal.coach-chat-modal .modal-head {
-  padding: 18px 20px 10px;
+  /* Clear of the grab handle drawn at the top of the sheet. */
+  padding: 26px 20px 10px;
   border-bottom: none;
   background: transparent;
   display: flex;
@@ -6674,7 +6768,24 @@ button.portal-set-prev:hover { color: var(--brand); }
   margin-bottom: -16px;
   position: relative;
   z-index: 1;
-  padding: 0 4px;
+  padding: 0 4px 0 12px;
+  isolation: isolate;
+}
+/* The light-blue panel behind the bubble; the mascot stands up out of it and
+   the white card below overlaps its foot, as in the design. */
+.coach-hero::before {
+  content: '';
+  position: absolute;
+  inset: 34px 0 0;
+  z-index: -1;
+  border-radius: 24px 24px 0 0;
+  background:
+    radial-gradient(120% 90% at 85% 10%, rgba(255, 255, 255, 0.55) 0%, transparent 55%),
+    linear-gradient(160deg, #cfe1ff 0%, #dceaff 55%, #e9f2ff 100%);
+}
+.coach-hero:not(:has(.coach-hero-art)) .coach-hero-bubble {
+  max-width: none;
+  margin-top: 46px;
 }
 .coach-hero-bubble {
   position: relative;
@@ -10588,9 +10699,13 @@ body .pf-form > .modal-foot .btn.primary {
 .portal-pick-search:focus-within { border-color: var(--brand); box-shadow: var(--ring); }
 .portal-pick-search svg { flex: none; }
 .portal-pick-search input {
-  flex: 1; min-width: 0; height: 100%; padding: 0; border: none; outline: none; background: none;
+  flex: 1; min-width: 0; min-height: 0; height: 100%; padding: 0; border: none; border-radius: 0; outline: none; background: none;
   color: var(--text); font: inherit; font-size: 16px; text-overflow: ellipsis;
 }
+/* The pill lights up on focus, so the bare input inside must not draw the
+   global field ring as a second, inset box. */
+.portal-pick-search input:focus,
+.portal-pick-search input:focus-visible { border: none; outline: none; box-shadow: none; background: none; }
 .portal-pick-search input::placeholder { color: var(--muted); }
 .portal-pick-search input::-webkit-search-cancel-button { cursor: pointer; }
 
