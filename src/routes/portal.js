@@ -13,6 +13,7 @@ import {
   PLAN_LEVELS,
   askCoach,
   buildCoachContext,
+  cleanMealPlan,
   coachConfigured,
   contextSteps,
   generatePlan,
@@ -1638,13 +1639,23 @@ portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), req
 
   const save = (reply) => {
     run(
-      `INSERT INTO ai_coach_messages (member_id, screen, question, answer, input_tokens, output_tokens)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [req.member.id, screen, question, reply.answer, reply.input_tokens, reply.output_tokens],
+      `INSERT INTO ai_coach_messages (member_id, screen, question, answer, meal_plan, input_tokens, output_tokens)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.member.id,
+        screen,
+        question,
+        reply.answer,
+        reply.meal_plan ? JSON.stringify(reply.meal_plan) : null,
+        reply.input_tokens,
+        reply.output_tokens,
+      ],
     );
     return {
       answer: reply.answer,
       suggestion: reply.suggestion,
+      // A meal plan, which the sheet shows as a card to log or save.
+      ...(reply.meal_plan && { meal_plan: reply.meal_plan }),
       remaining_today: Math.max(0, limit - asked - 1),
       // The figures the answer was worked from, for the macro rings under a
       // diet answer — the same numbers the coach was given.
@@ -2132,6 +2143,40 @@ portalRoutes.post('/diets/favorites', requireMemberAuth, requireModule('fitness'
 portalRoutes.delete('/diets/favorites/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
   const info = run('DELETE FROM member_food_favorites WHERE id = ? AND member_id = ?', [Number(req.params.id), req.member.id]);
   if (!info.changes) throw notFound('That food is not in your favourites');
+  res.json({ ok: true });
+});
+
+/* ── Meal plans ───────────────────────────────────────────────────────── */
+
+const MAX_SAVED_MEAL_PLANS = 50;
+
+const savedMealPlan = (row) => ({ id: row.id, created_at: row.created_at, ...JSON.parse(row.plan), name: row.name });
+
+/** The member's saved meal plans, newest first. */
+portalRoutes.get('/diets/meal-plans', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const rows = all('SELECT * FROM member_meal_plans WHERE member_id = ? ORDER BY id DESC', [req.member.id]);
+  res.json({ items: rows.map(savedMealPlan) });
+});
+
+/** Keeps a plan — usually one the coach made — to log again on another day. */
+portalRoutes.post('/diets/meal-plans', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const plan = cleanMealPlan(req.body);
+  if (!plan) throw badRequest('That plan has no food in it to save', { meals: 'is required' });
+  const count = get('SELECT COUNT(*) AS n FROM member_meal_plans WHERE member_id = ?', [req.member.id]).n;
+  if (count >= MAX_SAVED_MEAL_PLANS) {
+    throw conflict(`You have ${MAX_SAVED_MEAL_PLANS} saved meal plans — delete one to save another`);
+  }
+  const info = run('INSERT INTO member_meal_plans (member_id, name, plan) VALUES (?, ?, ?)', [
+    req.member.id,
+    plan.name,
+    JSON.stringify({ meals: plan.meals, totals: plan.totals }),
+  ]);
+  res.status(201).json(savedMealPlan(get('SELECT * FROM member_meal_plans WHERE id = ?', [info.lastInsertRowid])));
+});
+
+portalRoutes.delete('/diets/meal-plans/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const info = run('DELETE FROM member_meal_plans WHERE id = ? AND member_id = ?', [Number(req.params.id), req.member.id]);
+  if (!info.changes) throw notFound('That meal plan is not in your saved plans');
   res.json({ ok: true });
 });
 

@@ -1336,49 +1336,164 @@ function whenNearViewport(el, load) {
 }
 
 /**
+ * First frames already drawn, by media URL. The live logger rebuilds a whole
+ * card every time a set is ticked; with this the new card's thumbnail is
+ * painted straight away instead of fetching and decoding the clip again.
+ * Each entry is `{ canvas, full }` — `full` when the source was no bigger than
+ * asked for, so no later, larger request needs a sharper copy.
+ */
+const stills = new Map();
+const stillWaiters = new Map();
+
+function copyStill(canvas, still) {
+  canvas.width = still.width;
+  canvas.height = still.height;
+  canvas.getContext('2d')?.drawImage(still, 0, 0);
+}
+
+/** Paints the demo's first frame onto `canvas`: at once from the cache, else when it nears the viewport. */
+function showStill(canvas, url, type) {
+  const cached = stills.get(url);
+  if (cached) copyStill(canvas, cached.canvas);
+  whenNearViewport(canvas, () => {
+    // Sized to the box it is shown in, not the source: a full-HD frame per
+    // row would hold megabytes for a 56px disc.
+    const box = canvas.getBoundingClientRect();
+    const wanted = Math.max(box.width, box.height) * (window.devicePixelRatio || 1) || 360;
+    const have = stills.get(url);
+    if (have && (have.full || Math.min(have.canvas.width, have.canvas.height) >= wanted * 0.9)) {
+      if (have !== cached) copyStill(canvas, have.canvas);
+      return;
+    }
+    requestStill(url, type, wanted, (still) => copyStill(canvas, still.canvas));
+  });
+}
+
+/** One fetch per URL however many thumbnails ask for it at once. */
+function requestStill(url, type, wanted, onReady) {
+  const waiting = stillWaiters.get(url);
+  if (waiting) return waiting.push(onReady);
+  stillWaiters.set(url, [onReady]);
+
+  const finish = (source, width, height) => {
+    const scale = Math.min(1, wanted / Math.min(width, height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const still = { canvas, full: scale === 1 };
+    stills.set(url, still);
+    const waiters = stillWaiters.get(url) ?? [];
+    stillWaiters.delete(url);
+    for (const ready of waiters) ready(still);
+  };
+  // A failed load leaves the tile blank and lets the next render try again.
+  const fail = () => stillWaiters.delete(url);
+
+  if (type === 'video') return grabVideoFrame(url, finish, fail);
+  const frame = new Image();
+  frame.decoding = 'async';
+  frame.onload = () => finish(frame, frame.naturalWidth, frame.naturalHeight);
+  frame.onerror = fail;
+  frame.src = url;
+}
+
+/** True when a frame is near-black — a clip that fades in, or a frame the decoder hadn't filled yet. */
+function isDarkFrame(source) {
+  try {
+    const probe = document.createElement('canvas');
+    probe.width = probe.height = 8;
+    const ctx = probe.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, 0, 0, 8, 8);
+    const px = ctx.getImageData(0, 0, 8, 8).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+    return sum / (64 * 3) < 16;
+  } catch {
+    return false; // a cross-origin clip can't be read back; take its frame as it is
+  }
+}
+
+/** Loads the clip off-screen, hands over its first real frame, then lets the clip go. */
+function grabVideoFrame(url, onFrame, onFail) {
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+  let done = false;
+  let lookedLater = false;
+  const release = () => {
+    clearTimeout(nudge);
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  };
+  const grab = () => {
+    if (done || video.seeking || video.readyState < 2 || !video.videoWidth) return;
+    // A black opening frame is either a fade-in or a frame not decoded yet;
+    // either way a moment into the clip is the better picture.
+    if (!lookedLater && isDarkFrame(video)) {
+      lookedLater = true;
+      video.pause();
+      video.currentTime = Math.min(1, (video.duration || 4) / 4);
+      return;
+    }
+    done = true;
+    onFrame(video, video.videoWidth, video.videoHeight);
+    release();
+  };
+  for (const type of ['loadeddata', 'seeked', 'timeupdate']) video.addEventListener(type, grab);
+  video.addEventListener('error', () => {
+    if (done) return;
+    done = true;
+    release();
+    onFail();
+  });
+  // "#t=0.001" asks for the first real frame rather than a blank one.
+  video.src = url.includes('#') ? url : `${url}#t=0.001`;
+  // iOS won't buffer a detached clip on preload alone; a muted inline play()
+  // is allowed and gets the first frame decoded.
+  const nudge = setTimeout(() => {
+    if (!done) video.play()?.catch(() => {});
+  }, 1500);
+}
+
+/**
  * An exercise's demo — image, GIF or looping clip — or null when it has none,
  * so a caller can `?? fallback`. A clip plays muted and inline: browsers only
  * autoplay video that is both, and a demo must never grab the sound.
  *
- * `still` is for thumbnails in a list: a clip shows its first frame and a GIF
- * its first frame on a canvas, so a screen of rows isn't decoding a dozen
- * animations at once. The demo only moves once the member opens it. Stills
- * also wait until they scroll near the viewport before fetching anything, as
+ * `still` is for thumbnails in a list: a clip's or GIF's first frame is drawn
+ * once onto a canvas, so a screen of rows isn't decoding a dozen animations
+ * at once. The demo only moves once the member opens it. Stills also wait
+ * until they scroll near the viewport before fetching anything, as
  * `loading="lazy"` does for an <img> — a list of 150 rows would otherwise pull
  * every GIF and clip header up front.
+ *
+ * A canvas rather than a paused <video> for clips: Android Chrome drops a
+ * paused video's frame when the element leaves the document or is rebuilt, so
+ * a searched-away row or a re-rendered logger card came back as a black tile.
+ * Drawn frames are cached by URL (see `stills`), so a rebuild repaints at once.
  */
 export function exerciseMedia(item, { className = '', still = false } = {}) {
   if (!item?.media_url) return null;
+  if (still && (item.media_type === 'video' || item.media_type === 'gif')) {
+    const canvas = h('canvas', { class: className, 'aria-hidden': 'true' });
+    showStill(canvas, item.media_url, item.media_type);
+    return canvas;
+  }
   if (item.media_type === 'video') {
-    // "#t=0.001" makes mobile browsers paint the first frame of a clip that
-    // never plays; without it a paused <video> is often a blank box.
-    const src = still && !item.media_url.includes('#') ? `${item.media_url}#t=0.001` : item.media_url;
     const video = h('video', {
       class: className,
+      src: item.media_url,
       loop: '',
       playsinline: '',
       preload: 'metadata',
       'aria-hidden': 'true',
     });
     video.muted = true;
-    video.autoplay = !still;
-    if (still) whenNearViewport(video, () => (video.src = src));
-    else video.src = src;
+    video.autoplay = true;
     return video;
-  }
-  if (still && item.media_type === 'gif') {
-    const canvas = h('canvas', { class: className, 'aria-hidden': 'true' });
-    whenNearViewport(canvas, () => {
-      const frame = new Image();
-      frame.decoding = 'async';
-      frame.onload = () => {
-        canvas.width = frame.naturalWidth;
-        canvas.height = frame.naturalHeight;
-        canvas.getContext('2d')?.drawImage(frame, 0, 0);
-      };
-      frame.src = item.media_url;
-    });
-    return canvas;
   }
   return h('img', { class: className, src: item.media_url, alt: '', loading: 'lazy', decoding: 'async' });
 }

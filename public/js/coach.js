@@ -247,13 +247,202 @@ function macroRings(diet) {
           { class: 'coach-ring-mid' },
           renderIcon(icon, { size: 15, stroke: 2 }),
           h('strong', {}, unit === 'g' ? `${eaten}g` : eaten.toLocaleString()),
-          h('small', {}, `/ ${unit === 'g' ? `${target}g` : `${target.toLocaleString()} kcal`}`),
         ),
       ),
       h('span', { class: 'coach-ring-label' }, label),
+      // The target sits under the label, not inside the dial: "/ 3,280 kcal" is
+      // wider than the ring's inner chord and ran over the stroke.
+      h('small', { class: 'coach-ring-goal' }, `of ${unit === 'g' ? `${target}g` : `${target.toLocaleString()} kcal`}`),
     );
   });
   return cards.length ? h('div', { class: 'coach-rings', role: 'img', 'aria-label': 'Today’s macros against your targets' }, ...cards) : null;
+}
+
+/* ── Meal plans ───────────────────────────────────────────────────────── */
+
+const MEAL_LABELS = {
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+  snack: 'Snack',
+  pre_workout: 'Pre-workout',
+  post_workout: 'Post-workout',
+};
+const mealLabel = (meal) => MEAL_LABELS[meal.meal_type] ?? 'Meal';
+const mealKcal = (meal) => meal.items.reduce((sum, item) => sum + item.calories, 0);
+const grams = (n) => `${Math.round(n)}g`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** The plan as plain text, for pasting into notes or a chat with a trainer. */
+export function mealPlanText(plan) {
+  const t = plan.totals;
+  const lines = [plan.name, `${t.calories} kcal · ${grams(t.protein_g)} protein · ${grams(t.carbs_g)} carbs · ${grams(t.fats_g)} fats`];
+  for (const meal of plan.meals) {
+    lines.push('', `${mealLabel(meal)}${meal.name ? ` — ${meal.name}` : ''} (${mealKcal(meal)} kcal)`);
+    for (const item of meal.items) {
+      lines.push(`• ${item.food_name}, ${item.portion} — ${item.calories} kcal, ${grams(item.protein_g)} protein`);
+    }
+  }
+  return lines.join('\n');
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // No async clipboard (plain http on a LAN, older WebViews): the old way.
+    const area = h('textarea', { class: 'mplan-copy-area', 'aria-hidden': 'true' });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {}
+    area.remove();
+    return ok;
+  }
+}
+
+/**
+ * A meal plan as a card under a coach reply: totals and each meal with its
+ * foods, then what to do with it — save it, track it, or copy it as text.
+ *
+ * There is no "log it all" here on purpose: the coach's figures are
+ * estimates, so a plan is tracked food by food from Quick track's My plans
+ * tab, where each food is looked up in the food library or online and logged
+ * at the amount actually eaten. "Track foods" saves the plan (once) and opens
+ * it there.
+ *
+ * @param {object} plan {name, meals, totals} as the server sends it
+ * @param {object} [opts]
+ * @param {(saved: object) => void} [opts.onTrackPlan] opens the saved plan in Quick track; no button without it
+ */
+export function mealPlanCard(plan, { onTrackPlan } = {}) {
+  /** The saved copy, so Save and Track foods never save it twice. */
+  let saved = null;
+  let saving = null;
+  const save = () => {
+    saving ??= api.portal.saveMealPlan({ name: plan.name, meals: plan.meals }).then(
+      (row) => {
+        saved = row;
+        saveBtn.disabled = true;
+        saveBtn.replaceChildren(renderIcon('check', { size: 15, stroke: 2.4 }), h('span', {}, 'Saved'));
+        return row;
+      },
+      (err) => {
+        saving = null;
+        throw err;
+      },
+    );
+    return saving;
+  };
+
+  const saveBtn = h(
+    'button',
+    {
+      class: `mplan-btn${onTrackPlan ? '' : ' is-primary'}`,
+      type: 'button',
+      onclick: async () => {
+        saveBtn.disabled = true;
+        try {
+          await save();
+          toast('Saved — find it in Track food → My plans');
+        } catch (err) {
+          saveBtn.disabled = false;
+          toast(err.message || 'Could not save that plan', 'error');
+        }
+      },
+    },
+    renderIcon('save', { size: 15, stroke: 2.2 }),
+    h('span', {}, 'Save'),
+  );
+
+  const trackBtn = onTrackPlan
+    ? h(
+        'button',
+        {
+          class: 'mplan-btn is-primary',
+          type: 'button',
+          onclick: async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+              onTrackPlan(saved ?? (await save()));
+            } catch (err) {
+              toast(err.message || 'Could not save that plan', 'error');
+            } finally {
+              button.disabled = false;
+            }
+          },
+        },
+        renderIcon('search', { size: 15, stroke: 2.4 }),
+        h('span', {}, 'Track foods'),
+      )
+    : null;
+
+  const copyBtn = h(
+    'button',
+    {
+      class: 'mplan-btn is-icon',
+      type: 'button',
+      'aria-label': 'Copy plan as text',
+      title: 'Copy plan as text',
+      onclick: async () => toast(...((await copyText(mealPlanText(plan))) ? ['Meal plan copied'] : ['Could not copy on this device', 'error'])),
+    },
+    renderIcon('copy', { size: 16, stroke: 2.2 }),
+  );
+
+  const t = plan.totals;
+  return h(
+    'section',
+    { class: 'mplan', 'aria-label': plan.name },
+    h(
+      'div',
+      { class: 'mplan-head' },
+      h('span', { class: 'mplan-ico' }, renderIcon('utensils', { size: 18, stroke: 2.2 })),
+      h(
+        'div',
+        { class: 'mplan-title' },
+        h('strong', {}, plan.name),
+        h('small', {}, `${plural(plan.meals.length, 'meal')} · track each food from the food library`),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'mplan-macros' },
+      h('span', { class: 'is-kcal' }, h('strong', {}, t.calories.toLocaleString()), ' kcal'),
+      h('span', { class: 'is-protein' }, h('strong', {}, grams(t.protein_g)), ' protein'),
+      h('span', { class: 'is-carbs' }, h('strong', {}, grams(t.carbs_g)), ' carbs'),
+      h('span', { class: 'is-fats' }, h('strong', {}, grams(t.fats_g)), ' fats'),
+    ),
+    ...plan.meals.map((meal) =>
+      h(
+        'div',
+        { class: 'mplan-meal' },
+        h(
+          'div',
+          { class: 'mplan-meal-head' },
+          h('div', { class: 'mplan-meal-name' }, h('strong', {}, mealLabel(meal)), meal.name ? h('small', {}, meal.name) : null),
+          h('span', { class: 'mplan-meal-kcal' }, `${mealKcal(meal)} kcal`),
+        ),
+        h(
+          'ul',
+          { class: 'mplan-items' },
+          ...meal.items.map((item) =>
+            h(
+              'li',
+              {},
+              h('span', { class: 'mplan-food' }, h('span', {}, item.food_name), h('small', {}, item.portion)),
+              h('span', { class: 'mplan-food-num' }, `${item.calories} kcal`, h('small', {}, `${grams(item.protein_g)} protein`)),
+            ),
+          ),
+        ),
+      ),
+    ),
+    h('div', { class: 'mplan-actions' }, trackBtn, saveBtn, copyBtn),
+  );
 }
 
 /**
@@ -388,11 +577,23 @@ function createCoachView(turn) {
       stopThinking();
       bubble.classList.remove('is-empty');
       await typer.end(reply.answer);
-      Object.assign(turn, { live: false, text: reply.answer, suggestion: reply.suggestion ?? null });
+      Object.assign(turn, { live: false, text: reply.answer, suggestion: reply.suggestion ?? null, mealPlan: reply.meal_plan ?? null });
       settle();
       answer.replaceChildren(...answerTokens(reply.answer).map((token) => tokenNode(token, false)));
-      const rings = reply.diet ? macroRings(reply.diet) : null;
-      if (rings) extras.append(rings);
+      // A meal plan is the answer itself, so it takes the rings' place: the
+      // reply already says how it sits against what is left.
+      if (reply.meal_plan) {
+        extras.append(
+          mealPlanCard(reply.meal_plan, {
+            // Through whichever sheet is open when tapped: this one may have
+            // been closed and opened again since.
+            onTrackPlan: activeSheet?.onTrackPlan ? (saved) => activeSheet?.onTrackPlan?.(saved) : undefined,
+          }),
+        );
+      } else {
+        const rings = reply.diet ? macroRings(reply.diet) : null;
+        if (rings) extras.append(rings);
+      }
       activeSheet?.paintActions(turn);
       grow();
     },
@@ -423,8 +624,17 @@ function createCoachView(turn) {
  * @param {string} [opts.initialQuestion] sent as soon as the sheet opens
  * @param {'kg'|'lb'} [opts.unit]
  * @param {(kg: number) => string} [opts.weightLabel] how the member reads a weight
+ * @param {(saved: object) => void} [opts.onTrackPlan] opens a saved meal plan in Quick track
  */
-export function openCoachSheet({ screen, getSession, onApply, initialQuestion, unit = 'kg', weightLabel = (kg) => `${kg} kg` }) {
+export function openCoachSheet({
+  screen,
+  getSession,
+  onApply,
+  initialQuestion,
+  unit = 'kg',
+  weightLabel = (kg) => `${kg} kg`,
+  onTrackPlan,
+}) {
   const thread = threads[screen];
   // Follow the reply down as it grows, unless the member scrolled up to reread.
   let stick = true;
@@ -586,6 +796,7 @@ export function openCoachSheet({ screen, getSession, onApply, initialQuestion, u
 
   const sheet = {
     onGrow: scrollDown,
+    onTrackPlan,
     paintActions: (turn) => turn.view.setActions(applyButton(turn)),
     setBusy: (busy) => {
       sendBtn.disabled = busy;

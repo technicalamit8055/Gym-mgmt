@@ -18,7 +18,7 @@ const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
 const { closeRegistryDb } = await import('../src/tenants.js');
 const { config } = await import('../src/config.js');
-const { contextSteps, parsePlanReply, parseReply, partialAnswer, sanitiseSession, setAiClientForTests } = await import(
+const { cleanMealPlan, contextSteps, parsePlanReply, parseReply, partialAnswer, sanitiseSession, setAiClientForTests } = await import(
   '../src/aiCoach.js'
 );
 const { today } = await import('../src/validate.js');
@@ -382,7 +382,7 @@ describe('Ask Coach streaming', () => {
       event: 'done',
       data: { answer, suggestion: { exercise: 'Goblet Squat', weight_kg: 40, reps: 10 }, remaining_today: 2 },
     });
-    assert.deepEqual(fake.calls[0].config.thinkingConfig, { includeThoughts: true });
+    assert.deepEqual(fake.calls[0].config.thinkingConfig, { thinkingBudget: 1024, includeThoughts: true });
 
     // Saved like any other question: it is the chat's memory next time.
     await askStreamed({ question: 'And then?', screen: 'workout' }, streamToken);
@@ -490,6 +490,102 @@ describe('AI workout generator', () => {
   });
 });
 
+describe('Coach meal plans', () => {
+  // A member of their own, so the daily caps above are left alone.
+  let token;
+  let mealMemberId;
+  const plan = {
+    name: 'High-protein rest of today',
+    meals: [
+      {
+        meal_type: 'lunch',
+        name: 'Chicken rice bowl',
+        items: [
+          { food_name: 'Grilled chicken breast', portion: '150 g', calories: 248, protein_g: 46.5, carbs_g: 0, fats_g: 5.4 },
+          { food_name: 'Cooked white rice', portion: '1 cup', calories: 205, protein_g: 4.3, carbs_g: 44.5, fats_g: 0.4 },
+        ],
+      },
+      {
+        meal_type: 'dinner',
+        items: [{ food_name: 'Paneer bhurji', portion: '200 g', calories: 520, protein_g: 36, carbs_g: 10, fats_g: 38 }],
+      },
+    ],
+  };
+
+  before(async () => {
+    const member = await call('POST', '/api/members', { first_name: 'Neha', last_name: 'Kapoor', phone: '9876500024' }, { token: adminToken });
+    mealMemberId = member.body.id;
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: mealMemberId }, { token: adminToken });
+    token = await signInMember(call, { staffToken: adminToken, memberId: mealMemberId });
+  });
+
+  it('sends back a meal plan with the answer and remembers it for the next question', async () => {
+    fake.reply = JSON.stringify({ answer: 'Here is the rest of today: **973 calories, 87g protein**.', meal_plan: plan });
+    const res = await call('POST', '/api/portal/coach/ask', { question: 'Suggest a meal plan', screen: 'diet' }, { token });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.meal_plan.name, plan.name);
+    assert.deepEqual(res.body.meal_plan.totals, { calories: 973, protein_g: 86.8, carbs_g: 54.5, fats_g: 43.8 });
+    assert.equal(res.body.meal_plan.meals[1].name, null);
+    assert.ok(fake.calls[0].config.responseJsonSchema.properties.meal_plan, 'the model is asked for a plan');
+    assert.ok(fake.calls[0].config.maxOutputTokens >= 8192, 'room for a whole day');
+
+    fake.reply = JSON.stringify({ answer: 'Swapped the chicken for tofu.' });
+    const plain = await call('POST', '/api/portal/coach/ask', { question: 'Make lunch vegetarian', screen: 'diet' }, { token });
+    const earlier = JSON.parse(fake.calls[1].contents[1].parts[0].text);
+    assert.equal(earlier.meal_plan.meals[0].items[0].food_name, 'Grilled chicken breast');
+    // A plain answer carries no plan at all.
+    assert.ok(!('meal_plan' in plain.body));
+  });
+
+  it('tells the coach which meals are already logged today', async () => {
+    await call('POST', '/api/portal/diets/entries', { meal_type: 'breakfast', food_name: 'Oats', calories: 300 }, { token });
+    fake.reply = JSON.stringify({ answer: 'Fine.' });
+    await call('POST', '/api/portal/coach/ask', { question: 'What should I eat next?', screen: 'diet' }, { token });
+    assert.deepEqual(lastContext().diet_today.meals_logged, ['breakfast']);
+  });
+
+  it('has no way to log a plan in one go — its foods are tracked one by one', async () => {
+    const res = await call('POST', '/api/portal/diets/entries/batch', { meals: plan.meals }, { token });
+    assert.equal(res.status, 404);
+  });
+
+  it('saves, lists and deletes plans, each member only their own', async () => {
+    const saved = await call('POST', '/api/portal/diets/meal-plans', { name: plan.name, meals: plan.meals }, { token });
+    assert.equal(saved.status, 201);
+    assert.equal(saved.body.name, plan.name);
+    assert.equal(saved.body.totals.calories, 973);
+    // Unknown meal types become snacks rather than failing the save.
+    const odd = await call('POST', '/api/portal/diets/meal-plans', { meals: [{ meal_type: 'brunch', items: plan.meals[1].items }] }, { token });
+    assert.equal(odd.body.name, 'Meal plan');
+    assert.equal(odd.body.meals[0].meal_type, 'snack');
+
+    const list = await call('GET', '/api/portal/diets/meal-plans', undefined, { token });
+    assert.deepEqual(list.body.items.map((p) => p.id), [odd.body.id, saved.body.id]);
+    assert.deepEqual((await call('GET', '/api/portal/diets/meal-plans', undefined, { token: otherToken })).body.items, []);
+
+    assert.equal((await call('DELETE', `/api/portal/diets/meal-plans/${saved.body.id}`, undefined, { token: otherToken })).status, 404);
+    assert.equal((await call('DELETE', `/api/portal/diets/meal-plans/${saved.body.id}`, undefined, { token })).status, 200);
+    assert.equal((await call('GET', '/api/portal/diets/meal-plans', undefined, { token })).body.items.length, 1);
+    assert.equal((await call('POST', '/api/portal/diets/meal-plans', { name: 'Nothing', meals: [] }, { token })).status, 400);
+  });
+
+  it('cleans a plan: bad numbers, nameless foods and empty meals', () => {
+    assert.equal(cleanMealPlan(null), null);
+    assert.equal(cleanMealPlan({ meals: [{ meal_type: 'lunch', items: [] }] }), null);
+    const cleaned = cleanMealPlan({
+      meals: [
+        { meal_type: 'dinner', items: [{ food_name: 'Dal', calories: '180.6', protein_g: -3, carbs_g: 'lots' }, { calories: 100 }] },
+        { meal_type: 'snack', items: [] },
+      ],
+    });
+    assert.deepEqual(cleaned, {
+      name: 'Meal plan',
+      meals: [{ meal_type: 'dinner', name: null, items: [{ food_name: 'Dal', portion: '1 serving', calories: 181, protein_g: 0, carbs_g: 0, fats_g: 0 }] }],
+      totals: { calories: 181, protein_g: 0, carbs_g: 0, fats_g: 0 },
+    });
+  });
+});
+
 describe('Ask Coach helpers', () => {
   it('rejects a plan with nothing from the library in it', () => {
     const library = [{ name: 'Push-Up', muscle_group: 'chest', equipment: 'bodyweight' }];
@@ -507,7 +603,7 @@ describe('Ask Coach helpers', () => {
   });
 
   it('keeps only a usable suggestion from the model’s JSON', () => {
-    assert.deepEqual(parseReply('{"answer":" Hold at 30 kg. "}'), { answer: 'Hold at 30 kg.', suggestion: null });
+    assert.deepEqual(parseReply('{"answer":" Hold at 30 kg. "}'), { answer: 'Hold at 30 kg.', suggestion: null, meal_plan: null });
     assert.deepEqual(
       parseReply('{"answer":"Go up","suggestion":{"exercise":"Bench Press","weight_kg":"62.5","reps":8}}').suggestion,
       { exercise: 'Bench Press', weight_kg: 62.5, reps: 8 },
@@ -515,11 +611,11 @@ describe('Ask Coach helpers', () => {
     assert.equal(parseReply('{"answer":"Ok","suggestion":{"exercise":"Bench","weight_kg":60,"reps":0}}').suggestion, null);
     assert.deepEqual(
       parseReply('```json\n{"answer":"Drop to 10 kg."}\n```'),
-      { answer: 'Drop to 10 kg.', suggestion: null },
+      { answer: 'Drop to 10 kg.', suggestion: null, meal_plan: null },
     );
     assert.deepEqual(
       parseReply('Here is your recommendation: {"answer":"Push for 10 reps."} Hope this helps!'),
-      { answer: 'Push for 10 reps.', suggestion: null },
+      { answer: 'Push for 10 reps.', suggestion: null, meal_plan: null },
     );
     assert.throws(() => parseReply('not json'));
     assert.throws(() => parseReply('{"answer":""}'));

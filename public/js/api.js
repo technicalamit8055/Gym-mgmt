@@ -677,6 +677,10 @@ export const api = {
     addBarcodeFood: (payload) => request('POST', '/portal/diets/barcode-foods', payload, { member: true }),
     addFavoriteFood: (payload) => request('POST', '/portal/diets/favorites', payload, { member: true }),
     removeFavoriteFood: (id) => request('DELETE', `/portal/diets/favorites/${id}`, undefined, { member: true }),
+    // Meal plans saved from the coach, tracked food by food in Quick track.
+    mealPlans: () => request('GET', '/portal/diets/meal-plans', undefined, { member: true }),
+    saveMealPlan: (payload) => request('POST', '/portal/diets/meal-plans', payload, { member: true }),
+    deleteMealPlan: (id) => request('DELETE', `/portal/diets/meal-plans/${id}`, undefined, { member: true }),
     // Own targets, the calculator, weigh-ins and activities outside the logger.
     nutrition: () => request('GET', '/portal/nutrition', undefined, { member: true }),
     saveNutrition: (payload) => request('PUT', '/portal/nutrition', payload, { member: true }),

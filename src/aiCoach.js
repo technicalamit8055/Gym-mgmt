@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { all, get } from './db.js';
-import { exerciseHistory } from './fitness.js';
+import { MEAL_TYPES, exerciseHistory } from './fitness.js';
 import { ageOn, effectiveDietTargets, exerciseForDay, nutritionProfile, weightOn } from './nutrition.js';
 import { addDays, today } from './validate.js';
 
@@ -25,6 +25,9 @@ const HISTORY_TURNS = 6;
 const MAX_SESSION_EXERCISES = 15;
 const MAX_SESSION_SETS = 12;
 const HISTORY_EXERCISES = 8;
+/** A meal plan's size: a whole day is at most six meals of a few foods each. */
+const MAX_PLAN_MEALS = 6;
+const MAX_MEAL_ITEMS = 8;
 
 export const coachConfigured = () => Boolean(config.aiCoach.project);
 
@@ -57,14 +60,22 @@ const SYSTEM_INSTRUCTION = `You are the personal coach inside a gym's member app
 You are given MEMBER CONTEXT as JSON: their profile, injuries or limitations, current plan, the live workout session (every set so far with weight, reps and effort as RPE), recent history for those exercises, the last week of workouts, and today's food against their targets. Weights in the context are kilograms; "unit" is what the member uses, so give every weight in that unit, rounded to what a gym actually has. The smallest plate is 2.5 kg, so a barbell or Smith machine only goes up or down in 5 kg steps (a 2.5 kg plate on each side); dumbbells go in 2.5 kg steps; pounds go in 5 lb steps. Never suggest 1.25 kg plates or any load that needs them, such as 32.5 kg on a bar. When the next 5 kg step is too big a jump, say add reps at the same weight first.
 
 How to answer:
-- 2 to 5 short sentences. Lead with the answer (a number, a choice), then the one reason that matters. No headings, no lists unless they ask for a plan.
+- 2 to 5 short sentences. Lead with the answer (a number, a choice), then the one reason that matters. No headings and no lists in the answer.
 - Wrap the numbers the member acts on in **double asterisks** (e.g. "**2413 calories, 82g protein** left"); no other markdown. A blank line may split the answer into two short paragraphs.
 - Use their actual numbers. Prefer the context to generic advice; say so when there is no history to go on.
 - For "what weight/reps next", work from the set they just did: below the target rep range or a failed set means go lighter; past the top of the range or an easy set means go heavier; otherwise hold. "next_set_suggestion" in the session is the app's own rule-based pick — agree with it or explain why you differ.
 - When you recommend a specific next set for one exercise in the session, also fill "suggestion" with that exercise's exact name, the weight in kilograms and the reps. Leave it out for anything else.
 - Be conservative around anything listed under limitations and around pain: suggest a lighter or alternative movement and seeing a trainer or doctor. Never diagnose or treat medical conditions, and never recommend drugs, supplements beyond basics like protein or creatine, or extreme diets.
 - Stay on fitness, exercise, recovery and nutrition. Politely decline anything else.
-- Answer in the language the member writes in.`;
+- Answer in the language the member writes in.
+
+Meal plans — you can and should make them. Whenever the member asks for a meal plan, a diet for the day, what to eat, or a meal or snack idea, fill "meal_plan"; the app shows it as a card they can save and then track food by food from the food library. Never say you cannot make a meal plan.
+- Scope: "a meal plan" or "rest of today" covers the meals still to come today, fitted to what is left (targets minus eaten; skip meal types in "meals_logged"). If nothing is eaten yet, or they ask for a full day or tomorrow, plan the whole day against the full targets. A single meal or snack idea is a meal_plan with just that one meal.
+- Land the plan's total within about 10% of the calories and protein it is meant to cover. Hitting protein matters most.
+- Real, everyday foods with a concrete portion each ("150 g", "2 eggs", "1 cup cooked", "1 medium banana"). The member searches a food database for each food_name, so name the plain food the way a database does ("Chicken breast", "Rolled oats", "Paneer", "Brown rice"); put how it is cooked in the portion ("150 g, grilled"), not the name. Give each food's calories, protein, carbs and fats for that portion from standard nutrition values; calories should be close to 4 × protein + 4 × carbs + 9 × fats.
+- meal_type is one of breakfast, lunch, dinner, snack, pre_workout, post_workout. 2 to 5 foods per meal.
+- Follow any diet, cuisine, allergy or food the member mentions now or earlier (vegetarian, no eggs, Indian food) and their limitations.
+- With a meal_plan, "answer" is 1 to 3 sentences: what the plan covers and how its total sits against what is left, with the key numbers in bold. Do not list the foods in the answer — the card shows them.`;
 
 const RESPONSE_SCHEMA = {
   type: 'object',
@@ -79,6 +90,42 @@ const RESPONSE_SCHEMA = {
         reps: { type: 'integer', minimum: 1 },
       },
       required: ['exercise', 'weight_kg', 'reps'],
+    },
+    // No minItems/maxItems on the nested lists (Vertex rejects them with a
+    // 400); cleanMealPlan enforces the counts.
+    meal_plan: {
+      type: 'object',
+      description: 'Only when the member asks for a meal plan, what to eat, or a meal or snack idea.',
+      properties: {
+        name: { type: 'string', description: 'Short title, at most 40 characters, e.g. "High-protein rest of today".' },
+        meals: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              meal_type: { type: 'string', enum: MEAL_TYPES },
+              name: { type: 'string', description: 'Optional dish name, e.g. "Chicken rice bowl".' },
+              items: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    food_name: { type: 'string' },
+                    portion: { type: 'string', description: 'e.g. "150 g", "2 eggs", "1 cup cooked".' },
+                    calories: { type: 'integer', minimum: 0 },
+                    protein_g: { type: 'number', minimum: 0 },
+                    carbs_g: { type: 'number', minimum: 0 },
+                    fats_g: { type: 'number', minimum: 0 },
+                  },
+                  required: ['food_name', 'portion', 'calories', 'protein_g', 'carbs_g', 'fats_g'],
+                },
+              },
+            },
+            required: ['meal_type', 'items'],
+          },
+        },
+      },
+      required: ['name', 'meals'],
     },
   },
   required: ['answer'],
@@ -186,6 +233,12 @@ export function buildCoachContext(memberId, { screen, session, unit, planId }) {
     [memberId, on],
   ) ?? { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0, items: 0 };
   const burned = exerciseForDay(memberId, on).total_burned;
+  // So "a meal plan for the rest of today" can skip the meals already eaten.
+  const mealsLogged = all(
+    `SELECT DISTINCT e.meal_type FROM diet_logs d JOIN diet_log_entries e ON e.diet_log_id = d.id
+     WHERE d.member_id = ? AND d.log_date = ?`,
+    [memberId, on],
+  ).map((row) => row.meal_type);
 
   return {
     today: on,
@@ -217,6 +270,7 @@ export function buildCoachContext(memberId, { screen, session, unit, planId }) {
         fats_g: Math.round(food.fats_g),
       },
       items_logged: food.items,
+      meals_logged: mealsLogged,
       targets: {
         calories: targets.target_calories,
         protein_g: targets.target_protein_g,
@@ -242,7 +296,7 @@ export function questionsToday(memberId) {
 /** The last few exchanges on the same screen, oldest first, as chat turns. */
 export function recentTurns(memberId, screen) {
   return all(
-    `SELECT question, answer FROM ai_coach_messages
+    `SELECT question, answer, meal_plan FROM ai_coach_messages
      WHERE member_id = ? AND screen = ? AND created_at >= datetime('now', '-1 day')
      ORDER BY id DESC LIMIT ?`,
     [memberId, screen, HISTORY_TURNS],
@@ -255,7 +309,14 @@ function coachParams({ context, question, history, signal }) {
   const contents = [];
   for (const turn of history) {
     contents.push({ role: 'user', parts: [{ text: turn.question }] });
-    contents.push({ role: 'model', parts: [{ text: JSON.stringify({ answer: turn.answer }) }] });
+    // The plan goes back too, so "make the dinner vegetarian" has something to change.
+    const reply = { answer: turn.answer };
+    if (turn.meal_plan) {
+      try {
+        reply.meal_plan = JSON.parse(turn.meal_plan);
+      } catch {}
+    }
+    contents.push({ role: 'model', parts: [{ text: JSON.stringify(reply) }] });
   }
   // The context rides on the newest question rather than in the system
   // instruction, so it is always the live state — the session has moved on
@@ -273,7 +334,14 @@ function coachParams({ context, question, history, signal }) {
       responseMimeType: 'application/json',
       responseJsonSchema: RESPONSE_SCHEMA,
       temperature: 0.4,
-      maxOutputTokens: 1024,
+      // On thinking models the thinking counts against this too: a question
+      // with arithmetic in it (a meal that fits today's macros) can think for
+      // ~1000 tokens, and at 1024 the JSON was cut off mid-answer. A whole
+      // day's meal plan adds ~1500 more. Only what is written is billed.
+      maxOutputTokens: 8192,
+      // Left unbounded, thinking on that same meal question ran past the
+      // timeout instead of being cut off.
+      thinkingConfig: { thinkingBudget: 1024 },
       abortSignal: signal ? AbortSignal.any([timeout, signal]) : timeout,
     },
   };
@@ -305,7 +373,7 @@ export async function askCoach({ context, question, history = [] }) {
 export async function streamCoach({ context, question, history = [], signal, onThought, onAnswer }) {
   const ai = await getClient();
   const params = coachParams({ context, question, history, signal });
-  params.config.thinkingConfig = { includeThoughts: true };
+  params.config.thinkingConfig = { ...params.config.thinkingConfig, includeThoughts: true };
   const stream = await ai.models.generateContentStream(params);
 
   let raw = '';
@@ -403,8 +471,54 @@ function stripCodeFences(str) {
   return match ? match[1].trim() : text;
 }
 
+/* ── Meal plans ───────────────────────────────────────────────────────── */
+
+/** A plan's calories and macros, summed from its foods. */
+export function mealPlanTotals(meals) {
+  const totals = { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 };
+  for (const meal of meals) {
+    for (const item of meal.items) {
+      totals.calories += item.calories;
+      totals.protein_g += item.protein_g;
+      totals.carbs_g += item.carbs_g;
+      totals.fats_g += item.fats_g;
+    }
+  }
+  return { calories: totals.calories, protein_g: round1(totals.protein_g), carbs_g: round1(totals.carbs_g), fats_g: round1(totals.fats_g) };
+}
+
+/**
+ * A meal plan cut to the shape the app logs and saves: known meal types only,
+ * every food named with plain non-negative numbers, empty meals dropped.
+ * Used on the model's reply and on whatever a phone sends back to log or save,
+ * so both are held to the same rules. Null when nothing usable is left.
+ */
+export function cleanMealPlan(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.meals)) return null;
+  const meals = raw.meals
+    .slice(0, MAX_PLAN_MEALS)
+    .map((meal) => ({
+      meal_type: MEAL_TYPES.includes(meal?.meal_type) ? meal.meal_type : 'snack',
+      name: text(meal?.name, 60) || null,
+      items: (Array.isArray(meal?.items) ? meal.items : [])
+        .slice(0, MAX_MEAL_ITEMS)
+        .map((item) => ({
+          food_name: text(item?.food_name, 120),
+          portion: text(item?.portion, 60) || '1 serving',
+          calories: Math.round(num(item?.calories, 5000)),
+          protein_g: round1(num(item?.protein_g, 500)),
+          carbs_g: round1(num(item?.carbs_g, 1000)),
+          fats_g: round1(num(item?.fats_g, 500)),
+        }))
+        .filter((item) => item.food_name),
+    }))
+    .filter((meal) => meal.items.length);
+  if (!meals.length) return null;
+  return { name: text(raw.name, 60) || 'Meal plan', meals, totals: mealPlanTotals(meals) };
+}
+
 /** The model's JSON, checked: an answer is required, a suggestion is kept
- * only when every field is a usable number. */
+ * only when every field is a usable number, a meal plan only when it has food. */
 export function parseReply(raw) {
   let data;
   const cleaned = stripCodeFences(raw);
@@ -427,7 +541,7 @@ export function parseReply(raw) {
     s && typeof s.exercise === 'string' && Number.isFinite(Number(s.weight_kg)) && Number(s.reps) >= 1
       ? { exercise: s.exercise.trim().slice(0, 120), weight_kg: round1(Math.max(0, Number(s.weight_kg))), reps: Math.round(Number(s.reps)) }
       : null;
-  return { answer: answer.slice(0, 2000), suggestion };
+  return { answer: answer.slice(0, 2000), suggestion, meal_plan: cleanMealPlan(data.meal_plan) };
 }
 
 /* ── Workout generator ────────────────────────────────────────────────── */

@@ -1826,6 +1826,94 @@ const clockFrom = (seconds) => {
 
 const minutesLabel = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
 
+/** The longest session the server will store (its duration_seconds cap). */
+const MAX_SESSION_SECONDS = 86400;
+
+/** How long a session has run: from its start to now — or to the moment it
+ * was paused — less the time it already spent paused. */
+const sessionSeconds = (state) =>
+  Math.max(0, ((state.paused_at ?? Date.now()) - state.started_at - (state.paused_ms || 0)) / 1000);
+
+/** "14h 14min 51s", the duration sheet's long form of the session clock. */
+function longDurationLabel(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  return [hh ? `${hh}h` : null, hh || mm ? `${mm}min` : null, `${s % 60}s`].filter(Boolean).join(' ');
+}
+
+/** "45min", "1h 5min": a whole-minute duration as the minutes wheel reads it. */
+const minuteLabel = (m) => (m < 60 ? `${m}min` : `${Math.floor(m / 60)}h ${m % 60}min`);
+
+/**
+ * Hevy's minutes wheel: one row per minute from 0 to `max`, snapped so the
+ * middle row is always the pick. `onPick(minutes)` fires once the wheel comes
+ * to rest on a new minute — never for the scroll that `show` makes to put it
+ * in place, so opening the wheel edits nothing. `show` needs the wheel laid
+ * out, so it is called once the node is on screen.
+ */
+function minuteWheel({ max = MAX_SESSION_SECONDS / 60, onPick }) {
+  const rows = Array.from({ length: max + 1 }, (_, m) =>
+    h('div', { class: 'portal-wheel-row', onclick: () => scrollToMinute(m, 'smooth') }, minuteLabel(m)),
+  );
+  const wheel = h(
+    'div',
+    { class: 'portal-wheel', tabindex: 0, role: 'spinbutton', 'aria-label': 'Duration', 'aria-valuemin': 0, 'aria-valuemax': max },
+    ...rows,
+  );
+
+  const rowHeight = () => rows[0].offsetHeight || 48;
+  const minuteAt = () => Math.max(0, Math.min(max, Math.round(wheel.scrollTop / rowHeight())));
+  const scrollToMinute = (m, behavior = 'auto') => wheel.scrollTo({ top: m * rowHeight(), behavior });
+
+  let picked = 0;
+  let lit = null;
+  const light = () => {
+    const m = minuteAt();
+    if (rows[m] === lit) return;
+    lit?.classList.remove('is-current');
+    lit = rows[m];
+    lit.classList.add('is-current');
+    wheel.setAttribute('aria-valuenow', m);
+    wheel.setAttribute('aria-valuetext', minuteLabel(m));
+  };
+
+  let settle = null;
+  wheel.addEventListener('scroll', () => {
+    light();
+    clearTimeout(settle);
+    settle = setTimeout(() => {
+      const m = minuteAt();
+      if (m === picked) return;
+      picked = m;
+      onPick(m);
+    }, 150);
+  });
+  wheel.addEventListener('keydown', (event) => {
+    const step = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    scrollToMinute(Math.max(0, Math.min(max, minuteAt() + step)), 'smooth');
+  });
+
+  return {
+    node: h('div', { class: 'portal-wheel-wrap' }, h('div', { class: 'portal-wheel-band', 'aria-hidden': 'true' }), wheel),
+    show(minutes) {
+      picked = Math.max(0, Math.min(max, minutes));
+      scrollToMinute(picked);
+      light();
+      wheel.focus({ preventScroll: true });
+    },
+  };
+}
+
+/** A local datetime-local value ("2026-10-14T08:06") for an instant in ms. */
+function localDateTimeValue(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** The burst of rays and confetti around the workout summary's emoji. Rays are
  * [angle°, inner radius, outer radius] about the emoji's centre. */
 function summaryConfetti() {
@@ -1896,6 +1984,16 @@ function logTypeOf(exercise) {
   }
   if (exercise?.equipment === 'bodyweight') return 'reps';
   return 'weight_reps';
+}
+
+/** How a finished session logged an exercise, read off its sets rather than
+ * the catalogue: a weighted pull-up logged with a load keeps its weight box
+ * even though the exercise is filed as bodyweight. */
+function loggedTypeOf(exercise, sets) {
+  if (sets.some((set) => Number(set.weight_kg) > 0)) return 'weight_reps';
+  if (sets.some((set) => Number(set.distance_km) > 0)) return 'distance_duration';
+  if (sets.some((set) => Number(set.duration_seconds) > 0)) return 'duration';
+  return logTypeOf(exercise);
 }
 
 /** One set as a line of text: "60 kg × 10", "12 reps", "1:00", "5 km · 25:00". */
@@ -2933,26 +3031,64 @@ const QUICK_TRACK_TABS = [
   { key: 'recent', label: 'Recent' },
   { key: 'favorites', label: 'Favourites' },
   { key: 'all', label: 'All foods' },
+  { key: 'plans', label: 'My plans' },
 ];
+
+/** Which foods of a saved meal plan were tracked on `logDate`, kept on this
+ * phone: the ticks are a checklist for the member, not a record — the food
+ * log itself is the record. */
+function planTicks(logDate) {
+  const key = `gymbook.planTicks.${memberSession.member?.id ?? 'anon'}.${logDate}`;
+  let set;
+  try {
+    set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  } catch {
+    set = new Set();
+  }
+  return {
+    has: (tick) => set.has(tick),
+    add(tick) {
+      set.add(tick);
+      try {
+        localStorage.setItem(key, JSON.stringify([...set]));
+      } catch {
+        // Storage blocked: the tick lasts as long as the sheet.
+      }
+    },
+  };
+}
 
 /**
  * Quick track: the one sheet every food goes in through — recents and
- * favourites for one-tap logging, the library, a barcode, or numbers typed
- * off a packet. Opened from the Diet tab's floating button, on the meal the
- * clock suggests.
+ * favourites for one-tap logging, the library, a barcode, numbers typed off a
+ * packet, or a meal plan saved from Ask Coach. Opened from the Diet tab's
+ * floating button, on the meal the clock suggests.
+ *
+ * A saved plan is tracked food by food, never in one go: tapping a food sets
+ * its meal and searches the library and the online databases for it, so what
+ * goes in the log is a real food at the amount actually eaten rather than the
+ * coach's estimate. Once it is logged the sheet returns to the plan with that
+ * food ticked.
  *
  * The sheet stays open after each add, so a whole plate goes in one visit;
  * the Diet tab repaints once, when it closes. Serving arithmetic is previewed
  * live but recomputed on the server (see the entries POST) — the preview is a
  * courtesy, not the source of truth.
  */
-function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = 'list' }) {
+function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = 'list', startTab, openPlanId = null }) {
   let foods = [];
   let recent = [];
   let favorites = [];
   let loaded = false;
   let meal = MEAL_SLOTS.find((slot) => slot.key === mealType) ?? MEAL_SLOTS[0];
-  let tab = 'recent';
+  let tab = startTab ?? 'recent';
+  let plans = [];
+  let plansLoaded = false;
+  /** The unfolded plan, kept across repaints. */
+  let openPlan = openPlanId;
+  /** The plan food being searched for: { plan, item, tick }. */
+  let planPick = null;
+  const ticks = planTicks(logDate);
   let query = '';
   /** Where the detail view's back arrow goes: the list or the scanner. */
   let detailFrom = 'list';
@@ -3120,6 +3256,17 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
       ? { food_id: food.id, food_name: food.name, quantity: payload.quantity, serving_unit: food.serving_unit, ...scaled, food }
       : { food_id: null, food_name: payload.food_name, quantity: payload.quantity, serving_unit: payload.serving_unit, ...scaled, food: null };
     recent = [row, ...recent.filter((r) => r.food_name.toLowerCase() !== row.food_name.toLowerCase())];
+    if (planPick) {
+      // Found and logged: tick it and go back to the plan for the next food.
+      ticks.add(planPick.tick);
+      openPlan = planPick.plan.id;
+      planPick = null;
+      tab = 'plans';
+      query = '';
+      searchInput.value = '';
+      clearSearch.classList.add('hidden');
+      if (currentView === 'list') paintList();
+    }
     paintTrackedBar();
   }
 
@@ -3372,11 +3519,163 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
     );
   const prettyCategory = (c) => (c || 'Other').replace(/[_-]+/g, ' ').replace(/^./, (ch) => ch.toUpperCase());
 
+  /* ── Saved meal plans: each food looked up and logged on its own ── */
+
+  const slotLabel = (key) => MEAL_SLOTS.find((slot) => slot.key === key)?.label ?? 'Meal';
+
+  /** Sets the food's meal and searches for it; track() comes back here. */
+  function pickPlanFood(plan, planMeal, item, tick) {
+    planPick = { plan, item, tick };
+    meal = MEAL_SLOTS.find((slot) => slot.key === planMeal.meal_type) ?? meal;
+    paintMeals();
+    searchInput.value = item.food_name;
+    searchInput.dispatchEvent(new Event('input'));
+  }
+
+  function backToPlan() {
+    planPick = null;
+    tab = 'plans';
+    searchInput.value = '';
+    searchInput.dispatchEvent(new Event('input'));
+  }
+
+  /** What is being looked for, above its search results. */
+  const planPickNote = () =>
+    h(
+      'div',
+      { class: 'qt-plan-pick' },
+      h(
+        'div',
+        { class: 'qt-plan-pick-text' },
+        h('strong', {}, `${planPick.item.food_name} · ${planPick.item.portion}`),
+        h('small', {}, `Plan says about ${planPick.item.calories} kcal, ${Math.round(planPick.item.protein_g)}g protein. Pick the closest food and set what you ate.`),
+      ),
+      h('button', { class: 'qt-chip-btn', type: 'button', onclick: backToPlan }, renderIcon('arrowLeft', { size: 15 }), 'Plan'),
+    );
+
+  function planDeleteButton(plan) {
+    let armed = 0;
+    const button = h('button', { class: 'qt-plan-delete', type: 'button' }, renderIcon('trash', { size: 15 }), h('span', {}, 'Delete plan'));
+    button.addEventListener('click', async () => {
+      // Two taps: a dialog would close this sheet.
+      if (!armed) {
+        button.lastChild.textContent = 'Tap again to delete';
+        button.classList.add('armed');
+        armed = setTimeout(() => {
+          armed = 0;
+          button.lastChild.textContent = 'Delete plan';
+          button.classList.remove('armed');
+        }, 3000);
+        return;
+      }
+      clearTimeout(armed);
+      button.disabled = true;
+      try {
+        await api.portal.deleteMealPlan(plan.id);
+        plans = plans.filter((other) => other !== plan);
+        toast(`${plan.name} deleted`);
+        paintList();
+      } catch (err) {
+        button.disabled = false;
+        toast(err.message || 'Could not delete that plan', 'error');
+      }
+    });
+    return button;
+  }
+
+  function planCard(plan) {
+    const rows = [];
+    let total = 0;
+    let done = 0;
+    plan.meals.forEach((planMeal, mi) => {
+      const kcal = planMeal.items.reduce((sum, item) => sum + item.calories, 0);
+      rows.push(
+        h(
+          'div',
+          { class: 'qt-plan-meal' },
+          h('span', {}, slotLabel(planMeal.meal_type), planMeal.name ? h('small', {}, ` · ${planMeal.name}`) : null),
+          h('span', {}, `${kcal} kcal`),
+        ),
+      );
+      planMeal.items.forEach((item, ii) => {
+        const tick = `${plan.id}:${mi}:${ii}`;
+        const isDone = ticks.has(tick);
+        total += 1;
+        if (isDone) done += 1;
+        rows.push(
+          h(
+            'button',
+            {
+              class: `qt-plan-food${isDone ? ' done' : ''}`,
+              type: 'button',
+              'aria-label': `${isDone ? 'Tracked: ' : 'Find and track '}${item.food_name}, ${item.portion}`,
+              onclick: () => pickPlanFood(plan, planMeal, item, tick),
+            },
+            h('span', { class: 'qt-plan-check' }, renderIcon(isDone ? 'check' : 'plus', { size: 14, stroke: 2.6 })),
+            h(
+              'span',
+              { class: 'qt-row-text' },
+              h('span', { class: 'qt-row-name' }, h('span', {}, item.food_name)),
+              h('span', { class: 'qt-row-meta' }, `${item.portion} · ${Math.round(item.protein_g)}g protein`),
+            ),
+            h('span', { class: 'qt-row-kcal' }, String(item.calories), h('small', {}, 'kcal')),
+          ),
+        );
+      });
+    });
+    const card = h(
+      'details',
+      { class: 'qt-plan', open: openPlan === plan.id || plans.length === 1 ? '' : null },
+      h(
+        'summary',
+        {},
+        h('span', { class: 'qt-plan-ico' }, renderIcon('utensils', { size: 17, stroke: 2.2 })),
+        h(
+          'span',
+          { class: 'qt-row-text' },
+          h('span', { class: 'qt-row-name' }, h('span', {}, plan.name)),
+          h('span', { class: 'qt-row-meta' }, `${plan.totals.calories.toLocaleString()} kcal · ${Math.round(plan.totals.protein_g)}g protein`),
+        ),
+        h('span', { class: `qt-plan-progress${done === total ? ' all' : ''}` }, `${done}/${total}`),
+        renderIcon('chevronDown', { size: 17 }),
+      ),
+      ...rows,
+      planDeleteButton(plan),
+    );
+    card.addEventListener('toggle', () => {
+      if (card.open) openPlan = plan.id;
+      else if (openPlan === plan.id) openPlan = null;
+    });
+    return card;
+  }
+
+  function paintPlans() {
+    if (!plansLoaded) {
+      listBody.append(...Array.from({ length: 4 }, () => h('div', { class: 'qt-skel' }, h('i'), h('i'))));
+      return;
+    }
+    if (!plans.length) {
+      listBody.append(
+        emptyState('utensils', 'No meal plans yet', 'Ask Coach on the Diet tab for a meal plan and tap Save — it shows up here to track food by food.'),
+      );
+      return;
+    }
+    listBody.append(
+      h('p', { class: 'qt-plan-hint' }, 'Tap a food to find it in the food library or online, then log what you actually ate.'),
+      ...plans.map(planCard),
+    );
+  }
+
   function paintList() {
     const needle = query.trim().toLowerCase();
     tabRow.classList.toggle('hidden', Boolean(needle));
     paintTabs();
     clear(listBody);
+
+    if (!needle && tab === 'plans') {
+      paintPlans();
+      return;
+    }
 
     if (!loaded) {
       listBody.append(...Array.from({ length: 6 }, () => h('div', { class: 'qt-skel' }, h('i'), h('i'))));
@@ -3384,17 +3683,25 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
     }
 
     if (needle) {
+      if (planPick) listBody.append(planPickNote());
+      // Every word, in any order — as the server matches — so "chicken
+      // breast grilled" still finds "Grilled Chicken Breast".
+      const terms = needle.split(/\s+/);
+      const matches = (name) => {
+        const lower = name.toLowerCase();
+        return terms.every((term) => lower.includes(term));
+      };
       // Their own foods first — a search for "shake" should find the cafe
       // shake they log daily before the library's generic one.
       const seen = new Set();
       const mine = [...favorites.map(favoriteItem), ...recent.map(recentItem)].filter((item) => {
         const key = keyOf(item.food);
-        if (seen.has(key) || !item.name.toLowerCase().includes(needle)) return false;
+        if (seen.has(key) || !matches(item.name)) return false;
         seen.add(key);
         return true;
       });
       const library = rankFoods(
-        foods.filter((f) => f.name.toLowerCase().includes(needle) && !seen.has(keyOf(f))),
+        foods.filter((f) => matches(f.name) && !seen.has(keyOf(f))),
         needle,
         online.query.toLowerCase() === needle ? online.ranked : null,
       )
@@ -3456,6 +3763,8 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
   let searchTimer = null;
   searchInput.addEventListener('input', () => {
     query = searchInput.value;
+    // Searching for something else entirely: no longer looking for the plan's food.
+    if (!query.trim()) planPick = null;
     clearSearch.classList.toggle('hidden', !query);
     paintList();
     listBody.scrollTop = 0;
@@ -4041,11 +4350,21 @@ function openFoodSearch({ logDate, onAdded, mealType = mealForNow(), startOn = '
       favorites = res.favorites ?? [];
       loaded = true;
       // Nothing tracked yet: open on the library instead of an empty tab.
-      if (!recent.length) tab = favorites.length ? 'favorites' : 'all';
+      if (!recent.length && tab === 'recent') tab = favorites.length ? 'favorites' : 'all';
       paintList();
     })
     .catch((err) => {
       clear(listBody).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load the food library'));
+    });
+  api.portal
+    .mealPlans()
+    .then((res) => {
+      plans = res.items;
+    })
+    .catch(() => {})
+    .finally(() => {
+      plansLoaded = true;
+      if (tab === 'plans' && !query.trim()) paintList();
     });
 }
 
@@ -5482,13 +5801,18 @@ function renderPortalApp(ctx, initialMe) {
     }
   }
 
-  async function switchTab(key) {
-    // Leaving a pushed screen through the tab bar: drop its back layer too,
-    // so the next back press is not swallowed by a screen already gone.
+  /** Forgets a pushed screen without painting anything: its back layer goes
+   * too, so the next back press is not swallowed by a screen already gone. */
+  function dropScreen() {
     screenBack = null;
     screenOpen = false;
     removeBackLayer(screenLayer);
     screenLayer = null;
+  }
+
+  async function switchTab(key) {
+    // Leaving a pushed screen through the tab bar.
+    dropScreen();
     stopTicking();
     active = key;
     syncTabLayer();
@@ -5552,19 +5876,23 @@ function renderPortalApp(ctx, initialMe) {
         exercise_name: exercise.exercise_name,
         muscle_group: exercise.muscle_group,
         ...demoFields(exercise),
+        log_type: exercise.log_type,
         target_sets: exercise.target_sets,
         target_reps: exercise.target_reps,
         rest_seconds: exercise.rest_seconds,
         previous: previous?.[exercise.exercise_name] ?? null,
         // Every set of last time, for the next-set suggestion (nextSet.js).
         last_session: lastSession?.[exercise.exercise_name] ?? null,
-        sets: Array.from({ length: exercise.target_sets }, () => ({
-          set_type: 'normal',
-          weight_display: '',
-          weight_kg: 0,
-          reps: '',
-          completed: false,
-        })),
+        // A copied workout brings its own sets; a plan day only says how many.
+        sets:
+          exercise.sets ??
+          Array.from({ length: exercise.target_sets }, () => ({
+            set_type: 'normal',
+            weight_display: '',
+            weight_kg: 0,
+            reps: '',
+            completed: false,
+          })),
       })),
     };
     activeSession.write(state);
@@ -5606,7 +5934,7 @@ function renderPortalApp(ctx, initialMe) {
         return;
       }
       if (clockNode.isConnected) clockNode.dataset.mounted = '1';
-      clockNode.textContent = clockFrom((Date.now() - state.started_at) / 1000);
+      clockNode.textContent = clockFrom(sessionSeconds(state));
     };
     paintClock();
     const clockInterval = setInterval(paintClock, 1000);
@@ -5617,7 +5945,12 @@ function renderPortalApp(ctx, initialMe) {
     return h(
       'div',
       { class: 'portal-focus-card portal-focus-workout portal-focus-live' },
-      h('div', { class: 'portal-focus-kicker' }, h('span', { class: 'portal-live-dot' }), h('span', {}, 'Workout in progress')),
+      h(
+        'div',
+        { class: 'portal-focus-kicker' },
+        state.paused_at ? null : h('span', { class: 'portal-live-dot' }),
+        h('span', {}, state.paused_at ? 'Workout paused' : 'Workout in progress'),
+      ),
       h('div', { class: 'portal-focus-title' }, state.workout_name),
       h('div', { class: 'portal-live-time' }, renderIcon('timer', { size: 22, stroke: 2 }), clockNode),
       h(
@@ -6527,7 +6860,7 @@ function renderPortalApp(ctx, initialMe) {
      * how hard it felt, and what the chip is suggesting. */
     const sessionSnapshot = () => ({
       workout_name: state.workout_name,
-      elapsed_seconds: Math.round((Date.now() - state.started_at) / 1000),
+      elapsed_seconds: Math.round(sessionSeconds(state)),
       exercises: state.exercises.map((exercise) => {
         const suggestion = suggestionFor(exercise);
         return {
@@ -7147,7 +7480,9 @@ function renderPortalApp(ctx, initialMe) {
         workout_name: state.workout_name,
         plan_id: state.plan_id ?? undefined,
         day_id: state.day_id ?? undefined,
-        duration_seconds: Math.round((Date.now() - state.started_at) / 1000),
+        // A paused clock stops at the pause; a session left running past a
+        // day is capped rather than rejected by the server.
+        duration_seconds: Math.min(MAX_SESSION_SECONDS, Math.round(sessionSeconds(state))),
         sets,
       });
 
@@ -7313,10 +7648,164 @@ function renderPortalApp(ctx, initialMe) {
       input.select();
     }
 
+    /** Pauses the session clock, or resumes it with the break banked so it
+     * never counts towards the duration. */
+    function togglePause() {
+      const now = Date.now();
+      if (state.paused_at) {
+        state.paused_ms = (state.paused_ms || 0) + Math.max(0, now - state.paused_at);
+        state.paused_at = null;
+      } else {
+        state.paused_at = now;
+      }
+      persist();
+      paint();
+      paintClock();
+    }
+
+    /**
+     * Hevy's Duration sheet: the session's length and start, both editable
+     * before Finish — for a member who started the clock late, or forgot to
+     * stop it — and a pause for a break that shouldn't count.
+     */
+    function openDurationSheet() {
+      const end = () => state.paused_at ?? Date.now();
+      // Edits move the start, so the server's keep-alive nudge sees the same
+      // session length the member does.
+      const commit = () => {
+        persist();
+        reportWorkoutStarted(state);
+        paintClock();
+        refresh();
+      };
+
+      const durationText = h('span', {});
+
+      const wheel = minuteWheel({
+        onPick: (minutes) => {
+          // The start moves back from now (or from the pause) by the new
+          // length plus any break already banked.
+          state.started_at = end() - minutes * 60_000 - (state.paused_ms || 0);
+          commit();
+        },
+      });
+      const editor = h('div', { class: 'portal-duration-editor' }, wheel.node);
+
+      const durationBtn = h(
+        'button',
+        {
+          class: 'portal-duration-value',
+          type: 'button',
+          'aria-label': 'Edit duration',
+          onclick: () => {
+            if (editor.classList.toggle('is-open')) wheel.show(Math.floor(sessionSeconds(state) / 60));
+          },
+        },
+        durationText,
+      );
+
+      // The start reads as text; the native picker sits invisibly on top of
+      // it, so a tap opens the phone's own date-and-time wheel.
+      const startText = h('span', {});
+      const startInput = h('input', {
+        class: 'portal-duration-start-input',
+        type: 'datetime-local',
+        'aria-label': 'Start time',
+        onclick: () => {
+          try {
+            startInput.showPicker?.();
+          } catch {
+            // Already open, or a browser that opens it on its own.
+          }
+        },
+        onchange: () => {
+          const picked = new Date(startInput.value).getTime();
+          if (!Number.isFinite(picked)) return refresh();
+          if (picked > end()) {
+            toast('The start time can’t be in the future', 'error');
+            return refresh();
+          }
+          state.started_at = picked;
+          // A break can't be longer than the session it sits in.
+          state.paused_ms = Math.min(state.paused_ms || 0, end() - picked);
+          commit();
+        },
+      });
+
+      const startLabel = h('label', { class: 'portal-duration-value portal-duration-start' }, startText);
+
+      const pauseBtn = h('button', {
+        class: 'btn primary block portal-duration-pause',
+        type: 'button',
+        onclick: () => {
+          togglePause();
+          refresh();
+        },
+      });
+
+      const note = h('p', { class: 'portal-duration-note' });
+
+      function refresh() {
+        note.textContent = state.paused_at ? 'Paused — the clock is stopped until you resume.' : '';
+        durationText.textContent = longDurationLabel(sessionSeconds(state));
+        startText.textContent = new Date(state.started_at).toLocaleString(undefined, {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+        // Not while the picker is open: a rewrite under it would reset the wheel.
+        if (document.activeElement !== startInput) {
+          startInput.value = localDateTimeValue(state.started_at);
+          startInput.max = localDateTimeValue(end());
+        }
+        clear(pauseBtn).append(
+          renderIcon(state.paused_at ? 'play' : 'pause', { size: 16, stroke: 2.4 }),
+          h('span', {}, state.paused_at ? 'Resume Workout Timer' : 'Pause Workout Timer'),
+        );
+      }
+
+      const tick = setInterval(() => {
+        if (!pauseBtn.isConnected) return clearInterval(tick);
+        durationText.textContent = longDurationLabel(sessionSeconds(state));
+      }, 1000);
+
+      refresh();
+      openModal({
+        title: 'Duration',
+        className: 'portal-action-modal portal-duration-modal',
+        onClose: () => clearInterval(tick),
+        body: h(
+          'div',
+          { class: 'portal-duration-sheet' },
+          h('div', { class: 'portal-duration-row' }, h('span', {}, 'Duration'), durationBtn),
+          editor,
+          h(
+            'div',
+            { class: 'portal-duration-row' },
+            h('span', {}, 'Start time'),
+            startLabel,
+          ),
+          note,
+          pauseBtn,
+        ),
+      });
+      // Only now, so openModal's autofocus can't land on the picker: left
+      // focused, refresh() would stop keeping it in step with the wheel.
+      startLabel.append(startInput);
+    }
+
     function openSessionMenu() {
       const other = weightUnit.get() === 'kg' ? 'lb' : 'kg';
       actionSheet('Workout options', [
         { icon: 'edit', label: 'Rename workout', onClick: openRename },
+        { icon: 'timer', label: 'Edit duration', onClick: openDurationSheet },
+        {
+          icon: state.paused_at ? 'play' : 'pause',
+          label: state.paused_at ? 'Resume workout timer' : 'Pause workout timer',
+          onClick: togglePause,
+        },
         {
           icon: 'weight',
           label: `Show weights in ${other}`,
@@ -7367,7 +7856,18 @@ function renderPortalApp(ctx, initialMe) {
           h(
             'div',
             { class: 'portal-session-row' },
-            h('div', { class: 'portal-session-time' }, renderIcon('timer', { size: 20, stroke: 2 }), clockNode),
+            h(
+              'button',
+              {
+                class: `portal-session-time${state.paused_at ? ' is-paused' : ''}`,
+                type: 'button',
+                title: 'Edit duration',
+                'aria-label': state.paused_at ? 'Workout paused — edit duration' : 'Edit duration',
+                onclick: openDurationSheet,
+              },
+              renderIcon(state.paused_at ? 'pause' : 'timer', { size: 20, stroke: 2 }),
+              clockNode,
+            ),
             h(
               'div',
               { class: 'portal-session-actions' },
@@ -7404,7 +7904,7 @@ function renderPortalApp(ctx, initialMe) {
     }
 
     const paintClock = () => {
-      clockNode.textContent = clockFrom((Date.now() - state.started_at) / 1000);
+      clockNode.textContent = clockFrom(sessionSeconds(state));
       for (const { set, node } of runningHolds) node.value = durationLabel(elapsedOf(set));
     };
     paintClock();
@@ -7462,10 +7962,13 @@ function renderPortalApp(ctx, initialMe) {
    * days, each a list of exercises with target sets, reps and rest. Takes over
    * the tab body the way the live logger does — a builder this size is a
    * screen, not a sheet — and hands back to the Workout tab on save or cancel.
-   * `plan` is a full tree to edit, or null for a new one.
+   * `plan` is a full tree to edit, or null for a new one; a new plan's
+   * `activate` sets where its "Train with this plan now" switch starts.
    */
   function openPlanEditor(plan = null) {
     stopTicking();
+    // A screen it is opened from (a workout's detail) is left behind for good.
+    dropScreen();
     const isNew = !plan?.id;
     const draft = {
       name: plan?.name ?? '',
@@ -7473,7 +7976,7 @@ function renderPortalApp(ctx, initialMe) {
       days: plan?.days?.length
         ? plan.days.map((day) => ({ day_name: day.day_name, notes: day.notes ?? null, exercises: day.exercises.map(editableExercise) }))
         : [{ day_name: 'Day 1', notes: null, exercises: [] }],
-      activate: true,
+      activate: plan?.activate ?? true,
     };
     const pristine = JSON.stringify(draft);
     const body = h('div', { class: 'portal-tab-body portal-pe' });
@@ -8473,6 +8976,96 @@ function renderPortalApp(ctx, initialMe) {
 
     const edit = () => openWorkoutLogEditor(log, onDeleted);
 
+    /** Hevy's "Copy Workout": a new live session with this one's exercises
+     * and every set's numbers filled in, none of them ticked off yet. */
+    const copyWorkout = () => {
+      if (activeSession.read()) {
+        toast('Finish or discard the workout in progress first', 'error');
+        return;
+      }
+      const previous = {};
+      const lastSession = {};
+      const exercises = [...byExercise].map(([name, sets]) => {
+        const type = loggedTypeOf(sets[0], sets);
+        // This session stands in for "last time", so the Previous column and
+        // the next-set suggestion read off what is being repeated.
+        const done = sets.filter((set) => set.set_type !== 'warmup' && set.completed !== 0);
+        if (done.length) {
+          const { weight_kg, reps, duration_seconds, distance_km, est_1rm_kg } = done.at(-1);
+          previous[name] = { exercise_name: name, weight_kg, reps, duration_seconds, distance_km, est_1rm_kg, log_date: log.log_date };
+          lastSession[name] = done.map((set) => ({
+            set_type: set.set_type,
+            weight_kg: set.weight_kg,
+            reps: set.reps,
+            rpe: set.rpe,
+            log_date: log.log_date,
+          }));
+        }
+        return {
+          ...demoFields(sets[0]),
+          exercise_name: name,
+          muscle_group: sets[0].muscle_group,
+          log_type: type,
+          target_sets: sets.length,
+          target_reps: '',
+          // A run or a row is usually one block, with nothing to rest for.
+          rest_seconds: type === 'distance_duration' ? 0 : 90,
+          sets: sets.map((set) => ({
+            set_type: set.set_type,
+            weight_display: Number(set.weight_kg) > 0 ? String(toDisplayWeight(Number(set.weight_kg))) : '',
+            weight_kg: Number(set.weight_kg) || 0,
+            reps: Number(set.reps) > 0 ? Number(set.reps) : '',
+            duration_seconds: Number(set.duration_seconds) || 0,
+            distance_km: Number(set.distance_km) > 0 ? String(set.distance_km) : '',
+            completed: false,
+          })),
+        };
+      });
+      startWorkoutSession({ name: log.workout_name, day: { exercises }, previous, lastSession });
+    };
+
+    /** Hevy's "Save as Routine": the routine builder, filled in from this
+     * session — one day, each exercise's working sets and the reps it hit.
+     * Nothing is saved until the member taps Save there. */
+    const saveAsRoutine = () => {
+      const exercises = [...byExercise].slice(0, 30).map(([name, sets]) => {
+        const type = loggedTypeOf(sets[0], sets);
+        const working = sets.filter((set) => set.set_type !== 'warmup');
+        const counted = working.length ? working : sets;
+        const reps = counted.map((set) => Number(set.reps) || 0).filter((n) => n > 0);
+        const longest = Math.max(0, ...counted.map((set) => Number(set.duration_seconds) || 0));
+        const farthest = Math.max(0, ...counted.map((set) => Number(set.distance_km) || 0));
+        // The plan's target is free text: reps for a lift, a time or a
+        // distance for a hold or a run.
+        const target =
+          type === 'duration' && longest
+            ? durationLabel(longest)
+            : type === 'distance_duration' && farthest
+              ? `${farthest} km`
+              : reps.length
+              ? Math.min(...reps) === Math.max(...reps)
+                ? String(reps[0])
+                : `${Math.min(...reps)}-${Math.max(...reps)}`
+              : '8-12';
+        return {
+          ...demoFields(sets[0]),
+          exercise_name: name,
+          muscle_group: sets[0].muscle_group,
+          target_sets: Math.min(20, counted.length),
+          target_reps: target,
+          rest_seconds: type === 'distance_duration' ? 0 : 90,
+        };
+      });
+      openPlanEditor({
+        name: log.workout_name.slice(0, 100),
+        description: null,
+        // A past session saved for later shouldn't take over the Workout tab
+        // unless the member flips the switch.
+        activate: false,
+        days: [{ day_name: log.workout_name.slice(0, 120), notes: null, exercises }],
+      });
+    };
+
     const more = h(
       'button',
       {
@@ -8481,6 +9074,8 @@ function renderPortalApp(ctx, initialMe) {
         'aria-label': 'More options',
         onclick: () =>
           actionSheet(log.workout_name, [
+            { icon: 'download', label: 'Save as routine', onClick: saveAsRoutine },
+            { icon: 'copy', label: 'Copy workout', onClick: copyWorkout },
             { icon: 'edit', label: 'Edit workout', onClick: edit },
             { icon: 'upload', label: 'Share workout', onClick: share },
             { icon: 'trash', label: 'Delete workout', danger: true, onClick: remove },
@@ -8512,18 +9107,6 @@ function renderPortalApp(ctx, initialMe) {
    * records out again from what is saved.
    */
   function openWorkoutLogEditor(log, onDeleted) {
-    // What the session recorded decides the columns, not the catalogue: a
-    // weighted pull-up logged with a load keeps its weight box even though
-    // the exercise is filed as bodyweight.
-    const typeOfLogged = (exercise, sets) =>
-      sets.some((set) => Number(set.weight_kg) > 0)
-        ? 'weight_reps'
-        : sets.some((set) => Number(set.distance_km) > 0)
-          ? 'distance_duration'
-          : sets.some((set) => Number(set.duration_seconds) > 0)
-            ? 'duration'
-            : logTypeOf(exercise);
-
     const editableSet = (set) => ({
       set_type: set.set_type,
       weight_kg: Number(set.weight_kg) || 0,
@@ -8547,13 +9130,44 @@ function renderPortalApp(ctx, initialMe) {
       notes: log.notes ?? '',
       exercises: [...grouped].map(([name, sets]) => {
         const exercise = { ...sets[0], exercise_name: name };
-        return { ...exercise, log_type: typeOfLogged(exercise, sets), sets: sets.map(editableSet) };
+        // What the session recorded decides the columns, not the catalogue.
+        return { ...exercise, log_type: loggedTypeOf(exercise, sets), sets: sets.map(editableSet) };
       }),
     };
     let dirty = false;
     const touched = () => {
       dirty = true;
     };
+
+    // The same minutes wheel as the live logger's Duration sheet. One node
+    // kept across repaints, so a set edit doesn't rebuild it.
+    const durationField = h('button', {
+      class: 'portal-pe-input portal-we-duration-btn',
+      type: 'button',
+      'aria-label': 'Edit duration',
+      onclick: openDurationPicker,
+    });
+    const paintDuration = () => {
+      clear(durationField).append(h('span', {}, minuteLabel(Number(draft.minutes) || 0)), renderIcon('chevronDown', { size: 15 }));
+    };
+    paintDuration();
+
+    function openDurationPicker() {
+      const wheel = minuteWheel({
+        onPick: (minutes) => {
+          draft.minutes = String(minutes);
+          touched();
+          paintDuration();
+        },
+      });
+      openModal({
+        title: 'Duration',
+        className: 'portal-action-modal portal-duration-modal',
+        body: h('div', { class: 'portal-duration-sheet' }, wheel.node),
+        footer: [h('button', { class: 'btn primary block', type: 'button', onclick: closeModal }, 'Done')],
+      });
+      wheel.show(Number(draft.minutes) || 0);
+    }
 
     const root = h('div', { class: 'portal-we' });
 
@@ -8765,22 +9379,10 @@ function renderPortalApp(ctx, initialMe) {
             },
           }),
           h(
-            'label',
+            'div',
             { class: 'portal-pe-field portal-we-duration' },
-            h('span', {}, 'Duration (min)'),
-            h('input', {
-              class: 'portal-pe-input',
-              type: 'number',
-              inputmode: 'numeric',
-              min: 0,
-              max: 1440,
-              step: 1,
-              value: draft.minutes,
-              oninput: (event) => {
-                draft.minutes = event.target.value;
-                touched();
-              },
-            }),
+            h('span', {}, 'Duration'),
+            durationField,
           ),
           h(
             'textarea',
@@ -9093,7 +9695,18 @@ function renderPortalApp(ctx, initialMe) {
             {
               class: 'portal-coach-cta',
               type: 'button',
-              onclick: () => openCoachSheet({ screen: 'diet', unit: weightUnit.get(), weightLabel }),
+              onclick: () =>
+                openCoachSheet({
+                  screen: 'diet',
+                  unit: weightUnit.get(),
+                  weightLabel,
+                  // "Track foods" on a meal plan: the coach makes way for
+                  // Quick track, open on that plan.
+                  onTrackPlan: (saved) => {
+                    closeModal();
+                    openFoodSearch({ logDate, onAdded: reload, startTab: 'plans', openPlanId: saved.id });
+                  },
+                }),
             },
             h('span', { class: 'portal-coach-cta-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })),
             h('span', { class: 'portal-coach-cta-text' }, h('strong', {}, 'Ask Coach'), h('span', {}, 'What should I eat next?')),
@@ -9525,6 +10138,7 @@ function renderPortalApp(ctx, initialMe) {
       { class: 'diet-fab-menu', role: 'menu', 'aria-label': 'Track food' },
       item('search', 'Quick track', 'Search, recents & favourites', () => openFoodSearch({ logDate, onAdded })),
       item('scan', 'Scan barcode', 'Packaged food from its label', () => openFoodSearch({ logDate, onAdded, startOn: 'scan' })),
+      item('utensils', 'My meal plans', 'Track a saved plan, food by food', () => openFoodSearch({ logDate, onAdded, startTab: 'plans' })),
     );
     const layer = h('div', { class: 'diet-fab-layer', onclick: (event) => event.target === layer && setOpen(false) }, menu);
 

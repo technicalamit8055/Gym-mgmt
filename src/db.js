@@ -1445,6 +1445,23 @@ const MIGRATIONS = [
   },
   // Ensure screen column exists on member_notifications for existing tenant databases
   (db) => ensureColumn(db, 'member_notifications', 'screen', 'TEXT'),
+  // Meal plans from Ask Coach: the plan a reply carried (JSON), so the next
+  // question can change it, and the plans a member saved to log again later.
+  // A saved plan is a snapshot, not a link to the chat — it outlives the
+  // day-old messages.
+  (db) => {
+    ensureColumn(db, 'ai_coach_messages', 'meal_plan', 'TEXT');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_meal_plans (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        name       TEXT NOT NULL,
+        plan       TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_member_meal_plans_member ON member_meal_plans(member_id)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

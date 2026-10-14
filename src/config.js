@@ -79,7 +79,10 @@ export const config = {
     // AI-generated workout plans per member per day. Each one sends the whole
     // exercise library, so it costs several questions' worth.
     planDailyLimit: Number(process.env.AI_PLAN_DAILY_LIMIT || 3),
-    timeoutMs: Number(process.env.AI_COACH_TIMEOUT_MS || 20000),
+    // A diet answer with a meal plan, after up to ~1000 tokens of thinking,
+    // takes 7–17 s and sometimes more; at 20 s ordinary slow replies were cut
+    // off. The sheet shows the coach working meanwhile, so waiting is fine.
+    timeoutMs: Number(process.env.AI_COACH_TIMEOUT_MS || 45000),
   },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
