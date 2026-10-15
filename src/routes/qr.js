@@ -115,6 +115,8 @@ qrRoutes.get('/app', async (req, res) => {
     url,
     gym_name: gymNameFor(req),
     tagline: req.tenant?.tagline || null,
+    // Printed beside the QR: the member app finds the gym by either.
+    gym_code: req.tenant?.gym_code || null,
     logo_url: hasLogo ? tenantLogoUrl(req.tenant.slug, req.tenant.logo_version || 1) : null,
     svg,
     png,

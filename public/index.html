@@ -49,6 +49,16 @@
       // splash is still fading out. Key mirrors MEMBER_TOKEN_KEY in
       // js/api.js (per-gym suffix when the gym is addressed by path).
       var slug = (location.pathname.match(/^\/g\/([a-z][a-z0-9-]{2,39})(?=\/|$)/) || [])[1];
+      // The store app keeps its gym on the phone, not in the URL (see
+      // gymbook.app.gym in js/api.js). No gym yet means the finder, which is
+      // dark too — the empty slug's unscoped key is never set, so it is.
+      if (!slug && window.Capacitor && Capacitor.isNativePlatform()) {
+        try {
+          slug = (JSON.parse(localStorage.getItem('gymbook.app.gym')) || {}).slug;
+        } catch (e) {
+          slug = undefined;
+        }
+      }
       if (memberApp && !localStorage.getItem('gymbook.member.token' + (slug ? '.' + slug : ''))) {
         document.documentElement.dataset.splash = 'ink';
       }

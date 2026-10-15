@@ -20,6 +20,7 @@ import {
   toggleFullscreen,
 } from '../ui.js';
 import { t } from '../vertical.js';
+import { loadQrDecoder } from '../barcodeScanner.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -72,72 +73,6 @@ function cameraAvailability() {
     };
   }
   return { ok: true };
-}
-
-/**
- * Picks a QR decoder.
- *
- * The native BarcodeDetector is preferred — it's hardware-accelerated and costs
- * no download — but it is far from universal: it ships on Android, ChromeOS and
- * macOS, and is absent from Chrome and Edge on Windows and Linux as well as from
- * Safari and Firefox. So the fallback is a vendored decoder, fetched only when
- * it's actually needed.
- *
- * Both branches return the same shape: a function taking the <video> and
- * resolving to a decoded string, or null when nothing is in frame.
- */
-async function loadQrDecoder() {
-  if ('BarcodeDetector' in window) {
-    try {
-      const formats = await window.BarcodeDetector.getSupportedFormats();
-      if (formats.includes('qr_code')) {
-        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-        return async (video) => {
-          const [found] = await detector.detect(video);
-          return found?.rawValue ?? null;
-        };
-      }
-    } catch {
-      // Present but unusable on this platform — fall through to jsQR.
-    }
-  }
-
-  await loadJsQr();
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-  return async (video) => {
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-    // Frames arrive before the stream reports dimensions; nothing to read yet.
-    if (!width || !height) return null;
-
-    canvas.width = width;
-    canvas.height = height;
-    ctx.drawImage(video, 0, 0, width, height);
-    const { data } = ctx.getImageData(0, 0, width, height);
-    // Cards are held upright at a desk, so don't pay for inverted-image passes.
-    return window.jsQR(data, width, height, { inversionAttempts: 'dontInvert' })?.data ?? null;
-  };
-}
-
-let jsQrLoad;
-
-/** Fetches the vendored decoder once per page, on first use. */
-function loadJsQr() {
-  if (window.jsQR) return Promise.resolve();
-  jsQrLoad ??= new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/js/vendor/jsqr.min.js';
-    script.onload = () => (window.jsQR ? resolve() : reject(new Error('QR decoder loaded but did not register')));
-    script.onerror = () => {
-      // Let a later attempt retry rather than caching the failure forever.
-      jsQrLoad = undefined;
-      reject(new Error('Could not load the QR decoder'));
-    };
-    document.head.append(script);
-  });
-  return jsQrLoad;
 }
 
 /** Lets an admin/manager require a check-in to fall inside the member's

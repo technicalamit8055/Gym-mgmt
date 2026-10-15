@@ -19,12 +19,14 @@ import { parsePhotoDataUrl } from '../photo.js';
 import { BUSINESS_TYPES, verticalFor } from '../verticals.js';
 import { billingRoutes } from './billing.js';
 import { tenantDomainRoutes } from './customDomains.js';
+import { directoryRoutes } from './directory.js';
 import { platformAdminRoutes, isPlatformAdminConfigured } from './platformAdmin.js';
 
 export const platformRoutes = Router();
 platformRoutes.use('/billing', billingRoutes);
 platformRoutes.use('/admin', platformAdminRoutes);
 platformRoutes.use('/domains', tenantDomainRoutes);
+platformRoutes.use('/directory', directoryRoutes);
 
 // IP-keyed, not per-slug: each signup provisions a real SQLite file, so this
 // guards against spam-tenant creation, not credential guessing.
@@ -81,6 +83,14 @@ function publicTenant(tenant) {
     theme: vertical.themes.includes(tenant.theme) ? tenant.theme : vertical.themes[0],
     // The gym's own motto, not vertical.tagline above (the product's).
     tagline: tenant.tagline || null,
+    // How members find this gym in the member app (see routes/directory.js).
+    // Public like the rest: the code is printed on the desk poster anyway.
+    gym_code: tenant.gym_code ?? null,
+    address_line: tenant.address_line || null,
+    city: tenant.city || null,
+    state: tenant.state || null,
+    pincode: tenant.pincode || null,
+    listed_in_app: tenant.listed_in_app !== 0,
     logo_url: hasTenantLogo(tenant) ? tenantLogoUrl(tenant.slug, version) : null,
     // What the browser tab and an iOS home screen should show. The purpose-
     // built icon when there is one; otherwise the logo itself, which still
@@ -264,6 +274,11 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     theme: { type: 'enum', values: verticalFor(req.tenant.business_type).themes },
     // Sent empty to clear it: COALESCE keeps '' rather than the old value.
     tagline: { type: 'string', max: 60 },
+    address_line: { type: 'string', max: 200 },
+    city: { type: 'string', max: 80 },
+    state: { type: 'string', max: 80 },
+    pincode: { type: 'string', max: 12 },
+    listed_in_app: { type: 'boolean' },
     clear_logo: { type: 'boolean' },
   });
 
@@ -303,6 +318,11 @@ platformRoutes.patch('/tenant', requireAuth, requireRole('admin'), (req, res) =>
     timezone: body.timezone,
     theme: body.theme,
     tagline: body.tagline,
+    addressLine: body.address_line,
+    city: body.city,
+    state: body.state,
+    pincode: body.pincode,
+    listedInApp: body.listed_in_app,
     logoMime,
     logoBytes,
     iconMime,

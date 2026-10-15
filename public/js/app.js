@@ -1,4 +1,14 @@
-import { ApiError, api, isNativeApp, landingBrand, pathSlug, session } from './api.js';
+import {
+  ApiError,
+  api,
+  forgetGym,
+  gymLocked,
+  isNativeApp,
+  landingBrand,
+  needsGymChoice,
+  pathSlug,
+  session,
+} from './api.js';
 import {
   buildForm,
   clear,
@@ -49,6 +59,7 @@ import { renderLockers } from './views/lockers.js';
 import { renderExpenses } from './views/expenses.js';
 import { renderFitnessPlans } from './views/fitnessPlans.js';
 import { renderPortal } from './views/portal.js';
+import { renderFindGym } from './views/findGym.js';
 
 /**
  * Built by buildNav()/buildRoutes(), called from boot() once the vertical is
@@ -210,6 +221,9 @@ const PUBLIC_ROUTES = [
   // just-completed sign-in on /portal/login redraw straight into the app
   // (ctx.rerender() re-enters this same route) instead of looping back to the
   // sign-in screen a route-level "always show login" flag would force.
+  // Before sign-in in the store-listed member app, which serves every gym and
+  // so asks which one first. Platform-owned: no gym's palette applies yet.
+  { pattern: /^\/portal\/find-gym$/, title: 'Find your gym', view: renderFindGym, platformOwned: true },
   { pattern: /^\/portal\/login$/, title: 'Member Sign in', view: renderPortal },
   { pattern: /^\/portal(\/.*)?$/, title: 'Member Portal', view: renderPortal },
 ];
@@ -788,9 +802,27 @@ async function dispatch() {
     navigate('/portal'); // fires hashchange -> dispatch()
     return;
   }
+  // The store app has no gym until the member picks one; until then the
+  // finder is the only screen there is.
+  const findingGym = path === '/portal/find-gym';
+  if (needsGymChoice && !findingGym) {
+    navigate('/portal/find-gym');
+    return;
+  }
   useMemberMode(path.startsWith('/portal'));
 
-  if (platform.missing) {
+  // In the store app the gym came from the finder, not an address, so the way
+  // out of a gym that has since closed is back to the finder.
+  const backToFinder = isNativeApp && !gymLocked;
+  if ((platform.missing || platform.closed) && backToFinder && !findingGym) {
+    renderNotice(
+      platform.missing ? 'This gym is no longer on GymBook' : 'This gym’s account is closed',
+      'Ask your gym about it, or choose another gym.',
+      [h('button', { class: 'btn primary', type: 'button', onclick: forgetGym }, 'Choose a gym')],
+    );
+    return;
+  }
+  if (platform.missing && !findingGym) {
     renderNotice(
       'No gym at this address',
       `Nothing is set up at "${platform.slug}". Check the spelling, or create a gym with that address.`,
@@ -801,7 +833,7 @@ async function dispatch() {
     );
     return;
   }
-  if (platform.closed) {
+  if (platform.closed && !findingGym) {
     renderNotice('This account is closed', 'Contact support if you think this is a mistake.', [
       h('a', { class: 'btn ghost', href: window.location.origin }, 'Back to the site'),
     ]);

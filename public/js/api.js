@@ -22,17 +22,95 @@ async function loadNativeConfig() {
 
 const nativeServer = String(nativeConfig?.serverUrl || '').replace(/\/+$/, '');
 
+const SLUG_RE = /^[a-z][a-z0-9-]{2,39}$/;
+
+/**
+ * Which gym the native app is for. The store build serves every gym, so the
+ * member picks theirs on the "find your gym" screen and it is remembered on
+ * the phone. A gym's own white-label build has `gymSlug` in its config
+ * instead, and never offers the finder.
+ */
+export const gymLocked = isNativeApp && SLUG_RE.test(nativeConfig?.gymSlug || '');
+
+const SELECTED_GYM_KEY = 'gymbook.app.gym';
+const RECENT_GYMS_KEY = 'gymbook.app.recentGyms';
+
+function readJson(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+const validGym = (gym) => Boolean(gym && typeof gym === 'object' && SLUG_RE.test(gym.slug));
+
+/** The gym this app is pointed at: { slug, gym_name, gym_code, logo_url,
+ * address_text } as the finder last saw it, or null before one is chosen. */
+export const selectedGym = !isNativeApp
+  ? null
+  : gymLocked
+    ? { slug: nativeConfig.gymSlug }
+    : validGym(readJson(SELECTED_GYM_KEY))
+      ? readJson(SELECTED_GYM_KEY)
+      : null;
+
+/** True while the store app has no gym yet — everything but the finder waits. */
+export const needsGymChoice = isNativeApp && !selectedGym;
+
 /**
  * The "/g/<slug>" prefix this page was loaded under, or '' on a subdomain or
  * the root domain. Read once from the document URL — hash navigation never
  * changes the path, so this cannot go stale. In the native app the gym comes
- * from its config instead, and is always addressed by path.
+ * from the one chosen (or built in) instead, and is always addressed by path.
  */
 export const pathPrefix = isNativeApp
-  ? nativeConfig?.gymSlug
-    ? `/g/${nativeConfig.gymSlug}`
+  ? selectedGym
+    ? `/g/${selectedGym.slug}`
     : ''
   : (/^\/g\/[a-z][a-z0-9-]{2,39}(?=\/|$)/.exec(window.location.pathname) || [''])[0];
+
+/** Gyms this phone has opened before, newest first, for one-tap switching. */
+export function recentGyms() {
+  const list = readJson(RECENT_GYMS_KEY);
+  return Array.isArray(list) ? list.filter(validGym) : [];
+}
+
+/**
+ * Points the app at another gym. A reload rather than a re-render: the path
+ * prefix, the per-gym session keys and every module that captured them are
+ * read once at load, and a fresh start is the one way they all agree.
+ */
+export function chooseGym(gym) {
+  const entry = {
+    slug: gym.slug,
+    gym_name: gym.gym_name,
+    gym_code: gym.gym_code || null,
+    logo_url: gym.logo_url || null,
+    address_text: gym.address_text || null,
+  };
+  localStorage.setItem(SELECTED_GYM_KEY, JSON.stringify(entry));
+  const recent = [entry, ...recentGyms().filter((g) => g.slug !== entry.slug)].slice(0, 5);
+  localStorage.setItem(RECENT_GYMS_KEY, JSON.stringify(recent));
+  reloadAt('/portal');
+}
+
+/** Back to the gym finder. The old gym's member session stays on the phone,
+ * so coming back to it later does not mean signing in again. */
+export function forgetGym() {
+  localStorage.removeItem(SELECTED_GYM_KEY);
+  reloadAt('/portal/find-gym');
+}
+
+/** Drops a gym from the recent list — one that has closed, say. */
+export function removeRecentGym(slug) {
+  localStorage.setItem(RECENT_GYMS_KEY, JSON.stringify(recentGyms().filter((g) => g.slug !== slug)));
+}
+
+function reloadAt(path) {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${path}`);
+  window.location.reload();
+}
 
 /**
  * Makes a server-relative URL ("/api/...", "/g/<slug>/api/...") absolute in
@@ -196,13 +274,18 @@ async function uploadFile(path, file, { token, method = 'PUT' } = {}) {
   return payload;
 }
 
-async function request(method, path, body, { token, anonymous = false, member = false } = {}) {
+/**
+ * `root` sends the call to the server's root address rather than this gym's
+ * /g/<slug> one — for the platform-wide gym directory, which must keep
+ * working when the remembered gym has since closed and its prefix 404s.
+ */
+async function request(method, path, body, { token, anonymous = false, member = false, root = false } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const bearer = token ?? (member ? memberSession.token : anonymous ? null : session.token);
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
 
-  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), {
+  const res = await fetch(serverUrl(`${root ? '' : pathPrefix}/api${path}`), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -303,6 +386,15 @@ export const api = {
   slugAvailable: (slug) => request('GET', `/platform/slug-available${query({ slug })}`, undefined, { anonymous: true }),
   signup: (payload) => request('POST', '/platform/signup', payload, { anonymous: true }),
   updateGym: (payload) => request('PATCH', '/platform/tenant', payload),
+
+  // The member app's "find your gym" — platform-wide, so always on the root.
+  directory: {
+    byCode: (code) => request('GET', `/platform/directory/code/${encodeURIComponent(code)}`, undefined, { anonymous: true, root: true }),
+    search: (q, type) =>
+      request('GET', `/platform/directory/search${query({ q, type })}`, undefined, { anonymous: true, root: true }),
+    resolve: (text) =>
+      request('GET', `/platform/directory/resolve${query({ text })}`, undefined, { anonymous: true, root: true }),
+  },
   billingStatus: () => request('GET', '/platform/billing/status'),
   customDomains: () => request('GET', '/platform/domains'),
   inspectDomain: (hostname) => request('GET', `/platform/domains/inspect${query({ hostname })}`),

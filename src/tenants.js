@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -102,7 +103,64 @@ const MIGRATIONS = [
   // A short motto under the gym's name on the member-app desk poster.
   // NULL or empty means none.
   (db) => ensureColumn(db, 'tenants', 'tagline', 'TEXT'),
+  // How a member finds this gym in the store-listed member app, which serves
+  // every gym: by a short code typed off the desk poster, or by name/city in
+  // the directory (see routes/directory.js). The code is not a secret — it
+  // only finds the gym; signing in still takes the member's own password.
+  (db) => ensureColumn(db, 'tenants', 'gym_code', 'TEXT'),
+  (db) => db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_gym_code ON tenants(gym_code)'),
+  (db) => ensureColumn(db, 'tenants', 'address_line', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'city', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'state', 'TEXT'),
+  (db) => ensureColumn(db, 'tenants', 'pincode', 'TEXT'),
+  // Whether a name search finds this gym. Off only hides it from search — the
+  // code and the desk QR still work, so a members-only gym stays reachable.
+  (db) => ensureColumn(db, 'tenants', 'listed_in_app', 'INTEGER NOT NULL DEFAULT 1'),
+  // Every gym created before codes existed gets one. Runs on each open but
+  // only ever touches rows still without a code.
+  (db) => {
+    const missing = db.prepare('SELECT slug, gym_name, display_name FROM tenants WHERE gym_code IS NULL').all();
+    const assign = db.prepare('UPDATE tenants SET gym_code = ? WHERE slug = ?');
+    for (const row of missing) assign.run(newGymCode(db, row.gym_name || row.display_name), row.slug);
+  },
 ];
+
+/**
+ * Gym codes are read off a poster and typed on a phone, so the alphabet drops
+ * the characters people confuse — 0/O, 1/I/L — and is upper-case only.
+ */
+const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+const CODE_DIGITS = '23456789';
+const CODE_ALPHABET = CODE_LETTERS + CODE_DIGITS;
+export const GYM_CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{6}$`);
+
+/** What a member typed, as a code to look up: case, spaces and dashes don't
+ * matter ("amt 482", "AMT-482"). Null when it cannot be a code at all. */
+export function normalizeGymCode(input) {
+  const code = String(input ?? '').toUpperCase().replace(/[\s-]+/g, '');
+  return GYM_CODE_RE.test(code) ? code : null;
+}
+
+const randomFrom = (chars, n) => Array.from({ length: n }, () => chars[crypto.randomInt(chars.length)]).join('');
+
+/**
+ * A free code that reads like the gym: three letters from its name and three
+ * digits ("Iron House" → IRN482). Only 512 codes per prefix, so a busy prefix
+ * falls back to six random characters, which never realistically collide.
+ */
+function newGymCode(db, name) {
+  const taken = db.prepare('SELECT 1 FROM tenants WHERE gym_code = ?');
+  const letters = String(name ?? '').toUpperCase().split('').filter((c) => CODE_LETTERS.includes(c));
+  const prefix = (letters.join('') + randomFrom(CODE_LETTERS, 3)).slice(0, 3);
+  for (let i = 0; i < 20; i += 1) {
+    const code = prefix + randomFrom(CODE_DIGITS, 3);
+    if (!taken.get(code)) return code;
+  }
+  for (;;) {
+    const code = randomFrom(CODE_ALPHABET, 6);
+    if (!taken.get(code)) return code;
+  }
+}
 
 let registryDb;
 
@@ -174,6 +232,39 @@ export function listTenants() {
   return getRegistryDb().prepare('SELECT * FROM tenants ORDER BY created_at').all().map(plain);
 }
 
+export function findTenantByGymCode(code) {
+  const normalized = normalizeGymCode(code);
+  if (!normalized) return undefined;
+  return plain(getRegistryDb().prepare('SELECT * FROM tenants WHERE gym_code = ?').get(normalized));
+}
+
+/** Escapes LIKE's own wildcards, so a search for "50%" is not a match-all. */
+const likeTerm = (text) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/**
+ * The member app's "find your gym" search: listed gyms that are open for
+ * business, matched on name, city or pincode. Names that start with the query
+ * rank first — someone typing "iron" means Iron House before Pumping Iron.
+ */
+export function searchDirectory(query, { businessType, limit = 20 } = {}) {
+  const term = String(query ?? '').trim();
+  const params = [likeTerm(term), likeTerm(term), term];
+  let where = `status IN ('trial', 'active') AND listed_in_app = 1
+    AND (COALESCE(gym_name, display_name) LIKE ? ESCAPE '\\' OR city LIKE ? ESCAPE '\\' OR pincode = ?)`;
+  if (businessType) {
+    where += ' AND business_type = ?';
+    params.push(businessType);
+  }
+  return getRegistryDb()
+    .prepare(
+      `SELECT * FROM tenants WHERE ${where}
+       ORDER BY (COALESCE(gym_name, display_name) LIKE ? ESCAPE '\\') DESC, COALESCE(gym_name, display_name) COLLATE NOCASE
+       LIMIT ?`,
+    )
+    .all(...params, `${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`, limit)
+    .map(plain);
+}
+
 export function createTenant({
   slug,
   displayName,
@@ -185,10 +276,11 @@ export function createTenant({
 } = {}) {
   if (!isValidSlug(slug)) throw new Error(`Invalid tenant slug "${slug}"`);
   const dbFile = `tenants/${slug}.db`;
-  getRegistryDb()
+  const db = getRegistryDb();
+  db
     .prepare(
-      `INSERT INTO tenants (slug, display_name, gym_name, currency, timezone, db_file, trial_ends_on, business_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tenants (slug, display_name, gym_name, currency, timezone, db_file, trial_ends_on, business_type, gym_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       slug,
@@ -199,6 +291,7 @@ export function createTenant({
       dbFile,
       trialEndsOn ?? null,
       businessType,
+      newGymCode(db, gymName ?? displayName),
     );
   return findTenantBySlug(slug);
 }
@@ -226,17 +319,50 @@ export function setTenantBusinessType(slug, businessType) {
  */
 export function updateTenantProfile(
   slug,
-  { gymName, currency, timezone, theme, tagline, logoMime, logoBytes, iconMime, iconBytes, clearLogo } = {},
+  {
+    gymName,
+    currency,
+    timezone,
+    theme,
+    tagline,
+    addressLine,
+    city,
+    state,
+    pincode,
+    listedInApp,
+    logoMime,
+    logoBytes,
+    iconMime,
+    iconBytes,
+    clearLogo,
+  } = {},
 ) {
   const sets = [
-    'gym_name     = COALESCE(?, gym_name)',
-    'display_name = COALESCE(?, display_name)',
-    'currency     = COALESCE(?, currency)',
-    'timezone     = COALESCE(?, timezone)',
-    'theme        = COALESCE(?, theme)',
-    'tagline      = COALESCE(?, tagline)',
+    'gym_name      = COALESCE(?, gym_name)',
+    'display_name  = COALESCE(?, display_name)',
+    'currency      = COALESCE(?, currency)',
+    'timezone      = COALESCE(?, timezone)',
+    'theme         = COALESCE(?, theme)',
+    'tagline       = COALESCE(?, tagline)',
+    'address_line  = COALESCE(?, address_line)',
+    'city          = COALESCE(?, city)',
+    'state         = COALESCE(?, state)',
+    'pincode       = COALESCE(?, pincode)',
+    'listed_in_app = COALESCE(?, listed_in_app)',
   ];
-  const params = [gymName ?? null, gymName ?? null, currency ?? null, timezone ?? null, theme ?? null, tagline ?? null];
+  const params = [
+    gymName ?? null,
+    gymName ?? null,
+    currency ?? null,
+    timezone ?? null,
+    theme ?? null,
+    tagline ?? null,
+    addressLine ?? null,
+    city ?? null,
+    state ?? null,
+    pincode ?? null,
+    listedInApp == null ? null : listedInApp ? 1 : 0,
+  ];
 
   // The logo and the app icon drawn from it are one fact, written and cleared
   // together: leaving a stale icon behind would keep installing the old brand.

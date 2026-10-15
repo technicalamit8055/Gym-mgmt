@@ -5495,6 +5495,121 @@ body:not([data-mode='light']) .portal-pay {
 /* Room for the Back pill above the avatar on the side steps */
 .portal-login-card:has(> .portal-back-link) { padding-top: 54px; }
 
+/* ------------------------------------------------------------ find your gym */
+
+/* The member app's first screen (views/findGym.js), on the sign-in shell. Less
+   top padding than sign-in: there is no gym photo to frame yet, and the card
+   holds a camera viewfinder. */
+.findgym .portal-login-stage {
+  padding-top: calc(clamp(56px, 12dvh, 140px) + var(--safe-top));
+  padding-bottom: calc(40px + var(--safe-bottom));
+}
+.findgym-tagline {
+  margin: -4px 0 0; max-width: 34ch; font-size: 14px; line-height: 1.45;
+  color: rgba(255, 255, 255, 0.86); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
+}
+.findgym-card { gap: 14px; padding: 18px 16px 22px; }
+.findgym-card::before { display: none; }
+.findgym-lead { margin: 0; }
+
+.findgym-tabs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px;
+  border-radius: 14px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+}
+/* Icon over label: three side-by-side labels do not fit a phone's width */
+.findgym-tab {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-height: 54px; padding: 6px 4px; white-space: nowrap;
+  border: 0; border-radius: 10px; background: none; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--lg-muted);
+}
+.findgym-tab.active { color: #111; background: linear-gradient(180deg, var(--lg-gold-hi), var(--lg-gold-lo)); }
+.findgym-tab:focus-visible { outline: 2px solid var(--lg-gold); outline-offset: 2px; }
+
+.findgym-scan-start {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%;
+  padding: 28px 16px; border-radius: 18px; cursor: pointer;
+  font: inherit; color: var(--lg-text); background: rgba(255, 255, 255, 0.04);
+  border: 1.5px dashed rgba(255, 197, 31, 0.6);
+}
+.findgym-scan-start svg { color: var(--lg-gold); }
+.findgym-scan-start strong { font-size: 17px; }
+.findgym-scan-start span { font-size: 13px; color: var(--lg-muted); }
+.findgym-scan-start:hover { border-color: var(--lg-gold); }
+
+.findgym-viewfinder {
+  position: relative; overflow: hidden; aspect-ratio: 1; width: 100%;
+  border-radius: 18px; background: #000;
+}
+.findgym-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Gold corner brackets around the middle of the frame, where the QR should go */
+.findgym-corners {
+  position: absolute; inset: 16%; pointer-events: none;
+  --c: var(--lg-gold); --l: 34px; --w: 4px;
+  background:
+    linear-gradient(var(--c), var(--c)) top left / var(--l) var(--w) no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / var(--w) var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / var(--l) var(--w) no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / var(--w) var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / var(--l) var(--w) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / var(--w) var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / var(--l) var(--w) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / var(--w) var(--l) no-repeat;
+}
+.findgym-scan-hint {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 7px 10px; border-radius: 10px;
+  text-align: center; font-size: 12.5px; color: #fff; background: rgba(0, 0, 0, 0.6);
+}
+.findgym-wait { padding: 40px 0; }
+
+.portal-login-field .findgym-code-input { letter-spacing: 0.32em; font-weight: 700; text-transform: uppercase; }
+.portal-login-field .findgym-code-input::placeholder { letter-spacing: normal; font-weight: 400; text-transform: none; }
+
+.findgym-results, .findgym-recent { display: flex; flex-direction: column; gap: 8px; }
+.findgym-section {
+  margin: 6px 2px 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--lg-muted);
+}
+.findgym-row-wrap { display: flex; align-items: stretch; gap: 6px; }
+.findgym-row {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border-radius: 14px; cursor: pointer; text-align: left;
+  font: inherit; color: var(--lg-text); background: rgba(40, 40, 43, 0.92); border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.findgym-row:hover, .findgym-row:focus-visible { border-color: rgba(255, 197, 31, 0.7); outline: none; }
+.findgym-row > svg { flex: none; color: var(--lg-muted); }
+.findgym-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.findgym-row-text strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.findgym-row-text span { font-size: 12.5px; color: var(--lg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.findgym-forget {
+  flex: none; width: 40px; border-radius: 12px; cursor: pointer; display: grid; place-items: center;
+  color: var(--lg-muted); background: none; border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.findgym-forget:hover { color: var(--lg-text); }
+
+.findgym-logo {
+  flex: none; display: grid; place-items: center; object-fit: cover;
+  color: var(--lg-gold); background: #151515; border: 1.5px solid rgba(255, 197, 31, 0.6);
+}
+.findgym-logo-sm { width: 42px; height: 42px; border-radius: 12px; }
+.findgym-logo-lg { width: 88px; height: 88px; border-radius: 22px; border-width: 2.5px; box-shadow: 0 0 26px rgba(255, 190, 20, 0.35); }
+
+.findgym-found { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 34px; text-align: center; }
+.findgym-address { margin: 0; max-width: 32ch; color: var(--lg-muted); font-size: 14px; line-height: 1.4; }
+.findgym-address svg { display: inline-block; vertical-align: -3px; margin-right: 4px; color: var(--lg-gold); }
+.findgym-code-chip {
+  padding: 5px 12px; border-radius: 999px; font-size: 13px; color: var(--lg-muted);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.findgym-code-chip strong { color: var(--lg-gold); letter-spacing: 0.12em; }
+.findgym-not { align-self: center; }
+
+/* "Not your gym?" under the member sign-in card, in the store app */
+.portal-login-switch {
+  display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px;
+  font-size: 13.5px; color: var(--lg-muted);
+}
+
 .portal-field { display: flex; }
 .portal-input {
   width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
@@ -11004,6 +11119,8 @@ body:not([data-mode='light']) .stg-logo-btn.danger { color: var(--red); }
   background: transparent; color: var(--blue); cursor: pointer; display: grid; place-items: center;
 }
 .stg-url-copy:hover { background: color-mix(in srgb, var(--brand) 7%, transparent); }
+/* The gym code: read aloud and typed on a phone, so set large and spaced */
+.stg-gymcode code { font-size: 22px; font-weight: 800; letter-spacing: 0.18em; word-break: normal; }
 
 /* Member-app QR */
 .stg-appqr { display: flex; align-items: center; gap: 20px; }

@@ -1,9 +1,12 @@
 /**
  * Builds the member app's debug APK (android/, a Capacitor project bundling
- * public/) pointed at one server and one gym.
+ * public/) pointed at one server. Without --gym it is the store app, serving
+ * every gym on that server: members pick theirs on the "find your gym"
+ * screen. With --gym it is that one gym's own app, and never asks.
  *
+ *   npm run android:apk
+ *   npm run android:apk -- --server https://gymbook.fly.dev --install
  *   npm run android:apk -- --gym amit-gym
- *   npm run android:apk -- --gym amit-gym --server https://gymbook.fly.dev --install
  *
  * --server defaults to this PC's LAN address and PORT, so a phone on the same
  * Wi-Fi reaches the local dev server. --install puts the APK on whatever
@@ -57,12 +60,16 @@ function lanServerUrl() {
   return `http://${lan.address}:${process.env.PORT || 3000}`;
 }
 
-if (!args.gym) fail('Which gym should the app open? Pass --gym <slug> (the slug in /g/<slug>/).');
-if (!/^[a-z][a-z0-9-]{2,39}$/.test(args.gym)) fail(`"${args.gym}" is not a valid gym slug.`);
+if (args.gym && !/^[a-z][a-z0-9-]{2,39}$/.test(args.gym)) fail(`"${args.gym}" is not a valid gym slug.`);
 const serverUrl = (args.server || lanServerUrl()).replace(/\/+$/, '');
 
-fs.writeFileSync(path.join(ROOT, 'public', 'native-config.json'), `${JSON.stringify({ serverUrl, gymSlug: args.gym }, null, 2)}\n`);
-console.log(`App will open ${serverUrl}/g/${args.gym}/#/portal`);
+const nativeConfig = args.gym ? { serverUrl, gymSlug: args.gym } : { serverUrl };
+fs.writeFileSync(path.join(ROOT, 'public', 'native-config.json'), `${JSON.stringify(nativeConfig, null, 2)}\n`);
+console.log(
+  args.gym
+    ? `App is locked to one gym: ${serverUrl}/g/${args.gym}/#/portal`
+    : `App opens the gym finder on ${serverUrl} — members pick their gym by QR, code or search`,
+);
 
 // Called through node, not npx/gradlew.bat: Windows .cmd shims break on a
 // project path containing "&".

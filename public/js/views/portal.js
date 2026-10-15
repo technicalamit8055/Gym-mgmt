@@ -1,4 +1,4 @@
-import { ApiError, api, memberSession, pathPrefix } from '../api.js';
+import { ApiError, api, forgetGym, gymLocked, isNativeApp, memberSession, pathPrefix, pathSlug } from '../api.js';
 import {
   addDays,
   append,
@@ -1715,6 +1715,16 @@ function renderPortalLogin(ctx) {
           })
           : null,
         card,
+        // The store app serves every gym: a member who picked the wrong one
+        // must be able to get back to the finder before signing in.
+        isNativeApp && !gymLocked
+          ? h(
+            'p',
+            { class: 'portal-login-switch' },
+            'Not your gym?',
+            h('button', { class: 'portal-login-link', type: 'button', onclick: forgetGym }, 'Change gym'),
+          )
+          : null,
       ),
     ),
   );
@@ -3076,7 +3086,9 @@ const QUICK_TRACK_TABS = [
  * phone: the ticks are a checklist for the member, not a record — the food
  * log itself is the record. */
 function planTicks(logDate) {
-  const key = `gymbook.planTicks.${memberSession.member?.id ?? 'anon'}.${logDate}`;
+  // Scoped by gym as well: member ids restart at 1 in every gym, and one
+  // phone can be signed in to two of them.
+  const key = `gymbook.planTicks${pathSlug ? `.${pathSlug}` : ''}.${memberSession.member?.id ?? 'anon'}.${logDate}`;
   let set;
   try {
     set = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
@@ -11104,6 +11116,25 @@ function renderPortalApp(ctx, initialMe) {
     });
   }
 
+  /**
+   * Back to the gym finder (store app only). The member stays signed in to
+   * this gym, so switching back later is one tap — but its reminders stop,
+   * since the app can only show one gym and a tap on another gym's
+   * notification would open the wrong one.
+   */
+  function confirmSwitchGym() {
+    confirmDialog({
+      title: 'Switch to another gym?',
+      message: `You stay signed in to ${gymDisplayName(ctx)}, so switching back is quick — but its notifications stop on this phone until you come back and turn them on.`,
+      confirmLabel: 'Switch gym',
+      onConfirm: async () => {
+        await push.disablePush().catch(() => {});
+        await flushMemberSync();
+        forgetGym();
+      },
+    });
+  }
+
   /** Signs this device out — on the server too, so it drops off the Devices
    * list everywhere else. */
   async function signOut() {
@@ -11466,6 +11497,12 @@ function renderPortalApp(ctx, initialMe) {
           }),
         }),
         installRow,
+        isNativeApp && !gymLocked
+          ? profileRow({
+              icon: 'building', tone: 'blue', title: 'Switch gym', sub: `Now: ${gymDisplayName(ctx)}`,
+              onclick: confirmSwitchGym,
+            })
+          : null,
       ),
       h(
         'button',

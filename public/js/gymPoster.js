@@ -85,6 +85,12 @@ const COPY = {
     },
   ],
   linkLabel: 'Ya seedha link open karo',
+  codeLabel: 'Gym Code',
+  /** Step 1 once the gym has a code: the GymBook app finds it by either. */
+  appStep: {
+    title: 'QR Scan Karo',
+    body: 'GymBook Member app kholo aur yeh QR scan karo ya gym code daalo. Phone camera se bhi scan kar sakte ho.',
+  },
 };
 
 /* ------------------------------------------------------------ text tools */
@@ -347,7 +353,7 @@ function scanBadge() {
     `</g>`;
 }
 
-function stepsBlock() {
+function stepsBlock(poster) {
   const { top, columns, width, dividers } = SLOTS.steps;
   const pillSize = 22;
   const pillWidth = measure(COPY.stepsTitle, pillSize, 800) + 48;
@@ -356,7 +362,8 @@ function stepsBlock() {
     text(70, top + 7, COPY.stepsTitle, { size: pillSize, weight: 800, fill: '#fff' }),
     ...dividers.map((x) => `<line x1="${x}" y1="${top + 48}" x2="${x}" y2="${top + 200}" stroke="#e5e7eb" stroke-width="1.5"/>`),
   ];
-  COPY.steps.forEach((step, i) => {
+  const steps = poster.gym_code ? [COPY.appStep, ...COPY.steps.slice(1)] : COPY.steps;
+  steps.forEach((step, i) => {
     const x = columns[i];
     const titleWidth = width - 50;
     parts.push(
@@ -373,12 +380,21 @@ function stepsBlock() {
   return parts.join('');
 }
 
-function linkBlock(url) {
+/** The link, and the gym code at the right end of the same strip — what a
+ * member types into the app when they would rather not scan. */
+function linkBlock(url, code) {
   const { left, right, top, bottom } = SLOTS.link;
   const mid = (top + bottom) / 2;
   const textX = left + 86;
-  const maxWidth = right - textX - 24;
-  return `<circle cx="${left + 44}" cy="${mid}" r="27" fill="#fff1e6"/>` +
+  const codeWidth = code ? 236 : 0;
+  const maxWidth = right - textX - 24 - codeWidth;
+  const codeX = right - codeWidth / 2;
+  const codePart = code
+    ? `<line x1="${right - codeWidth}" y1="${top + 14}" x2="${right - codeWidth}" y2="${bottom - 14}" stroke="#e5e7eb" stroke-width="1.5"/>` +
+      text(codeX, mid - 10, COPY.codeLabel, { size: 15, fill: MUTED, anchor: 'middle' }) +
+      text(codeX, mid + 22, code, { size: 30, weight: 900, fill: ORANGE, anchor: 'middle', extra: ' letter-spacing="3"' })
+    : '';
+  return codePart + `<circle cx="${left + 44}" cy="${mid}" r="27" fill="#fff1e6"/>` +
     icon('link', left + 31, mid - 13, 26, ORANGE) +
     text(textX, mid - 10, COPY.linkLabel, { size: 15, fill: MUTED }) +
     text(textX, mid + 20, url, { size: fitSize(url, { size: 23, min: 13, weight: 600, maxWidth }), weight: 600, maxWidth });
@@ -405,8 +421,8 @@ function buildSvg(poster, { bgHref, logoHref, font = APP_FONT }) {
     productBranding(poster, logoHref) +
     qrBlock(poster.svg) +
     scanBadge() +
-    stepsBlock() +
-    linkBlock(poster.url) +
+    stepsBlock(poster) +
+    linkBlock(poster.url, poster.gym_code) +
     `</svg>`;
 }
 
@@ -437,7 +453,7 @@ function imagesLoaded(root, timeoutMs = 8000) {
  * resolves once its pictures have loaded — see imagesLoaded().
  */
 export async function gymPosterNode(poster) {
-  await fontsReady(`${poster.gym_name} ${poster.tagline || ''} ${poster.url}`);
+  await fontsReady(`${poster.gym_name} ${poster.tagline || ''} ${poster.url} ${poster.gym_code || ''}`);
   const holder = document.createElement('div');
   holder.className = 'gym-poster-wrap';
   holder.innerHTML = buildSvg(poster, { bgHref: BG_URL, logoHref: posterLogo(poster) });

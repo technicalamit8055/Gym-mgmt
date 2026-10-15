@@ -81,13 +81,88 @@ async function loadDecoder() {
 }
 
 /**
+ * Picks a QR decoder — for the check-in desk's member cards and the member
+ * app's gym finder.
+ *
+ * The native BarcodeDetector is preferred — it's hardware-accelerated and costs
+ * no download — but it is far from universal: it ships on Android, ChromeOS and
+ * macOS, and is absent from Chrome and Edge on Windows and Linux as well as from
+ * Safari and Firefox. So the fallback is a vendored decoder, fetched only when
+ * it's actually needed.
+ *
+ * Both branches return the same shape: a function taking the <video> and
+ * resolving to a decoded string, or null when nothing is in frame.
+ */
+export async function loadQrDecoder() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        return async (video) => {
+          const [found] = await detector.detect(video);
+          return found?.rawValue ?? null;
+        };
+      }
+    } catch {
+      // Present but unusable on this platform — fall through to jsQR.
+    }
+  }
+
+  await loadJsQr();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  return async (video) => {
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    // Frames arrive before the stream reports dimensions; nothing to read yet.
+    if (!width || !height) return null;
+
+    canvas.width = width;
+    canvas.height = height;
+    ctx.drawImage(video, 0, 0, width, height);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    // Codes are held upright, so don't pay for inverted-image passes.
+    return window.jsQR(data, width, height, { inversionAttempts: 'dontInvert' })?.data ?? null;
+  };
+}
+
+let jsQrLoad;
+
+/** Fetches the vendored decoder once per page, on first use. */
+function loadJsQr() {
+  if (window.jsQR) return Promise.resolve();
+  jsQrLoad ??= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/js/vendor/jsqr.min.js';
+    script.onload = () => (window.jsQR ? resolve() : reject(new Error('QR decoder loaded but did not register')));
+    script.onerror = () => {
+      // Let a later attempt retry rather than caching the failure forever.
+      jsQrLoad = undefined;
+      reject(new Error('Could not load the QR decoder'));
+    };
+    document.head.append(script);
+  });
+  return jsQrLoad;
+}
+
+/**
  * Starts the rear camera into `video` and calls `onCode` once with the first
  * barcode read the same way on two consecutive frames — a cheap guard against
  * a half-in-frame misread. Resolves to a stop() that releases the camera; the
  * loop also stops itself if the video is taken out of the page.
  */
 export async function startBarcodeScan(video, { onCode }) {
-  const decode = await loadDecoder();
+  return startScan(video, await loadDecoder(), onCode);
+}
+
+/** startBarcodeScan() for a QR code. */
+export async function startQrScan(video, { onCode }) {
+  return startScan(video, await loadQrDecoder(), onCode);
+}
+
+async function startScan(video, decode, onCode) {
   await ensureCameraPermission();
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },

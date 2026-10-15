@@ -152,6 +152,75 @@ function appQrCard(poster) {
   );
 }
 
+/**
+ * How members find this gym in the store-listed member app, which serves every
+ * gym: the code printed on the desk poster, and the address and opt-out that
+ * decide whether a name search turns it up.
+ */
+function appListingCard(tenant, { isAdmin, reload }) {
+  const Noun = isLibrary() ? 'Library' : 'Gym';
+  const code = tenant.gym_code || '';
+
+  const form = buildForm(
+    [
+      { name: 'address_line', label: 'Street address', value: tenant.address_line || '', full: true, placeholder: 'e.g. 12, MG Road, near City Mall' },
+      { name: 'city', label: 'City', value: tenant.city || '', placeholder: 'e.g. Jaipur' },
+      { name: 'state', label: 'State', value: tenant.state || '', placeholder: 'e.g. Rajasthan' },
+      { name: 'pincode', label: 'PIN code', value: tenant.pincode || '', placeholder: 'e.g. 302001' },
+      {
+        name: 'listed_in_app',
+        label: 'Show in app search',
+        type: 'select',
+        value: tenant.listed_in_app === false ? 'no' : 'yes',
+        options: [
+          { value: 'yes', label: 'Yes — findable by name' },
+          { value: 'no', label: 'No — code or QR only' },
+        ],
+      },
+    ],
+    {
+      onSubmit: async (values) => {
+        const { tenant: updated } = await api.updateGym({ ...values, listed_in_app: values.listed_in_app === 'yes' });
+        window.dispatchEvent(new CustomEvent('gymbook:gym-updated', { detail: updated }));
+        toast('App listing saved');
+        await reload();
+      },
+    },
+  );
+  form.querySelector('.modal-foot').remove();
+  form.classList.add('stg-form');
+  form.append(h('button', { class: 'btn primary stg-save', type: 'submit' }, renderIcon('save', { size: 18 }), 'Save listing'));
+  if (!isAdmin) {
+    for (const control of form.querySelectorAll('input, select, button')) control.disabled = true;
+  }
+
+  return h(
+    'div',
+    { class: 'card stg-card' },
+    cardHead(
+      'search',
+      'blue',
+      `Find us in the ${t('member').toLowerCase()} app`,
+      `${t('members')} pick your ${Noun.toLowerCase()} in the GymBook app before they sign in — by this code, by scanning your desk poster, or by searching your name and city.`,
+    ),
+    h(
+      'div',
+      { class: 'stg-url stg-gymcode' },
+      h('span', { class: 'stg-url-lead' }, renderIcon('key', { size: 20, stroke: 2 })),
+      h('code', { 'aria-label': `${Noun} code` }, code || '—'),
+      code
+        ? h(
+          'button',
+          { class: 'stg-url-copy', type: 'button', title: 'Copy code', 'aria-label': 'Copy code', onclick: () => copyText(code, 'Code copied') },
+          renderIcon('copy', { size: 18 }),
+        )
+        : null,
+    ),
+    h('p', { class: 'muted', style: 'margin:6px 0 14px;font-size:13px' }, `${Noun} code — it is printed on your desk poster too.`),
+    form,
+  );
+}
+
 function subscriptionCard(tenant, billing, reload) {
   const isAdmin = session.can('admin');
   const daysLeft = tenant.trial_ends_on ? relativeDays(tenant.trial_ends_on) : null;
@@ -615,6 +684,7 @@ export async function renderSettings({ reload }) {
         ]),
       ),
       appQrCard(appQr),
+      appListingCard(tenant, { isAdmin, reload }),
       h(
         'div',
         { class: 'card stg-card' },

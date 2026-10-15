@@ -116,6 +116,12 @@ export const config = {
   signupMaxAttempts: Number(process.env.SIGNUP_MAX_ATTEMPTS || 10),
   signupWindowMs: Number(process.env.SIGNUP_WINDOW_MS || 60 * 60_000),
   signupLockoutMs: Number(process.env.SIGNUP_LOCKOUT_MS || 60 * 60_000),
+  // The member app's gym finder searches as the member types, and Indian
+  // mobile carriers put many phones behind one IP — so this is generous, and
+  // only there to stop someone paging through the whole directory.
+  directoryMaxRequests: Number(process.env.DIRECTORY_MAX_REQUESTS || 120),
+  directoryWindowMs: Number(process.env.DIRECTORY_WINDOW_MS || 60_000),
+  directoryLockoutMs: Number(process.env.DIRECTORY_LOCKOUT_MS || 60_000),
   // The exact production hostname (e.g. "yourapp.fly.dev" or, later, a real
   // domain) once deployed. Unset locally/in tests, where subdomain detection
   // falls back to inferring from label count instead (see tenant.js).
