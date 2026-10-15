@@ -375,7 +375,7 @@ async function enableNativePush() {
   if (!hasNativePush) throw new PushError('unavailable', 'Notifications are not available in this version of the app');
   nativePermission = (await nativeCall('requestPermissions')).receive;
   if (nativePermission === 'denied') {
-    throw new PushError('denied', 'Notifications are blocked — allow them in your phone’s Settings › Apps › GymBook Member');
+    throw new PushError('denied', 'Notifications are blocked — allow them in your phone’s Settings › Apps › GymVym');
   }
   if (nativePermission !== 'granted') throw new PushError('dismissed', 'Notifications were not turned on');
   await registerNativeDevice();

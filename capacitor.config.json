@@ -1,6 +1,6 @@
 {
   "appId": "com.gymbook.member",
-  "appName": "GymBook Member",
+  "appName": "GymVym",
   "webDir": "public",
   "server": {
     "androidScheme": "http"

@@ -89,7 +89,7 @@ const COPY = {
   /** Step 1 once the gym has a code: the GymBook app finds it by either. */
   appStep: {
     title: 'QR Scan Karo',
-    body: 'GymBook Member app kholo aur yeh QR scan karo ya gym code daalo. Phone camera se bhi scan kar sakte ho.',
+    body: 'GymVym app kholo aur yeh QR scan karo ya gym code daalo. Phone camera se bhi scan kar sakte ho.',
   },
 };
 
