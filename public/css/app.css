@@ -6546,7 +6546,7 @@ button.portal-set-prev:hover { color: var(--brand); }
   border: none; background: none; font: inherit; color: var(--brand); cursor: pointer;
   display: inline-flex; align-items: center;
 }
-.portal-set-suggest-use { gap: 5px; padding: 0 10px 0 9px; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.portal-set-suggest-use { display: inline-flex; align-items: center; color: var(--brand); gap: 5px; padding: 0 10px 0 9px; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .portal-set-suggest-label { font-size: 10px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.85; }
 .portal-set-suggest-use strong { font-weight: 700; color: var(--text); }
 .portal-set-suggest-why {
@@ -6554,6 +6554,12 @@ button.portal-set-prev:hover { color: var(--brand); }
   border-left: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border)) !important;
 }
 .portal-set-suggest button:hover { background: color-mix(in srgb, var(--brand) 12%, transparent); }
+/* The boxes already hold the suggestion: a quieter green confirmation. */
+.portal-set-suggest.is-match {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--border));
+  background: color-mix(in srgb, var(--green) 9%, var(--surface));
+}
+.portal-set-suggest.is-match .portal-set-suggest-use { color: var(--green); }
 
 .portal-suggest-why { display: flex; flex-direction: column; gap: 8px; }
 .portal-suggest-why p { margin: 0; font-size: 14px; line-height: 1.45; }
@@ -7407,6 +7413,25 @@ button.portal-set-prev:hover { color: var(--brand); }
   background: #1d4ed8;
   transform: translateY(-1px);
 }
+.coach-apply:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+/* A swap and a next set can both sit under one reply. */
+.coach-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.coach-apply.is-swap {
+  max-width: 100%;
+}
+.coach-apply.is-swap span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Meal plan card (coach.js mealPlanCard), under a coach reply. Tracking it
    happens in Quick track's My plans tab (.qt-plan). */
@@ -7715,6 +7740,107 @@ button.portal-set-prev:hover { color: var(--brand); }
 .coach-input::placeholder {
   color: #94a3b8;
 }
+
+/* @ exercise picker: the button at the end of the field, and the list that
+   opens above the dock while an @mention is being typed. */
+.coach-at {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  border: none;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #2563eb;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.coach-at:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.coach-mentions {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(100% - 4px);
+  max-height: min(280px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 -8px 28px rgba(15, 23, 42, 0.14);
+  padding: 4px 0;
+  z-index: 20;
+}
+.coach-mentions[hidden] { display: none; }
+.coach-mentions-label {
+  position: sticky;
+  top: -4px;
+  padding: 8px 14px 4px;
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.coach-mention {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 14px;
+  /* Scrolled into view clear of the sticky day label above it. */
+  scroll-margin-top: 34px;
+  font-size: 14px;
+  color: #0f172a;
+  cursor: pointer;
+}
+.coach-mention[aria-selected='true'],
+.coach-mention:hover {
+  background: #eff6ff;
+}
+.coach-mention-at {
+  color: #2563eb;
+  font-weight: 700;
+}
+.coach-mention-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.coach-mention-muscle {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.coach-mentions-note {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #64748b;
+}
+.coach-msg-mention {
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+}
 .coach-send {
   width: 44px;
   height: 44px;
@@ -7825,6 +7951,22 @@ button.portal-set-prev:hover { color: var(--brand); }
   font-size: 12.5px;
   color: #94a3b8;
 }
+/* Live words from the free English recogniser read as text, not a hint. */
+.coach-rec.is-live .coach-rec-hint { color: #0f172a; font-size: 13.5px; text-align: left; }
+/* Under the composer: the voice language switch, and the questions left. */
+.coach-dock-foot { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 22px; }
+.coach-dock-foot:has(.coach-lang) { justify-content: space-between; }
+.coach-lang {
+  display: inline-flex; align-items: center; gap: 2px; padding: 2px 2px 2px 8px;
+  border-radius: 999px; background: #f1f5f9; color: #64748b;
+}
+.coach-lang svg { margin-right: 3px; }
+.coach-lang-opt {
+  height: 22px; padding: 0 10px; border: none; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: #64748b; background: transparent;
+}
+.coach-lang-opt[aria-pressed='true'] { background: #ffffff; color: #1d4ed8; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); }
+.coach-lang-opt:disabled { cursor: default; opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) {
   .coach-mic.is-writing::after { animation-duration: 2.4s; }
   .coach-rec-dot { transition: none; }
@@ -8105,6 +8247,33 @@ body:not([data-mode='light']) .coach-field .coach-input {
 body:not([data-mode='light']) .coach-field .coach-input::placeholder {
   color: var(--muted);
 }
+body:not([data-mode='light']) .coach-at {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+body:not([data-mode='light']) .coach-mentions {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45);
+}
+body:not([data-mode='light']) .coach-mentions-label {
+  background: var(--surface);
+  color: var(--muted);
+}
+body:not([data-mode='light']) .coach-mention {
+  color: var(--text);
+}
+body:not([data-mode='light']) .coach-mention[aria-selected='true'],
+body:not([data-mode='light']) .coach-mention:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+body:not([data-mode='light']) .coach-mention-muscle {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+body:not([data-mode='light']) .coach-mentions-note {
+  color: var(--muted);
+}
 body:not([data-mode='light']) .coach-remaining {
   color: var(--muted);
 }
@@ -8118,6 +8287,18 @@ body:not([data-mode='light']) .coach-rec-time {
 body:not([data-mode='light']) .coach-rec-cancel,
 body:not([data-mode='light']) .coach-rec-hint {
   color: var(--muted);
+}
+body:not([data-mode='light']) .coach-rec.is-live .coach-rec-hint {
+  color: var(--text);
+}
+body:not([data-mode='light']) .coach-lang,
+body:not([data-mode='light']) .coach-lang-opt {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+body:not([data-mode='light']) .coach-lang-opt[aria-pressed='true'] {
+  background: var(--bg-alt);
+  color: #93c5fd;
 }
 
 @media (max-width: 480px) {
@@ -8520,6 +8701,48 @@ body:not([data-mode='light']) .coach-rec-hint {
   border-color: transparent;
   box-shadow: 0 10px 22px -10px color-mix(in srgb, var(--brand) 70%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
+.btn.portal-summary-share {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 50px; margin-top: 4px; border-radius: 14px; font-size: 16px; font-weight: 650;
+}
+
+/* Share workout: Hevy's carousel of square cards on black, whichever card is
+   in view being the one Share and Download send. Dark in either theme, like
+   a photo viewer. */
+.modal.share-cards-modal { width: min(560px, 100%); background: #0b0b0c; border-color: #1f2023; color: #f3f4f6; }
+.share-cards-modal .modal-head { border-bottom-color: #1f2023; justify-content: center; }
+.share-cards-modal .modal-head h2 { color: #f3f4f6; }
+.share-cards-modal .modal-head .icon-btn { color: #f3f4f6; }
+.share-cards-modal .modal-body { padding: 22px 0 26px; }
+.share-cards { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.share-cards-track {
+  display: flex; width: 100%; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.share-cards-track::-webkit-scrollbar { display: none; }
+.share-cards-slide { flex: 0 0 100%; padding: 0 24px; scroll-snap-align: center; scroll-snap-stop: always; }
+.share-cards-slide svg { display: block; width: 100%; height: auto; border-radius: 14px; }
+.share-cards-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; padding: 0 16px; }
+.share-cards-dot {
+  width: 22px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; position: relative;
+}
+.share-cards-dot::after {
+  content: ''; position: absolute; inset: 7px; border-radius: 50%; background: #3a3c42; transition: background 0.15s;
+}
+.share-cards-dot.is-active::after { background: var(--brand); }
+.share-cards-caption { margin: 0; font-size: 17px; font-weight: 550; color: #f3f4f6; }
+.share-cards-actions { display: flex; justify-content: center; gap: 22px; padding: 0 16px; }
+.share-cards-action {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; width: 76px;
+  padding: 0; border: 0; background: transparent; color: #9ca3af; font: inherit; font-size: 13px; cursor: pointer;
+}
+.share-cards-action-icon {
+  display: grid; place-items: center; width: 60px; height: 60px; border-radius: 50%;
+  background: #26272b; color: #f3f4f6; transition: transform 0.12s;
+}
+.share-cards-action:first-child .share-cards-action-icon { background: var(--brand); color: #fff; }
+.share-cards-action:active .share-cards-action-icon { transform: scale(0.94); }
+.modal.share-cards-modal::before { background: #3a3c42; }
 
 @media (max-width: 420px) {
   .portal-summary-grid { gap: 10px; }

@@ -95,6 +95,98 @@ const VOICE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=o
 /** Whether this browser can record from the mic at all (not on plain http). */
 const voiceSupported = () => Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder && window.isSecureContext);
 
+/** The browser's own speech recognition (Google's service in Chrome and
+ * Edge, Apple's in Safari): free to the gym, used for English questions. */
+const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+/** The voice switch: English on the free recogniser, everything else on Gemini. */
+const VOICE_LANGS = [
+  ['en', 'English'],
+  ['any', 'Hinglish / any'],
+];
+const VOICE_LANG_KEY = 'gymbook.coach.voiceLang';
+/** The member's last pick on this phone; Hinglish / any until they choose. */
+function readVoiceLang() {
+  try {
+    return localStorage.getItem(VOICE_LANG_KEY) === 'en' ? 'en' : 'any';
+  } catch {
+    return 'any';
+  }
+}
+function saveVoiceLang(value) {
+  try {
+    localStorage.setItem(VOICE_LANG_KEY, value);
+  } catch {}
+}
+/** Recogniser errors that mean this browser has the API but no service
+ * behind it (an iPhone home-screen app, Brave): Gemini takes over. */
+const SPEECH_UNAVAILABLE = new Set(['service-not-allowed', 'language-not-supported', 'network']);
+
+/**
+ * Listens with the browser's recogniser; the same handle shape as
+ * recordVoice, with `kind: 'speech'`. `onText` gets the words so far as they
+ * are recognised. `stop()` resolves to the text ('' if nothing was said) or
+ * throws an Error whose `code` is the recogniser's error; `cancel()` resolves
+ * to null. `onEnd` is called if the recogniser stops by itself.
+ */
+function recogniseSpeech({ lang, onText }) {
+  const recogniser = new SpeechRecognitionApi();
+  recogniser.lang = lang;
+  recogniser.interimResults = true;
+  recogniser.maxAlternatives = 1;
+  // Android Chrome's continuous mode repeats earlier words in every result,
+  // so there it takes one phrase and ends at the pause (onEnd finishes it).
+  recogniser.continuous = !/Android/i.test(navigator.userAgent);
+
+  let heard = '';
+  let error = null;
+  recogniser.onresult = (event) => {
+    let text = '';
+    for (const result of event.results) text += `${result[0].transcript} `;
+    heard = text.replace(/\s+/g, ' ').trim();
+    onText(heard);
+  };
+  recogniser.onerror = (event) => {
+    error = event.error;
+  };
+
+  const handle = { kind: 'speech', onTick: null, onEnd: null };
+  let stopping = false;
+  const ended = new Promise((resolve) => {
+    recogniser.onend = () => {
+      resolve();
+      if (!stopping) handle.onEnd?.();
+    };
+  });
+  const started = Date.now();
+  const ticker = setInterval(() => handle.onTick?.(Date.now() - started), 250);
+  try {
+    recogniser.start();
+  } catch (err) {
+    clearInterval(ticker);
+    throw err;
+  }
+
+  let done = null;
+  const end = (keep) =>
+    (done ??= (async () => {
+      stopping = true;
+      clearInterval(ticker);
+      if (keep) recogniser.stop();
+      else recogniser.abort();
+      await ended;
+      if (!keep) return null;
+      // "no-speech" is only silence, and "aborted" our own abort.
+      if (error && error !== 'no-speech' && error !== 'aborted') {
+        if (error === 'network' && !navigator.onLine) error = 'offline';
+        throw Object.assign(new Error(error), { code: error });
+      }
+      return heard.slice(0, MAX_QUESTION);
+    })());
+  handle.stop = () => end(true);
+  handle.cancel = () => end(false).catch(() => null);
+  return handle;
+}
+
 /** A blob as bare base64, for a JSON body. */
 const blobBase64 = (blob) =>
   new Promise((resolve, reject) => {
@@ -680,7 +772,13 @@ function createCoachView(turn) {
       stopThinking();
       bubble.classList.remove('is-empty');
       await typer.end(reply.answer);
-      Object.assign(turn, { live: false, text: reply.answer, suggestion: reply.suggestion ?? null, mealPlan: reply.meal_plan ?? null });
+      Object.assign(turn, {
+        live: false,
+        text: reply.answer,
+        suggestion: reply.suggestion ?? null,
+        swap: reply.swap ?? null,
+        mealPlan: reply.meal_plan ?? null,
+      });
       settle();
       answer.replaceChildren(...answerTokens(reply.answer).map((token) => tokenNode(token, false)));
       // A meal plan is the answer itself, so it takes the rings' place: the
@@ -724,19 +822,26 @@ function createCoachView(turn) {
  * @param {() => object|null} [opts.getSession] the live workout, read at send time
  * @param {(suggestion: {exercise: string, weight_kg: number, reps: number}) => boolean} [opts.onApply]
  *   fills the next set; returns false when no exercise in the session matches
+ * @param {(swap: {from: string, to: string, muscle_group: string|null}) => Promise<string|false>} [opts.onSwap]
+ *   replaces `from` with `to` in the workout; resolves to the toast to show, or
+ *   false when `from` is no longer in the session
  * @param {string} [opts.initialQuestion] sent as soon as the sheet opens
  * @param {'kg'|'lb'} [opts.unit]
  * @param {(kg: number) => string} [opts.weightLabel] how the member reads a weight
  * @param {(saved: object) => void} [opts.onTrackPlan] opens a saved meal plan in Quick track
+ * @param {() => Promise<Array<{label: string, items: Array<{name: string, muscle_group?: string}>}>>} [opts.getExercises]
+ *   what typing "@" lists: this workout's exercises and the rest of the plan's
  */
 export function openCoachSheet({
   screen,
   getSession,
   onApply,
+  onSwap,
   initialQuestion,
   unit = 'kg',
   weightLabel = (kg) => `${kg} kg`,
   onTrackPlan,
+  getExercises,
 }) {
   const thread = threads[screen];
   // Follow the reply down as it grows, unless the member scrolled up to reread.
@@ -744,7 +849,8 @@ export function openCoachSheet({
 
   const list = h('div', { class: 'coach-thread', 'aria-live': 'polite' });
   const remainingNode = h('span', { class: 'coach-remaining' });
-  const placeholder = screen === 'diet' ? 'Ask about food, macros, your goal…' : 'Ask about this workout…';
+  const placeholder =
+    screen === 'diet' ? 'Ask about food, macros, your goal…' : getExercises ? 'Ask, or @ an exercise…' : 'Ask about this workout…';
   const input = h('textarea', {
     class: 'coach-input',
     rows: 1,
@@ -757,17 +863,52 @@ export function openCoachSheet({
     { class: 'coach-send', type: 'button', 'aria-label': 'Send', title: 'Send' },
     renderIcon('send', { size: 22, stroke: 2.2 }),
   );
+  const mentions = getExercises
+    ? createMentionPicker({
+        input,
+        load: getExercises,
+        onPick: () => {
+          growInput();
+          paintCompose();
+        },
+      })
+    : null;
+  const mentionBtn = mentions
+    ? h(
+        'button',
+        {
+          class: 'coach-at',
+          type: 'button',
+          'aria-label': 'Pick an exercise',
+          title: 'Pick an exercise',
+          // Keeps the focus (and the phone's keyboard) in the box.
+          onpointerdown: (event) => event.preventDefault(),
+          onclick: () => mentions.start(),
+        },
+        '@',
+      )
+    : null;
   const field = h(
     'label',
     { class: 'coach-field' },
     h('span', { class: 'coach-field-ico' }, renderIcon('sparkle', { size: 18, stroke: 2 })),
     input,
+    mentionBtn,
   );
   // Voice: WhatsApp's pattern — the mic sits where Send is while the box is
-  // empty. Tapping it records (the field becomes a recording bar), ✓ stops
+  // empty. Tapping it listens (the field becomes a recording bar), ✓ stops
   // and the words land in the box to check before sending, since a misheard
   // question would still use one of the day's questions.
-  const voiceOn = voiceSupported();
+  //
+  // Two engines, picked by the language switch under the composer. English
+  // goes to the browser's own speech recognition — free, and the words appear
+  // as they are spoken. Hinglish and every other language are recorded and
+  // written down by Gemini (POST /coach/transcribe), which is billed but is
+  // the one that writes Hinglish in Roman letters and detects the language.
+  const canRecord = voiceSupported();
+  const canRecognise = Boolean(SpeechRecognitionApi) && window.isSecureContext;
+  const voiceOn = canRecord || canRecognise;
+  let voiceLang = canRecord && canRecognise ? readVoiceLang() : canRecognise ? 'en' : 'any';
   let voiceState = 'idle'; // 'recording' | 'writing'
   let recording = null;
   const micBtn = h(
@@ -776,6 +917,7 @@ export function openCoachSheet({
     renderIcon('mic', { size: 22, stroke: 2.2 }),
   );
   const recClock = h('span', { class: 'coach-rec-time' }, '0:00');
+  const recHint = h('span', { class: 'coach-rec-hint' });
   const recBar = h(
     'div',
     { class: 'coach-rec', hidden: true },
@@ -786,8 +928,23 @@ export function openCoachSheet({
     ),
     h('span', { class: 'coach-rec-dot' }),
     recClock,
-    h('span', { class: 'coach-rec-hint' }, 'Listening — any language'),
+    recHint,
   );
+
+  // The switch only shows when both engines are there to choose between.
+  const langButtons = VOICE_LANGS.map(([value, label]) =>
+    h('button', { class: 'coach-lang-opt', type: 'button', 'data-lang': value, onclick: () => setVoiceLang(value) }, label),
+  );
+  const langSwitch =
+    canRecord && canRecognise
+      ? h('div', { class: 'coach-lang', role: 'group', 'aria-label': 'Voice language' }, renderIcon('mic', { size: 13, stroke: 2.2 }), ...langButtons)
+      : null;
+  function setVoiceLang(value) {
+    voiceLang = value;
+    saveVoiceLang(value);
+    for (const button of langButtons) button.setAttribute('aria-pressed', String(button.dataset.lang === value));
+  }
+  setVoiceLang(voiceLang);
 
   /** Which of the composer's controls show for the box and the mic's state. */
   function paintCompose() {
@@ -796,6 +953,8 @@ export function openCoachSheet({
     recBar.hidden = !recordingNow;
     input.disabled = voiceState === 'writing';
     input.placeholder = voiceState === 'writing' ? 'Writing down what you said…' : placeholder;
+    if (mentionBtn) mentionBtn.disabled = voiceState !== 'idle';
+    if (langSwitch) for (const button of langButtons) button.disabled = voiceState !== 'idle';
     if (!voiceOn) return;
     const typed = input.value.trim() !== '';
     sendBtn.hidden = voiceState !== 'idle' || !typed;
@@ -808,6 +967,14 @@ export function openCoachSheet({
     micBtn.replaceChildren(renderIcon(recordingNow ? 'check' : 'mic', { size: 22, stroke: recordingNow ? 2.6 : 2.2 }));
   }
 
+  /** Spoken words into the box, after anything already typed, so a question
+   * can be part typed, part spoken. */
+  function insertSpoken(text) {
+    const typed = input.value.trim();
+    input.value = (typed ? `${typed} ${text}` : text).slice(0, MAX_QUESTION);
+    growInput();
+  }
+
   async function startVoice() {
     if (!navigator.onLine) {
       toast('Voice questions need a connection', 'error');
@@ -817,8 +984,15 @@ export function openCoachSheet({
       toast(`That's your ${status.daily_limit} coach questions for today`, 'error');
       return;
     }
+    const free = voiceLang === 'en' && canRecognise;
     try {
-      recording = await recordVoice({ onLevel: (level) => recBar.style.setProperty('--level', level.toFixed(2)) });
+      recording = free
+        ? recogniseSpeech({
+            lang: 'en-IN',
+            // The latest words, which is what the member is checking as they talk.
+            onText: (text) => (recHint.textContent = !text ? 'Listening — English' : text.length > 24 ? `…${text.slice(-24)}` : text),
+          })
+        : await recordVoice({ onLevel: (level) => recBar.style.setProperty('--level', level.toFixed(2)) });
     } catch (err) {
       toast(
         err?.name === 'NotAllowedError' ? 'Allow the microphone for this app to ask by voice' : 'Could not start the microphone',
@@ -828,23 +1002,30 @@ export function openCoachSheet({
     }
     voiceState = 'recording';
     recClock.textContent = '0:00';
+    recHint.textContent = free ? 'Listening — English' : 'Listening — any language';
+    recBar.classList.toggle('is-live', free);
     recording.onTick = (ms) => {
       const seconds = Math.floor(ms / 1000);
       recClock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
       if (ms >= VOICE_MAX_MS) endVoice(true);
     };
+    // The browser can stop listening by itself (a long pause, a lost
+    // connection, a refused mic): take what it heard as if ✓ was tapped.
+    recording.onEnd = () => endVoice(true);
     paintCompose();
   }
 
-  /** Stops the recording: kept, it is written down into the box; not, it is thrown away. */
+  /** Stops listening: kept, the words go into the box; not, they are thrown away. */
   async function endVoice(keep) {
     if (voiceState !== 'recording') return;
-    // Straight to the next state: the recorder takes a moment to hand over the clip.
+    // Straight to the next state: the engine takes a moment to hand over.
     voiceState = keep ? 'writing' : 'idle';
     paintCompose();
     const handle = recording;
-    const clip = await (keep ? handle.stop() : handle.cancel());
     recording = null;
+    if (handle.kind === 'speech') return endSpeech(handle, keep);
+
+    const clip = await (keep ? handle.stop() : handle.cancel());
     if (!clip || clip.size === 0 || handle.heardNothing) {
       voiceState = 'idle';
       paintCompose();
@@ -859,16 +1040,37 @@ export function openCoachSheet({
     paintCompose();
     try {
       const { text } = await api.portal.coachTranscribe({ audio: await blobBase64(clip), mime_type: clip.type, screen });
-      if (!text) {
-        toast("Didn't catch that — try again a little closer to the phone", 'error');
-      } else {
-        // Added to anything already typed, so a question can be part typed, part spoken.
-        const typed = input.value.trim();
-        input.value = (typed ? `${typed} ${text}` : text).slice(0, MAX_QUESTION);
-        growInput();
-      }
+      if (text) insertSpoken(text);
+      else toast("Didn't catch that — try again a little closer to the phone", 'error');
     } catch (err) {
       toast(err instanceof ApiError && err.message ? err.message : 'Could not make out that recording — try again', 'error');
+    } finally {
+      voiceState = 'idle';
+      paintCompose();
+    }
+  }
+
+  /** The browser's recogniser finishing: its words, or why there are none.
+   * Where the browser has the API but no working service behind it, the
+   * member is moved over to the Gemini engine for next time. */
+  async function endSpeech(handle, keep) {
+    try {
+      const text = await (keep ? handle.stop() : handle.cancel());
+      if (text) insertSpoken(text);
+      // Some browsers' recognisers hear nothing without saying why; the
+      // other engine is the way round that.
+      else if (keep) toast("Didn't catch that — try again, or switch voice to Hinglish / any", 'error');
+    } catch (err) {
+      if (err.code === 'not-allowed') {
+        toast('Allow the microphone for this app to ask by voice', 'error');
+      } else if (err.code === 'offline') {
+        toast('Voice questions need a connection', 'error');
+      } else if (SPEECH_UNAVAILABLE.has(err.code) && canRecord) {
+        setVoiceLang('any');
+        toast("English voice isn't available in this browser — switched to Hinglish / any. Tap the mic again", 'error');
+      } else {
+        toast('Could not hear that — try again or type it', 'error');
+      }
     } finally {
       voiceState = 'idle';
       paintCompose();
@@ -903,16 +1105,47 @@ export function openCoachSheet({
         )
       : null;
 
+  /** The coach's swap as one tap: the exercise is replaced in the workout
+   * (and the plan, where the member's own) by the logger's onSwap. */
+  const swapButton = (turn) =>
+    turn.swap && onSwap && !turn.swapped && !turn.live
+      ? h(
+          'button',
+          {
+            class: 'coach-apply is-swap',
+            type: 'button',
+            title: `Swap ${turn.swap.from} for ${turn.swap.to}`,
+            onclick: async (event) => {
+              const button = event.currentTarget;
+              button.disabled = true;
+              const done = await onSwap(turn.swap);
+              if (done) {
+                turn.swapped = true;
+                closeModal();
+                toast(done);
+              } else {
+                button.disabled = false;
+                toast(`${turn.swap.from} isn't in this workout any more`, 'error');
+              }
+            },
+          },
+          renderIcon('refresh', { size: 15, stroke: 2.4 }),
+          h('span', {}, `Swap to ${turn.swap.to}`),
+        )
+      : null;
+
+  const actionButtons = (turn) => [swapButton(turn), applyButton(turn)];
+
   const turnNode = (turn) => {
     if (turn.role === 'user') {
       return h(
         'div',
         { class: 'coach-msg is-user' },
-        h('div', { class: 'coach-msg-text' }, turn.text),
+        h('div', { class: 'coach-msg-text' }, mentionText(turn.text, turn.mentions)),
         h('span', { class: 'coach-user-avatar' }, renderIcon('user', { size: 18, stroke: 2 })),
       );
     }
-    turn.view.setActions(applyButton(turn));
+    turn.view.setActions(...actionButtons(turn));
     return turn.view.node;
   };
 
@@ -1018,7 +1251,7 @@ export function openCoachSheet({
   const sheet = {
     onGrow: scrollDown,
     onTrackPlan,
-    paintActions: (turn) => turn.view.setActions(applyButton(turn)),
+    paintActions: (turn) => turn.view.setActions(...actionButtons(turn)),
     setBusy: (busy) => {
       sendBtn.disabled = busy;
     },
@@ -1039,12 +1272,14 @@ export function openCoachSheet({
     }
     inFlight[screen] = true;
     sheet.setBusy(true);
+    const picked = mentions?.mentionsIn(text) ?? [];
     input.value = '';
     input.style.height = '';
+    mentions?.close();
     paintCompose();
     const turn = { role: 'coach', live: true, steps: [], thoughts: '', text: '' };
     turn.view = createCoachView(turn);
-    thread.push({ role: 'user', text }, turn);
+    thread.push({ role: 'user', text, mentions: picked }, turn);
     // Appended rather than repainted, so earlier bubbles don't replay their entrance.
     hint.hidden = true;
     list.append(turnNode(thread.at(-2)), turnNode(turn));
@@ -1055,7 +1290,13 @@ export function openCoachSheet({
     let done = null;
     let failure = null;
     try {
-      const payload = { question: text, screen, unit, session: getSession?.() ?? undefined };
+      const payload = {
+        question: text,
+        screen,
+        unit,
+        session: getSession?.() ?? undefined,
+        mentions: picked.length ? picked : undefined,
+      };
       const plain = await api.portal.coachAskStream(payload, (event, data) => {
         if (event === 'step') turn.view.step(data.text);
         else if (event === 'thought') turn.view.thought(data.text);
@@ -1082,6 +1323,7 @@ export function openCoachSheet({
 
   sendBtn.addEventListener('click', () => send(input.value));
   input.addEventListener('keydown', (event) => {
+    if (mentions?.handleKey(event)) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       send(input.value);
@@ -1110,6 +1352,7 @@ export function openCoachSheet({
       h(
         'div',
         { class: 'coach-dock' },
+        mentions?.node,
         h('div', { class: 'coach-chips' }, ...chipButtons),
         h(
           'div',
@@ -1119,7 +1362,7 @@ export function openCoachSheet({
           voiceOn ? micBtn : null,
           sendBtn,
         ),
-        remainingNode,
+        h('div', { class: 'coach-dock-foot' }, langSwitch, remainingNode),
       ),
     ),
     onClose: () => {
@@ -1137,6 +1380,203 @@ export function openCoachSheet({
   sheet.setBusy(inFlight[screen]);
   coachStatus().then(paintRemaining);
   if (initialQuestion) send(initialQuestion);
+}
+
+/* ── @ exercise picker ── */
+
+/** The @mention the caret is in: the text after an "@" that starts a word,
+ * up to the caret, or null. */
+function mentionAt(input) {
+  const before = input.value.slice(0, input.selectionStart ?? input.value.length);
+  const match = /(^|\s)@([^@\n]{0,40})$/.exec(before);
+  return match ? { start: before.length - match[2].length - 1, query: match[2] } : null;
+}
+
+/** Every word typed after the @ appears in the exercise's name or muscle group. */
+const mentionMatches = (item, query) => {
+  const haystack = `${item.name} ${item.muscle_group ?? ''}`.toLowerCase();
+  return query.toLowerCase().split(/\s+/).filter(Boolean).every((word) => haystack.includes(word));
+};
+
+/**
+ * Typing "@" in the composer lists the exercises in this workout and the rest
+ * of the plan; picking one writes "@Name " into the question, so a long plan
+ * doesn't have to be spelled out from memory. ↑/↓ and Enter pick from the
+ * keyboard, Esc closes. `load()` resolves to [{ label, items: [{ name,
+ * muscle_group }] }], asked for once, the first time the list opens.
+ */
+function createMentionPicker({ input, load, onPick }) {
+  let groups = null;
+  let loading = null;
+  let open = null; // { start, query } while the list shows
+  let options = [];
+  let active = 0;
+
+  const box = h('div', { class: 'coach-mentions', id: 'coach-mentions', role: 'listbox', 'aria-label': 'Exercises', hidden: true });
+  // Taps on the list keep the focus (and the phone's keyboard) in the box.
+  box.addEventListener('pointerdown', (event) => event.preventDefault());
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-controls', box.id);
+  input.setAttribute('aria-expanded', 'false');
+
+  const names = () => (groups ?? []).flatMap((group) => group.items.map((item) => item.name));
+
+  function close() {
+    open = null;
+    box.hidden = true;
+    box.scrollTop = 0;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
+
+  function paintActive() {
+    options.forEach((option, i) => option.node.setAttribute('aria-selected', String(i === active)));
+    const current = options[active]?.node;
+    if (current) {
+      input.setAttribute('aria-activedescendant', current.id);
+      current.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function paint() {
+    if (!open) return;
+    if (!groups) {
+      options = [];
+      box.replaceChildren(h('div', { class: 'coach-mentions-note' }, 'Loading your plan…'));
+    } else {
+      // A finished mention ("@Leg Press ") is just part of the question now.
+      const query = open.query;
+      const done = names().some((name) => query.toLowerCase().startsWith(`${name.toLowerCase()} `));
+      options = [];
+      const sections = done
+        ? []
+        : groups
+            .map((group) => {
+              const items = group.items.filter((item) => mentionMatches(item, query));
+              if (!items.length) return null;
+              return h(
+                'div',
+                { class: 'coach-mentions-group', role: 'group', 'aria-label': group.label },
+                h('div', { class: 'coach-mentions-label' }, group.label),
+                ...items.map((item) => {
+                  const index = options.length;
+                  const node = h(
+                    'div',
+                    { class: 'coach-mention', id: `coach-mention-${index}`, role: 'option', onclick: () => pick(index) },
+                    h('span', { class: 'coach-mention-at' }, '@'),
+                    h('span', { class: 'coach-mention-name' }, item.name),
+                    item.muscle_group ? h('span', { class: 'coach-mention-muscle' }, item.muscle_group) : null,
+                  );
+                  options.push({ item, node });
+                  return node;
+                }),
+              );
+            })
+            .filter(Boolean);
+      if (!options.length) {
+        // Typing on past every match is just typing: get out of the way.
+        if (query.trim()) return close();
+        box.replaceChildren(h('div', { class: 'coach-mentions-note' }, 'No exercises in this workout or plan yet'));
+      } else {
+        box.replaceChildren(...sections);
+        active = Math.min(active, options.length - 1);
+      }
+    }
+    box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    // Once shown: a hidden list can't scroll its active row into view.
+    if (options.length) paintActive();
+  }
+
+  /** Re-reads the caret's mention after every keystroke or tap in the box. */
+  function update() {
+    const found = mentionAt(input);
+    if (!found) return close();
+    if (!open || open.query !== found.query) active = 0;
+    open = found;
+    if (!groups && !loading) {
+      loading = Promise.resolve()
+        .then(load)
+        .catch(() => [])
+        .then((loaded) => {
+          groups = (loaded ?? []).filter((group) => group.items?.length);
+          paint();
+        });
+    }
+    paint();
+  }
+
+  function pick(index) {
+    const option = options[index];
+    if (!open || !option) return;
+    const caret = input.selectionStart ?? input.value.length;
+    const text = `@${option.item.name} `;
+    input.value = (input.value.slice(0, open.start) + text + input.value.slice(caret)).slice(0, MAX_QUESTION);
+    const at = Math.min(open.start + text.length, input.value.length);
+    input.setSelectionRange(at, at);
+    input.focus();
+    close();
+    onPick();
+  }
+
+  /** The list's keys, ahead of the composer's own. True when it used the key. */
+  function handleKey(event) {
+    if (!open || box.hidden || !options.length) {
+      if (open && event.key === 'Escape') {
+        close();
+        return true;
+      }
+      return false;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      active = (active + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+      paintActive();
+    } else if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+      pick(active);
+    } else if (event.key === 'Escape') {
+      close();
+    } else {
+      return false;
+    }
+    event.preventDefault();
+    return true;
+  }
+
+  /** Starts a mention from the @ button, for keyboards that hide the @. */
+  function start() {
+    const caret = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, caret);
+    const text = before && !/\s$/.test(before) ? ' @' : '@';
+    input.value = (before + text + input.value.slice(caret)).slice(0, MAX_QUESTION);
+    const at = Math.min(caret + text.length, input.value.length);
+    input.focus();
+    input.setSelectionRange(at, at);
+    onPick();
+    update();
+  }
+
+  /** The exercises a question names with @, longest names first so
+   * "@Incline Bench Press" isn't read as "@Bench Press". */
+  function mentionsIn(text) {
+    const lower = text.toLowerCase();
+    return [...new Set(names())]
+      .sort((a, b) => b.length - a.length)
+      .filter((name) => lower.includes(`@${name.toLowerCase()}`));
+  }
+
+  input.addEventListener('input', update);
+  input.addEventListener('click', update);
+  input.addEventListener('blur', close);
+
+  return { node: box, handleKey, start, close, mentionsIn };
+}
+
+/** A question with its @exercises picked out, for the member's bubble. */
+function mentionText(text, mentions) {
+  if (!mentions?.length) return text;
+  const escaped = mentions.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const pattern = new RegExp(`(@(?:${escaped.join('|')}))`, 'gi');
+  return text.split(pattern).map((part, i) => (i % 2 ? h('span', { class: 'coach-msg-mention' }, part) : part));
 }
 
 /* ── AI workout generator ─────────────────────────────────────────────── */

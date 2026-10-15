@@ -1,3 +1,4 @@
+import { serverOrigin, serverUrl } from './api.js';
 import { clear, date, fullName, h } from './ui.js';
 import { gymPosterNode, gymPosterPngBlob } from './gymPoster.js';
 import { getGymLogoUrl } from './receipt.js';
@@ -89,7 +90,8 @@ const loadImage = (src) =>
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Could not load the QR image'));
-    img.src = src;
+    img.crossOrigin = serverOrigin(src);
+    img.src = serverUrl(src);
   });
 
 /**

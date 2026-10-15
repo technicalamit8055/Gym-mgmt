@@ -25,9 +25,14 @@ const HISTORY_TURNS = 6;
 const MAX_SESSION_EXERCISES = 15;
 const MAX_SESSION_SETS = 12;
 const HISTORY_EXERCISES = 8;
+/** Exercises one question may name with @ (the app's exercise picker). */
+const MAX_MENTIONS = 5;
 /** A meal plan's size: a whole day is at most six meals of a few foods each. */
 const MAX_PLAN_MEALS = 6;
 const MAX_MEAL_ITEMS = 8;
+/** Swap candidates per muscle group in the session: enough choice of
+ * equipment and angle without paying for the whole library on every question. */
+const MAX_SWAP_OPTIONS = 20;
 
 export const coachConfigured = () => Boolean(config.aiCoach.project);
 
@@ -57,14 +62,16 @@ async function getClient() {
 
 const SYSTEM_INSTRUCTION = `You are the personal coach inside a gym's member app. You answer one member's questions about their training and nutrition while they are in the gym, often between sets, so be quick and concrete.
 
-You are given MEMBER CONTEXT as JSON: their profile, injuries or limitations, current plan, the live workout session (every set so far with weight, reps and effort as RPE), recent history for those exercises, the last week of workouts, and today's food against their targets. Weights in the context are kilograms; "unit" is what the member uses, so give every weight in that unit, rounded to what a gym actually has. The smallest plate is 2.5 kg, so a barbell or Smith machine only goes up or down in 5 kg steps (a 2.5 kg plate on each side); dumbbells go in 2.5 kg steps; pounds go in 5 lb steps. Never suggest 1.25 kg plates or any load that needs them, such as 32.5 kg on a bar. When the next 5 kg step is too big a jump, say add reps at the same weight first.
+You are given MEMBER CONTEXT as JSON: their profile, injuries or limitations, current plan, the live workout session (every set so far with weight, reps and effort as RPE), recent history for those exercises, the last week of workouts, and today's food against their targets. Weights in the context are kilograms; "unit" is what the member uses, so give every weight in that unit, rounded to what a gym actually has. The smallest plate is 2.5 kg, so a barbell or Smith machine only goes up or down in 5 kg steps (a 2.5 kg plate on each side); dumbbells go in 2.5 kg steps; pounds go in 5 lb steps. Never suggest 1.25 kg plates or any load that needs them, such as 32.5 kg on a bar. When the next 5 kg step is too big a jump, say add reps at the same weight first. An exercise in the session with "weight_step" overrides all of that for that exercise: it is the jump the member's own kit makes, learned from what they have logged (a stack that goes 6.5, 13, 19.5 kg, or a gym with 1.25 kg plates), so only suggest weights on that step.
 
 How to answer:
 - 2 to 5 short sentences. Lead with the answer (a number, a choice), then the one reason that matters. No headings and no lists in the answer.
 - Wrap the numbers the member acts on in **double asterisks** (e.g. "**2413 calories, 82g protein** left"); no other markdown. A blank line may split the answer into two short paragraphs.
 - Use their actual numbers. Prefer the context to generic advice; say so when there is no history to go on.
+- An exercise written with @ ("@Incline Dumbbell Press") was picked from the member's workout or plan: the question is about that exercise, even when it is not the one marked "current" or is on another day of the plan. "asked_about" lists them, and their past sets are in "exercise_history".
 - For "what weight/reps next", work from the set they just did: below the target rep range or a failed set means go lighter; past the top of the range or an easy set means go heavier; otherwise hold. "next_set_suggestion" in the session is the app's own rule-based pick — agree with it or explain why you differ.
 - When you recommend a specific next set for one exercise in the session, also fill "suggestion" with that exercise's exact name, the weight in kilograms and the reps. Leave it out for anything else.
+- Swaps: when the member asks for a swap, a replacement or an alternative for an exercise in the session (or one is the right call, say for pain or a busy machine), pick ONE replacement from "swap_options" under that exercise's muscle group, copying its name exactly, and fill "swap" with "from" (the session exercise's exact name) and "to". "This exercise" means the one marked "current", unless the question names one with @. Respect limitations, and prefer a different piece of equipment or angle from the one being replaced. The answer names the swap and gives the one reason; the app shows a button that makes the swap. Leave "swap" out for anything else.
 - Be conservative around anything listed under limitations and around pain: suggest a lighter or alternative movement and seeing a trainer or doctor. Never diagnose or treat medical conditions, and never recommend drugs, supplements beyond basics like protein or creatine, or extreme diets.
 - Stay on fitness, exercise, recovery and nutrition. Politely decline anything else.
 - Answer in the language the member writes in. Many members write Hinglish — Hindi in Roman letters mixed with English ("bhai next set mein kitna weight lagaun?"); answer them in the same casual Hinglish in Roman letters, keeping exercise names, units and numbers in English.
@@ -90,6 +97,15 @@ const RESPONSE_SCHEMA = {
         reps: { type: 'integer', minimum: 1 },
       },
       required: ['exercise', 'weight_kg', 'reps'],
+    },
+    swap: {
+      type: 'object',
+      description: 'Only when suggesting one exercise in the live session be replaced by another from swap_options.',
+      properties: {
+        from: { type: 'string', description: 'The exact name of the exercise in the live session.' },
+        to: { type: 'string', description: 'The exact name of the replacement, copied from swap_options.' },
+      },
+      required: ['from', 'to'],
     },
     // No minItems/maxItems on the nested lists (Vertex rejects them with a
     // 400); cleanMealPlan enforces the counts.
@@ -152,7 +168,10 @@ export function sanitiseSession(session) {
     elapsed_minutes: Math.round(num(session.elapsed_seconds, 86400) / 60),
     exercises: session.exercises.slice(0, MAX_SESSION_EXERCISES).map((exercise) => ({
       name: text(exercise?.name),
+      muscle_group: text(exercise?.muscle_group, 30) || undefined,
       equipment: text(exercise?.equipment, 30) || undefined,
+      // The one the member is on: what "this exercise" means.
+      current: exercise?.current ? true : undefined,
       target: exercise?.target_reps ? `${num(exercise.target_sets, 20)} × ${text(exercise.target_reps, 20)}` : undefined,
       rest_seconds: exercise?.rest_seconds == null ? undefined : num(exercise.rest_seconds, 900),
       sets: (Array.isArray(exercise?.sets) ? exercise.sets : []).slice(0, MAX_SESSION_SETS).map((set) => ({
@@ -165,8 +184,52 @@ export function sanitiseSession(session) {
       next_set_suggestion: exercise?.suggestion
         ? { kg: round1(num(exercise.suggestion.weight_kg, 1000)), reps: num(exercise.suggestion.reps, 500) }
         : undefined,
+      // The jump this member's kit makes, learned from their logs ("6.5 kg").
+      weight_step: text(exercise?.weight_step, 20) || undefined,
     })),
   };
+}
+
+const nameKey = (name) => String(name ?? '').trim().toLowerCase();
+
+/** The exercises a question named with @, as the phone sent them: a few
+ * short, distinct names, or null. */
+export function sanitiseMentions(mentions) {
+  if (!Array.isArray(mentions)) return null;
+  const seen = new Set();
+  const names = [];
+  for (const raw of mentions) {
+    const name = typeof raw === 'string' ? text(raw) : '';
+    if (!name || seen.has(nameKey(name))) continue;
+    seen.add(nameKey(name));
+    names.push(name);
+    if (names.length === MAX_MENTIONS) break;
+  }
+  return names.length ? names : null;
+}
+
+/**
+ * What each muscle group in the live session could be swapped for, from the
+ * gym's own library, as "name | equipment" — so a swap the coach suggests is
+ * one the app can put straight into the workout. Exercises already in the
+ * session are left out.
+ */
+export function swapOptions(live, library) {
+  if (!live?.exercises?.length || !library?.length) return null;
+  const byName = new Map(library.map((item) => [nameKey(item.name), item]));
+  const inSession = new Set(live.exercises.map((exercise) => nameKey(exercise.name)));
+  const groups = new Set(
+    live.exercises.map((exercise) => byName.get(nameKey(exercise.name))?.muscle_group ?? exercise.muscle_group).filter(Boolean),
+  );
+  const options = {};
+  for (const group of groups) {
+    const lines = library
+      .filter((item) => item.muscle_group === group && !inSession.has(nameKey(item.name)))
+      .slice(0, MAX_SWAP_OPTIONS)
+      .map((item) => `${item.name} | ${item.equipment ?? 'other'}`);
+    if (lines.length) options[group] = lines;
+  }
+  return Object.keys(options).length ? options : null;
 }
 
 /** The last few sessions of one exercise, one line each: "2026-10-09: 30×10, 30×9 @9". */
@@ -185,7 +248,7 @@ function historyLines(memberId, name) {
  * Everything the coach is told about this member. Only this member's rows are
  * read — memberId comes from their verified session, never the request body.
  */
-export function buildCoachContext(memberId, { screen, session, unit, planId }) {
+export function buildCoachContext(memberId, { screen, session, unit, planId, library, mentions }) {
   const on = today();
   const member = get('SELECT first_name, gender, date_of_birth, health_notes FROM members WHERE id = ?', [memberId]) ?? {};
   const profile = nutritionProfile(memberId);
@@ -222,6 +285,13 @@ export function buildCoachContext(memberId, { screen, session, unit, planId }) {
     if (!exercise.name) continue;
     const lines = historyLines(memberId, exercise.name);
     if (lines.length) history[exercise.name] = lines;
+  }
+  // Exercises picked with @ get their history too, wherever in the plan they are.
+  const askedAbout = sanitiseMentions(mentions);
+  for (const name of askedAbout ?? []) {
+    if (Object.keys(history).some((key) => nameKey(key) === nameKey(name))) continue;
+    const lines = historyLines(memberId, name);
+    if (lines.length) history[name] = lines;
   }
 
   const { targets } = effectiveDietTargets(memberId);
@@ -260,6 +330,9 @@ export function buildCoachContext(memberId, { screen, session, unit, planId }) {
     },
     plan: plan ? { name: plan.name, goal: plan.goal, level: plan.level, days_per_week: plan.days_per_week } : null,
     live_session: live,
+    // Mid-workout only, with the gym's library to pick from.
+    ...(screen === 'workout' && { swap_options: swapOptions(live, library) ?? undefined }),
+    ...(askedAbout && { asked_about: askedAbout }),
     exercise_history: history,
     last_7_days: recent,
     diet_today: {
@@ -557,6 +630,7 @@ export function contextSteps(context) {
     const done = live.exercises.reduce((n, exercise) => n + exercise.sets.filter((set) => set.done).length, 0);
     steps.push(`Reading this session — ${plural(live.exercises.length, 'exercise')}, ${plural(done, 'set')} done`);
   }
+  if (context.asked_about?.length) steps.push(`Looking at ${context.asked_about.join(' and ')}`);
   const names = Object.keys(context.exercise_history ?? {});
   if (names.length) {
     const more = names.length > 2 ? ` and ${names.length - 2} more` : '';
@@ -653,7 +727,26 @@ export function parseReply(raw) {
     s && typeof s.exercise === 'string' && Number.isFinite(Number(s.weight_kg)) && Number(s.reps) >= 1
       ? { exercise: s.exercise.trim().slice(0, 120), weight_kg: round1(Math.max(0, Number(s.weight_kg))), reps: Math.round(Number(s.reps)) }
       : null;
-  return { answer: answer.slice(0, 2000), suggestion, meal_plan: cleanMealPlan(data.meal_plan) };
+  const w = data.swap;
+  const swap =
+    w && typeof w.from === 'string' && typeof w.to === 'string' && w.from.trim() && w.to.trim()
+      ? { from: w.from.trim().slice(0, 120), to: w.to.trim().slice(0, 120) }
+      : null;
+  return { answer: answer.slice(0, 2000), suggestion, swap, meal_plan: cleanMealPlan(data.meal_plan) };
+}
+
+/**
+ * The model's swap, checked against what is real: "from" must be an exercise
+ * in the live session and "to" one in the gym's library, both given back in
+ * their own spelling, with the replacement's muscle group. Null otherwise —
+ * the answer still says what to do, there is just no button for it.
+ */
+export function cleanSwap(swap, { session, library }) {
+  if (!swap || !library?.length) return null;
+  const from = (sanitiseSession(session)?.exercises ?? []).find((exercise) => nameKey(exercise.name) === nameKey(swap.from));
+  const to = library.find((item) => nameKey(item.name) === nameKey(swap.to));
+  if (!from || !to || nameKey(from.name) === nameKey(to.name)) return null;
+  return { from: from.name, to: to.name, muscle_group: to.muscle_group ?? null };
 }
 
 /* ── Workout generator ────────────────────────────────────────────────── */

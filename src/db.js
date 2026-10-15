@@ -1482,6 +1482,10 @@ const MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_ai_voice_member_day ON ai_voice_transcriptions(member_id, created_at)');
   },
+  // The server address an Android app device registered through (src/fcm.js):
+  // FCM needs an absolute URL for a notification's picture, and unlike a
+  // browser the phone has no page address to resolve a relative one against.
+  (db) => ensureColumn(db, 'push_subscriptions', 'origin', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

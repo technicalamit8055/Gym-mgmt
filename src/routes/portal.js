@@ -15,6 +15,7 @@ import {
   askCoach,
   buildCoachContext,
   cleanMealPlan,
+  cleanSwap,
   coachConfigured,
   contextSteps,
   generatePlan,
@@ -37,10 +38,12 @@ import {
   fitnessAccessFor,
   fitnessSettings,
   lastSessionSetsFor,
+  loggedWeightsFor,
   muscleGroupOf,
   previousSetsFor,
   reconcileEditedRecords,
   recordPersonalRecords,
+  sessionRecords,
   summariseSets,
 } from '../fitness.js';
 import { insertBarcodeFood, libraryFoodByBarcode, lookupBarcode, normaliseBarcode } from '../foodBarcode.js';
@@ -901,7 +904,7 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
   const { assignment, source, plan_id: planId } = liveWorkoutFor(req.member.id);
 
   if (!planId) {
-    return res.json({ assignment: null, source: null, plan: null, today_day: null, previous: {}, last_session: {}, streak_days: 0 });
+    return res.json({ assignment: null, source: null, plan: null, today_day: null, previous: {}, last_session: {}, logged_weights: {}, streak_days: 0 });
   }
 
   const plan = workoutPlanTree(planId, { withMedia: true });
@@ -937,6 +940,8 @@ portalRoutes.get('/workouts/current', requireMemberAuth, requireModule('fitness'
     previous: previousSetsFor(req.member.id, names),
     // The whole of last session per exercise, for the next-set suggestion.
     last_session: lastSessionSetsFor(req.member.id, names),
+    // Recent weights per exercise, so the suggestion learns each machine's step.
+    logged_weights: loggedWeightsFor(req.member.id, names),
     sessions_logged: sessionsLogged,
     last_workout: get(
       'SELECT * FROM workout_logs WHERE member_id = ? ORDER BY log_date DESC, id DESC LIMIT 1',
@@ -1445,11 +1450,13 @@ function ownWorkoutLog(req) {
 }
 
 /** A session with its sets, each carrying its exercise's demo so the detail
- * screen can show the same thumbnail the member trained from. */
-const workoutLogDetail = (logId) => ({
-  ...get('SELECT * FROM workout_logs WHERE id = ?', [logId]),
-  sets: attachCatalogToExercises(all('SELECT * FROM workout_log_sets WHERE log_id = ? ORDER BY sort_order, id', [logId])),
-});
+ * screen can show the same thumbnail the member trained from, and the records
+ * it set for its share cards. */
+function workoutLogDetail(logId) {
+  const log = get('SELECT * FROM workout_logs WHERE id = ?', [logId]);
+  const sets = attachCatalogToExercises(all('SELECT * FROM workout_log_sets WHERE log_id = ? ORDER BY sort_order, id', [logId]));
+  return { ...log, sets, records: sessionRecords(log.member_id, log, sets) };
+}
 
 portalRoutes.get('/workouts/logs/:id', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
   res.json(workoutLogDetail(ownWorkoutLog(req).id));
@@ -1561,9 +1568,15 @@ portalRoutes.get('/workouts/exercises', requireMemberAuth, requireModule('fitnes
   const names = items.map((e) => e.name);
   const previous = previousSetsFor(req.member.id, names);
   const lastSession = lastSessionSetsFor(req.member.id, names);
+  const loggedWeights = loggedWeightsFor(req.member.id, names);
 
   res.json({
-    items: items.map((item) => ({ ...item, previous: previous[item.name] ?? null, last_session: lastSession[item.name] ?? null })),
+    items: items.map((item) => ({
+      ...item,
+      previous: previous[item.name] ?? null,
+      last_session: lastSession[item.name] ?? null,
+      logged_weights: loggedWeights[item.name] ?? null,
+    })),
     // The picker's two filter sheets: muscle groups with the operator's
     // highlighted-body pictures, and the equipment list.
     muscle_groups: listMuscleGroups(),
@@ -1632,11 +1645,15 @@ portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), req
   }
   coachBurstLimiter.recordAttempt(burstKey);
 
+  // Mid-workout, the gym's library: what the coach may swap an exercise for.
+  const library = screen === 'workout' && req.body?.session ? exercisePickerRows({}) : null;
   const context = buildCoachContext(req.member.id, {
     screen,
     session: req.body?.session,
     unit: req.body?.unit,
     planId: liveWorkoutFor(req.member.id).plan_id,
+    library,
+    mentions: req.body?.mentions,
   });
   const history = recentTurns(req.member.id, screen);
   const unavailable = 'The coach could not answer just now — try again in a moment';
@@ -1655,9 +1672,12 @@ portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), req
         reply.output_tokens,
       ],
     );
+    const swap = cleanSwap(reply.swap, { session: req.body?.session, library });
     return {
       answer: reply.answer,
       suggestion: reply.suggestion,
+      // An exercise swap the sheet offers as a button: both names are real.
+      ...(swap && { swap }),
       // A meal plan, which the sheet shows as a card to log or save.
       ...(reply.meal_plan && { meal_plan: reply.meal_plan }),
       remaining_today: Math.max(0, limit - asked - 1),

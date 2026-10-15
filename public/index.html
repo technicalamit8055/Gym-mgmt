@@ -30,6 +30,11 @@
   </head>
   <body>
     <script>
+      // The Capacitor member app (android/) always opens on the member portal.
+      // Set here, ahead of everything that reads the hash to pick its mode.
+      if (window.Capacitor && Capacitor.isNativePlatform() && location.hash.indexOf('#/portal') !== 0) {
+        history.replaceState(null, '', '#/portal');
+      }
       // Set before first paint so the boot sequence (which awaits network
       // calls before setVertical() runs) never flashes the wrong mode. The
       // member app defaults to light, the staff app to dark (see vertical.js).

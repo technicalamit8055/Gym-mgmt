@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GymBook Member</string>
+    <string name="title_activity_main">GymBook Member</string>
+    <string name="package_name">com.gymbook.member</string>
+    <string name="custom_url_scheme">com.gymbook.member</string>
+</resources>

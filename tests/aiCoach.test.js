@@ -18,7 +18,7 @@ const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
 const { closeRegistryDb } = await import('../src/tenants.js');
 const { config } = await import('../src/config.js');
-const { cleanMealPlan, contextSteps, parsePlanReply, parseReply, parseTranscript, partialAnswer, sanitiseSession, setAiClientForTests } = await import(
+const { cleanMealPlan, cleanSwap, contextSteps, parsePlanReply, parseReply, parseTranscript, partialAnswer, sanitiseMentions, sanitiseSession, setAiClientForTests, swapOptions } = await import(
   '../src/aiCoach.js'
 );
 const { today } = await import('../src/validate.js');
@@ -198,6 +198,8 @@ describe('Ask Coach context', () => {
     );
     // "Previous" stays the single last set it always was.
     assert.equal(item.previous.reps, 10);
+    // Distinct weights, for learning the kit's step: two sets at 7.5 are one.
+    assert.deepEqual(item.logged_weights, [7.5]);
   });
 
   it('answers with the member’s own profile, history and live session', async () => {
@@ -273,6 +275,51 @@ describe('Ask Coach context', () => {
     assert.deepEqual(ctx.exercise_history, {});
     assert.deepEqual(ctx.last_7_days, []);
     assert.equal(ctx.member.limitations, null);
+  });
+});
+
+describe('Ask Coach @ exercises', () => {
+  let token;
+  before(async () => {
+    const member = await call('POST', '/api/members', { first_name: 'Neha', last_name: 'Iyer', phone: '9876500023' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    token = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+    const log = await call(
+      'POST',
+      '/api/portal/workouts/logs',
+      {
+        workout_name: 'Legs',
+        duration_seconds: 1800,
+        sets: [{ exercise_name: 'Leg Press', muscle_group: 'legs', set_number: 1, set_type: 'normal', weight_kg: 80, reps: 10, completed: true }],
+      },
+      { token },
+    );
+    assert.equal(log.status, 201, JSON.stringify(log.body));
+  });
+
+  it('reads the history of an exercise picked with @ from another day of the plan', async () => {
+    const res = await call(
+      'POST',
+      '/api/portal/coach/ask',
+      {
+        question: 'How heavy should @Leg Press be on Friday?',
+        screen: 'workout',
+        session: { workout_name: 'Push', exercises: [{ name: 'Bench Press', sets: [] }] },
+        mentions: ['Leg Press', 'leg press ', 42],
+      },
+      { token },
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const ctx = lastContext();
+    assert.deepEqual(ctx.asked_about, ['Leg Press']);
+    assert.match(ctx.exercise_history['Leg Press'][0], /80×10/);
+    assert.match(fake.calls[0].config.systemInstruction, /written with @/);
+  });
+
+  it('leaves asked_about out when nothing was picked', async () => {
+    const res = await call('POST', '/api/portal/coach/ask', { question: 'Next set?', screen: 'workout' }, { token });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(lastContext().asked_about, undefined);
   });
 });
 
@@ -598,6 +645,78 @@ describe('Coach meal plans', () => {
   });
 });
 
+describe('Coach exercise swaps', () => {
+  // A member of their own, so the daily caps above are left alone.
+  let token;
+  let library;
+  let replacement;
+  const session = (name) => ({
+    workout_name: 'Shoulders',
+    exercises: [
+      { name: 'Lateral Raise', muscle_group: 'shoulders', target_sets: 3, sets: [{ weight_kg: 7.5, reps: 12, completed: true }] },
+      { name, muscle_group: 'shoulders', current: true, target_sets: 3, sets: [{ weight_kg: 0, reps: 0, completed: false }] },
+    ],
+  });
+
+  before(async () => {
+    const member = await call('POST', '/api/members', { first_name: 'Ravi', last_name: 'Iyer', phone: '9876500025' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    token = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+    library = (await call('GET', '/api/portal/workouts/exercises?muscle_group=shoulders', undefined, { token })).body.items;
+    replacement = library.find((item) => !['Lateral Raise', 'Overhead Press'].includes(item.name));
+    assert.ok(replacement, 'the library has a shoulder exercise to swap to');
+  });
+
+  it('gives the coach the gym’s same-muscle alternatives and sends back a swap it can make', async () => {
+    fake.reply = JSON.stringify({
+      answer: `Try ${replacement.name} instead.`,
+      swap: { from: 'overhead press', to: replacement.name.toUpperCase() },
+    });
+    const res = await call(
+      'POST',
+      '/api/portal/coach/ask',
+      { question: 'Suggest a swap for this exercise', screen: 'workout', session: session('Overhead Press') },
+      { token },
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    // Both names come back in their real spelling.
+    assert.deepEqual(res.body.swap, { from: 'Overhead Press', to: replacement.name, muscle_group: 'shoulders' });
+
+    const ctx = lastContext();
+    assert.equal(ctx.live_session.exercises[1].current, true);
+    const options = ctx.swap_options.shoulders;
+    assert.ok(options.some((line) => line.startsWith(`${replacement.name} |`)));
+    assert.ok(!options.some((line) => line.startsWith('Lateral Raise |')), 'nothing already in the session');
+    assert.ok(fake.calls[0].config.responseJsonSchema.properties.swap, 'the model is asked for a swap');
+  });
+
+  it('drops a swap to an exercise the gym does not have, or from one not in the session', async () => {
+    fake.reply = JSON.stringify({ answer: 'Try the Zottman press.', swap: { from: 'Overhead Press', to: 'Zottman Press 3000' } });
+    const invented = await call('POST', '/api/portal/coach/ask', { question: 'Swap?', screen: 'workout', session: session('Overhead Press') }, { token });
+    assert.equal(invented.status, 200);
+    assert.ok(!('swap' in invented.body));
+
+    fake.reply = JSON.stringify({ answer: 'Swap it.', swap: { from: 'Leg Press', to: replacement.name } });
+    const absent = await call('POST', '/api/portal/coach/ask', { question: 'Swap?', screen: 'workout', session: session('Overhead Press') }, { token });
+    assert.ok(!('swap' in absent.body));
+  });
+
+  it('checks a swap against the session and library', () => {
+    const lib = [{ name: 'Arnold Press', muscle_group: 'shoulders' }, { name: 'Face Pull', muscle_group: 'shoulders' }];
+    const live = { exercises: [{ name: 'Overhead Press' }] };
+    assert.deepEqual(cleanSwap({ from: 'Overhead Press', to: 'arnold press' }, { session: live, library: lib }), {
+      from: 'Overhead Press',
+      to: 'Arnold Press',
+      muscle_group: 'shoulders',
+    });
+    assert.equal(cleanSwap({ from: 'Overhead Press', to: 'Overhead Press' }, { session: live, library: [...lib, { name: 'Overhead Press' }] }), null);
+    assert.equal(cleanSwap(null, { session: live, library: lib }), null);
+    assert.equal(cleanSwap({ from: 'Overhead Press', to: 'Arnold Press' }, { session: live, library: null }), null);
+    assert.equal(parseReply('{"answer":"Ok","swap":{"from":"A","to":" "}}').swap, null);
+    assert.equal(swapOptions({ exercises: [] }, lib), null);
+  });
+});
+
 describe('Ask Coach helpers', () => {
   it('rejects a plan with nothing from the library in it', () => {
     const library = [{ name: 'Push-Up', muscle_group: 'chest', equipment: 'bodyweight' }];
@@ -615,7 +734,7 @@ describe('Ask Coach helpers', () => {
   });
 
   it('keeps only a usable suggestion from the model’s JSON', () => {
-    assert.deepEqual(parseReply('{"answer":" Hold at 30 kg. "}'), { answer: 'Hold at 30 kg.', suggestion: null, meal_plan: null });
+    assert.deepEqual(parseReply('{"answer":" Hold at 30 kg. "}'), { answer: 'Hold at 30 kg.', suggestion: null, swap: null, meal_plan: null });
     assert.deepEqual(
       parseReply('{"answer":"Go up","suggestion":{"exercise":"Bench Press","weight_kg":"62.5","reps":8}}').suggestion,
       { exercise: 'Bench Press', weight_kg: 62.5, reps: 8 },
@@ -623,11 +742,11 @@ describe('Ask Coach helpers', () => {
     assert.equal(parseReply('{"answer":"Ok","suggestion":{"exercise":"Bench","weight_kg":60,"reps":0}}').suggestion, null);
     assert.deepEqual(
       parseReply('```json\n{"answer":"Drop to 10 kg."}\n```'),
-      { answer: 'Drop to 10 kg.', suggestion: null, meal_plan: null },
+      { answer: 'Drop to 10 kg.', suggestion: null, swap: null, meal_plan: null },
     );
     assert.deepEqual(
       parseReply('Here is your recommendation: {"answer":"Push for 10 reps."} Hope this helps!'),
-      { answer: 'Push for 10 reps.', suggestion: null, meal_plan: null },
+      { answer: 'Push for 10 reps.', suggestion: null, swap: null, meal_plan: null },
     );
     assert.throws(() => parseReply('not json'));
     assert.throws(() => parseReply('{"answer":""}'));
@@ -666,6 +785,18 @@ describe('Ask Coach helpers', () => {
     ]);
   });
 
+  it('keeps a few short, distinct @ exercise names', () => {
+    assert.equal(sanitiseMentions('Squat'), null);
+    assert.equal(sanitiseMentions(['', '  ']), null);
+    assert.deepEqual(sanitiseMentions(['Squat', 'squat', ' Row ', 'x'.repeat(200)]), ['Squat', 'Row', 'x'.repeat(80)]);
+    assert.equal(sanitiseMentions(Array.from({ length: 20 }, (_, i) => `Move ${i}`)).length, 5);
+  });
+
+  it('says which @ exercises the coach is looking at', () => {
+    const steps = contextSteps({ screen: 'workout', member: {}, asked_about: ['Leg Press', 'Hip Thrust'], last_7_days: [] });
+    assert.ok(steps.includes('Looking at Leg Press and Hip Thrust'));
+  });
+
   it('coerces a hostile session into plain numbers and short strings', () => {
     const clean = sanitiseSession({
       workout_name: 'x'.repeat(500),
@@ -674,6 +805,8 @@ describe('Ask Coach helpers', () => {
     assert.equal(clean.workout_name.length, 80);
     assert.deepEqual(clean.exercises[0].sets[0], { type: 'normal', kg: 0, reps: 0, rpe: 10, done: true });
     assert.equal(sanitiseSession('nope'), null);
+    const stack = sanitiseSession({ exercises: [{ name: 'Leg Press', weight_step: '6.5 kg' }] });
+    assert.equal(stack.exercises[0].weight_step, '6.5 kg');
   });
 });
 

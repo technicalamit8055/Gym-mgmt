@@ -1,5 +1,7 @@
 /** Small DOM + formatting toolkit shared by every view. */
 
+import { serverOrigin, serverUrl } from './api.js';
+
 export function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(props || {})) {
@@ -10,6 +12,7 @@ export function h(tag, props = {}, ...children) {
     else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
     else if (key === 'value') el.value = value;
     else if (key === 'checked' || key === 'disabled' || key === 'selected') el[key] = Boolean(value);
+    else if (key === 'src' || key === 'href' || key === 'poster') el.setAttribute(key, serverUrl(value));
     else el.setAttribute(key, value);
   }
   append(el, children);
@@ -1396,7 +1399,8 @@ function requestStill(url, type, wanted, onReady) {
   frame.decoding = 'async';
   frame.onload = () => finish(frame, frame.naturalWidth, frame.naturalHeight);
   frame.onerror = fail;
-  frame.src = url;
+  frame.crossOrigin = serverOrigin(url);
+  frame.src = serverUrl(url);
 }
 
 /** True when a frame is near-black — a clip that fades in, or a frame the decoder hadn't filled yet. */
@@ -1451,7 +1455,8 @@ function grabVideoFrame(url, onFrame, onFail) {
     onFail();
   });
   // "#t=0.001" asks for the first real frame rather than a blank one.
-  video.src = url.includes('#') ? url : `${url}#t=0.001`;
+  video.crossOrigin = serverOrigin(url);
+  video.src = serverUrl(url.includes('#') ? url : `${url}#t=0.001`);
   // iOS won't buffer a detached clip on preload alone; a muted inline play()
   // is allowed and gets the first frame decoded.
   const nudge = setTimeout(() => {

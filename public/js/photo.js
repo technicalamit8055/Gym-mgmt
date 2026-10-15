@@ -1,3 +1,5 @@
+import { serverUrl } from './api.js';
+import { ensureCameraPermission } from './nativePermissions.js';
 import { clear, closeModal, h, openModal, renderIcon, toast } from './ui.js';
 
 /** Decodes a File, Blob or URL string into an <img> the canvas can draw. */
@@ -143,6 +145,7 @@ export async function openCameraModal({ onCapture }) {
   const startStream = async () => {
     stopStream();
     try {
+      await ensureCameraPermission();
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode, width: { ideal: 640 }, height: { ideal: 640 } },
         audio: false,
@@ -268,7 +271,7 @@ export function createPhotoPicker({ initialUrl = null, onChange } = {}) {
     currentUrl = url || null;
     dirty = true;
     if (currentUrl) {
-      avatarImg.src = currentUrl;
+      avatarImg.src = serverUrl(currentUrl);
       avatarImg.style.display = '';
       placeholder.style.display = 'none';
       removeBtn.style.display = '';

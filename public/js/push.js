@@ -15,7 +15,7 @@
  *   - A denied permission cannot be re-asked from script; only the browser's
  *     own site settings can undo it.
  */
-import { api, memberSession, pathPrefix } from './api.js';
+import { api, isNativeApp, memberSession, pathPrefix } from './api.js';
 import { isIos, isStandalone } from './pwa.js';
 
 /** Which member turned notifications on in this browser. Scoped per gym like
@@ -56,6 +56,7 @@ export class PushError extends Error {
  *   unsupported  — this browser has no Web Push
  */
 export function pushCapability() {
+  if (isNativeApp) return nativeCapability();
   if (!window.isSecureContext) return 'insecure';
   const hasApis = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   if (isIos() && !isStandalone()) return hasApis ? 'ready' : 'ios-install';
@@ -64,7 +65,8 @@ export function pushCapability() {
   return 'ready';
 }
 
-export const permissionState = () => ('Notification' in window ? Notification.permission : 'default');
+export const permissionState = () =>
+  isNativeApp ? nativePermissionState() : 'Notification' in window ? Notification.permission : 'default';
 
 export function platformName() {
   const ua = navigator.userAgent;
@@ -82,6 +84,7 @@ async function registration() {
 }
 
 export async function currentSubscription() {
+  if (isNativeApp) return nativeDevice();
   const reg = await registration();
   return reg ? reg.pushManager.getSubscription() : null;
 }
@@ -124,6 +127,7 @@ async function subscribe(reg, publicKey) {
  * @throws {PushError} `denied` / `dismissed` / `unavailable`.
  */
 export async function enablePush(publicKey) {
+  if (isNativeApp) return enableNativePush();
   if (pushCapability() !== 'ready') throw new PushError('unavailable', 'Notifications are not available in this browser');
   // First thing, before any other await, so iOS still counts it as part of
   // the tap that triggered it.
@@ -153,6 +157,11 @@ export async function enablePush(publicKey) {
 
 /** Stops notifications to this device, on both ends. */
 export async function disablePush() {
+  if (isNativeApp) {
+    await disableNativePush();
+    clearAppBadge();
+    return;
+  }
   const subscription = await currentSubscription().catch(() => null);
   if (subscription) {
     await api.portal.notifications.unsubscribe(subscription.endpoint).catch(() => {});
@@ -174,6 +183,7 @@ export async function disablePush() {
  * @returns {Promise<boolean>} Whether this device is subscribed afterwards.
  */
 export async function syncPushSubscription(publicKey) {
+  if (isNativeApp) return syncNativePush();
   if (pushCapability() !== 'ready' || permissionState() !== 'granted') return false;
   const reg = await registration();
   if (!reg) return false;
@@ -274,5 +284,154 @@ if ('serviceWorker' in navigator) {
     if (data.type === 'gymbook:push') {
       for (const fn of listeners) fn(data.notification || {}, Boolean(data.foreground));
     }
+  });
+}
+
+/* ------------------------------------------- the Android app (Firebase) */
+
+/*
+ * The Capacitor app (android/) has no Web Push: its WebView offers neither
+ * PushManager nor Notification. There, the functions above hand over to
+ * @capacitor/push-notifications instead, called through the bridge Capacitor
+ * injects (the page has no bundler to import the plugin's JS with). The
+ * device registers an FCM token where a browser would send its subscription,
+ * and the server pushes to it through Firebase (src/fcm.js) — so to the rest
+ * of the portal, notifications on the phone work just as they do in Chrome.
+ */
+
+const PLUGIN = 'PushNotifications';
+const hasNativePush = isNativeApp && Boolean(window.Capacitor?.isPluginAvailable?.(PLUGIN));
+/** The FCM token this device registered with the server, if it did. */
+const NATIVE_TOKEN_KEY = `gymbook.push.fcm-token${pathPrefix ? `.${pathPrefix.slice(3)}` : ''}`;
+
+const nativeCall = (method, options = {}) => window.Capacitor.nativePromise(PLUGIN, method, options);
+
+/** Android's answer — 'granted', 'denied', or a 'prompt…' still to ask —
+ * read up front so pushCapability() can stay synchronous. */
+let nativePermission = hasNativePush ? ((await nativeCall('checkPermissions').catch(() => ({}))).receive ?? 'prompt') : 'prompt';
+
+const nativePermissionState = () =>
+  nativePermission === 'granted' ? 'granted' : nativePermission === 'denied' ? 'denied' : 'default';
+
+function nativeCapability() {
+  if (!hasNativePush) return 'unsupported';
+  return nativePermission === 'denied' ? 'denied' : 'ready';
+}
+
+const nativeDevice = () => {
+  const token = readStore(NATIVE_TOKEN_KEY);
+  return token ? { endpoint: `fcm:${token}` } : null;
+};
+
+/**
+ * The channels src/fcm.js files messages under (FCM_CHANNELS there). On
+ * Android 8+ a channel, not the message, decides sound and vibration, so the
+ * member's sound/vibrate preferences pick a channel. Creating one that
+ * exists is a no-op, so this runs on every registration.
+ */
+async function createChannels() {
+  const channels = [
+    { id: 'alerts', name: 'Reminders and announcements', importance: 4, vibration: true },
+    { id: 'alerts-no-vibrate', name: 'Reminders and announcements (no vibration)', importance: 4, vibration: false },
+    { id: 'quiet', name: 'Silent reminders and announcements', importance: 2, vibration: false },
+  ];
+  await Promise.all(channels.map((channel) => nativeCall('createChannel', { visibility: 1, ...channel }).catch(() => {})));
+}
+
+/** This device's FCM token, fresh from Firebase. */
+function fetchNativeToken() {
+  return new Promise((resolve, reject) => {
+    const handles = [];
+    const settle = (fn, value) => {
+      clearTimeout(timer);
+      for (const handle of handles) handle.remove();
+      fn(value);
+    };
+    // Without Google Play services, or offline, Firebase may never answer.
+    const timer = setTimeout(() => settle(reject, new Error('Firebase did not answer')), 20_000);
+    handles.push(window.Capacitor.addListener(PLUGIN, 'registration', (token) => settle(resolve, token.value)));
+    handles.push(window.Capacitor.addListener(PLUGIN, 'registrationError', (err) => settle(reject, new Error(err?.error))));
+    nativeCall('register').catch((err) => settle(reject, err));
+  });
+}
+
+async function registerNativeDevice() {
+  await createChannels();
+  let token;
+  try {
+    token = await fetchNativeToken();
+  } catch {
+    throw new PushError(
+      'register',
+      'This phone could not register for notifications. Check it is online and has Google Play services, then try again.',
+    );
+  }
+  await api.portal.notifications.registerDevice({ token, path_prefix: pathPrefix });
+  writeStore(NATIVE_TOKEN_KEY, token);
+  writeStore(OWNER_KEY, String(memberSession.member?.id ?? ''));
+}
+
+async function enableNativePush() {
+  if (!hasNativePush) throw new PushError('unavailable', 'Notifications are not available in this version of the app');
+  nativePermission = (await nativeCall('requestPermissions')).receive;
+  if (nativePermission === 'denied') {
+    throw new PushError('denied', 'Notifications are blocked — allow them in your phone’s Settings › Apps › GymBook Member');
+  }
+  if (nativePermission !== 'granted') throw new PushError('dismissed', 'Notifications were not turned on');
+  await registerNativeDevice();
+  resetPrimer();
+  return nativeDevice();
+}
+
+async function disableNativePush() {
+  const token = readStore(NATIVE_TOKEN_KEY);
+  if (token) await api.portal.notifications.unregisterDevice(token).catch(() => {});
+  // Deleting the token too, so nothing still addressed to it can arrive.
+  if (hasNativePush) await nativeCall('unregister').catch(() => {});
+  writeStore(NATIVE_TOKEN_KEY, null);
+  writeStore(OWNER_KEY, null);
+}
+
+/** syncPushSubscription() for the app: the same ownership rule, and the token
+ * re-sent because Firebase rotates it now and then. */
+async function syncNativePush() {
+  if (!hasNativePush || nativePermission !== 'granted') return false;
+  const owner = readStore(OWNER_KEY);
+  if (owner && owner !== String(memberSession.member?.id ?? '')) {
+    await nativeCall('unregister').catch(() => {});
+    writeStore(NATIVE_TOKEN_KEY, null);
+    writeStore(OWNER_KEY, null);
+    return false;
+  }
+  if (!owner) return false;
+  try {
+    await registerNativeDevice();
+    return true;
+  } catch {
+    return Boolean(nativeDevice());
+  }
+}
+
+if (hasNativePush) {
+  // Only while the app is open — Android shows nothing itself then, as sw.js
+  // stays silent for an open window, and the portal sounds and toasts it.
+  window.Capacitor.addListener(PLUGIN, 'pushNotificationReceived', (message) => {
+    const data = message?.data || {};
+    const notification = {
+      title: message?.title,
+      body: message?.body,
+      category: data.category,
+      url: data.url,
+      urgent: Number(data.urgent) || 0,
+      unread: data.unread === '' || data.unread === undefined ? undefined : Number(data.unread),
+    };
+    for (const fn of listeners) fn(notification, true);
+  });
+  // A tap — including one that launched the app, which the plugin holds on
+  // to until this listener exists. Same deep link sw.js would open.
+  window.Capacitor.addListener(PLUGIN, 'pushNotificationActionPerformed', (action) => {
+    const url = String(action?.notification?.data?.url || '');
+    const hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
+    if (/^#\/portal(\/|$)/.test(hash) && window.location.hash !== hash) window.location.hash = hash;
   });
 }

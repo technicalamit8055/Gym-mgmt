@@ -47,9 +47,59 @@ export function weightStep(equipment, unit = 'kg') {
 
 const fix = (value) => Math.round(value * 100) / 100;
 const roundTo = (value, step) => fix(Math.round(value / step) * step);
-const floorTo = (value, step) => fix(Math.floor(value / step + 1e-9) * step);
 const toDisplay = (kg, unit) => (unit === 'lb' ? Math.round(kg * LB_PER_KG * 10) / 10 : kg);
 const toKg = (display, unit) => (unit === 'lb' ? Math.round((display / LB_PER_KG) * 100) / 100 : display);
+/** What a weight is shown to: 0.1 lb, or 0.01 kg for 1.25 kg plates. */
+const precisionOf = (unit) => (unit === 'lb' ? 0.1 : 0.01);
+
+/** Fewer distinct weights than this and any spacing could be chance. */
+const MIN_LEARNED_WEIGHTS = 3;
+/** A learned step outside these bounds is a member who jumps in big leaps (or
+ * a typo), not the kit's real increment, so the catalogue default wins. */
+const LEARNED_STEP_BOUNDS = { kg: { min: 1, max: 10 }, lb: { min: 2, max: 25 } };
+
+/**
+ * The jump this member's kit actually makes, read off the weights they have
+ * logged on it: 6.5, 13, 19.5 and 26 kg is a 6.5 kg stack, whatever the
+ * catalogue says a "machine" does; 40, 41.25 and 42.5 is a gym with 1.25 kg
+ * plates. The step is the smallest gap, trusted only when every weight sits on
+ * that grid. `base` is where the grid starts, for a 45 lb bar that goes 45,
+ * 55, 65 rather than 50, 60.
+ *
+ * The step is averaged over the whole span, so a kg stack seen in lb (14.3,
+ * 28.7, 43) comes out as one even 14.33 lb step rather than drifting.
+ *
+ * @param {number[]} weightsKg every weight logged on the exercise, any order
+ * @returns {{ step: number, base: number } | null} in the display unit
+ */
+export function learnGrid(weightsKg = [], unit = 'kg') {
+  const precision = precisionOf(unit);
+  // Each weight within rounding of a rung: kg logged in lb lands on 4.54, 9.07…
+  const tolerance = unit === 'lb' ? 0.25 : 0.05;
+  const sorted = [
+    ...new Set(weightsKg.map(Number).filter((kg) => kg > 0).map((kg) => roundTo(toDisplay(kg, unit), precision))),
+  ].sort((a, b) => a - b);
+  // One plate typed two ways is one weight: 32.5 lb stored as 14.74 kg and the
+  // same stack pin typed as 14.75 kg would otherwise be a 0.01 kg "step".
+  const values = [];
+  for (const value of sorted) if (!values.length || value - values[values.length - 1] > tolerance) values.push(value);
+  if (values.length < MIN_LEARNED_WEIGHTS) return null;
+
+  const smallest = Math.min(...values.slice(1).map((value, i) => value - values[i]));
+  const span = values[values.length - 1] - values[0];
+  const step = span / Math.round(span / smallest);
+  const bounds = LEARNED_STEP_BOUNDS[unit] ?? LEARNED_STEP_BOUNDS.kg;
+  if (step < bounds.min || step > bounds.max) return null;
+
+  const fits = values.every((value) => {
+    const rungs = (value - values[0]) / step;
+    return Math.abs(rungs - Math.round(rungs)) * step <= tolerance;
+  });
+  if (!fits) return null;
+  const base = ((values[0] % step) + step) % step;
+  // A base within rounding of a whole step is no offset at all.
+  return { step, base: base < tolerance || step - base < tolerance ? 0 : base };
+}
 
 /** Epley, as estimate1rm() in src/fitness.js. */
 const oneRepMax = (weight, reps) => weight * (1 + reps / 30);
@@ -75,9 +125,20 @@ const rpeOf = (set) => (set?.rpe == null || set.rpe === '' ? null : Number(set.r
  * @param {'weight_reps'|'reps'|string} [input.logType]
  * @param {Array} [input.doneThisSession] this exercise's ticked sets so far, in order
  * @param {Array} [input.lastSession] this exercise's sets from its most recent session
- * @returns {{weight_kg: number, weight_display: number, reps: number, code: string, reason: string} | null}
+ * @param {number[]} [input.loggedWeights] recent distinct kg weights logged on
+ *   this exercise, which teach learnGrid() the kit's real step
+ * @returns {{weight_kg: number, weight_display: number, reps: number, code: string, reason: string,
+ *   step: number, step_learned: boolean} | null}
  */
-export function suggestNextSet({ targetReps, equipment, unit = 'kg', logType = 'weight_reps', doneThisSession = [], lastSession = [] } = {}) {
+export function suggestNextSet({
+  targetReps,
+  equipment,
+  unit = 'kg',
+  logType = 'weight_reps',
+  doneThisSession = [],
+  lastSession = [],
+  loggedWeights = [],
+} = {}) {
   if (logType !== 'weight_reps' && logType !== 'reps') return null;
   const range = parseRepRange(targetReps);
   const { lo, hi } = range;
@@ -87,7 +148,23 @@ export function suggestNextSet({ targetReps, equipment, unit = 'kg', logType = '
 
   if (logType === 'reps') return suggestReps({ done, before });
 
-  const step = weightStep(equipment, unit);
+  // Warmups and drop sets count here: they were still real weights on the kit.
+  const learned = learnGrid(
+    [...loggedWeights, ...doneThisSession, ...lastSession].map((entry) => Number(entry?.weight_kg ?? entry)),
+    unit,
+  );
+  const grid = learned ?? { step: weightStep(equipment, unit), base: 0 };
+  const precision = precisionOf(unit);
+  const step = roundTo(grid.step, precision);
+  // Every suggested weight is a rung on the grid: base + n × step.
+  const rung = (n) => roundTo(grid.base + n * grid.step, precision);
+  const rungOf = (value) => (value - grid.base) / grid.step;
+  const lowest = grid.base > 0 ? 0 : 1;
+  const up = (value) => rung(Math.round(rungOf(value)) + 1);
+  const down = (value) => rung(Math.max(lowest, Math.round(rungOf(value)) - 1));
+  // The slack keeps a weight already on the grid from flooring to the rung below.
+  const atOrBelow = (value) => rung(Math.max(lowest, Math.floor(rungOf(value) + 0.05)));
+
   const label = (display) => `${display} ${unit}`;
   const result = (display, reps, code, reason) => ({
     weight_kg: toKg(display, unit),
@@ -95,12 +172,14 @@ export function suggestNextSet({ targetReps, equipment, unit = 'kg', logType = '
     reps: Math.max(1, Math.round(reps)),
     code,
     reason,
+    step,
+    step_learned: Boolean(learned),
   });
 
   // ── Mid-session: react to the set just done ──────────────────────────────
   const last = [...done].reverse().find((set) => Number(set.weight_kg) > 0);
   if (last) {
-    const weight = roundTo(toDisplay(Number(last.weight_kg), unit), unit === 'lb' ? 0.1 : 0.01);
+    const weight = roundTo(toDisplay(Number(last.weight_kg), unit), precision);
     const reps = Number(last.reps);
     const rpe = rpeOf(last);
     const max = oneRepMax(weight, reps);
@@ -110,7 +189,7 @@ export function suggestNextSet({ targetReps, equipment, unit = 'kg', logType = '
     if (reps < lo) {
       // What this set says the member can lift for the middle of the range,
       // rounded down: they are only getting more tired from here.
-      const lighter = Math.max(step, Math.min(floorTo(max / (1 + mid / 30), step), floorTo(weight - step, step)));
+      const lighter = Math.min(atOrBelow(max / (1 + mid / 30)), down(weight));
       // Epley flatters a lighter weight late in a session, so the aim is the
       // middle of the range, not the top: a fresh 15 kg × 13 does not mean a
       // tired 15 kg × 15 after a set to failure.
@@ -119,12 +198,12 @@ export function suggestNextSet({ targetReps, equipment, unit = 'kg', logType = '
         `Set ${setNo} was ${reps} reps at ${label(weight)} — below your ${rangeText}. Go lighter to stay in range.`);
     }
     if (rpe === 10) {
-      const lighter = Math.max(step, floorTo(weight - step, step));
+      const lighter = down(weight);
       return result(lighter, clamp(reps, lo, hi), 'drop_failed',
         `Set ${setNo} went to failure. Drop a step so the next set is all good reps.`);
     }
     if (reps > hi || (rpe != null && rpe <= 6)) {
-      const heavier = roundTo(weight + step, step);
+      const heavier = up(weight);
       const aim = clamp(repsAt(max, heavier), lo, hi);
       const why = reps > hi ? `${reps} reps is past the top of your ${rangeText}` : `that felt easy`;
       return result(heavier, aim, 'up_easy', `Set ${setNo}: ${why} — add ${label(step)}.`);
@@ -141,19 +220,19 @@ export function suggestNextSet({ targetReps, equipment, unit = 'kg', logType = '
   if (!loaded.length) return null;
   const topKg = Math.max(...loaded.map((set) => Number(set.weight_kg)));
   const atTop = loaded.filter((set) => Number(set.weight_kg) === topKg);
-  const top = roundTo(toDisplay(topKg, unit), unit === 'lb' ? 0.1 : 0.01);
+  const top = roundTo(toDisplay(topKg, unit), precision);
   const bestReps = Math.max(...atTop.map((set) => Number(set.reps)));
   const knownRpes = atTop.map(rpeOf).filter((rpe) => rpe != null);
 
   const allTopped = atTop.every((set) => Number(set.reps) >= hi) && knownRpes.every((rpe) => rpe <= 8);
   if (allTopped) {
-    const heavier = roundTo(top + step, step);
+    const heavier = up(top);
     const aim = clamp(repsAt(oneRepMax(top, bestReps), heavier), lo, hi);
     return result(heavier, aim, 'progress',
       `Last time every set at ${label(top)} reached ${hi}+ reps. Time to go up ${label(step)}.`);
   }
   if (atTop.every((set) => Number(set.reps) < lo)) {
-    const lighter = Math.max(step, floorTo(top - step, step));
+    const lighter = down(top);
     return result(lighter, lo, 'reset',
       `Last time ${label(top)} stayed under ${lo} reps. Drop a step and build back up.`);
   }

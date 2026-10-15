@@ -1,0 +1,11 @@
+plugins {
+    // @capacitor/camera compiles with a Java 21 toolchain; this lets Gradle
+    // download one into ~/.gradle/jdks when none is installed.
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+
+apply from: 'capacitor.settings.gradle'

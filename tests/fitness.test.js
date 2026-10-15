@@ -697,6 +697,21 @@ describe('Heavy-style workout logging in the portal', () => {
     assert.equal(res.body.items.find((l) => l.workout_name === 'New best').pr_count, 1);
   });
 
+  it('names the records a session set for its share cards', async () => {
+    const list = await call('GET', '/api/portal/workouts/logs', undefined, { token: memberToken });
+    const detail = async (name) =>
+      (await call('GET', `/api/portal/workouts/logs/${list.body.items.find((l) => l.workout_name === name).id}`, undefined, { token: memberToken })).body
+        .records;
+
+    // A first session earns medals, but there was no earlier best to break.
+    assert.deepEqual(await detail('Upper (Strength)'), []);
+    assert.deepEqual(await detail('Repeat'), []);
+    assert.deepEqual(await detail('New best'), [
+      { exercise_name: 'Barbell Bench Press', kind: 'best_1rm', value_kg: estimate1rm(85, 5) },
+      { exercise_name: 'Barbell Bench Press', kind: 'heaviest_weight', value_kg: 85 },
+    ]);
+  });
+
   it('refuses an empty session and out-of-range figures', async () => {
     const empty = await call('POST', '/api/portal/workouts/logs', { workout_name: 'Nothing', sets: [] }, { token: memberToken });
     assert.equal(empty.status, 400);

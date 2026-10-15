@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { EFFORTS, parseRepRange, suggestNextSet, weightStep } from '../public/js/nextSet.js';
+import { EFFORTS, learnGrid, parseRepRange, suggestNextSet, weightStep } from '../public/js/nextSet.js';
 
 const set = (weight_kg, reps, extra = {}) => ({ set_type: 'normal', weight_kg, reps, ...extra });
 
@@ -154,5 +154,106 @@ describe('suggestNextSet — units and log types', () => {
 
   it('maps every effort chip to a valid RPE', () => {
     assert.deepEqual(EFFORTS.map((e) => e.rpe), [6, 8, 9, 10]);
+  });
+});
+
+describe('learnGrid', () => {
+  it('reads a 6.5 kg stack off the weights logged on it, in any order', () => {
+    assert.deepEqual(learnGrid([6.5, 13, 19.5, 26]), { step: 6.5, base: 0 });
+    assert.deepEqual(learnGrid([26, 6.5, 13, 13, 19.5]), { step: 6.5, base: 0 });
+  });
+
+  it('treats one pin typed in kg and logged in lb as one weight, so both units agree', () => {
+    // 26, 32.5 and 39 lb stored in kg, plus the 32.5 lb pin typed by hand as 14.75 kg.
+    const weights = [17.69, 14.74, 11.79, 14.75];
+    assert.equal(learnGrid(weights, 'lb').step, 6.5);
+    assert.ok(Math.abs(learnGrid(weights, 'kg').step - 2.95) < 0.01);
+    const input = (unit) => ({
+      targetReps: '8-12',
+      equipment: 'cable',
+      unit,
+      doneThisSession: [set(14.75, 8, { rpe: 8 }), set(17.69, 6, { rpe: 6 })],
+      loggedWeights: weights,
+    });
+    const kg = suggestNextSet(input('kg'));
+    const lb = suggestNextSet(input('lb'));
+    assert.ok(Math.abs(kg.weight_kg - lb.weight_kg) < 0.05, `${kg.weight_kg} kg vs ${lb.weight_kg} kg`);
+    assert.equal(kg.reps, lb.reps);
+  });
+
+  it('picks up 1.25 kg plates', () => {
+    assert.deepEqual(learnGrid([40, 41.25, 42.5, 45]), { step: 1.25, base: 0 });
+  });
+
+  it('keeps the offset of a 45 lb bar loaded in 5 lb pairs', () => {
+    // 45, 55 and 65 lb, as they are stored in kg.
+    assert.deepEqual(learnGrid([20.41, 24.95, 29.48], 'lb'), { step: 10, base: 5 });
+  });
+
+  it('evens out a kg stack shown in lb rather than drifting', () => {
+    const grid = learnGrid([6.5, 13, 19.5, 26], 'lb');
+    assert.ok(Math.abs(grid.step - 14.33) < 0.01);
+    assert.equal(grid.base, 0);
+  });
+
+  it('trusts nothing under three weights, off the pattern, or outside sane steps', () => {
+    assert.equal(learnGrid([6.5, 13]), null);
+    assert.equal(learnGrid([6.5, 13, 17]), null);
+    assert.equal(learnGrid([20, 40, 60]), null);
+    assert.equal(learnGrid([10, 10.5, 11]), null);
+    assert.equal(learnGrid([0, 0, 10, 20]), null);
+  });
+});
+
+describe('suggestNextSet — learned steps', () => {
+  it('goes up a 6.5 kg stack by 6.5, not the catalogue 5', () => {
+    const next = suggestNextSet({ targetReps: '8-12', equipment: 'machine', loggedWeights: [6.5, 13], doneThisSession: [set(19.5, 14)] });
+    assert.equal(next.code, 'up_easy');
+    assert.equal(next.weight_kg, 26);
+    assert.equal(next.step, 6.5);
+    assert.equal(next.step_learned, true);
+    assert.match(next.reason, /add 6\.5 kg/);
+  });
+
+  it('drops and progresses on the same stack', () => {
+    const failed = suggestNextSet({ targetReps: '8-12', equipment: 'machine', loggedWeights: [6.5, 13, 19.5], doneThisSession: [set(26, 9, { rpe: 10 })] });
+    assert.equal(failed.weight_kg, 19.5);
+    const progress = suggestNextSet({
+      targetReps: '8-12',
+      equipment: 'machine',
+      loggedWeights: [6.5, 13],
+      lastSession: [set(19.5, 12, { rpe: 8 }), set(19.5, 12), set(19.5, 12)],
+    });
+    assert.equal(progress.code, 'progress');
+    assert.equal(progress.weight_kg, 26);
+  });
+
+  it('learns within a first session from the sets just done, warmups included', () => {
+    const next = suggestNextSet({
+      targetReps: '8-12',
+      equipment: 'machine',
+      doneThisSession: [set(6.5, 15, { set_type: 'warmup' }), set(13, 14), set(19.5, 13)],
+    });
+    assert.equal(next.weight_kg, 26);
+  });
+
+  it('lands a lighter set on the bar-plus-plates grid', () => {
+    // 65 lb × 3 on 8–12: the catalogue 5 lb step says 50, which needs 2.5s.
+    const next = suggestNextSet({ targetReps: '8-12', equipment: 'barbell', unit: 'lb', loggedWeights: [20.41, 24.95], doneThisSession: [set(29.48, 3)] });
+    assert.equal(next.code, 'drop_short');
+    assert.equal(next.weight_display, 45);
+  });
+
+  it('suggests a kg stack in lb on the stack’s own rungs', () => {
+    const next = suggestNextSet({ targetReps: '8-12', equipment: 'machine', unit: 'lb', loggedWeights: [6.5, 13, 19.5, 26], doneThisSession: [set(19.5, 14)] });
+    assert.equal(next.weight_display, 57.3);
+    assert.ok(Math.abs(next.weight_kg - 26) < 0.05);
+  });
+
+  it('falls back to the catalogue step without enough history', () => {
+    const next = suggestNextSet({ targetReps: '8-12', equipment: 'machine', loggedWeights: [6.5], doneThisSession: [set(19.5, 14)] });
+    // The catalogue's 5 kg grid: what a 6.5 kg stack got before it was learned.
+    assert.equal(next.weight_kg, 25);
+    assert.equal(next.step_learned, false);
   });
 });

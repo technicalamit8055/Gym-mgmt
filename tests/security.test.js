@@ -106,6 +106,34 @@ describe('security response headers', () => {
   });
 });
 
+describe('CORS for the native member app', () => {
+  const preflight = (origin) =>
+    fetch(`${base}/g/nosuchgym/api/portal/me`, {
+      method: 'OPTIONS',
+      headers: { Origin: origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' },
+    });
+
+  it("answers the Capacitor WebView's preflight before tenant or auth checks run", async () => {
+    const res = await preflight('https://localhost');
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), 'https://localhost');
+    assert.match(res.headers.get('access-control-allow-headers'), /authorization/i);
+    assert.equal(res.headers.get('access-control-allow-credentials'), null);
+  });
+
+  it('allows the app origin on ordinary responses', async () => {
+    const res = await fetch(`${base}/api/health`, { headers: { Origin: 'capacitor://localhost' } });
+    assert.equal(res.headers.get('access-control-allow-origin'), 'capacitor://localhost');
+    assert.match(res.headers.get('vary'), /origin/i);
+  });
+
+  it('grants nothing to any other origin', async () => {
+    const res = await preflight('https://evil.example');
+    assert.notEqual(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+  });
+});
+
 describe('assertProductionReady', () => {
   it('throws in production with no AUTH_SECRET', () => {
     assert.throws(() => assertProductionReady({ NODE_ENV: 'production' }));

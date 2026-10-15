@@ -6,7 +6,7 @@
  * already read the generic one would install "GymBook" pointing at the root
  * domain instead of the gym the owner is actually looking at.
  */
-import { pathPrefix } from './api.js';
+import { isNativeApp, pathPrefix } from './api.js';
 import { h, openModal, renderIcon, toast } from './ui.js';
 import { isLibrary } from './vertical.js';
 
@@ -105,6 +105,8 @@ export function applyGymIcons(iconUrl, name) {
 /* -------------------------------------------------------------- detection */
 
 export const isStandalone = () =>
+  // The Capacitor app is installed by definition — never offer to install it.
+  isNativeApp ||
   window.matchMedia('(display-mode: standalone)').matches ||
   window.matchMedia('(display-mode: fullscreen)').matches ||
   // iOS never implemented beforeinstallprompt or, until recently, the
@@ -401,11 +403,15 @@ function watchConnection() {
   if (!navigator.onLine) document.body.classList.add('is-offline');
 }
 
-applyManifestLink();
-// The manifest link also needs correcting if this tab moves between the
-// staff app and #/portal without a full reload — see applyManifestLink().
-window.addEventListener('hashchange', applyManifestLink);
-registerServiceWorker();
+// The Capacitor app ships its pages inside the APK, so it has no manifest to
+// install from and nothing for a service worker to cache.
+if (!isNativeApp) {
+  applyManifestLink();
+  // The manifest link also needs correcting if this tab moves between the
+  // staff app and #/portal without a full reload — see applyManifestLink().
+  window.addEventListener('hashchange', applyManifestLink);
+  registerServiceWorker();
+}
 watchConnection();
 if (isStandalone()) document.body.classList.add('is-installed');
 // Safari fires no beforeinstallprompt, so the iOS nudge has to be offered on

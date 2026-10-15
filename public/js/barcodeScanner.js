@@ -8,6 +8,8 @@
  * only on first use. iPhones and Chrome on Windows take the fallback.
  */
 
+import { ensureCameraPermission } from './nativePermissions.js';
+
 const PRODUCT_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
 
 /** Why the camera cannot be used here, or null when it can. */
@@ -86,6 +88,7 @@ async function loadDecoder() {
  */
 export async function startBarcodeScan(video, { onCode }) {
   const decode = await loadDecoder();
+  await ensureCameraPermission();
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
     audio: false,

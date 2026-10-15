@@ -1,4 +1,4 @@
-import { ApiError, api, landingBrand, pathSlug, session } from './api.js';
+import { ApiError, api, isNativeApp, landingBrand, pathSlug, session } from './api.js';
 import {
   buildForm,
   clear,
@@ -782,6 +782,12 @@ async function renderRoute() {
  */
 async function dispatch() {
   const path = currentPath();
+  // The Capacitor app is the member app and nothing else: the staff app and
+  // the landing pages are not part of it, so every other route leads back.
+  if (isNativeApp && !path.startsWith('/portal')) {
+    navigate('/portal'); // fires hashchange -> dispatch()
+    return;
+  }
   useMemberMode(path.startsWith('/portal'));
 
   if (platform.missing) {

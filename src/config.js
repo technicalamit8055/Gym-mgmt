@@ -105,6 +105,11 @@ export const config = {
   // Opt-in only: trusting X-Forwarded-For without a real proxy in front lets
   // a client spoof its own IP and dodge the rate limiter below.
   trustProxy: process.env.TRUST_PROXY === 'true',
+  // Origins allowed to call the API cross-origin. The member app's Capacitor
+  // WebView serves its bundled pages from https://localhost (Android) or
+  // capacitor://localhost (iOS), so every API call it makes is cross-origin.
+  // Auth is a bearer token, never a cookie, so no credentials are allowed.
+  corsOrigins: ['https://localhost', 'http://localhost', 'capacitor://localhost', ...splitList(process.env.CORS_ORIGINS)],
   loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS || 15),
   loginWindowMs: Number(process.env.LOGIN_WINDOW_MS || 15 * 60_000),
   loginLockoutMs: Number(process.env.LOGIN_LOCKOUT_MS || 2 * 60_000),
@@ -162,6 +167,16 @@ export const config = {
     // How often server.js runs the reminder sweep. Short, because a hydration
     // reminder at 11:00 should not arrive at 11:55.
     sweepIntervalMs: Number(process.env.PUSH_SWEEP_INTERVAL_MS || 5 * 60_000),
+  },
+  // Native push for the Android member app (android/), through Firebase Cloud
+  // Messaging (src/fcm.js). credentialsFile is a service-account key allowed
+  // to send for the Firebase project — Firebase console › Project settings ›
+  // Service accounts › Generate new private key. projectId defaults to the
+  // key's own project. Unset: the app's notification switch explains that
+  // push isn't set up on this server, and web push carries on regardless.
+  fcm: {
+    credentialsFile: process.env.FCM_CREDENTIALS || '',
+    projectId: process.env.FCM_PROJECT_ID || '',
   },
   // Operator console credentials. Both must be set for the console to exist
   // at all — an unset password must never mean "no password required".

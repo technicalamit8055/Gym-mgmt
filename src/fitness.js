@@ -241,6 +241,43 @@ export function recordPersonalRecords(memberId, sets) {
 }
 
 /**
+ * The records one finished session broke, for its share cards — Hevy's "Best
+ * One Rep Max" and "Heaviest Weight Lifted", in the order the exercises were
+ * done.
+ *
+ * Only a best that beat an earlier session's counts. The is_pr medal also
+ * goes to an exercise's first-ever set, but a card for every new exercise
+ * would bury the lifts that actually went up. Read off the history rather than
+ * exercise_prs, which keeps only the latest best, so an old session still
+ * shows the records it set at the time.
+ */
+export function sessionRecords(memberId, log, sets) {
+  const qualifying = sets.filter((set) => COUNTS_TOWARDS_PR.has(set.set_type) && set.completed);
+  const records = [];
+  for (const exerciseName of new Set(qualifying.map((set) => set.exercise_name))) {
+    const mine = qualifying.filter((set) => set.exercise_name === exerciseName);
+    const earlier = get(
+      `SELECT MAX(s.est_1rm_kg) AS best_1rm, MAX(s.weight_kg) AS heaviest
+       FROM workout_log_sets s JOIN workout_logs l ON l.id = s.log_id
+       WHERE l.member_id = ? AND s.exercise_name = ?
+         AND s.set_type IN ('normal', 'drop', 'failure') AND s.completed = 1
+         AND (l.log_date < ? OR (l.log_date = ? AND l.id < ?))`,
+      [memberId, exerciseName, log.log_date, log.log_date, log.id],
+    );
+
+    const best1rm = Math.max(0, ...mine.map((set) => Number(set.est_1rm_kg) || 0));
+    if (earlier.best_1rm > 0 && best1rm > earlier.best_1rm) {
+      records.push({ exercise_name: exerciseName, kind: 'best_1rm', value_kg: best1rm });
+    }
+    const heaviest = Math.max(0, ...mine.map((set) => Number(set.weight_kg) || 0));
+    if (earlier.heaviest > 0 && heaviest > earlier.heaviest) {
+      records.push({ exercise_name: exerciseName, kind: 'heaviest_weight', value_kg: heaviest });
+    }
+  }
+  return records;
+}
+
+/**
  * Puts records right after a session's sets were edited and re-inserted.
  *
  * `sets` are the session's new rows (with ids); `ownedNames` the exercises
@@ -382,6 +419,38 @@ export function lastSessionSetsFor(memberId, exerciseNames) {
       rpe: row.rpe,
       log_date: row.log_date,
     });
+  }
+  return out;
+}
+
+/** Enough distinct weights to read a stack's step off, few enough that a
+ * member who changes gyms gets the new gym's step within a few sessions. */
+const LOGGED_WEIGHTS_PER_EXERCISE = 12;
+
+/**
+ * The most recent distinct weights the member has used on each exercise,
+ * newest first — what the next-set suggestion (learnGrid in
+ * public/js/nextSet.js) reads to learn that this gym's leg press goes up in
+ * 6.5 kg, or that it has 1.25 kg plates. Warmups count: 6.5 kg on the stack is
+ * the stack's first rung whatever the set was for.
+ */
+export function loggedWeightsFor(memberId, exerciseNames) {
+  if (!exerciseNames.length) return {};
+  const placeholders = exerciseNames.map(() => '?').join(', ');
+  const rows = all(
+    `SELECT s.exercise_name, s.weight_kg
+     FROM workout_log_sets s
+     JOIN workout_logs l ON l.id = s.log_id
+     WHERE l.member_id = ? AND s.exercise_name IN (${placeholders})
+       AND s.completed = 1 AND s.weight_kg > 0
+     ORDER BY s.exercise_name, l.log_date DESC, l.id DESC, s.id DESC`,
+    [memberId, ...exerciseNames],
+  );
+
+  const out = {};
+  for (const row of rows) {
+    const weights = (out[row.exercise_name] ??= []);
+    if (weights.length < LOGGED_WEIGHTS_PER_EXERCISE && !weights.includes(row.weight_kg)) weights.push(row.weight_kg);
   }
   return out;
 }

@@ -30,6 +30,7 @@ import { coachStatus, openCoachSheet, openPlanGenerator } from '../coach.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { EFFORTS, suggestNextSet } from '../nextSet.js';
 import { cropAndResizeImage } from '../photo.js';
+import { openWorkoutShare } from '../shareCards.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
 import { createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
@@ -256,6 +257,26 @@ function dayCardGrid(days, onStart) {
   }
   return h('div', { class: 'portal-day-grid' }, ...days.map((day, i) => dayCard(day, onStart, spans[i])));
 }
+
+/** A plan as the member's routine endpoints take it — from the plan builder's
+ * draft, or from a plan as the server sent it (the coach's swap). */
+const routinePayload = (plan) => ({
+  name: plan.name.trim(),
+  description: String(plan.description ?? '').trim() || null,
+  days: plan.days.map((day) => ({
+    day_name: day.day_name.trim(),
+    notes: day.notes,
+    exercises: day.exercises.map((e) => ({
+      exercise_name: e.exercise_name,
+      muscle_group: e.muscle_group,
+      target_sets: e.target_sets,
+      target_reps: String(e.target_reps ?? '').trim() || '8-12',
+      target_rpe: e.target_rpe ?? null,
+      rest_seconds: e.rest_seconds,
+      notes: e.notes,
+    })),
+  })),
+});
 
 /** The demo fields a session carries for an exercise, so the logger can show
  * them without another round trip (and still can offline). */
@@ -2845,7 +2866,19 @@ const syncedSession = memberSynced('active_workout', 'portal.activeWorkout', {
 const activeSession = {
   read() {
     const state = syncedSession.read();
-    return state && Array.isArray(state.exercises) ? state : null;
+    if (!state || !Array.isArray(state.exercises)) return null;
+    // The typed weight boxes hold this device's unit, but the unit is a
+    // per-device choice and the session follows the account: a set typed in
+    // kg on one phone arrives here as "17.69" under an lb header. The kilograms
+    // are the truth, so any box that no longer matches them is re-derived.
+    for (const set of state.exercises.flatMap((ex) => ex.sets ?? [])) {
+      const shown = set.weight_display;
+      if (shown === '' || shown == null || !(Number(set.weight_kg) > 0)) continue;
+      if (Math.abs(toKg(Number(shown)) - Number(set.weight_kg)) > 0.05) {
+        set.weight_display = String(toDisplayWeight(Number(set.weight_kg)));
+      }
+    }
+    return state;
   },
   write: (state) => syncedSession.write(state),
   clear: () => syncedSession.write(null),
@@ -5917,7 +5950,7 @@ function renderPortalApp(ctx, initialMe) {
    * workout" button can fire the exact same 1-tap flow the Workout tab uses
    * instead of routing the member through an extra tap into that tab first.
    */
-  function startWorkoutSession({ name, day, planId, previous, lastSession }) {
+  function startWorkoutSession({ name, day, planId, previous, lastSession, loggedWeights }) {
     const state = {
       workout_name: name,
       plan_id: planId ?? null,
@@ -5934,6 +5967,8 @@ function renderPortalApp(ctx, initialMe) {
         previous: previous?.[exercise.exercise_name] ?? null,
         // Every set of last time, for the next-set suggestion (nextSet.js).
         last_session: lastSession?.[exercise.exercise_name] ?? null,
+        // Recent weights used on it, from which nextSet.js learns the kit's step.
+        logged_weights: loggedWeights?.[exercise.exercise_name] ?? null,
         // A copied workout brings its own sets; a plan day only says how many.
         sets:
           exercise.sets ??
@@ -6095,6 +6130,7 @@ function renderPortalApp(ctx, initialMe) {
                   planId: current.plan.id,
                   previous: current.previous,
                   lastSession: current.last_session,
+                  loggedWeights: current.logged_weights,
                 }),
             },
             renderIcon('play', { size: 14 }),
@@ -6881,6 +6917,7 @@ function renderPortalApp(ctx, initialMe) {
         // A session started before last_session existed still has the one
         // "previous" set, which is enough for a first suggestion.
         lastSession: exercise.last_session ?? (exercise.previous ? [exercise.previous] : []),
+        loggedWeights: exercise.logged_weights ?? [],
       });
 
     /** Puts a weight and reps into this exercise's next set — from the chip or
@@ -6906,33 +6943,156 @@ function renderPortalApp(ctx, initialMe) {
 
     /** The live session as the coach sees it: what is planned, what is done,
      * how hard it felt, and what the chip is suggesting. */
-    const sessionSnapshot = () => ({
-      workout_name: state.workout_name,
-      elapsed_seconds: Math.round(sessionSeconds(state)),
-      exercises: state.exercises.map((exercise) => {
-        const suggestion = suggestionFor(exercise);
-        return {
-          name: exercise.exercise_name,
-          equipment: exercise.equipment ?? undefined,
-          target_sets: exercise.target_sets,
-          target_reps: exercise.target_reps || undefined,
-          rest_seconds: exercise.rest_seconds,
-          sets: exercise.sets.map((set) => ({
-            set_type: set.set_type,
-            weight_kg: Number(set.weight_kg) || 0,
-            reps: Number(set.reps) || 0,
-            rpe: set.rpe ?? undefined,
-            completed: Boolean(set.completed),
-          })),
-          suggestion: suggestion ? { weight_kg: suggestion.weight_kg, reps: suggestion.reps } : undefined,
-        };
-      }),
-    });
+    const sessionSnapshot = () => {
+      // The one the member is on — what "this exercise" means to the coach:
+      // the first with a set still to do, or the last once all are done.
+      const open = state.exercises.findIndex((exercise) => exercise.sets.some((set) => !set.completed));
+      const current = open >= 0 ? open : state.exercises.length - 1;
+      return {
+        workout_name: state.workout_name,
+        elapsed_seconds: Math.round(sessionSeconds(state)),
+        exercises: state.exercises.map((exercise, index) => {
+          const suggestion = suggestionFor(exercise);
+          return {
+            name: exercise.exercise_name,
+            muscle_group: exercise.muscle_group ?? undefined,
+            equipment: exercise.equipment ?? undefined,
+            current: index === current || undefined,
+            target_sets: exercise.target_sets,
+            target_reps: exercise.target_reps || undefined,
+            rest_seconds: exercise.rest_seconds,
+            sets: exercise.sets.map((set) => ({
+              set_type: set.set_type,
+              weight_kg: Number(set.weight_kg) || 0,
+              reps: Number(set.reps) || 0,
+              rpe: set.rpe ?? undefined,
+              completed: Boolean(set.completed),
+            })),
+            suggestion: suggestion ? { weight_kg: suggestion.weight_kg, reps: suggestion.reps } : undefined,
+            // Only a step learned from their own logs: the defaults are already
+            // in the coach's rules.
+            weight_step: suggestion?.step_learned ? `${suggestion.step} ${weightUnit.get()}` : undefined,
+          };
+        }),
+      };
+    };
+
+    const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+    /** A library exercise by name, with the member's last sets of it: the
+     * picker's cached list first, then the server; offline, just the name and
+     * muscle group the coach gave. */
+    async function libraryExercise(name, muscleGroup) {
+      const find = (items) => items?.find((item) => sameName(item.name, name));
+      const cached = exerciseLibraryCache?.token === memberSession.token ? find(exerciseLibraryCache.res.items) : null;
+      if (cached) return cached;
+      try {
+        const found = find((await api.portal.exercises({ q: name })).items);
+        if (found) return found;
+      } catch {}
+      return { name, muscle_group: muscleGroup };
+    }
+
+    /** The coach's swap made in the plan day this workout came from, when the
+     * plan is one of the member's own — a trainer's plan is theirs to change,
+     * so it 404s here and only today changes. Resolves to the plan's name, or
+     * null when the plan was left alone. */
+    async function swapInPlan(from, next) {
+      if (!state.plan_id || !state.day_id) return null;
+      try {
+        const plan = await api.portal.routine(state.plan_id);
+        const dayIndex = plan.days.findIndex((day) => day.id === state.day_id);
+        const day = plan.days[dayIndex];
+        const at = day ? day.exercises.findIndex((e) => sameName(e.exercise_name, from)) : -1;
+        if (at < 0) return null;
+        day.exercises[at] = { ...day.exercises[at], exercise_name: next.exercise_name, muscle_group: next.muscle_group };
+        const saved = await api.portal.updateRoutine(plan.id, routinePayload(plan));
+        // Saving writes the plan's days afresh with new ids: keep this workout
+        // pointed at its day, so Finish still moves the rotation on from it.
+        const savedDay = saved.days?.[dayIndex];
+        if (savedDay) {
+          state.day_id = savedDay.id;
+          persist();
+        }
+        return plan.name;
+      } catch {
+        return null;
+      }
+    }
+
+    /** The coach's "Swap to …": `to` takes `from`'s place with the same
+     * targets and rest. Sets already done stay logged under `from`; only the
+     * sets left move over, as a new exercise straight after it. */
+    async function swapExercise({ from, to, muscle_group: muscleGroup }) {
+      const item = await libraryExercise(to, muscleGroup);
+      // Found after the await: the session may have changed meanwhile.
+      const index = state.exercises.findIndex((ex) => sameName(ex.exercise_name, from));
+      if (index < 0) return false;
+      const old = state.exercises[index];
+      const done = old.sets.filter((set) => set.completed);
+      const next = {
+        exercise_name: item.name,
+        muscle_group: item.muscle_group ?? old.muscle_group,
+        ...demoFields(item),
+        log_type: item.log_type,
+        target_sets: old.target_sets,
+        target_reps: old.target_reps,
+        rest_seconds: old.rest_seconds,
+        previous: item.previous ?? null,
+        last_session: item.last_session ?? null,
+        logged_weights: item.logged_weights ?? null,
+        sets: Array.from({ length: Math.max(1, old.sets.length - done.length) }, () => ({
+          set_type: 'normal',
+          weight_display: '',
+          weight_kg: 0,
+          reps: '',
+          completed: false,
+        })),
+      };
+      if (done.length) {
+        old.sets = done;
+        state.exercises.splice(index + 1, 0, next);
+      } else {
+        state.exercises.splice(index, 1, next);
+      }
+      persist();
+      paint();
+      const planName = await swapInPlan(old.exercise_name, next);
+      return planName ? `Swapped to ${next.exercise_name} — today and in ${planName}` : `Swapped to ${next.exercise_name} for today`;
+    }
+
+    /** What "@" lists in the coach: this workout's exercises, then each
+     * other day of the plan it came from, each exercise once. */
+    async function coachExercises() {
+      const seen = new Set();
+      const fresh = (exercises) =>
+        exercises
+          .filter((ex) => {
+            const key = ex.exercise_name.trim().toLowerCase();
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .map((ex) => ({ name: ex.exercise_name.trim(), muscle_group: ex.muscle_group ? muscleLabel(ex.muscle_group) : undefined }));
+      const groups = [{ label: 'This workout', items: fresh(state.exercises) }];
+      if (state.plan_id) {
+        try {
+          const plan = await api.portal.routine(state.plan_id);
+          for (const day of plan.days ?? []) {
+            groups.push({ label: day.day_name, items: fresh(day.exercises ?? []) });
+          }
+        } catch {
+          // Offline or the plan is gone: this workout's exercises still list.
+        }
+      }
+      return groups;
+    }
 
     const askCoach = (initialQuestion) =>
       openCoachSheet({
         screen: 'workout',
         getSession: sessionSnapshot,
+        getExercises: coachExercises,
         unit: weightUnit.get(),
         weightLabel,
         initialQuestion,
@@ -6941,6 +7101,7 @@ function renderPortalApp(ctx, initialMe) {
           const exercise = state.exercises.find((ex) => ex.exercise_name.trim().toLowerCase() === name);
           return exercise ? fillSet(exercise, suggestion) : false;
         },
+        onSwap: swapExercise,
       });
 
     /** The chip's "why?": the rule behind the number, with the coach one tap
@@ -7197,7 +7358,9 @@ function renderPortalApp(ctx, initialMe) {
       }[type]();
 
       // The suggestion chip, on the next working set only — one number to
-      // look at, not one per row. Hidden once the boxes already hold it.
+      // look at, not one per row. When the boxes already hold it (a set that
+      // inherited the last one's load, or a tapped chip) it stays as "On
+      // target", so a prefilled row still says the numbers are the right ones.
       let suggestNode = null;
       if (!set.completed && index === suggestionIndex(exercise)) {
         const suggestion = suggestionFor(exercise);
@@ -7205,23 +7368,31 @@ function renderPortalApp(ctx, initialMe) {
           suggestion &&
           Number(set.reps) === suggestion.reps &&
           (type !== 'weight_reps' || Math.abs((Number(set.weight_kg) || 0) - suggestion.weight_kg) < 0.05);
-        if (suggestion && !alreadyIn) {
+        if (suggestion) {
           const numbers = type === 'weight_reps' ? `${weightLabel(suggestion.weight_kg)} × ${suggestion.reps}` : `${suggestion.reps} reps`;
           suggestNode = h(
             'div',
-            { class: 'portal-set-suggest' },
-            h(
-              'button',
-              {
-                class: 'portal-set-suggest-use',
-                type: 'button',
-                title: 'Fill in the suggested set',
-                onclick: () => fillSet(exercise, suggestion),
-              },
-              renderIcon('sparkle', { size: 13, stroke: 2 }),
-              h('span', { class: 'portal-set-suggest-label' }, 'Try'),
-              h('strong', {}, numbers),
-            ),
+            { class: `portal-set-suggest${alreadyIn ? ' is-match' : ''}` },
+            alreadyIn
+              ? h(
+                  'span',
+                  { class: 'portal-set-suggest-use', title: 'These are the suggested numbers' },
+                  renderIcon('check', { size: 13, stroke: 2.4 }),
+                  h('span', { class: 'portal-set-suggest-label' }, 'On target'),
+                  h('strong', {}, numbers),
+                )
+              : h(
+                  'button',
+                  {
+                    class: 'portal-set-suggest-use',
+                    type: 'button',
+                    title: 'Fill in the suggested set',
+                    onclick: () => fillSet(exercise, suggestion),
+                  },
+                  renderIcon('sparkle', { size: 13, stroke: 2 }),
+                  h('span', { class: 'portal-set-suggest-label' }, 'Try'),
+                  h('strong', {}, numbers),
+                ),
             h(
               'button',
               {
@@ -7477,6 +7648,7 @@ function renderPortalApp(ctx, initialMe) {
             rest_seconds: logTypeOf(item) === 'distance_duration' ? 0 : 90,
             previous: item.previous ?? null,
             last_session: item.last_session ?? null,
+            logged_weights: item.logged_weights ?? null,
             sets: [{ set_type: 'normal', weight_display: '', weight_kg: 0, reps: '', completed: false }],
           });
         }
@@ -7617,6 +7789,22 @@ function renderPortalApp(ctx, initialMe) {
                 ),
               )
             : null,
+          h(
+            'button',
+            {
+              class: 'btn block portal-summary-share',
+              type: 'button',
+              onclick: async () => {
+                try {
+                  shareWorkoutLog(await api.portal.workoutLog(res.log.id));
+                } catch {
+                  toast('Could not open the share cards', 'error');
+                }
+              },
+            },
+            renderIcon('upload', { size: 18, stroke: 2.2 }),
+            'Share workout',
+          ),
           h(
             'button',
             { class: 'btn primary block portal-summary-done', type: 'button', onclick: closeModal },
@@ -8050,23 +8238,7 @@ function renderPortalApp(ctx, initialMe) {
         toast(problem, 'error');
         return;
       }
-      const payload = {
-        name: draft.name.trim(),
-        description: draft.description.trim() || null,
-        days: draft.days.map((day) => ({
-          day_name: day.day_name.trim(),
-          notes: day.notes,
-          exercises: day.exercises.map((e) => ({
-            exercise_name: e.exercise_name,
-            muscle_group: e.muscle_group,
-            target_sets: e.target_sets,
-            target_reps: String(e.target_reps).trim() || '8-12',
-            target_rpe: e.target_rpe ?? null,
-            rest_seconds: e.rest_seconds,
-            notes: e.notes,
-          })),
-        })),
-      };
+      const payload = routinePayload(draft);
       saveBtn.disabled = true;
       try {
         if (isNew) {
@@ -8746,7 +8918,14 @@ function renderPortalApp(ctx, initialMe) {
     const body = h('div', { class: 'portal-tab-body' });
 
     const startSession = (name, day) =>
-      startWorkoutSession({ name, day, planId: current.plan?.id, previous: current.previous, lastSession: current.last_session });
+      startWorkoutSession({
+        name,
+        day,
+        planId: current.plan?.id,
+        previous: current.previous,
+        lastSession: current.last_session,
+        loggedWeights: current.logged_weights,
+      });
 
     const startButton = (label, onclick) =>
       h(
@@ -8975,32 +9154,35 @@ function renderPortalApp(ctx, initialMe) {
   }
 
   /**
+   * Hevy's share sheet for a finished session (`log` with its sets and
+   * records, as the detail endpoint returns it): the cards to swipe through
+   * and share as a picture, and the plain-text version for Copy.
+   */
+  function shareWorkoutLog(log) {
+    const volume = `${Math.round(toDisplayWeight(Number(log.total_volume_kg) || 0)).toLocaleString()} ${weightUnit.get()}`;
+    const text = [
+      log.workout_name,
+      `${workoutTimeLabel(log.duration_seconds)} · ${volume} · ${log.total_sets} sets`,
+      '',
+      ...[...setsByExercise(log.sets)].map(([name, sets]) => `${name}: ${sets.map((set) => setSummary(set)).join(', ')}`),
+    ].join('\n');
+    openWorkoutShare(log, {
+      person: me.member,
+      gym: { name: gymDisplayName(ctx), logoUrl: ctx.context?.tenant?.logo_url || '/icons/gym-logo.svg' },
+      unit: weightUnit.get(),
+      toDisplay: toDisplayWeight,
+      text,
+    });
+  }
+
+  /**
    * One finished session as a page of its own, laid out the way Hevy's
    * "Workout Detail" is: who and when, the headline numbers, the muscle split
    * and every exercise's sets. Delete lives behind the ⋯ in the header.
    */
   function openWorkoutLogDetail(log, onDeleted) {
     const byExercise = setsByExercise(log.sets);
-    const volume = `${Math.round(toDisplayWeight(Number(log.total_volume_kg) || 0)).toLocaleString()} ${weightUnit.get()}`;
-
-    const share = async () => {
-      const lines = [
-        log.workout_name,
-        `${workoutTimeLabel(log.duration_seconds)} · ${volume} · ${log.total_sets} sets`,
-        '',
-        ...[...byExercise].map(([name, sets]) => `${name}: ${sets.map((set) => setSummary(set)).join(', ')}`),
-      ];
-      const text = lines.join('\n');
-      try {
-        if (navigator.share) await navigator.share({ title: log.workout_name, text });
-        else {
-          await navigator.clipboard.writeText(text);
-          toast('Workout copied — paste it anywhere');
-        }
-      } catch (err) {
-        if (err?.name !== 'AbortError') toast('Could not share this workout', 'error');
-      }
-    };
+    const share = () => shareWorkoutLog(log);
 
     const remove = () =>
       confirmDialog({

@@ -1,9 +1,55 @@
 /**
+ * Whether this page is running inside the Capacitor member app (android/).
+ * Capacitor injects window.Capacitor before any page script runs.
+ */
+export const isNativeApp = Boolean(window.Capacitor?.isNativePlatform?.());
+
+/**
+ * The native app serves its bundled copy of public/ from https://localhost,
+ * which has no API behind it — so it reads which server and gym to talk to
+ * from native-config.json, written into the bundle by scripts/android.js.
+ */
+const nativeConfig = isNativeApp ? await loadNativeConfig() : null;
+
+async function loadNativeConfig() {
+  try {
+    const res = await fetch('/native-config.json');
+    return res.ok ? await res.json() : {};
+  } catch {
+    return {};
+  }
+}
+
+const nativeServer = String(nativeConfig?.serverUrl || '').replace(/\/+$/, '');
+
+/**
  * The "/g/<slug>" prefix this page was loaded under, or '' on a subdomain or
  * the root domain. Read once from the document URL — hash navigation never
- * changes the path, so this cannot go stale.
+ * changes the path, so this cannot go stale. In the native app the gym comes
+ * from its config instead, and is always addressed by path.
  */
-export const pathPrefix = (/^\/g\/[a-z][a-z0-9-]{2,39}(?=\/|$)/.exec(window.location.pathname) || [''])[0];
+export const pathPrefix = isNativeApp
+  ? nativeConfig?.gymSlug
+    ? `/g/${nativeConfig.gymSlug}`
+    : ''
+  : (/^\/g\/[a-z][a-z0-9-]{2,39}(?=\/|$)/.exec(window.location.pathname) || [''])[0];
+
+/**
+ * Makes a server-relative URL ("/api/...", "/g/<slug>/api/...") absolute in
+ * the native app, where relative URLs resolve against the bundled pages
+ * instead of the server. Anything else — bundled assets, data: and blob:
+ * URLs, and every URL on the web — is returned as is.
+ */
+export function serverUrl(url) {
+  return nativeServer && typeof url === 'string' && /^\/(api|g)\//.test(url) ? nativeServer + url : url;
+}
+
+/**
+ * The crossOrigin value for an image or video that gets drawn onto a canvas:
+ * 'anonymous' when serverUrl() sends it cross-origin, or the canvas would be
+ * tainted and refuse to export; null (no attribute) everywhere else.
+ */
+export const serverOrigin = (url) => (serverUrl(url) !== url ? 'anonymous' : null);
 
 /** The gym slug from the path prefix, or null when addressed by subdomain. */
 export const pathSlug = pathPrefix ? pathPrefix.slice(3) : null;
@@ -139,7 +185,7 @@ export class ApiError extends Error {
 /** Uploads a file as the raw request body — no JSON/base64 wrapping, so a
  * multi-megabyte GIF costs what it weighs. */
 async function uploadFile(path, file, { token, method = 'PUT' } = {}) {
-  const res = await fetch(`${pathPrefix}/api${path}`, {
+  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), {
     method,
     headers: { 'Content-Type': file.type || 'application/octet-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: file,
@@ -156,7 +202,7 @@ async function request(method, path, body, { token, anonymous = false, member = 
   const bearer = token ?? (member ? memberSession.token : anonymous ? null : session.token);
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
 
-  const res = await fetch(`${pathPrefix}/api${path}`, {
+  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -194,7 +240,7 @@ async function request(method, path, body, { token, anonymous = false, member = 
 async function streamRequest(path, body, onEvent) {
   const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
   if (memberSession.token) headers.Authorization = `Bearer ${memberSession.token}`;
-  const res = await fetch(`${pathPrefix}/api${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), { method: 'POST', headers, body: JSON.stringify(body) });
 
   if (res.status === 401) {
     memberSession.clear();
@@ -461,9 +507,9 @@ export const api = {
   growthReport: () => request('GET', '/reports/growth'),
   occupancyReport: (params) => request('GET', `/reports/occupancy${query(params)}`),
   pnlReport: (params) => request('GET', `/reports/pnl${query(params)}`),
-  exportUrl: (entity) => `${pathPrefix}/api/reports/export/${entity}`,
+  exportUrl: (entity) => serverUrl(`${pathPrefix}/api/reports/export/${entity}`),
   download: async (entity) => {
-    const res = await fetch(`${pathPrefix}/api/reports/export/${entity}`, {
+    const res = await fetch(serverUrl(`${pathPrefix}/api/reports/export/${entity}`), {
       headers: { Authorization: `Bearer ${session.token}` },
     });
     if (!res.ok) throw new ApiError(res.status, 'Export failed');
@@ -709,6 +755,9 @@ export const api = {
       config: () => request('GET', '/portal/notifications/config', undefined, { member: true }),
       subscribe: (subscription) => request('POST', '/portal/notifications/subscriptions', subscription, { member: true }),
       unsubscribe: (endpoint) => request('DELETE', '/portal/notifications/subscriptions', { endpoint }, { member: true }),
+      // The Android app's FCM token, in place of a Web Push subscription.
+      registerDevice: (body) => request('POST', '/portal/notifications/devices', body, { member: true }),
+      unregisterDevice: (token) => request('DELETE', '/portal/notifications/devices', { token }, { member: true }),
       savePreferences: (prefs) => request('PUT', '/portal/notifications/preferences', prefs, { member: true }),
       list: (params) => request('GET', `/portal/notifications${query(params)}`, undefined, { member: true }),
       markRead: (ids) => request('POST', '/portal/notifications/read', ids ? { ids } : {}, { member: true }),
@@ -717,7 +766,7 @@ export const api = {
       workoutEnded: () => request('DELETE', '/portal/notifications/active-workout', undefined, { member: true }),
     },
     downloadReceipt: async (id) => {
-      const res = await fetch(`${pathPrefix}/api/portal/payments/${id}/receipt`, {
+      const res = await fetch(serverUrl(`${pathPrefix}/api/portal/payments/${id}/receipt`), {
         headers: { Authorization: `Bearer ${memberSession.token}` },
       });
       if (!res.ok) throw new ApiError(res.status, 'Could not download the receipt');

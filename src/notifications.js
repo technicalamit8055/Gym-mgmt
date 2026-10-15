@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { gymOffsetMinutes } from './clock.js';
 import { config, DEFAULT_TENANT_SLUG } from './config.js';
 import { all, get, run, tenantStorage, tx } from './db.js';
+import { FCM_PREFIX, sendFcm } from './fcm.js';
 import { fitnessAccessFor } from './fitness.js';
 import { effectiveDietTargets } from './nutrition.js';
 import { addDays } from './validate.js';
@@ -148,16 +149,16 @@ const MAX_DEVICES_PER_MEMBER = 10;
  * them — the previous member stops getting this device's notifications, which
  * is exactly what signing out and in again should mean.
  */
-export function saveSubscription(memberId, { endpoint, p256dh, auth, platform, userAgent, pathPrefix, sessionId = null }) {
+export function saveSubscription(memberId, { endpoint, p256dh, auth, platform, userAgent, pathPrefix, sessionId = null, origin = null }) {
   run(
-    `INSERT INTO push_subscriptions (member_id, endpoint, p256dh, auth, platform, user_agent, path_prefix, session_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO push_subscriptions (member_id, endpoint, p256dh, auth, platform, user_agent, path_prefix, session_id, origin)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(endpoint) DO UPDATE SET
        member_id = excluded.member_id, p256dh = excluded.p256dh, auth = excluded.auth,
        platform = excluded.platform, user_agent = excluded.user_agent, path_prefix = excluded.path_prefix,
-       session_id = excluded.session_id,
+       session_id = excluded.session_id, origin = excluded.origin,
        failure_count = 0, last_error = NULL, updated_at = datetime('now')`,
-    [memberId, endpoint, p256dh, auth, platform, userAgent, pathPrefix, sessionId],
+    [memberId, endpoint, p256dh, auth, platform, userAgent, pathPrefix, sessionId, origin],
   );
   run(
     `DELETE FROM push_subscriptions WHERE member_id = ? AND id NOT IN (
@@ -274,7 +275,9 @@ const portalUrl = (prefix, screen) => `${prefix || ''}/#/portal${screen ? `/${sc
  */
 async function pushToSubscriptions(subscriptions, buildPayload, options) {
   const outcomes = await pool(subscriptions, SEND_CONCURRENCY, async (sub) => {
-    const result = await sendPush(sub, buildPayload(sub), options(sub));
+    // Android app devices go through Firebase; every other row is Web Push.
+    const send = sub.endpoint.startsWith(FCM_PREFIX) ? sendFcm : sendPush;
+    const result = await send(sub, buildPayload(sub), options(sub));
     if (result.ok) {
       run("UPDATE push_subscriptions SET failure_count = 0, last_error = NULL, last_success_at = datetime('now') WHERE id = ?", [
         sub.id,

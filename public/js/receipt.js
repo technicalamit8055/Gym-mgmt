@@ -1,3 +1,4 @@
+import { serverOrigin, serverUrl } from './api.js';
 import { clear, date, fullName, h, money, today } from './ui.js';
 import { imageBytesToPdf } from './pdf.js';
 
@@ -136,7 +137,8 @@ const loadImage = (src) =>
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Could not load the gym logo'));
-    img.src = src;
+    img.crossOrigin = serverOrigin(src);
+    img.src = serverUrl(src);
   });
 
 const FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';

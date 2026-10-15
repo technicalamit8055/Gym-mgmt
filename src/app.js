@@ -60,6 +60,24 @@ export function createApp() {
     next();
   });
 
+  // Ahead of everything else, the tenant resolver and the auth checks
+  // included: a preflight carries no Authorization header, so it has to be
+  // answered before anything that would refuse it for lacking one.
+  const corsOrigins = new Set(config.corsOrigins);
+  app.use((req, res, next) => {
+    const origin = req.get('origin');
+    if (!origin || !corsOrigins.has(origin)) return next();
+    res.vary('Origin');
+    res.set('Access-Control-Allow-Origin', origin);
+    // Receipts and exports name their download in Content-Disposition.
+    res.set('Access-Control-Expose-Headers', 'Content-Disposition');
+    if (req.method !== 'OPTIONS') return next();
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE');
+    res.set('Access-Control-Allow-Headers', req.get('access-control-request-headers') || 'Content-Type, Authorization');
+    res.set('Access-Control-Max-Age', '600');
+    return res.status(204).end();
+  });
+
   // Razorpay signs the RAW request body, so this path needs the bytes before
   // express.json() below parses (and thereby consumes) them. Mounted before
   // resolveTenant too: Razorpay calls one fixed URL with no tenant subdomain

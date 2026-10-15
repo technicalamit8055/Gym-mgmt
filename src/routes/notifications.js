@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { MANAGES_BILLING, requireAuth, requireMemberAuth, requireRole } from '../auth.js';
-import { badRequest, notFound } from '../errors.js';
+import { badRequest, HttpError, notFound } from '../errors.js';
+import { FCM_PREFIX, fcmConfigured } from '../fcm.js';
 import {
   ANNOUNCEMENT_KINDS,
   PREFERENCE_KEYS,
@@ -99,6 +100,46 @@ portalNotificationRoutes.post('/subscriptions', (req, res) => {
 portalNotificationRoutes.delete('/subscriptions', (req, res) => {
   const { endpoint } = parse(req.body, { endpoint: { type: 'string', required: true, max: 1024 } });
   removeSubscription(req.member.id, endpoint);
+  res.json({ devices: deviceCount(req.member.id) });
+});
+
+/**
+ * Registers (or refreshes) the Android app's FCM token for this member — the
+ * app's counterpart of POST /subscriptions, which its WebView cannot use.
+ *
+ * Stored as an "fcm:<token>" subscription, so it shares the device cap,
+ * hand-over and sign-out handling of a browser's. Refused while the server
+ * has no FCM credentials: a device that could never be reached must not show
+ * as "on".
+ */
+const FCM_TOKEN = /^[\w:-]{20,4096}$/;
+
+portalNotificationRoutes.post('/devices', (req, res) => {
+  const body = parse(req.body, {
+    token: { type: 'string', required: true, max: 4096 },
+    path_prefix: { type: 'string', max: 60, default: '' },
+  });
+  if (!FCM_TOKEN.test(body.token)) throw badRequest('That is not a device token', { token: 'is not an FCM registration token' });
+  if (!fcmConfigured()) throw new HttpError(503, "Push notifications aren't set up on this server yet");
+  // Same rule as /subscriptions: only ever "" or "/g/<slug>".
+  const pathPrefix = /^(\/g\/[a-z][a-z0-9-]{2,39})?$/.test(body.path_prefix) ? body.path_prefix : '';
+
+  const subscription = saveSubscription(req.member.id, {
+    endpoint: `${FCM_PREFIX}${body.token}`,
+    p256dh: '',
+    auth: '',
+    platform: 'android',
+    userAgent: String(req.get('user-agent') || '').slice(0, 300),
+    pathPrefix,
+    sessionId: req.memberSessionId,
+    origin: `${req.protocol}://${req.get('host')}`,
+  });
+  res.status(201).json({ subscription, devices: deviceCount(req.member.id) });
+});
+
+portalNotificationRoutes.delete('/devices', (req, res) => {
+  const { token } = parse(req.body, { token: { type: 'string', required: true, max: 4096 } });
+  removeSubscription(req.member.id, `${FCM_PREFIX}${token}`);
   res.json({ devices: deviceCount(req.member.id) });
 });
 

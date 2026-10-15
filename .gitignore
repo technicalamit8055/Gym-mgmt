@@ -8,3 +8,8 @@ data/
 .DS_Store
 npm-debug.log*
 coverage/
+
+# Member app (android/): which server and gym the APK talks to — see scripts/android.js
+public/native-config.json
+# Firebase config for the member app: per-project, kept out of the repo
+android/app/google-services.json
