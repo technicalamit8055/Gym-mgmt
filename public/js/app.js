@@ -901,6 +901,9 @@ function isOfflineError(err) {
  * reconnecting can clear it without anyone tapping anything. */
 let awaitingReconnect = false;
 
+/** The member app is GymVym in the store; the web stays GymBook. */
+const appBrand = isNativeApp ? 'GymVym' : 'GymBook';
+
 /** The installed app has no browser error page behind it: a failed boot would
  * otherwise leave a home-screen icon that opens to "Loading…" forever. */
 function renderBootFailure(err) {
@@ -908,13 +911,13 @@ function renderBootFailure(err) {
   if (isOfflineError(err)) {
     awaitingReconnect = true;
     renderNotice(
-      "Can't reach GymBook",
+      `Can't reach ${appBrand}`,
       'You appear to be offline. Nothing has been lost — reconnect and this page will pick up where it left off.',
       [h('button', { class: 'btn primary', onclick: () => boot() }, 'Try again')],
     );
     return;
   }
-  renderNotice('Could not start GymBook', err?.message || 'Unexpected error', [
+  renderNotice(`Could not start ${appBrand}`, err?.message || 'Unexpected error', [
     h('button', { class: 'btn primary', onclick: () => boot() }, 'Try again'),
   ]);
 }

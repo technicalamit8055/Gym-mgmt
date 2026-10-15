@@ -377,7 +377,7 @@ export function renderFindGym() {
       h(
         'div',
         { class: 'portal-login-brand' },
-        h('div', { class: 'portal-login-logo' }, renderIcon('dumbbell', { size: 30 })),
+        h('img', { class: 'findgym-brand', src: '/images/brand/gymvym-icon.webp', alt: 'GymVym' }),
         h('h1', { class: 'portal-login-gymname' }, 'Find your ', h('em', {}, 'gym')),
         h('p', { class: 'findgym-tagline' }, 'Scan the QR at your gym’s front desk, enter its code, or search by name.'),
       ),

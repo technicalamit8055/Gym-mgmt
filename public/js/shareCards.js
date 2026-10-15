@@ -427,12 +427,12 @@ async function saveImage(blob, filename, title) {
   }
   try {
     await native('Filesystem', 'writeFile', {
-      path: `GymBook/${filename}`,
+      path: `GymVym/${filename}`,
       data: await blobBase64(blob),
       directory: 'DOCUMENTS',
       recursive: true,
     });
-    toast('Saved to Documents/GymBook');
+    toast('Saved to Documents/GymVym');
   } catch {
     // Older Androids keep Documents behind a storage permission; the share
     // sheet's "Save to…" targets need none.

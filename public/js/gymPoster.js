@@ -86,7 +86,7 @@ const COPY = {
   ],
   linkLabel: 'Ya seedha link open karo',
   codeLabel: 'Gym Code',
-  /** Step 1 once the gym has a code: the GymBook app finds it by either. */
+  /** Step 1 once the gym has a code: the GymVym app finds it by either. */
   appStep: {
     title: 'QR Scan Karo',
     body: 'GymVym app kholo aur yeh QR scan karo ya gym code daalo. Phone camera se bhi scan kar sakte ho.',
