@@ -35,6 +35,11 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
+        <!-- The buttons on the workout-in-progress notification (WorkoutNotifier). -->
+        <receiver
+            android:name=".WorkoutNotificationReceiver"
+            android:exported="false" />
+
         <!-- Push notifications (Firebase): the status-bar icon, and the channel for a
              message that names none. The app creates its channels on registration
              (public/js/push.js); src/fcm.js picks one per message. -->

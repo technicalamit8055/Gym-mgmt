@@ -1373,6 +1373,24 @@ function showStill(canvas, url, type) {
   });
 }
 
+/** An exercise demo's still (a video's first good frame) as a canvas at least
+ * `wanted` px on its short side, for drawing elsewhere — the Android app's
+ * workout notification. Null when it can't be fetched in time. */
+export function loadStill(url, type, wanted) {
+  const have = stills.get(url);
+  if (have && (have.full || Math.min(have.canvas.width, have.canvas.height) >= wanted * 0.9)) {
+    return Promise.resolve(have.canvas);
+  }
+  return new Promise((resolve) => {
+    // A failed load tells no one (see fail below), so give up after a while.
+    const timer = setTimeout(() => resolve(null), 10_000);
+    requestStill(url, type, wanted, (still) => {
+      clearTimeout(timer);
+      resolve(still.canvas);
+    });
+  });
+}
+
 /** One fetch per URL however many thumbnails ask for it at once. */
 function requestStill(url, type, wanted, onReady) {
   const waiting = stillWaiters.get(url);

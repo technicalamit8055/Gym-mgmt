@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The workout notification while resting, collapsed: the exercise up next,
+     and "Rest 1:03" with its bar. The expanded one is notification_rest_big. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/rest_title"
+            style="@style/TextAppearance.Compat.Notification.Title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textStyle="bold" />
+
+        <include layout="@layout/notification_rest_row" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/rest_image"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="12dp"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+</LinearLayout>

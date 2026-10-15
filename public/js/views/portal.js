@@ -27,6 +27,7 @@ import {
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { coachStatus, openCoachSheet, openPlanGenerator } from '../coach.js';
+import { askLiveWorkoutPermission, setLiveWorkoutHandler, syncLiveWorkout } from '../liveWorkout.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { EFFORTS, suggestNextSet } from '../nextSet.js';
 import { cropAndResizeImage } from '../photo.js';
@@ -2775,7 +2776,7 @@ function restTimer({ load = () => null, save = () => {} } = {}) {
 
     if (remaining !== lastTickSecond) {
       lastTickSecond = remaining;
-      if (remaining === 3 || remaining === 2 || remaining === 1) {
+      if ((remaining === 3 || remaining === 2 || remaining === 1) && !appInBackground()) {
         sound.playRestTick();
         node.classList.add('tick');
         setTimeout(() => node.classList.remove('tick'), 220);
@@ -2787,7 +2788,7 @@ function restTimer({ load = () => null, save = () => {} } = {}) {
       interval = null;
       save(null);
       node.classList.add('done');
-      sound.playRestEnd();
+      if (!appInBackground()) sound.playRestEnd();
       // Only hides: the rest is already forgotten above, and a delayed save
       // could land after Finish has cleared the session.
       hideTimeout = setTimeout(hide, 2500);
@@ -2817,7 +2818,7 @@ function restTimer({ load = () => null, save = () => {} } = {}) {
     total = seconds;
     endsAt = Date.now() + seconds * 1000;
     save({ ends_at: endsAt, total });
-    sound.playRestStart();
+    if (!appInBackground()) sound.playRestStart();
     run();
   }
 
@@ -2856,7 +2857,7 @@ function restTimer({ load = () => null, save = () => {} } = {}) {
     hide();
   }
 
-  return { node, start, stop, resume, detach };
+  return { node, start, stop, resume, detach, extend };
 }
 
 /* ── Active workout session ────────────────────────────────────────────── */
@@ -2890,11 +2891,142 @@ const activeSession = {
     }
     return state;
   },
-  write: (state) => syncedSession.write(state),
-  clear: () => syncedSession.write(null),
+  // Every change goes through here, so this is also where the phone's
+  // workout notification (liveWorkout.js) is kept in step.
+  write: (state) => {
+    syncedSession.write(state);
+    syncLiveWorkout(liveNotificationContent(state));
+  },
+  clear: () => {
+    syncedSession.write(null);
+    syncLiveWorkout(null);
+  },
   /** Picks up a session started, changed or finished on another device. */
-  pull: () => syncedSession.pull(),
+  async pull() {
+    const changed = await syncedSession.pull();
+    if (changed) syncLiveWorkout(liveNotificationContent(activeSession.read()));
+    return changed;
+  },
 };
+
+/**
+ * The greyed-out placeholders in a set are last session's numbers, and a box
+ * left blank means "same as last time" — so ticking the set copies them in for
+ * real. Shared by the logger's tick and the notification's Complete Set.
+ */
+function fillSetFromPrevious(exercise, set) {
+  const type = logTypeOf(exercise);
+  const previous = exercise.previous;
+  if (!previous || setSummary(previous, type) === '—') return;
+  const isBlank = (value) => value === '' || value == null || Number(value) === 0;
+  if (type === 'weight_reps' && (set.weight_display === '' || set.weight_display == null)) {
+    set.weight_display = String(toDisplayWeight(previous.weight_kg));
+    set.weight_kg = previous.weight_kg;
+  }
+  if ((type === 'weight_reps' || type === 'reps') && isBlank(set.reps)) set.reps = previous.reps;
+  if ((type === 'duration' || type === 'distance_duration') && isBlank(set.duration_seconds) && !set.timer_started_at) {
+    set.duration_seconds = previous.duration_seconds || 0;
+  }
+  if (type === 'distance_duration' && isBlank(set.distance_km) && previous.distance_km) {
+    set.distance_km = String(previous.distance_km);
+  }
+}
+
+/** The set the member is on: the first not yet ticked, in the first exercise
+ * that still has one. Null once every set is done. */
+function currentSetOf(state) {
+  const exercise = state.exercises.find((ex) => ex.sets.some((set) => !set.completed));
+  if (!exercise) return null;
+  const index = exercise.sets.findIndex((set) => !set.completed);
+  return { exercise, set: exercise.sets[index], index };
+}
+
+/** The app is open but not on screen. The workout notification rings the end
+ * of a rest then, so the page's own beeps would only double it up. */
+const appInBackground = () => isNativeApp && document.visibilityState === 'hidden';
+
+/** The exercise's picture for the notification: the gym's uploaded demo (a
+ * video gives a frame of itself), else the bundled drawing. */
+function exercisePicture(exercise) {
+  if (exercise.media_url) return { url: exercise.media_url, type: exercise.media_type };
+  const thumb = EXERCISE_THUMBS[String(exercise.exercise_name).trim().toLowerCase()];
+  return thumb ? { url: `/images/workout/ex-${thumb}.png`, type: 'image' } : null;
+}
+
+/**
+ * What the Android app's ongoing notification says about a session (see
+ * liveWorkout.js), Hevy's two faces: "Squat (Barbell) / Set 1/3 - 37 kg x 11
+ * reps" with Complete Set, and while resting "Next: Set 2 of 3 (37 kg x 10
+ * reps)" over a "Rest 1:03" bar with Skip, -15s and +15s. The session
+ * stopwatch runs in the header throughout. The numbers are what a tick would
+ * log — typed in, or last session's.
+ */
+function liveNotificationContent(state) {
+  if (!state) return null;
+  if (state.paused_at) {
+    return { title: state.workout_name, body: `Workout paused at ${clockFrom(sessionSeconds(state))}`, actions: [] };
+  }
+  const stopwatch = { base: state.started_at + (state.paused_ms || 0), countDown: false };
+  const current = currentSetOf(state);
+  if (!current) {
+    const anySets = state.exercises.some((ex) => ex.sets.length);
+    return {
+      title: state.workout_name,
+      body: anySets ? 'All sets done — open the app to finish' : 'Workout in progress',
+      chronometer: stopwatch,
+      actions: [],
+    };
+  }
+
+  const { exercise, set, index } = current;
+  const planned = { ...set };
+  fillSetFromPrevious(exercise, planned);
+  const type = logTypeOf(exercise);
+  let what;
+  if (type === 'weight_reps' || type === 'reps') {
+    const kg = type === 'weight_reps' ? Number(planned.weight_kg) || 0 : 0;
+    const reps = Number(planned.reps) || 0;
+    what = [kg > 0 ? weightLabel(kg) : null, reps > 0 ? `${reps} reps` : null].filter(Boolean).join(' x ');
+  } else {
+    const summary = setSummary(planned, type);
+    what = summary === '—' ? '' : summary;
+  }
+  const warmup = set.set_type === 'warmup' ? ' (warm-up)' : '';
+  const label = `Set ${index + 1}/${exercise.sets.length}${warmup}`;
+  const setLine = what ? `${label} - ${what}` : label;
+  const nextLine = `Next: Set ${index + 1} of ${exercise.sets.length}${warmup}${what ? ` (${what})` : ''}`;
+
+  const lifting = {
+    title: exercise.exercise_name,
+    body: setLine,
+    picture: exercisePicture(exercise),
+    chronometer: stopwatch,
+    actions: [{ id: 'complete', label: 'Complete Set' }],
+  };
+  const restEndsAt = state.rest?.ends_at > Date.now() ? state.rest.ends_at : null;
+  if (!restEndsAt) return lifting;
+  // What it goes back to when the countdown runs out, even with the page
+  // asleep — the app swaps it in itself (WorkoutNotifier).
+  const { picture, ...afterRest } = lifting;
+  return {
+    title: exercise.exercise_name,
+    body: nextLine,
+    picture,
+    chronometer: stopwatch,
+    rest: {
+      endsAt: restEndsAt,
+      // Rests saved before `total` existed: the time left is the best guess.
+      total: state.rest.total || Math.ceil((restEndsAt - Date.now()) / 1000),
+    },
+    actions: [
+      { id: 'rest_skip', label: 'Skip' },
+      { id: 'rest_sub', label: '-15s' },
+      { id: 'rest_add', label: '+15s' },
+    ],
+    afterRest,
+    restAlert: { title: 'Rest over', body: `${exercise.exercise_name} · ${setLine}` },
+  };
+}
 
 
 /* ── Macro rings ───────────────────────────────────────────────────────── */
@@ -5711,10 +5843,49 @@ function renderPortalApp(ctx, initialMe) {
     activeSession.write(state);
     // A phone that slept through the end wakes the timer late; a beep for a
     // rest that ended minutes ago would only confuse.
-    if (overBy > 30_000) return;
+    if (overBy > 30_000 || appInBackground()) return;
     sound.playRestEnd();
     toast('Rest over — time for your next set');
   }
+  /**
+   * The workout notification's buttons (liveWorkout.js). With the logger open
+   * they go to it (loggerControls, which it sets and clears); otherwise they
+   * change the saved session directly, as the logger would on its next open.
+   */
+  let loggerControls = null;
+  function applyNotificationAction(id, { repaint = true } = {}) {
+    if (loggerControls) return loggerControls(id);
+    const state = activeSession.read();
+    if (!state) return;
+    if (id === 'complete') {
+      const current = currentSetOf(state);
+      if (!current) return;
+      const { exercise, set } = current;
+      if (set.timer_started_at) {
+        set.duration_seconds = (Number(set.duration_seconds) || 0) + Math.floor((Date.now() - set.timer_started_at) / 1000);
+        set.timer_started_at = null;
+      }
+      set.completed = true;
+      fillSetFromPrevious(exercise, set);
+      const restFor = exercise.rest_seconds ?? 90;
+      state.rest = restFor > 0 ? { ends_at: Date.now() + restFor * 1000, total: restFor } : null;
+      if (!appInBackground()) sound.playSetComplete();
+    } else if ((id === 'rest_add' || id === 'rest_sub') && state.rest?.ends_at > Date.now()) {
+      const by = id === 'rest_add' ? 15 : -15;
+      const endsAt = state.rest.ends_at + by * 1000;
+      // −15 past zero is the same as skipping, as on the logger's own timer.
+      state.rest = endsAt > Date.now() ? { ends_at: endsAt, total: Math.max(1, (state.rest.total || 0) + by) } : null;
+    } else if (id === 'rest_skip') {
+      state.rest = null;
+    } else {
+      return;
+    }
+    activeSession.write(state);
+    restAlarm.arm();
+    // Home's running-workout card counts sets.
+    if (repaint && active === 'home' && !screenOpen) refreshTab('home');
+  }
+
   /** Which day the Diet tab is showing. Held here rather than inside the tab so
    * scrolling back to yesterday and then logging a meal repaints yesterday,
    * not today. */
@@ -5924,9 +6095,13 @@ function renderPortalApp(ctx, initialMe) {
     clear(content).append(h('div', { class: 'portal-loading' }, 'Loading…'));
     try {
       const node = await TAB_RENDERERS[key]();
+      // Another tab was asked for while this one loaded (a notification tap
+      // landing during start-up): that one paints instead.
+      if (active !== key) return;
       clear(content).append(node);
       content.scrollTop = 0;
     } catch (err) {
+      if (active !== key) return;
       clear(content).append(
         h(
           'div',
@@ -5995,6 +6170,8 @@ function renderPortalApp(ctx, initialMe) {
     };
     activeSession.write(state);
     reportWorkoutStarted(state);
+    // Started by a tap, which is when Android lets the app ask to post.
+    askLiveWorkoutPermission();
     switchTab('workout');
   }
 
@@ -6875,6 +7052,7 @@ function renderPortalApp(ctx, initialMe) {
     // the session so it is still counting on the way back, and the shell's
     // alarm rings its end if the member is still away.
     const teardown = () => {
+      loggerControls = null;
       rest.detach();
       restAlarm.arm();
       if (clockInterval) clearInterval(clockInterval);
@@ -7182,6 +7360,49 @@ function renderPortalApp(ctx, initialMe) {
 
     const isBlank = (value) => value === '' || value == null || Number(value) === 0;
 
+    /** A set's tick box — and the notification's Complete Set, which is the
+     * same tap made from the phone's notification shade. */
+    function toggleSet(exercise, set) {
+      const type = logTypeOf(exercise);
+      // Ticking a hold mid-count is the member saying "that's it".
+      stopHold(set);
+      set.completed = !set.completed;
+      justTicked = set.completed ? set : null;
+      // Ask how it felt — the one thing the next suggestion can't read
+      // off the numbers. Only for counted sets: a plank's effort is its time.
+      if (set.completed && (type === 'weight_reps' || type === 'reps')) effortSet = set;
+      else if (effortSet === set) effortSet = null;
+      if (set.completed) fillSetFromPrevious(exercise, set);
+      persist();
+      if (set.completed) {
+        if (!appInBackground()) sound.playSetComplete();
+        // Ticking a set is what starts the rest clock — that is the
+        // moment the member actually stops lifting. A rest of 0 is the
+        // plan saying none (a single cardio block).
+        const restFor = exercise.rest_seconds ?? 90;
+        if (restFor > 0) rest.start(restFor);
+      } else {
+        sound.playSetUncheck();
+      }
+      paint();
+      justTicked = null;
+    }
+
+    // The notification's buttons, while this logger is open — the same calls
+    // its own controls make, so the screen and the shade never disagree.
+    loggerControls = (id) => {
+      if (id === 'complete') {
+        const current = currentSetOf(state);
+        if (current) toggleSet(current.exercise, current.set);
+      } else if (id === 'rest_add') {
+        rest.extend(15);
+      } else if (id === 'rest_sub') {
+        rest.extend(-15);
+      } else if (id === 'rest_skip') {
+        rest.stop();
+      }
+    };
+
     function setRow(exercise, set, index) {
       const type = logTypeOf(exercise);
       const previous = exercise.previous;
@@ -7215,22 +7436,7 @@ function renderPortalApp(ctx, initialMe) {
       const oneRm = type === 'weight_reps' ? estimate1rm(Number(set.weight_kg) || 0, Number(set.reps) || 0) : 0;
       const beatsPrevious = previous && oneRm > estimate1rm(previous.weight_kg, previous.reps);
 
-      // The greyed-out placeholders are last session's numbers; a blank box
-      // means "same as last time", so this copies them in for real.
-      const fillFromPrevious = () => {
-        if (!hasPrevious) return;
-        if (type === 'weight_reps' && (set.weight_display === '' || set.weight_display == null)) {
-          set.weight_display = String(toDisplayWeight(previous.weight_kg));
-          set.weight_kg = previous.weight_kg;
-        }
-        if ((type === 'weight_reps' || type === 'reps') && isBlank(set.reps)) set.reps = previous.reps;
-        if ((type === 'duration' || type === 'distance_duration') && isBlank(set.duration_seconds) && !set.timer_started_at) {
-          set.duration_seconds = previous.duration_seconds || 0;
-        }
-        if (type === 'distance_duration' && isBlank(set.distance_km) && previous.distance_km) {
-          set.distance_km = String(previous.distance_km);
-        }
-      };
+      const fillFromPrevious = () => fillSetFromPrevious(exercise, set);
 
       const check = h(
         'button',
@@ -7238,30 +7444,7 @@ function renderPortalApp(ctx, initialMe) {
           class: `portal-set-check${set.completed ? ' done' : ''}${set.completed && justTicked === set ? ' pop' : ''}`,
           type: 'button',
           'aria-label': set.completed ? 'Mark set as not done' : 'Mark set as done',
-          onclick: () => {
-            // Ticking a hold mid-count is the member saying "that's it".
-            stopHold(set);
-            set.completed = !set.completed;
-            justTicked = set.completed ? set : null;
-            // Ask how it felt — the one thing the next suggestion can't read
-            // off the numbers. Only for counted sets: a plank's effort is its time.
-            if (set.completed && (type === 'weight_reps' || type === 'reps')) effortSet = set;
-            else if (effortSet === set) effortSet = null;
-            if (set.completed) fillFromPrevious();
-            persist();
-            if (set.completed) {
-              sound.playSetComplete();
-              // Ticking a set is what starts the rest clock — that is the
-              // moment the member actually stops lifting. A rest of 0 is the
-              // plan saying none (a single cardio block).
-              const restFor = exercise.rest_seconds ?? 90;
-              if (restFor > 0) rest.start(restFor);
-            } else {
-              sound.playSetUncheck();
-            }
-            paint();
-            justTicked = null;
-          },
+          onclick: () => toggleSet(exercise, set),
         },
         renderIcon('check', { size: 18, stroke: 2.4 }),
       );
@@ -11130,6 +11313,7 @@ function renderPortalApp(ctx, initialMe) {
       onConfirm: async () => {
         await push.disablePush().catch(() => {});
         await flushMemberSync();
+        syncLiveWorkout(null);
         forgetGym();
       },
     });
@@ -11146,6 +11330,8 @@ function renderPortalApp(ctx, initialMe) {
     await api.portal.endSession('current').catch(() => {});
     detachPushListener?.();
     detachPushListener = null;
+    // The session stays saved to the account; only this phone stops showing it.
+    syncLiveWorkout(null);
     memberSession.clear();
     ctx.navigate('/portal/login');
   }
@@ -11573,9 +11759,29 @@ function renderPortalApp(ctx, initialMe) {
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
   const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
   const restored = lastTab.get();
+  // The phone's workout notification: its taps routed to this portal instance.
+  // Taps that launched the app are handed over right here, before the first
+  // tab is drawn — an "open" picks that tab, and a button changes the session
+  // that tab will show. (Nothing is on the page yet, hence `mounting`.)
+  let mounting = true;
+  let openRequested = false;
+  setLiveWorkoutHandler((event) => {
+    if (!mounting && !content.isConnected) return;
+    if (event.type === 'open') {
+      if (mounting) openRequested = true;
+      else if (active !== 'workout' || screenOpen) switchTab('workout');
+    } else {
+      applyNotificationAction(event.id, { repaint: !mounting });
+    }
+  });
+  mounting = false;
+  // Brought up to date, or taken down for a session finished elsewhere.
+  syncLiveWorkout(liveNotificationContent(activeSession.read()));
   // A reload mid-rest that lands on another tab; the Workout tab disarms it.
   restAlarm.arm();
-  switchTab(reachable.has(requested) ? requested : reachable.has(restored) ? restored : 'home');
+  switchTab(
+    openRequested ? 'workout' : reachable.has(requested) ? requested : reachable.has(restored) ? restored : 'home',
+  );
   if (requested === 'notifications') openNotificationCenter();
 
   return h('div', { class: 'portal-frame' }, h('div', { class: 'portal-app' }, topbar, content, tabbar));
