@@ -26,7 +26,7 @@ import {
   verifiedTick,
 } from '../ui.js';
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
-import { coachStatus, openCoachSheet, openPlanGenerator } from '../coach.js';
+import { coachStatus, openCoachSheet, openPlanGenerator, resetCoachThread } from '../coach.js';
 import { askLiveWorkoutPermission, setLiveWorkoutHandler, syncLiveWorkout } from '../liveWorkout.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { EFFORTS, suggestNextSet } from '../nextSet.js';
@@ -37,7 +37,12 @@ import { createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStor
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
-import { getAppMode, isLibrary, t, toggleAppMode } from '../vertical.js';
+// `isLibrary` here means "an education product": nearly every check in this
+// file picks study-hall wording over gym wording (a student, not a member; no
+// workout art), which is just as right for a CoachBook institute. The few
+// places that differ for CoachBook test isCoaching() first.
+import { getAppMode, isCoaching, isEducation as isLibrary, t, toggleAppMode } from '../vertical.js';
+import { COACHING_PORTAL_TABS, coachingPortalTabs } from './portalCoaching.js';
 import {
   EXERCISE_THUMBS,
   distanceLabel,
@@ -57,7 +62,25 @@ import {
  */
 
 
-const gymDisplayName = (ctx) => ctx.context?.tenant?.gym_name || (isLibrary() ? 'SeatBook' : 'GymBook');
+const gymDisplayName = (ctx) => ctx.context?.tenant?.gym_name || (isCoaching() ? 'CoachBook' : isLibrary() ? 'SeatBook' : 'GymBook');
+
+/** The boot splash's gym illustration, copied while index.html still has it:
+ * this module is imported statically, so it runs before app.js's
+ * dismissSplash() takes the splash away. One drawing, kept in one place. */
+const gymLoaderArt = document.querySelector('#splash .splash-art')?.cloneNode(true) ?? null;
+
+/** A full-page wait inside the app: the splash's dumbbell-and-shaker scene for
+ * a gym, plain text for a study hall (and anywhere the art couldn't be copied). */
+function portalLoader() {
+  if (isLibrary() || !gymLoaderArt) return h('div', { class: 'portal-loading' }, 'Loading…');
+  return h(
+    'div',
+    { class: 'portal-loader', role: 'status', 'aria-label': 'Loading' },
+    gymLoaderArt.cloneNode(true),
+    h('p', { class: 'portal-loader-text' }, 'Getting things ready…'),
+    h('div', { class: 'splash-beads', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')),
+  );
+}
 
 /** Detaches the previous portal instance's push listener. A tapped
  * notification re-renders the portal via a hash change (#/portal/diet), and
@@ -403,6 +426,28 @@ function openDemoFullscreen(exercise) {
   overlay.querySelector('.portal-demo-full-close').focus();
 }
 
+/** A YouTube search for the exercise's tutorials, e.g. "how to do deadlift
+ * instruction". A plain link rather than window.open: in the Android app,
+ * Capacitor hands any off-site link to the system, which opens the YouTube app
+ * when it's installed and the browser when it isn't. */
+function youtubeHowToLink(exercise) {
+  const name = String(exercise.exercise_name ?? exercise.name ?? '').trim();
+  if (!name) return null;
+  const query = `how to do ${name.toLowerCase()} instruction`;
+  return h(
+    'a',
+    {
+      class: 'portal-yt-link',
+      href: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      'aria-label': `Watch how to do ${name} on YouTube`,
+    },
+    renderIcon('youtube', { size: 18 }),
+    'YouTube',
+  );
+}
+
 /** The demo, what it works and how to do it — the demo sheet's body, and the
  * "How to" tab of the progress sheet. */
 function exerciseDemoBody(exercise) {
@@ -413,6 +458,7 @@ function exerciseDemoBody(exercise) {
     'div',
     { class: 'portal-demo' },
     demoStage(exercise),
+    h('div', { class: 'portal-demo-actions' }, youtubeHowToLink(exercise)),
     h(
       'div',
       { class: 'portal-demo-badges' },
@@ -569,6 +615,92 @@ function actionSheet(title, actions) {
           renderIcon(action.icon, { size: 18 }),
           h('span', {}, action.label),
           action.hint ? h('small', { class: 'portal-action-hint' }, action.hint) : null,
+        ),
+      ),
+    ),
+  });
+}
+
+/** What each set type means — the ? on its row in the Select Set Type sheet. */
+const SET_TYPE_HELP = {
+  warmup: 'A lighter set to get your muscles and joints ready. It isn’t numbered and doesn’t count towards your records.',
+  normal: 'A regular working set at your training weight. These are numbered 1, 2, 3… and make up your records.',
+  failure: 'A set taken until you can’t do another rep with good form.',
+  drop: 'Straight after a set, drop the weight and keep going with little or no rest.',
+};
+
+/**
+ * Hevy's Select Set Type sheet, opened from a set's number badge: Warm Up,
+ * Normal, Failure and Drop, each with a ? that explains it, then Remove Set.
+ * `number` is what the set shows as a normal set; `onRemove` is left out where
+ * the set can't go (an exercise keeps its last set).
+ */
+function openSetTypeSheet({ current, number, onPick, onRemove }) {
+  const options = [
+    ['warmup', 'W', 'Warm Up Set'],
+    ['normal', String(number), 'Normal Set'],
+    ['failure', 'F', 'Failure Set'],
+    ['drop', 'D', 'Drop Set'],
+  ];
+  const pick = (run) => {
+    closeModal();
+    run();
+  };
+
+  const row = ([key, badge, label]) => {
+    const help = h('p', { class: 'portal-settype-help', hidden: true }, SET_TYPE_HELP[key]);
+    return h(
+      'div',
+      { class: `portal-settype-item${key === current ? ' active' : ''}` },
+      h(
+        'div',
+        { class: 'portal-settype-line' },
+        h(
+          'button',
+          { class: 'portal-settype-row', type: 'button', 'aria-pressed': String(key === current), onclick: () => pick(() => onPick(key)) },
+          h('span', { class: `portal-settype-badge t-${key}` }, badge),
+          h('span', {}, label),
+        ),
+        h(
+          'button',
+          {
+            class: 'portal-settype-q',
+            type: 'button',
+            'aria-label': `What is a ${label.toLowerCase()}?`,
+            'aria-expanded': 'false',
+            onclick: (event) => {
+              help.hidden = !help.hidden;
+              event.currentTarget.setAttribute('aria-expanded', String(!help.hidden));
+            },
+          },
+          '?',
+        ),
+      ),
+      help,
+    );
+  };
+
+  openModal({
+    title: 'Select Set Type',
+    className: 'portal-settype-modal',
+    body: h(
+      'div',
+      { class: 'portal-settype-list' },
+      ...options.map(row),
+      h(
+        'div',
+        { class: 'portal-settype-item' },
+        h(
+          'button',
+          {
+            class: 'portal-settype-row is-remove',
+            type: 'button',
+            disabled: !onRemove,
+            title: onRemove ? null : 'An exercise keeps at least one set',
+            onclick: () => pick(onRemove),
+          },
+          h('span', { class: 'portal-settype-badge' }, renderIcon('close', { size: 20, stroke: 2 })),
+          h('span', {}, 'Remove Set'),
         ),
       ),
     ),
@@ -1701,7 +1833,7 @@ function renderPortalLogin(ctx) {
         { class: 'portal-login-brand' },
         logoUrl
           ? h('img', { class: 'portal-login-logo-img', src: logoUrl, alt: '' })
-          : h('div', { class: 'portal-login-logo' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 30 })),
+          : h('div', { class: 'portal-login-logo' }, renderIcon(isCoaching() ? 'graduation' : isLibrary() ? 'book' : 'dumbbell', { size: 30 })),
         h('h1', { class: 'portal-login-gymname' }, ...loginHeadline(gymName)),
       ),
       h(
@@ -2677,7 +2809,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   function paint() {
     paintTabs();
     clear(panel);
-    if (active === 'summary' && summaryDemo) panel.append(summaryDemo);
+    if (active === 'summary') panel.append(...[summaryDemo, summaryActions].filter(Boolean));
     if (active === 'howto') {
       panel.append(exerciseDemoBody(item));
       return;
@@ -2700,6 +2832,7 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
   // Built once and moved between paints, so tapping a metric or a range
   // doesn't restart the clip.
   const summaryDemo = demoStage(item);
+  const summaryActions = h('div', { class: 'portal-demo-actions' }, youtubeHowToLink(item));
 
   const subtitle = [item.muscle_group, item.equipment].filter(Boolean).map(titleCase).join(' · ');
   body.append(
@@ -5635,7 +5768,10 @@ function openWeightSheet({ latest, onSaved }) {
  * opened the tab since the badge was last edited.
  */
 function buildTabs(storeStatus = 'coming_soon', navBadges = {}) {
-  const tabs = isLibrary()
+  // CoachBook: Home, Timetable, Tests, Fees, Profile (views/portalCoaching.js).
+  const tabs = isCoaching()
+    ? COACHING_PORTAL_TABS.map((tab) => ({ ...tab }))
+    : isLibrary()
     ? [
         { key: 'home', label: 'Home', icon: 'home' },
         { key: 'pass', label: 'Pass', icon: 'idCard' },
@@ -5684,7 +5820,7 @@ const seenNavBadges = {
   },
 };
 
-const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile' };
+const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile', attendance: 'home', materials: 'home' };
 
 /**
  * The tab bar's own icons, apart from the app-wide set in ui.js because each
@@ -5750,6 +5886,28 @@ const NAV_ICONS = {
       'M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z',
     ],
     stroke: ['M5.5 18v2.5', 'M18.5 18v2.5'],
+  },
+  // CoachBook's Timetable, Tests and Fees tabs.
+  calendarTab: {
+    line: [{ tag: 'rect', x: 3, y: 5, width: 18, height: 16, rx: 3 }, 'M8 3v4', 'M16 3v4', 'M3 10h18', 'M7.5 14h2', 'M14.5 14h2', 'M7.5 17.5h2'],
+    body: [{ tag: 'rect', x: 3, y: 5, width: 18, height: 16, rx: 3 }],
+    stroke: ['M8 3v4', 'M16 3v4'],
+    cut: ['M3 10h18', 'M7.5 14h2', 'M14.5 14h2', 'M7.5 17.5h2'],
+  },
+  trophyTab: {
+    line: ['M7 4h10v5a5 5 0 0 1-10 0z', 'M17 5.5h2.5v1.5a3 3 0 0 1-3 3', 'M7 5.5H4.5V7a3 3 0 0 0 3 3', 'M12 14v4', 'M8 21h8'],
+    body: ['M7 4h10v5a5 5 0 0 1-10 0z'],
+    stroke: ['M17 5.5h2.5v1.5a3 3 0 0 1-3 3', 'M7 5.5H4.5V7a3 3 0 0 0 3 3', 'M12 14v4', 'M8 21h8'],
+  },
+  walletTab: {
+    line: [
+      'M6 6.5 15.4 4a1.6 1.6 0 0 1 2 1.5v1',
+      { tag: 'rect', x: 3, y: 6.5, width: 18, height: 14, rx: 3 },
+      { tag: 'circle', cx: 16.5, cy: 13.5, r: 1.3 },
+    ],
+    body: [{ tag: 'rect', x: 3, y: 6.5, width: 18, height: 14, rx: 3 }],
+    stroke: ['M6 6.5 15.4 4a1.6 1.6 0 0 1 2 1.5v1'],
+    cut: [{ tag: 'circle', cx: 16.5, cy: 13.5, r: 1.3 }],
   },
 };
 
@@ -6043,7 +6201,7 @@ function renderPortalApp(ctx, initialMe) {
       action,
     );
     content.classList.remove('is-refresh');
-    clear(content).append(h('div', { class: 'portal-tab-body portal-screen' }, head, h('div', { class: 'portal-loading' }, 'Loading…')));
+    clear(content).append(h('div', { class: 'portal-tab-body portal-screen' }, head, portalLoader()));
     content.scrollTop = 0;
     try {
       const node = await render();
@@ -6092,7 +6250,7 @@ function renderPortalApp(ctx, initialMe) {
     tabbar.classList.toggle('is-store', key === 'store');
     content.classList.toggle('is-store', key === 'store');
     content.classList.remove('is-refresh');
-    clear(content).append(h('div', { class: 'portal-loading' }, 'Loading…'));
+    clear(content).append(portalLoader());
     try {
       const node = await TAB_RENDERERS[key]();
       // Another tab was asked for while this one loaded (a notification tap
@@ -6506,7 +6664,7 @@ function renderPortalApp(ctx, initialMe) {
 
   async function renderPassTab() {
     const pass = await api.portal.pass();
-    const body = h('div', { class: 'portal-tab-body portal-pass-tab' }, h('h2', { class: 'portal-tab-title' }, 'Digital Pass'));
+    const body = h('div', { class: 'portal-tab-body portal-pass-tab' }, h('h2', { class: 'portal-tab-title' }, isCoaching() ? 'Student ID' : 'Digital Pass'));
 
     const ticker = h('div', { class: 'portal-qr-ticker' });
     const walletCard = h(
@@ -7423,12 +7581,26 @@ function renderPortalApp(ctx, initialMe) {
           type: 'button',
           title: `${typeInfo?.label ?? 'Normal'} set — tap to change type`,
           'aria-label': `Set ${index + 1}, ${typeInfo?.label ?? 'Normal'}. Change set type`,
-          onclick: () => {
-            const order = ['normal', 'warmup', 'drop', 'failure'];
-            set.set_type = order[(order.indexOf(set.set_type) + 1) % order.length];
-            persist();
-            paint();
-          },
+          onclick: () =>
+            openSetTypeSheet({
+              current: set.set_type,
+              number: exercise.sets.slice(0, index).filter((s) => s.set_type !== 'warmup').length + 1,
+              onPick: (key) => {
+                set.set_type = key;
+                persist();
+                paint();
+              },
+              // The last set stays: an exercise with no rows is removed from
+              // its menu, not by emptying it.
+              onRemove:
+                exercise.sets.length > 1
+                  ? () => {
+                      exercise.sets.splice(exercise.sets.indexOf(set), 1);
+                      persist();
+                      paint();
+                    }
+                  : null,
+            }),
         },
         set.set_type === 'normal' ? String(workingNumber) : (typeInfo?.short ?? String(workingNumber)),
       );
@@ -8456,6 +8628,42 @@ function renderPortalApp(ctx, initialMe) {
       paint();
     };
 
+    /** The AI coach on this plan — the same Ask Coach sheet as the Workout
+     * and Diet tabs, on its 'plan' screen: rate it, find what is missing, add
+     * the exercises it suggests. Opened from the floating coach button. The
+     * chat starts fresh for each plan opened, then lasts while it is edited. */
+    resetCoachThread('plan');
+    const openCoach = () =>
+      openCoachSheet({
+        screen: 'plan',
+        // What "@" lists: the exercises on each day of this plan.
+        getExercises: async () =>
+          draft.days
+            .map((day, index) => ({
+              label: day.day_name.trim() || `Day ${index + 1}`,
+              items: day.exercises.map((e) => ({ name: e.exercise_name, muscle_group: e.muscle_group })),
+            }))
+            .filter((group) => group.items.length),
+        plan: {
+          getPlan: () => ({ name: draft.name, days: draft.days }),
+          onAdd: (suggestion, dayIndex, newDayName) => {
+            // One past the last day: the coach's new day ("Legs"), added for it.
+            if (dayIndex === draft.days.length && draft.days.length < 7) {
+              draft.days.push({ day_name: newDayName, notes: null, exercises: [] });
+            }
+            draft.days[dayIndex]?.exercises.push(editableExercise(suggestion));
+            paint();
+          },
+          onReplace: (suggestion, dayIndex, replaces) => {
+            const list = draft.days[dayIndex]?.exercises ?? [];
+            const at = list.findIndex((e) => e.exercise_name.trim().toLowerCase() === replaces.trim().toLowerCase());
+            if (at === -1) return false;
+            list[at] = editableExercise(suggestion);
+            paint();
+            return true;
+          },
+        },
+      });
     function openDayMenu(dayIndex) {
       const day = draft.days[dayIndex];
       const removeDay = () => {
@@ -8742,7 +8950,12 @@ function renderPortalApp(ctx, initialMe) {
     }
 
     paint();
-    clear(content).append(body);
+    // The coach button beside the body, not in it, as on the Workout and Diet
+    // tabs: the body's entry animation would pin the fixed button to it, and
+    // paint() never rebuilds it.
+    clear(content).append(
+      h('div', { class: 'portal-pe-wrap' }, body, coachFab('plan', openCoach)),
+    );
     content.scrollTop = 0;
     // scrollIntoView rather than scrollTop: on a phone the document scrolls, not `content`.
     if (showDay !== null) body.querySelectorAll('.portal-pe-day')[showDay]?.scrollIntoView({ block: 'start' });
@@ -9720,12 +9933,24 @@ function renderPortalApp(ctx, initialMe) {
             type: 'button',
             title: `${typeInfo?.label ?? 'Normal'} set — tap to change type`,
             'aria-label': `Set ${index + 1}, ${typeInfo?.label ?? 'Normal'}. Change set type`,
-            onclick: () => {
-              const order = ['normal', 'warmup', 'drop', 'failure'];
-              set.set_type = order[(order.indexOf(set.set_type) + 1) % order.length];
-              touched();
-              paint();
-            },
+            onclick: () =>
+              openSetTypeSheet({
+                current: set.set_type,
+                number: exercise.sets.slice(0, index).filter((s) => s.set_type !== 'warmup').length + 1,
+                onPick: (key) => {
+                  set.set_type = key;
+                  touched();
+                  paint();
+                },
+                onRemove:
+                  exercise.sets.length > 1
+                    ? () => {
+                        exercise.sets.splice(exercise.sets.indexOf(set), 1);
+                        touched();
+                        paint();
+                      }
+                    : null,
+              }),
           },
           set.set_type === 'normal' ? String(working) : (typeInfo?.short ?? String(working)),
         ),
@@ -10765,7 +10990,7 @@ function renderPortalApp(ctx, initialMe) {
       return;
     }
 
-    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
+    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials'] : [])]);
     clear(list).append(
       ...items.map((item) => {
         const style = NOTIFICATION_STYLE[item.category] ?? NOTIFICATION_STYLE.announcement;
@@ -11542,7 +11767,8 @@ function renderPortalApp(ctx, initialMe) {
     const status = (() => {
       if (m.status === 'frozen') return { tone: 'blue', label: 'Membership frozen' };
       if (m.status !== 'active') return { tone: 'grey', label: `Inactive ${t('member').toLowerCase()}` };
-      if (!sub) return { tone: 'amber', label: 'No active plan' };
+      // A CoachBook student is enrolled in a batch, not on a plan.
+      if (!sub && !isCoaching()) return { tone: 'amber', label: 'No active plan' };
       return { tone: 'green', label: `Active ${t('member')}` };
     })();
 
@@ -11631,15 +11857,29 @@ function renderPortalApp(ctx, initialMe) {
         h('span', { class: 'portal-prof-tile-go' }, renderIcon('arrowRight', { size: 16, stroke: 2.4 })),
       );
     body.append(
-      h('h3', { class: 'portal-prof-label' }, 'Membership'),
-      h(
-        'div',
-        { class: `portal-prof-tiles${isLibrary() ? ' is-single' : ''}` },
-        isLibrary()
-          ? null
-          : memberTile('orange', 'qrCode', 'View & scan digital pass', 'Show your QR code at the gym', () => switchTab('pass')),
-        memberTile('blue', 'billing', 'Invoices & payment history', 'View all your invoices and payments', () => switchTab('pay')),
-      ),
+      ...(isCoaching()
+        ? [
+            h('h3', { class: 'portal-prof-label' }, 'My institute'),
+            h(
+              'div',
+              { class: 'portal-prof-tiles' },
+              memberTile('orange', 'qrCode', 'Student ID', 'Your QR code for the gate and the desk', () => switchTab('pass')),
+              memberTile('blue', 'calendar', 'Attendance', 'Your month, lecture by lecture', () => switchTab('attendance')),
+              memberTile('purple', 'fileText', 'Notes & DPPs', 'Download study material', () => switchTab('materials')),
+              memberTile('green', 'wallet', 'Fees & receipts', 'Installments and PDF receipts', () => switchTab('fees')),
+            ),
+          ]
+        : [
+            h('h3', { class: 'portal-prof-label' }, 'Membership'),
+            h(
+              'div',
+              { class: `portal-prof-tiles${isLibrary() ? ' is-single' : ''}` },
+              isLibrary()
+                ? null
+                : memberTile('orange', 'qrCode', 'View & scan digital pass', 'Show your QR code at the gym', () => switchTab('pass')),
+              memberTile('blue', 'billing', 'Invoices & payment history', 'View all your invoices and payments', () => switchTab('pay')),
+            ),
+          ]),
     );
 
     const ordersSlot = h('div', { class: 'portal-prof-orders', hidden: true });
@@ -11714,6 +11954,9 @@ function renderPortalApp(ctx, initialMe) {
     pay: renderPayTab,
     store: renderStoreTab,
     profile: renderProfileTab,
+    // CoachBook replaces Home and Schedule and adds its own screens; the Pass
+    // (the QR student ID) and Profile stay the portal's own.
+    ...(isCoaching() ? coachingPortalTabs({ getMe: () => me, switchTab }) : {}),
   };
 
   paintTabbar();
@@ -11723,7 +11966,7 @@ function renderPortalApp(ctx, initialMe) {
     ctx.context?.tenant?.logo_url
       ? h('img', { class: 'portal-topbar-logo-img', src: ctx.context.tenant.logo_url, alt: gymDisplayName(ctx) })
       : isLibrary()
-        ? h('div', { class: 'portal-topbar-logo' }, renderIcon('book', { size: 16 }))
+        ? h('div', { class: 'portal-topbar-logo' }, renderIcon(isCoaching() ? 'graduation' : 'book', { size: 16 }))
         : h('img', { class: 'portal-topbar-logo-img', src: '/icons/gym-logo.svg', alt: gymDisplayName(ctx) }),
     h('div', { class: 'portal-topbar-name' }, h('div', {}, gymDisplayName(ctx)), topbarSub),
     h(
@@ -11757,7 +12000,7 @@ function renderPortalApp(ctx, initialMe) {
   // reload would otherwise reopen the notification's screen forever after.
   const requested = window.location.hash.replace(/^#\/portal\/?/, '').split(/[/?]/)[0];
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
-  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule']);
+  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials'] : [])]);
   const restored = lastTab.get();
   // The phone's workout notification: its taps routed to this portal instance.
   // Taps that launched the app are handed over right here, before the first

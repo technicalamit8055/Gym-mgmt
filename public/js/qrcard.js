@@ -2,7 +2,7 @@ import { serverOrigin, serverUrl } from './api.js';
 import { clear, date, fullName, h } from './ui.js';
 import { gymPosterNode, gymPosterPngBlob } from './gymPoster.js';
 import { getGymLogoUrl } from './receipt.js';
-import { isLibrary, t } from './vertical.js';
+import { isCoaching, isEducation, isLibrary, t } from './vertical.js';
 
 /**
  * Member QR ID cards: on-screen preview, printing, and a downloadable image
@@ -42,7 +42,7 @@ export function idCardNode(card) {
       h('div', { class: 'id-card-code' }, member.code),
       member.membership_end
         ? h('div', { class: 'id-card-valid' }, `Valid until ${date(member.membership_end)}`)
-        : h('div', { class: 'id-card-valid muted' }, 'No active membership'),
+        : h('div', { class: 'id-card-valid muted' }, isCoaching() ? 'Student ID card' : 'No active membership'),
     ),
     h(
       'div',
@@ -210,7 +210,7 @@ export async function renderCardPngBytes(card) {
   // Validity Date / Membership Status
   ctx.fillStyle = member.membership_end ? '#4b5563' : '#9ca3af';
   ctx.font = `400 ${Math.round(height * 0.055)}px system-ui, sans-serif`;
-  const validText = member.membership_end ? `Valid until ${date(member.membership_end)}` : 'No active membership';
+  const validText = member.membership_end ? `Valid until ${date(member.membership_end)}` : isCoaching() ? 'Student ID card' : 'No active membership';
   ctx.fillText(validText, left, currentY, maxTextWidth);
 
   // QR block on the right side
@@ -257,9 +257,11 @@ function posterCopy(poster) {
   const member = t('member').toLowerCase();
   return {
     headline: 'Get our app',
-    sub: isLibrary()
-      ? 'Your seat pass, fees and attendance — right on your phone.'
-      : 'Your membership pass, classes, payments and check-ins — right on your phone.',
+    sub: isCoaching()
+      ? 'Your student ID, timetable, test results and fee receipts — right on your phone.'
+      : isLibrary()
+        ? 'Your seat pass, fees and attendance — right on your phone.'
+        : 'Your membership pass, classes, payments and check-ins — right on your phone.',
     caption: 'Scan with your phone camera',
     steps: [
       'Point your camera at the code and tap the link that appears.',
@@ -300,7 +302,7 @@ function plainPosterNode(poster) {
 
 /** The desk poster this account gets, as DOM — see posterCopy() for which. */
 export async function appPosterNode(poster) {
-  return isLibrary() ? plainPosterNode(poster) : gymPosterNode(poster);
+  return isEducation() ? plainPosterNode(poster) : gymPosterNode(poster);
 }
 
 /** Same #print-root mechanism as printCards() — see there for why. */
@@ -466,7 +468,7 @@ async function plainPosterPngBlob(poster) {
  * phone, which has no print dialog worth the name.
  */
 export async function downloadAppPosterPng(poster) {
-  const blob = isLibrary() ? await plainPosterPngBlob(poster) : await gymPosterPngBlob(poster);
+  const blob = isEducation() ? await plainPosterPngBlob(poster) : await gymPosterPngBlob(poster);
   const slug = poster.gym_name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'gym';
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);

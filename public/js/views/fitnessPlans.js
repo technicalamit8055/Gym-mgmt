@@ -1,4 +1,5 @@
 import { api, session } from '../api.js';
+import { openPlanCoach } from '../planCoach.js';
 import {
   append,
   buildForm,
@@ -627,6 +628,16 @@ function workoutDaysEditor(initialDays = [], library = []) {
     );
   }
 
+  /** A plan row from the AI coach's suggestion. */
+  const fromSuggestion = (suggestion) => ({
+    exercise_name: suggestion.exercise_name,
+    muscle_group: suggestion.muscle_group,
+    target_sets: suggestion.target_sets ?? 3,
+    target_reps: suggestion.target_reps ?? '8-12',
+    rest_seconds: suggestion.rest_seconds ?? 90,
+    notes: '',
+  });
+
   paint();
   return {
     node: wrap,
@@ -637,13 +648,32 @@ function workoutDaysEditor(initialDays = [], library = []) {
       days
         .map((day) => ({ ...day, exercises: day.exercises.filter((e) => e.exercise_name.trim()) }))
         .filter((day) => day.day_name.trim()),
+    // Every day as it stands, unnamed ones too — day numbers are what the
+    // coach's suggestions point at, so none may be skipped.
+    getDays: () => days,
+    /** One past the last day adds a day named `newDayName` for it. */
+    addExercise: (dayIndex, suggestion, newDayName) => {
+      if (dayIndex === days.length && days.length < 7) days.push({ day_name: newDayName, notes: '', exercises: [] });
+      days[dayIndex]?.exercises.push(fromSuggestion(suggestion));
+      paint();
+    },
+    replaceExercise: (dayIndex, replaces, suggestion) => {
+      const list = days[dayIndex]?.exercises ?? [];
+      const at = list.findIndex((e) => nameKey(e.exercise_name) === nameKey(replaces));
+      if (at === -1) return false;
+      list[at] = fromSuggestion(suggestion);
+      paint();
+      return true;
+    },
   };
 }
 
 async function openWorkoutTemplateForm({ template, onSaved }) {
-  const [{ items: library }, full] = await Promise.all([
+  const [{ items: library }, full, coach] = await Promise.all([
     api.exercises(),
     template ? api.workoutTemplate(template.id) : Promise.resolve(null),
+    // The coach button is an extra: the builder opens the same without it.
+    api.workoutCoachStatus().catch(() => ({ enabled: false })),
   ]);
 
   const editor = workoutDaysEditor(full?.days ?? [], library);
@@ -669,8 +699,45 @@ async function openWorkoutTemplateForm({ template, onSaved }) {
     },
   );
 
+  const field = (name) => form.querySelector(`[name="${name}"]`)?.value;
+  const coachButton = coach.enabled
+    ? h(
+        'button',
+        {
+          class: 'btn sm fit-coach-btn',
+          type: 'button',
+          onclick: () =>
+            openPlanCoach({
+              subtitle: 'Rates this template and suggests exercises from your library',
+              remaining: coach.remaining_today,
+              getPlan: () => ({
+                name: field('name'),
+                goal: field('goal'),
+                level: field('level'),
+                days_per_week: Number(field('days_per_week')) || null,
+                days: editor.getDays(),
+              }),
+              ask: async (payload, options) => {
+                const reply = await api.workoutCoachReview(payload, options);
+                coach.remaining_today = reply.remaining_today;
+                return reply;
+              },
+              onAdd: (suggestion, dayIndex, newDayName) => editor.addExercise(dayIndex, suggestion, newDayName),
+              onReplace: (suggestion, dayIndex, replaces) => editor.replaceExercise(dayIndex, replaces, suggestion),
+            }),
+        },
+        renderIcon('sparkle', { size: 15 }),
+        'AI Coach',
+      )
+    : null;
+
   form.querySelector('.form-grid').after(
-    h('div', { class: 'fit-builder-wrap' }, h('h4', { class: 'fit-builder-title' }, 'Training days'), editor.node),
+    h(
+      'div',
+      { class: 'fit-builder-wrap' },
+      h('div', { class: 'fit-builder-head' }, h('h4', { class: 'fit-builder-title' }, 'Training days'), coachButton),
+      editor.node,
+    ),
   );
 
   openModal({ title: template ? `Edit · ${template.name}` : 'New workout plan', body: form, wide: true });

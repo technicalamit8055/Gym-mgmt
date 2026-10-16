@@ -27,6 +27,9 @@
          the system font a beat later. crossorigin is required for font preloads. -->
     <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/css/app.css" />
+    <!-- CoachBook's palettes and screens; inert unless body[data-vertical='coaching']
+         or one of its own .cb-* components is on the page. -->
+    <link rel="stylesheet" href="/css/coaching.css" />
   </head>
   <body>
     <script>
@@ -62,6 +65,14 @@
       if (memberApp && !localStorage.getItem('gymbook.member.token' + (slug ? '.' + slug : ''))) {
         document.documentElement.dataset.splash = 'ink';
       }
+      // Members get the gym illustration instead of the neutral tick. The
+      // vertical isn't known until /api answers, so this goes on the one
+      // setVertical() last saw — a study hall's members see the tick from
+      // their second open on. So do an institute's (CoachBook).
+      var splashVertical = localStorage.getItem('gymbook.splash.vertical');
+      if (memberApp && splashVertical !== 'library' && splashVertical !== 'coaching') {
+        document.documentElement.dataset.splashArt = 'gym';
+      }
     </script>
     <!-- Boot splash. Painted before boot() knows whether this is a gym or a
          study hall, so it carries no brand colour — only the mode tokens the
@@ -78,7 +89,71 @@
             <svg viewBox="0 0 32 32"><path class="splash-check" d="M8.5 16.5l5 5 10-10.5" pathLength="1" /></svg>
           </div>
         </div>
+        <!-- Member app only (data-splash-art). Each item nests three groups:
+             the outer one pops in, the middle one loops, the inner one holds
+             the item's placement — CSS transforms would otherwise overwrite
+             the transform attribute. -->
+        <svg class="splash-art" viewBox="0 0 240 200" aria-hidden="true">
+          <defs>
+            <clipPath id="sp-shaker-clip">
+              <path d="M-19 -21h38l-3 61a4 4 0 0 1-4 4h-24a4 4 0 0 1-4-4z" />
+            </clipPath>
+          </defs>
+          <g class="sp-swoosh">
+            <path class="sp-s1" d="M58 116q-20 30 10 52" />
+            <path class="sp-s2" d="M70 46q22-14 44-10" />
+            <path class="sp-s3" d="M194 80q16 26-8 52" />
+          </g>
+          <g class="sp-sparks">
+            <g class="sp-spark sp-k1"><path d="M120 30l-7-6M127 25l-1-10M134 27l5-8" /></g>
+            <g class="sp-spark sp-k2"><path d="M44 84l-9-2M46 76l-7-6" /></g>
+            <g class="sp-spark sp-k3"><path d="M203 140l8-4M205 148l9 2" /></g>
+          </g>
+          <ellipse class="sp-shadow sp-sh1" cx="112" cy="180" rx="26" ry="3.5" />
+          <ellipse class="sp-shadow sp-sh2" cx="166" cy="180" rx="28" ry="3.5" />
+
+          <g class="sp-pop sp-p1"><g class="sp-loop sp-dumbbell"><g transform="translate(78 86) rotate(-28)">
+            <rect class="sp-ink" x="-47" y="-4" width="94" height="8" rx="3" />
+            <rect class="sp-ink" x="-42" y="-14" width="10" height="28" rx="4" />
+            <rect class="sp-ink" x="32" y="-14" width="10" height="28" rx="4" />
+            <rect class="sp-ink" x="-34" y="-21" width="14" height="42" rx="6" />
+            <rect class="sp-ink" x="20" y="-21" width="14" height="42" rx="6" />
+            <rect class="sp-gold" x="-29" y="-21" width="4" height="42" />
+            <rect class="sp-gold" x="25" y="-21" width="4" height="42" />
+            <rect class="sp-shine" x="-32" y="-16" width="2" height="12" rx="1" />
+            <rect class="sp-shine" x="22" y="-16" width="2" height="12" rx="1" />
+          </g></g></g>
+
+          <g class="sp-pop sp-p2"><g class="sp-loop sp-shaker"><g transform="translate(158 62) rotate(12)">
+            <path class="sp-glass" d="M-19 -21h38l-3 61a4 4 0 0 1-4 4h-24a4 4 0 0 1-4-4z" />
+            <g clip-path="url(#sp-shaker-clip)">
+              <path class="sp-liquid" d="M-60 2q10-5 20 0t20 0t20 0t20 0t20 0t20 0V50H-60z" />
+            </g>
+            <path class="sp-outline" d="M-19 -21h38l-3 61a4 4 0 0 1-4 4h-24a4 4 0 0 1-4-4z" />
+            <path class="sp-tick" d="M9 10h6M11 18h4M9 26h6M11 34h4" />
+            <rect class="sp-shine" x="-14" y="-15" width="4" height="50" rx="2" />
+            <path class="sp-gold" d="M-15 -33q0-12 15-12t15 12z" />
+            <rect class="sp-gold" x="-22" y="-34" width="44" height="13" rx="3" />
+            <rect class="sp-ink" x="-4" y="-52" width="8" height="8" rx="2" />
+            <path class="sp-strap" d="M11 -41q11-8 15 4" />
+          </g></g></g>
+
+          <g class="sp-pop sp-p3"><g class="sp-loop sp-apple"><g transform="translate(112 148)">
+            <path class="sp-gold" d="M0-14c-6-6-24-6-26 12c-2 16 12 32 20 30c3-1 9-1 12 0c8 2 22-14 20-30c-2-18-20-18-26-12z" />
+            <path class="sp-stem" d="M0-14q1-8 4-13" />
+            <path class="sp-leaf" d="M3-22c5-10 15-8 17-4c-6 6-13 7-17 4z" />
+            <path class="sp-glint" d="M-16-5q-2 10 4 18" />
+          </g></g></g>
+
+          <g class="sp-pop sp-p4"><g class="sp-loop sp-jar"><g transform="translate(168 150) rotate(-8)">
+            <rect class="sp-ink" x="-22" y="-19" width="44" height="46" rx="8" />
+            <rect class="sp-gold" x="-20" y="-31" width="40" height="13" rx="3" />
+            <path class="sp-bolt" d="M3-10L-8 5h7l-3 12L8 1H1z" />
+            <rect class="sp-shine" x="-17" y="-13" width="3" height="30" rx="1.5" />
+          </g></g></g>
+        </svg>
         <p class="splash-text">Getting things ready<span class="splash-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
+        <div class="splash-beads" aria-hidden="true"><i></i><i></i><i></i></div>
       </div>
     </div>
     <div id="app"></div>

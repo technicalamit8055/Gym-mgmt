@@ -61,6 +61,25 @@ export function issuePlatformToken(email) {
   return `${payload}.${sign(payload)}`;
 }
 
+/**
+ * Partner-shop token, for a supplement shop signed in to its own panel — not a
+ * gym, not a member, not the operator. `scope: 'seller'` makes it inert on
+ * every other surface (each of them checks its own scope), and `ver` is the
+ * shop's session_version: bumping it on a password change, a reset or a pause
+ * signs out every device the shop was signed in on.
+ */
+export function issueSellerToken(seller) {
+  const payload = b64url(
+    JSON.stringify({
+      scope: 'seller',
+      sub: seller.id,
+      ver: seller.session_version,
+      exp: Math.floor(Date.now() / 1000) + config.tokenTtlSeconds,
+    }),
+  );
+  return `${payload}.${sign(payload)}`;
+}
+
 export function readToken(token) {
   const [payload, signature] = String(token || '').split('.');
   if (!payload || !signature) return null;

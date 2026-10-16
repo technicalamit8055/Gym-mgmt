@@ -1,7 +1,7 @@
 import { api, pathPrefix } from '../api.js';
 import { fitImage } from '../photo.js';
 import { buildForm, clear, confirmDialog, date, h, renderIcon, table, toast } from '../ui.js';
-import { isLibrary } from '../vertical.js';
+import { isEducation, t } from '../vertical.js';
 
 /**
  * Push notifications, from the gym's side: send an announcement to every
@@ -120,7 +120,7 @@ export async function renderNotifications({ reload }) {
     api.pushSettings(),
     api.announcements({ limit: 30 }).catch(() => ({ items: [] })),
   ]);
-  const people = isLibrary() ? 'students' : 'members';
+  const people = isEducation() ? 'students' : 'members';
 
   const reachCard = h(
     'div',
@@ -189,7 +189,7 @@ export async function renderNotifications({ reload }) {
           const urgent = values.urgent === '1';
           confirmDialog({
             title: urgent ? 'Send an urgent announcement?' : 'Send this announcement?',
-            message: `“${values.title.trim()}” goes to every current ${isLibrary() ? 'student' : 'member'}’s notification center, and to ${
+            message: `“${values.title.trim()}” goes to every current ${isEducation() ? 'student' : 'member'}’s notification center, and to ${
               urgent ? 'every' : 'each opted-in'
             } phone straight away. It cannot be recalled.`,
             confirmLabel: 'Send',
@@ -298,7 +298,7 @@ export async function renderNotifications({ reload }) {
       h(
         'p',
         { class: 'muted', style: 'margin:0 0 12px;font-size:13px' },
-        `Times are your ${isLibrary() ? 'library' : 'gym'}’s local time. Each ${isLibrary() ? 'student' : 'member'} can still switch any of these off for themselves.`,
+        `Times are your ${t('org')}’s local time. Each ${isEducation() ? 'student' : 'member'} can still switch any of these off for themselves.`,
       ),
       scheduleForm,
     ),

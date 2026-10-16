@@ -88,6 +88,15 @@ import {
   updateStoreProduct,
 } from '../monetization.js';
 import { isRazorpayOrdersConfigured } from '../razorpay.js';
+import {
+  createSeller,
+  deleteSeller,
+  listSellers,
+  recordSellerPayout,
+  resetSellerPassword,
+  sellerGymOptions,
+  updateSeller,
+} from '../sellers.js';
 import { badRequest, conflict, forbidden, notFound, tooManyRequests, unauthorized } from '../errors.js';
 import { issuePasswordReset } from '../passwordReset.js';
 import { createLimiter } from '../rateLimit.js';
@@ -817,8 +826,10 @@ platformAdminRoutes.delete('/nav-badges/:tab/image', (req, res) => {
   res.json(navBadgeState());
 });
 
+/** The central catalogue only — partner shops keep their own shelves. */
 platformAdminRoutes.get('/store/products', (req, res) => {
   const items = listStoreProducts({
+    sellerId: Number.isInteger(Number(req.query.seller)) && Number(req.query.seller) > 0 ? Number(req.query.seller) : null,
     q: req.query.q ? String(req.query.q).trim() : undefined,
     category: req.query.category ? String(req.query.category) : undefined,
   });
@@ -911,6 +922,34 @@ platformAdminRoutes.get('/store/orders', (req, res) => {
 
 platformAdminRoutes.patch('/store/orders/:id', (req, res) => {
   res.json(updateStoreOrder(Number(req.params.id), req.body));
+});
+
+/* ── Partner shops ─────────────────────────────────────────────────────── */
+
+/** Supplement shops that sell to their area's gyms from their own panel —
+ * see src/sellers.js. */
+platformAdminRoutes.get('/sellers', (_req, res) => {
+  res.json({ items: listSellers(), gyms: sellerGymOptions(), gym_commission_pct: monetizationSettings().store_commission_pct });
+});
+
+platformAdminRoutes.post('/sellers', (req, res) => {
+  res.status(201).json(createSeller(req.body));
+});
+
+platformAdminRoutes.patch('/sellers/:id', (req, res) => {
+  res.json(updateSeller(Number(req.params.id), req.body));
+});
+
+platformAdminRoutes.delete('/sellers/:id', (req, res) => {
+  res.json(deleteSeller(Number(req.params.id)));
+});
+
+platformAdminRoutes.post('/sellers/:id/reset-password', (req, res) => {
+  res.json(resetSellerPassword(Number(req.params.id)));
+});
+
+platformAdminRoutes.post('/sellers/:id/payout', (req, res) => {
+  res.json(recordSellerPayout(Number(req.params.id), req.body));
 });
 
 platformAdminRoutes.get('/commissions', (_req, res) => {

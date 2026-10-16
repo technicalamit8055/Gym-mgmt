@@ -166,7 +166,7 @@ export async function sendLoginOnWhatsApp(req, member, password, { reason = 'iss
         : `Here's your app login for *${gymName}* 💪`,
       '',
       `🌐 App: ${base}/#/portal`,
-      `🆔 ${currentVertical().key === 'library' ? 'Student' : 'Member'} ID: ${member.code}`,
+      `🆔 ${currentVertical().key === 'gym' ? 'Member' : 'Student'} ID: ${member.code}`,
       `🔑 Password: ${secret}`,
       '',
       '✅ Sign in with these, then choose your own password.',

@@ -28,7 +28,7 @@ function storedMode() {
 
 let currentMode = storedMode();
 
-const DEFAULT_THEME = { gym: 'flame', library: 'emerald' };
+const DEFAULT_THEME = { gym: 'flame', library: 'emerald', coaching: 'indigo' };
 
 /**
  * The palette the owner saved on this gym (see publicTenant in
@@ -48,9 +48,16 @@ function paintTheme() {
 }
 
 export function setVertical(type, theme) {
-  vertical = type === 'library' ? 'library' : 'gym';
+  vertical = type === 'library' || type === 'coaching' ? type : 'gym';
   gymTheme = theme || null;
   document.body.dataset.vertical = vertical;
+  // Read by index.html's pre-paint script, which picks the next boot splash
+  // before this module has loaded.
+  try {
+    localStorage.setItem('gymbook.splash.vertical', vertical);
+  } catch {
+    /* storage blocked: the splash falls back to the gym art */
+  }
   document.body.dataset.mode = currentMode;
   paintTheme();
 }
@@ -104,6 +111,11 @@ try {
 }
 
 export const isLibrary = () => vertical === 'library';
+export const isCoaching = () => vertical === 'coaching';
+/** Either education product — the two whose people are students, not
+ * members, and whose copy talks about study rather than training. */
+export const isEducation = () => vertical === 'library' || vertical === 'coaching';
+export const currentVerticalKey = () => vertical;
 
 const TERMS = {
   gym: {
@@ -155,6 +167,32 @@ const TERMS = {
     expenses: 'Expenses',
     shift: 'shift',
     shiftCap: 'Shift',
+  },
+  coaching: {
+    brand: 'CoachBook',
+    tagline: 'Coaching & Institute Management',
+    org: 'institute',
+    orgCap: 'Institute',
+    member: 'Student',
+    members: 'Students',
+    membership: 'Enrollment',
+    memberships: 'Fees & installments',
+    plan: 'Course',
+    plans: 'Courses',
+    checkin: 'Attendance desk',
+    shifts: 'Batches',
+    settings: 'Institute settings',
+    trainer: 'Faculty',
+    staff: 'Faculty & staff',
+    inNow: 'In the institute now',
+    equipment: 'Assets',
+    visit: 'lecture',
+    emergencyContact: 'Guardian',
+    seats: 'Seat map',
+    lockers: 'Lockers',
+    expenses: 'Expenses',
+    shift: 'batch',
+    shiftCap: 'Batch',
   },
 };
 

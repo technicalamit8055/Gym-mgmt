@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { COACHING_MIGRATIONS } from './coaching/schema.js';
 import { config } from './config.js';
 import { backfillFoodFiberSugar, seedFitnessLibraries } from './fitnessSeed.js';
 import { migrateMuscleGroups } from './muscles.js';
@@ -1486,6 +1487,34 @@ const MIGRATIONS = [
   // FCM needs an absolute URL for a notification's picture, and unlike a
   // browser the phone has no page address to resolve a relative one against.
   (db) => ensureColumn(db, 'push_subscriptions', 'origin', 'TEXT'),
+  // The coach in the plan builder (reviewPlan in src/aiCoach.js): each
+  // question asked about a plan being edited, by a member or by a staff user
+  // writing a template — exactly one of the two. Today's rows are the daily
+  // cap; the tokens join the rest of the Vertex bill.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_plan_reviews (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id     INTEGER REFERENCES members(id) ON DELETE CASCADE,
+        user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        mode          TEXT NOT NULL CHECK (mode IN ('ask', 'rate')),
+        question      TEXT NOT NULL,
+        reply         TEXT NOT NULL,
+        input_tokens  INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        CHECK ((member_id IS NULL) <> (user_id IS NULL))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_ai_plan_reviews_member_day ON ai_plan_reviews(member_id, created_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_ai_plan_reviews_user_day ON ai_plan_reviews(user_id, created_at)');
+  },
+
+  /* --------------------------------------------------------- CoachBook --- */
+  // Courses, batches, admissions, installment fees, lecture attendance, the
+  // timetable, tests and study material — see src/coaching/schema.js. Carried
+  // by every tenant's database, like the SeatBook tables above.
+  ...COACHING_MIGRATIONS,
 ];
 
 // Carries the current request's tenant DB file through the async call chain,
@@ -1525,7 +1554,7 @@ export function getTenantTimezone() {
 }
 
 /**
- * Which product this tenant runs: 'gym' or 'library'.
+ * Which product this tenant runs: 'gym', 'library' or 'coaching'.
  *
  * Lives in the store rather than on `req` because bootstrap.js, maintenance.js,
  * server.js's reminder sweep and platformAdmin.js all need it and none of them

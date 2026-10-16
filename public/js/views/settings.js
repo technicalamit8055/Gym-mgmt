@@ -2,7 +2,7 @@ import { ApiError, api, gymPathUrl, pathSlug, session } from '../api.js';
 import { buildForm, date, h, isFullscreen, openModal, relativeDays, renderIcon, setCurrency, toast, toggleFullscreen } from '../ui.js';
 import { cropAndResizeImage, makeAppIcon } from '../photo.js';
 import { appPosterNode, downloadAppPosterPng, printAppPoster } from '../qrcard.js';
-import { getAppMode, getAppTheme, isLibrary, setAppMode, setAppTheme, t, tl } from '../vertical.js';
+import { getAppMode, getAppTheme, isCoaching, isLibrary, setAppMode, setAppTheme, t, tl } from '../vertical.js';
 import { customDomainCard } from './customDomains.js';
 
 /**
@@ -29,7 +29,12 @@ const STATUS_TONE = { active: 'green', trial: 'blue', suspended: 'red', cancelle
 const ART = '/images/settings';
 
 /** The picture and icon that stand for the business: a dumbbell for a gym, books for a library. */
-const mark = () => (isLibrary() ? { icon: 'book', art: 'books.svg' } : { icon: 'dumbbell', art: 'dumbbell.svg' });
+const mark = () =>
+  isCoaching()
+    ? { icon: 'graduation', art: 'books.svg' }
+    : isLibrary()
+      ? { icon: 'book', art: 'books.svg' }
+      : { icon: 'dumbbell', art: 'dumbbell.svg' };
 
 /** Only the zones a gym is plausibly in, plus whatever this browser reports —
  * a free-text IANA name is still accepted, this is just the shortcut. */
@@ -158,7 +163,7 @@ function appQrCard(poster) {
  * decide whether a name search turns it up.
  */
 function appListingCard(tenant, { isAdmin, reload }) {
-  const Noun = isLibrary() ? 'Library' : 'Gym';
+  const Noun = t('orgCap');
   const code = tenant.gym_code || '';
 
   const form = buildForm(
@@ -242,7 +247,7 @@ function subscriptionCard(tenant, billing, reload) {
     'button',
     { class: 'btn primary' },
     renderIcon('crown', { size: 17, stroke: 2 }),
-    tenant.status === 'suspended' ? `Reactivate my ${isLibrary() ? 'library' : 'gym'}` : 'Subscribe',
+    tenant.status === 'suspended' ? `Reactivate my ${t('org')}` : 'Subscribe',
   );
   subscribe.addEventListener('click', async () => {
     subscribe.disabled = true;
@@ -302,8 +307,8 @@ function subscriptionCard(tenant, billing, reload) {
 
 export async function renderSettings({ reload }) {
   const isAdmin = session.can('admin');
-  const noun = isLibrary() ? 'library' : 'gym';
-  const Noun = isLibrary() ? 'Library' : 'Gym';
+  const noun = t('org');
+  const Noun = t('orgCap');
 
   const { tenant } = await api.tenantContext();
   if (!tenant) {
@@ -461,7 +466,11 @@ export async function renderSettings({ reload }) {
         label: 'Tagline',
         value: tenant.tagline || '',
         full: true,
-        placeholder: isLibrary() ? 'e.g. Focus. Study. Succeed.' : 'e.g. Train Harder. Be Stronger.',
+        placeholder: isCoaching()
+          ? 'e.g. Learn. Practise. Succeed.'
+          : isLibrary()
+            ? 'e.g. Focus. Study. Succeed.'
+            : 'e.g. Train Harder. Be Stronger.',
         hint: `Optional. Shown under your name on the ${t('member').toLowerCase()} app QR poster.`,
       },
       { name: 'currency', label: 'Currency', type: 'select', value: tenant.currency, options: CURRENCIES },
@@ -553,7 +562,14 @@ export async function renderSettings({ reload }) {
     );
   };
 
-  const palettes = isLibrary()
+  const palettes = isCoaching()
+    ? [
+      { id: 'indigo', name: 'Scholar Indigo', color: '#818cf8' },
+      { id: 'ocean', name: 'Ocean Teal', color: '#2dd4bf' },
+      { id: 'plum', name: 'Royal Plum', color: '#e879f9' },
+      { id: 'saffron', name: 'Saffron', color: '#fb923c' },
+    ]
+    : isLibrary()
     ? [
       { id: 'emerald', name: 'Emerald Lounge', color: '#10b981' },
       { id: 'sapphire', name: 'Sapphire Night', color: '#38bdf8' },
@@ -567,7 +583,7 @@ export async function renderSettings({ reload }) {
       { id: 'ultramarine', name: 'Ultramarine Blue', color: '#3b82f6' },
       { id: 'gold', name: 'Golden Amber', color: '#f4b400' },
     ];
-  const currentTheme = getAppTheme() || (isLibrary() ? 'emerald' : 'flame');
+  const currentTheme = getAppTheme() || (isCoaching() ? 'indigo' : isLibrary() ? 'emerald' : 'flame');
 
   const grid = h(
     'div',

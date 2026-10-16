@@ -308,6 +308,7 @@ async function pushToSubscriptions(subscriptions, buildPayload, options) {
  */
 function branding() {
   const library = moduleEnabled('seats');
+  const coaching = moduleEnabled('batches');
   const slug = tenantStorage.getStore()?.slug;
   let tenant = null;
   if (slug && slug !== DEFAULT_TENANT_SLUG) {
@@ -318,14 +319,15 @@ function branding() {
     }
   }
   const version = tenant?.logo_version || 1;
-  let icon = library ? '/icons/library/icon-192.png' : '/icons/icon-192.png';
+  const iconDir = library ? '/icons/library' : coaching ? '/icons/coaching' : '/icons';
+  let icon = `${iconDir}/icon-192.png`;
   if (tenant?.has_icon) icon = `/api/platform/tenant-icon/${slug}?v=${version}`;
   else if (tenant?.has_logo) icon = `/api/platform/tenant-logo/${slug}?v=${version}`;
   return {
-    name: tenant?.gym_name || tenant?.display_name || config.gymName || (library ? 'SeatBook' : 'GymBook'),
+    name: tenant?.gym_name || tenant?.display_name || config.gymName || (library ? 'SeatBook' : coaching ? 'CoachBook' : 'GymBook'),
     icon,
     // Android's status-bar icon: a single-colour silhouette (npm run icons:gen).
-    badge: library ? '/icons/library/badge-96.png' : '/icons/badge-96.png',
+    badge: `${iconDir}/badge-96.png`,
   };
 }
 

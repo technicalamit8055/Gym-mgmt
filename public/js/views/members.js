@@ -26,7 +26,8 @@ import { openMemberSeatAssignForm } from './seats.js';
 import { downloadCardPng, idCardNode, printCards, renderCardPngBytes } from '../qrcard.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
-import { isLibrary, t, tl } from '../vertical.js';
+import { isCoaching, isEducation, isLibrary, t, tl } from '../vertical.js';
+import { coachingStudentActions, coachingStudentSection, coachingSummaryCard } from './coaching/studentPanel.js';
 import { workoutDetailBody } from '../workoutDetail.js';
 
 /**
@@ -933,7 +934,10 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
   const latestVisit = member.attendance?.[0];
   const currentlyIn = Boolean(latestVisit && !latestVisit.check_out && latestVisit.check_in.slice(0, 10) === now);
 
-  setActions(
+  // CoachBook: a student is enrolled into a batch and pays a course fee
+  // plan, rather than buying a membership (views/coaching/studentPanel.js).
+  if (isCoaching()) setActions(...coachingStudentActions(member, { reload }));
+  else setActions(
     h(
       'button',
       {
@@ -1072,7 +1076,7 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       ),
     ]);
 
-    openModal({ title: `${isLibrary() ? 'Student' : 'Member'} app login · ${fullName(member)}`, body, footer });
+    openModal({ title: `${isEducation() ? 'Student' : 'Member'} app login · ${fullName(member)}`, body, footer });
   }
 
   const appLoginStatus = {
@@ -1116,19 +1120,30 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
       ...detailRow('mapPin', 'Address', member.address || '—'),
       ...detailRow(
         'users',
-        'Emergency',
-        member.emergency_contact ? `${member.emergency_contact} · ${member.emergency_phone || ''}` : '—',
+        isCoaching() ? 'Guardian' : 'Emergency',
+        member.emergency_contact
+          ? `${member.emergency_contact}${isCoaching() && member.guardian_relation ? ` (${member.guardian_relation})` : ''} · ${member.emergency_phone || ''}`
+          : '—',
       ),
-      ...detailRow('heartPulse', 'Health notes', member.health_notes || '—'),
+      ...(isCoaching()
+        ? [
+            ...detailRow('graduation', 'School · class', [member.school_name, member.current_class].filter(Boolean).join(' · ') || '—'),
+            ...detailRow('target', 'Target exam', member.exam_target || '—'),
+          ]
+        : []),
+      ...detailRow('heartPulse', isCoaching() ? 'Notes' : 'Health notes', member.health_notes || '—'),
       ...detailRow('key', 'Device PIN', member.device_pin ?? muted('Not enrolled')),
       ...detailRow('lock', 'App login', appLoginStatus[member.portal_access]),
-      ...detailRow(
-        isLibrary() ? 'clock' : 'weight',
-        t('shiftCap'),
-        member.session_name
-          ? `${member.session_name} (${member.session_start}–${member.session_end})`
-          : muted(`No assigned ${t('shift')}`),
-      ),
+      // A coaching student's batches are on their academics panel instead.
+      ...(isCoaching()
+        ? []
+        : detailRow(
+            isLibrary() ? 'clock' : 'weight',
+            t('shiftCap'),
+            member.session_name
+              ? `${member.session_name} (${member.session_start}–${member.session_end})`
+              : muted(`No assigned ${t('shift')}`),
+          )),
       ...(isLibrary()
         ? detailRow(
             'seats',
@@ -1354,9 +1369,10 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
         'Outstanding balance',
         member.balance_due > 0 ? h('span', { style: 'color:var(--red)' }, money(member.balance_due)) : money(0),
       ),
-      summaryRow('reports', 'green', 'Total visits', member.visit_count),
-      summaryRow('clock', 'green', 'Last visit', member.last_visit ? date(member.last_visit, { withTime: true }) : 'Never'),
-      summaryRow('crown', 'amber', `${t('membership')}s bought`, member.subscriptions.length),
+      summaryRow('reports', 'green', isCoaching() ? 'Gate check-ins' : 'Total visits', member.visit_count),
+      summaryRow('clock', 'green', isCoaching() ? 'Last check-in' : 'Last visit', member.last_visit ? date(member.last_visit, { withTime: true }) : 'Never'),
+      // A CoachBook student buys a course fee plan, shown on their academics panel.
+      isCoaching() ? null : summaryRow('crown', 'amber', `${t('membership')}s bought`, member.subscriptions.length),
     ),
   );
 
@@ -1748,7 +1764,9 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
   const history = h(
     'div',
     { class: 'md-row-history' },
-    h('div', { class: 'md-stack' }, membershipHistoryCard, classBookingsCard),
+    // Memberships and class bookings are gym/library records; a CoachBook
+    // student's batches and fees are on the academics panel above.
+    isCoaching() ? null : h('div', { class: 'md-stack' }, membershipHistoryCard, classBookingsCard),
     paymentsCard,
     visitsCard,
   );
@@ -1889,10 +1907,11 @@ export async function renderMemberDetail({ params, setTitle, setActions, reload,
     'div',
     { class: 'md-page md-stack' },
     h('a', { href: '#/members', class: 'md-back' }, renderIcon('arrowLeft', { size: 16 }), `Back to ${tl('members')}`),
-    h('div', { class: 'md-row-3' }, profileCard, membershipCard, accountCard),
-    // Gym only: the fitness module is not part of SeatBook, and its API 404s
-    // there — see requireModule in src/verticals.js.
-    isLibrary() ? null : fitnessSection(member, { reload }),
+    h('div', { class: 'md-row-3' }, profileCard, isCoaching() ? coachingSummaryCard(member, { reload }) : membershipCard, accountCard),
+    isCoaching() ? coachingStudentSection(member, { reload, navigate }) : null,
+    // Gym only: the fitness module is not part of SeatBook or CoachBook, and
+    // its API 404s there — see requireModule in src/verticals.js.
+    isLibrary() || isCoaching() ? null : fitnessSection(member, { reload }),
     qrCardSection,
     biometricCard,
     documentsCard,

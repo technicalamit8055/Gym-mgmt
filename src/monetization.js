@@ -6,6 +6,7 @@ import { tenantStorage } from './db.js';
 import { badRequest, conflict, HttpError, notFound } from './errors.js';
 import { sniffMedia } from './exerciseCatalog.js';
 import { activateFitnessAddon } from './fitness.js';
+import { emailEnabled, sendEmail } from './mailer.js';
 import { notifyMember } from './notifications.js';
 import { createOrder, isRazorpayOrdersConfigured } from './razorpay.js';
 import { findTenantBySlug, getRegistryDb, tenantDbPath } from './tenants.js';
@@ -84,7 +85,13 @@ const STORE_ORDERS_TABLE = `CREATE TABLE IF NOT EXISTS store_orders (
       tracking_url        TEXT,
       created_at          TEXT NOT NULL DEFAULT (datetime('now')),
       paid_at             TEXT,
-      updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      seller_id           INTEGER,
+      seller_fee_pct      REAL,
+      seller_fee_amount   REAL,
+      seller_amount       REAL,
+      seller_payout_ref   TEXT,
+      seller_paid_at      TEXT
     );`;
 
 const ORDER_COLUMNS_V1 = [
@@ -124,6 +131,26 @@ function migrate(handle) {
       throw err;
     }
   }
+
+  // Partner shops (see src/sellers.js): who sells a product, who fulfils an
+  // order, and the shop's side of the money on it. NULL is the platform's own.
+  ensure('store_products', 'seller_id', 'INTEGER');
+  ensure('store_sellers', 'owned', 'INTEGER NOT NULL DEFAULT 0');
+  ensure('store_sellers', 'gym_commission_pct', 'REAL');
+  for (const [column, type] of [
+    ['seller_id', 'INTEGER'],
+    ['seller_fee_pct', 'REAL'],
+    ['seller_fee_amount', 'REAL'],
+    ['seller_amount', 'REAL'],
+    ['seller_payout_ref', 'TEXT'],
+    ['seller_paid_at', 'TEXT'],
+  ]) {
+    ensure('store_orders', column, type);
+  }
+  handle.exec(`
+    CREATE INDEX IF NOT EXISTS idx_store_products_seller ON store_products(seller_id);
+    CREATE INDEX IF NOT EXISTS idx_store_orders_seller ON store_orders(seller_id);
+  `);
 }
 
 const initialised = new WeakSet();
@@ -276,6 +303,43 @@ function db() {
       PRIMARY KEY (product_id, badge_id)
     );
     CREATE INDEX IF NOT EXISTS idx_store_product_badges_badge ON store_product_badges(badge_id);
+
+    -- Partner supplement shops, each signing in to its own panel. A gym is
+    -- served by at most one shop: its members see that shop's shelf, and the
+    -- shop fulfils their orders. See src/sellers.js.
+    CREATE TABLE IF NOT EXISTS store_sellers (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      name                 TEXT NOT NULL,
+      owner_name           TEXT NOT NULL,
+      email                TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      phone                TEXT NOT NULL,
+      city                 TEXT NOT NULL,
+      area                 TEXT,
+      address              TEXT,
+      gstin                TEXT,
+      password_hash        TEXT NOT NULL,
+      session_version      INTEGER NOT NULL DEFAULT 1,
+      must_change_password INTEGER NOT NULL DEFAULT 1,
+      platform_fee_pct     REAL NOT NULL DEFAULT 10 CHECK (platform_fee_pct BETWEEN 0 AND 100),
+      -- 1 = the operator's own store (a dark store): no platform fee, and its
+      -- takings are the operator's already, so there is nothing to pay out.
+      owned                INTEGER NOT NULL DEFAULT 0,
+      -- The gym's cut on this shop's orders. NULL follows the platform-wide
+      -- rate; 0 switches gym commission off for this shop.
+      gym_commission_pct   REAL CHECK (gym_commission_pct IS NULL OR gym_commission_pct BETWEEN 0 AND 100),
+      delivery_eta         TEXT,
+      pickup_eta           TEXT,
+      active               INTEGER NOT NULL DEFAULT 1,
+      last_login_at        TEXT,
+      created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS store_seller_gyms (
+      tenant_slug TEXT PRIMARY KEY,
+      seller_id   INTEGER NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_store_seller_gyms_seller ON store_seller_gyms(seller_id);
   `);
   migrate(handle);
 
@@ -289,6 +353,10 @@ const one = (sql, ...params) => {
 };
 const many = (sql, ...params) => db().prepare(sql).all(...params).map((row) => ({ ...row }));
 const exec = (sql, ...params) => db().prepare(sql).run(...params);
+
+/** The store's registry handles, for src/sellers.js — the same tables, opened
+ * (and migrated) the same way. */
+export const storeRegistry = { one, many, exec, tx: (fn) => registryTx(fn) };
 
 function registryTx(fn) {
   const handle = db();
@@ -533,8 +601,19 @@ function removeStoreImage(file) {
   }
 }
 
-export function addProductImage(productId, bytes) {
-  if (!one('SELECT id FROM store_products WHERE id = ?', productId)) throw notFound('Product not found');
+/**
+ * The product, when the caller may touch it. `sellerId` undefined is the
+ * operator (any product); a number is one partner shop, which only ever sees
+ * its own shelf — anyone else's product is "not found", not "forbidden".
+ */
+function productFor(id, sellerId) {
+  const row = one('SELECT * FROM store_products WHERE id = ?', id);
+  if (!row || (sellerId !== undefined && (row.seller_id ?? null) !== sellerId)) throw notFound('Product not found');
+  return row;
+}
+
+export function addProductImage(productId, bytes, { sellerId } = {}) {
+  productFor(productId, sellerId);
   const count = one('SELECT COUNT(*) AS n FROM store_product_images WHERE product_id = ?', productId).n;
   if (count >= 8) throw badRequest('A product can have at most 8 photos');
   const file = writeStoreImage(`p${productId}`, bytes);
@@ -543,7 +622,8 @@ export function addProductImage(productId, bytes) {
   return getStoreProduct(productId);
 }
 
-export function deleteProductImage(productId, imageId) {
+export function deleteProductImage(productId, imageId, { sellerId } = {}) {
+  productFor(productId, sellerId);
   const image = one('SELECT * FROM store_product_images WHERE id = ? AND product_id = ?', imageId, productId);
   if (!image) throw notFound('Photo not found');
   exec('DELETE FROM store_product_images WHERE id = ?', image.id);
@@ -552,7 +632,8 @@ export function deleteProductImage(productId, imageId) {
 }
 
 /** Moves one photo to the front — the one product cards show. */
-export function makeProductImagePrimary(productId, imageId) {
+export function makeProductImagePrimary(productId, imageId, { sellerId } = {}) {
+  productFor(productId, sellerId);
   const image = one('SELECT * FROM store_product_images WHERE id = ? AND product_id = ?', imageId, productId);
   if (!image) throw notFound('Photo not found');
   const min = one('SELECT MIN(sort_order) AS n FROM store_product_images WHERE product_id = ?', productId).n;
@@ -623,10 +704,16 @@ function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map(), bad
   };
 }
 
-export function listStoreProducts({ activeOnly = false, q, category } = {}) {
+/** `sellerId`: undefined lists every product, null the platform's own
+ * catalogue, a number one partner shop's shelf. */
+export function listStoreProducts({ activeOnly = false, q, category, sellerId } = {}) {
   const where = [];
   const params = [];
   if (activeOnly) where.push('active = 1');
+  if (sellerId !== undefined) {
+    where.push('seller_id IS ?');
+    params.push(sellerId);
+  }
   if (category && STORE_CATEGORIES.includes(category)) {
     where.push('category = ?');
     params.push(category);
@@ -719,7 +806,9 @@ function assertPricing(mrp, price) {
   if (price > mrp) throw badRequest('The selling price cannot be above the MRP', { price: 'must not exceed MRP' });
 }
 
-export function createStoreProduct(payload) {
+/** A partner shop's products carry its `sellerId`. Quality badges are the
+ * operator's to vouch for, so a shop's own listing never sets them. */
+export function createStoreProduct(payload, { sellerId = null } = {}) {
   const body = parse(payload, {
     ...PRODUCT_FIELDS,
     title: { ...PRODUCT_FIELDS.title, required: true },
@@ -731,13 +820,13 @@ export function createStoreProduct(payload) {
   assertPricing(body.mrp, body.price);
   const variants = cleanVariants(payload?.variants) ?? [];
   for (const v of variants) assertPricing(v.mrp ?? body.mrp, v.price ?? body.price);
-  const badgeIds = cleanBadgeIds(payload?.badge_ids) ?? [];
+  const badgeIds = sellerId === null ? (cleanBadgeIds(payload?.badge_ids) ?? []) : [];
 
   return registryTx(() => {
     const info = exec(
       `INSERT INTO store_products (title, brand, category, description, image_url, nutrition_facts, lab_report_url,
-                                   mrp, price, featured, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                   mrp, price, featured, active, seller_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       body.title,
       body.brand,
       body.category,
@@ -749,6 +838,7 @@ export function createStoreProduct(payload) {
       body.price,
       body.featured ?? 0,
       body.active ?? 1,
+      sellerId,
     );
     const id = Number(info.lastInsertRowid);
     writeVariants(id, variants);
@@ -757,9 +847,9 @@ export function createStoreProduct(payload) {
   });
 }
 
-export function updateStoreProduct(id, payload) {
-  const current = one('SELECT * FROM store_products WHERE id = ?', id);
-  if (!current) throw notFound('Product not found');
+export function updateStoreProduct(id, payload, { sellerId } = {}) {
+  const current = productFor(id, sellerId);
+  const byShop = current.seller_id !== null && current.seller_id !== undefined;
   const body = parse(payload, PRODUCT_FIELDS);
   const sets = {};
   for (const [key, value] of Object.entries(body)) {
@@ -778,7 +868,7 @@ export function updateStoreProduct(id, payload) {
   assertPricing(mrp, price);
   const variants = cleanVariants(payload?.variants);
   for (const v of variants ?? []) assertPricing(v.mrp ?? mrp, v.price ?? price);
-  const badgeIds = cleanBadgeIds(payload?.badge_ids);
+  const badgeIds = sellerId === undefined ? cleanBadgeIds(payload?.badge_ids) : undefined;
 
   return registryTx(() => {
     const columns = Object.keys(sets);
@@ -791,8 +881,9 @@ export function updateStoreProduct(id, payload) {
     }
     if (variants) writeVariants(id, variants);
     if (badgeIds) writeProductBadges(id, badgeIds);
-    // The last active product going away would leave a live store empty.
-    if (sets.active === 0) guardLiveStoreHasStock();
+    // The last active product going away would leave a live store empty. A
+    // shop's gyms fall back to the central catalogue instead (catalogFor).
+    if (sets.active === 0 && !byShop) guardLiveStoreHasStock();
     return getStoreProduct(id);
   });
 }
@@ -805,12 +896,13 @@ function guardLiveStoreHasStock() {
 
 /** A product that was ever ordered is retired rather than deleted, so order
  * history keeps pointing at something real. */
-export function deleteStoreProduct(id) {
-  if (!one('SELECT id FROM store_products WHERE id = ?', id)) throw notFound('Product not found');
+export function deleteStoreProduct(id, { sellerId } = {}) {
+  const product = productFor(id, sellerId);
+  const byShop = product.seller_id !== null && product.seller_id !== undefined;
   return registryTx(() => {
     if (one('SELECT 1 AS ok FROM store_order_items WHERE product_id = ? LIMIT 1', id)) {
       exec("UPDATE store_products SET active = 0, updated_at = datetime('now') WHERE id = ?", id);
-      guardLiveStoreHasStock();
+      if (!byShop) guardLiveStoreHasStock();
       return { retired: true };
     }
     const files = many('SELECT file FROM store_product_images WHERE product_id = ?', id).map((r) => r.file);
@@ -818,10 +910,46 @@ export function deleteStoreProduct(id) {
     exec('DELETE FROM store_product_images WHERE product_id = ?', id);
     exec('DELETE FROM store_product_badges WHERE product_id = ?', id);
     exec('DELETE FROM store_products WHERE id = ?', id);
-    guardLiveStoreHasStock();
+    if (!byShop) guardLiveStoreHasStock();
     for (const file of files) removeStoreImage(file);
     return { deleted: true };
   });
+}
+
+/* ── Which shelf a gym shops from ─────────────────────────────────────── */
+
+/**
+ * The partner shop the operator assigned to this gym, while it is active and
+ * has something on its shelf — otherwise the platform's central catalogue.
+ * One shelf per gym, so a cart never mixes two sellers and every order has
+ * exactly one shop to fulfil it. Storefront and checkout both ask here, so a
+ * member can never buy from a shelf their gym does not show.
+ */
+export function catalogFor(tenantSlug) {
+  const seller = one(
+    `SELECT s.* FROM store_seller_gyms g JOIN store_sellers s ON s.id = g.seller_id
+     WHERE g.tenant_slug = ? AND s.active = 1`,
+    tenantSlug,
+  );
+  if (seller && one('SELECT 1 AS ok FROM store_products WHERE seller_id = ? AND active = 1', seller.id)) {
+    return { seller, sellerId: seller.id };
+  }
+  return { seller: null, sellerId: null };
+}
+
+/**
+ * The cuts on an order from `seller`'s shelf (null: the central catalogue).
+ * The gym's share follows the shop's own setting when it has one — a custom
+ * rate, or 0 for none — and the platform-wide rate otherwise. The operator's
+ * own store pays no platform fee: its takings are the operator's already.
+ */
+export function shopRates(seller, settings = monetizationSettings()) {
+  const gymPct = seller?.gym_commission_pct ?? settings.store_commission_pct;
+  return {
+    gym_commission_pct: gymPct,
+    gym_commission_custom: seller ? seller.gym_commission_pct !== null && seller.gym_commission_pct !== undefined : false,
+    platform_fee_pct: seller ? (seller.owned ? 0 : seller.platform_fee_pct) : null,
+  };
 }
 
 /* ── Checkout ─────────────────────────────────────────────────────────── */
@@ -988,13 +1116,14 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
     throw badRequest('Enter a 6-digit PIN code', { pincode: 'must be 6 digits' });
   }
 
+  const { seller, sellerId } = catalogFor(tenantSlug);
   const lines = items.map((raw, i) => {
     const item = parse(raw, {
       product_id: { type: 'int', required: true, min: 1 },
       variant_id: { type: 'int', min: 1 },
       quantity: { type: 'int', required: true, min: 1, max: 10 },
     });
-    const product = one('SELECT * FROM store_products WHERE id = ? AND active = 1', item.product_id);
+    const product = one('SELECT * FROM store_products WHERE id = ? AND active = 1 AND seller_id IS ?', item.product_id, sellerId);
     if (!product) throw badRequest(`Item ${i + 1} is no longer available`, { items: `row ${i + 1} unavailable` });
     const variants = many('SELECT * FROM store_product_variants WHERE product_id = ?', product.id);
     let variant = null;
@@ -1022,7 +1151,14 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
   const subtotal = round2(lines.reduce((sum, l) => sum + l.line_total, 0));
   const mrpTotal = round2(lines.reduce((sum, l) => sum + l.unit_mrp * l.quantity, 0));
   if (subtotal < 1) throw badRequest('The order total must be at least ₹1');
-  const commissionPct = settings.store_commission_pct;
+  const rates = shopRates(seller, settings);
+  const commissionPct = rates.gym_commission_pct;
+  const commission = round2((subtotal * commissionPct) / 100);
+  // A partner shop's side, fixed now like the gym's: the platform's fee, and
+  // what is left for the shop once the gym's cut and the fee are taken.
+  const sellerFeePct = rates.platform_fee_pct;
+  const sellerFee = seller ? round2((subtotal * sellerFeePct) / 100) : null;
+  const sellerAmount = seller ? Math.max(0, round2(subtotal - commission - sellerFee)) : null;
   const code = orderCode();
 
   const order = await createOrder({
@@ -1036,8 +1172,8 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
       `INSERT INTO store_orders
          (order_code, tenant_slug, member_id, member_name, subtotal, mrp_total, total_amount, commission_pct,
           commission_amount, razorpay_order_id, fulfillment_method, shipping_name, shipping_phone, shipping_address,
-          shipping_city, shipping_state, shipping_pincode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          shipping_city, shipping_state, shipping_pincode, seller_id, seller_fee_pct, seller_fee_amount, seller_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       code,
       tenantSlug,
       member.id,
@@ -1046,7 +1182,7 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
       mrpTotal,
       subtotal,
       commissionPct,
-      round2((subtotal * commissionPct) / 100),
+      commission,
       order.id,
       method,
       ship.name,
@@ -1055,6 +1191,10 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
       ship.city ?? null,
       ship.state ?? null,
       ship.pincode ?? null,
+      sellerId,
+      sellerFeePct,
+      sellerFee,
+      sellerAmount,
     );
     const orderId = Number(info.lastInsertRowid);
     for (const l of lines) {
@@ -1090,7 +1230,7 @@ export function settleStorePayment({ razorpayOrderId, paymentId }) {
   if (!order) throw notFound('No store order matches that payment');
   if (order.payment_status === 'paid') return { order: storeOrder(order.id), settled: false };
 
-  return registryTx(() => {
+  const result = registryTx(() => {
     const claimed = exec(
       `UPDATE store_orders SET payment_status = 'paid', razorpay_payment_id = ?, paid_at = datetime('now'),
               updated_at = datetime('now')
@@ -1099,6 +1239,9 @@ export function settleStorePayment({ razorpayOrderId, paymentId }) {
     ).changes;
     if (!claimed) return { order: storeOrder(order.id), settled: false };
 
+    // A shop with gym commission switched off earns the gym nothing, and a
+    // ₹0 line in the gym's statement would only be noise.
+    if (!(order.commission_amount > 0)) return { order: storeOrder(order.id), settled: true };
     const earnedOn = withTenantDb(order.tenant_slug, () => today());
     exec(
       `INSERT OR IGNORE INTO gym_commissions
@@ -1115,6 +1258,40 @@ export function settleStorePayment({ razorpayOrderId, paymentId }) {
     );
     return { order: storeOrder(order.id), settled: true };
   });
+  if (result.settled && result.order.seller_id) notifySellerNewOrder(result.order);
+  return result;
+}
+
+/**
+ * An email to the partner shop the moment one of its orders is paid, so a
+ * shop that is not watching its panel still packs it the same day. Best
+ * effort: no mail server, or a failed send, never touches the payment.
+ */
+function notifySellerNewOrder(order) {
+  const seller = one('SELECT name, email FROM store_sellers WHERE id = ?', order.seller_id);
+  if (!seller || !emailEnabled()) return;
+  const gym = order.tenant_slug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(order.tenant_slug);
+  const gymName = gym?.gym_name || gym?.display_name || order.tenant_slug;
+  const lines = order.items.map((i) => `  ${i.quantity} × ${i.brand ? `${i.brand} ` : ''}${i.title}${i.variant_label ? ` (${i.variant_label})` : ''}`);
+  const where =
+    order.fulfillment_method === 'pickup'
+      ? `Pickup at ${gymName} — take it to the gym's front desk.`
+      : `Deliver to ${order.shipping_name}, ${[order.shipping_address, order.shipping_city, order.shipping_pincode].filter(Boolean).join(', ')}`;
+  sendEmail({
+    to: seller.email,
+    subject: `New order ${order.order_code} · ₹${order.total_amount}`,
+    text: [
+      `Hi ${seller.name},`,
+      '',
+      `${order.member_name || 'A member'} of ${gymName} just paid for order ${order.order_code}:`,
+      ...lines,
+      '',
+      where,
+      `Phone: ${order.shipping_phone}`,
+      '',
+      `You receive ₹${order.seller_amount} once it is delivered. Open your shop panel to pack it and add tracking.`,
+    ].join('\n'),
+  }).catch((err) => console.error('[store] seller order email failed:', err.message));
 }
 
 /**
@@ -1139,23 +1316,51 @@ export function listMemberOrders(tenantSlug, memberId) {
 
 /* ── Operator: orders, commissions, payouts ───────────────────────────── */
 
-export function listStoreOrders({ status, tenantSlug, limit = 200 } = {}) {
-  const where = ["payment_status != 'pending'"];
+/** `sellerId` as in listStoreProducts: undefined every order, a number one
+ * partner shop's. Each row names its shop and its gym for the lists. */
+export function listStoreOrders({ status, tenantSlug, sellerId, limit = 200 } = {}) {
+  const where = ["o.payment_status != 'pending'"];
   const params = [];
   if (status && FULFILLMENT_STATUSES.includes(status)) {
-    where.push('fulfillment_status = ?');
+    where.push('o.fulfillment_status = ?');
     params.push(status);
   }
   if (tenantSlug) {
-    where.push('tenant_slug = ?');
+    where.push('o.tenant_slug = ?');
     params.push(tenantSlug);
   }
+  if (sellerId !== undefined) {
+    where.push('o.seller_id IS ?');
+    params.push(sellerId);
+  }
   const orders = many(
-    `SELECT * FROM store_orders WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`,
+    `SELECT o.*, s.name AS seller_name FROM store_orders o LEFT JOIN store_sellers s ON s.id = o.seller_id
+     WHERE ${where.join(' AND ')} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`,
     ...params,
     Math.min(Number(limit) || 200, 500),
   );
-  return orders.map((o) => ({ ...o, items: many('SELECT * FROM store_order_items WHERE order_id = ? ORDER BY id', o.id) }));
+  const gymNames = new Map();
+  const gymName = (slug) => {
+    if (!gymNames.has(slug)) {
+      const tenant = slug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(slug);
+      gymNames.set(slug, tenant?.gym_name || tenant?.display_name || slug);
+    }
+    return gymNames.get(slug);
+  };
+  return orders.map((o) => ({
+    ...o,
+    gym_name: gymName(o.tenant_slug),
+    items: many('SELECT * FROM store_order_items WHERE order_id = ? ORDER BY id', o.id),
+  }));
+}
+
+/** The steps a partner shop takes itself. "Ready at the gym" and a pickup's
+ * "collected" belong to the gym's desk, which actually has the parcel. */
+function assertShopMayMove(order, next) {
+  if (next === 'ready') throw badRequest('The gym’s front desk marks a pickup as received', { fulfillment_status: 'gym desk only' });
+  if (next === 'delivered' && order.fulfillment_method === 'pickup') {
+    throw badRequest('The gym’s front desk marks a pickup as collected', { fulfillment_status: 'gym desk only' });
+  }
 }
 
 /**
@@ -1164,9 +1369,9 @@ export function listStoreOrders({ status, tenantSlug, limit = 200 } = {}) {
  * unless the operator has already paid it out, which is then theirs to settle
  * by hand rather than something to silently claw back.
  */
-export function updateStoreOrder(id, payload) {
+export function updateStoreOrder(id, payload, { sellerId } = {}) {
   const order = one('SELECT * FROM store_orders WHERE id = ?', id);
-  if (!order) throw notFound('Order not found');
+  if (!order || (sellerId !== undefined && order.seller_id !== sellerId)) throw notFound('Order not found');
   if (order.payment_status === 'pending') throw badRequest('That order was never paid for');
   const body = parse(payload, {
     fulfillment_status: { type: 'enum', values: FULFILLMENT_STATUSES },
@@ -1182,6 +1387,12 @@ export function updateStoreOrder(id, payload) {
   }
   if (body.fulfillment_status === 'ready' && order.fulfillment_method !== 'pickup') {
     throw badRequest('"Ready at the gym" is only for pickup orders', { fulfillment_status: 'pickup only' });
+  }
+  if (sellerId !== undefined && body.fulfillment_status && body.fulfillment_status !== order.fulfillment_status) {
+    assertShopMayMove(order, body.fulfillment_status);
+  }
+  if (order.fulfillment_status === 'delivered' && body.fulfillment_status === 'cancelled' && order.seller_paid_at) {
+    throw conflict('The shop has already been paid for this order — settle the refund with them by hand');
   }
 
   const updated = registryTx(() => {
@@ -1453,17 +1664,25 @@ export function storefront(tenantSlug) {
   const settings = monetizationSettings();
   const live = settings.store_status === 'live';
   const tenant = tenantSlug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(tenantSlug);
+  const { seller, sellerId } = catalogFor(tenantSlug);
+  const products = live ? listStoreProducts({ activeOnly: true, sellerId }) : [];
+  // A banner pointing at a product this gym's shelf does not carry would open
+  // nothing, so it is left out; category and plain banners show everywhere.
+  const onShelf = new Set(products.map((p) => String(p.id)));
   return {
     status: settings.store_status,
     payments_ready: isRazorpayOrdersConfigured(),
     delivery: {
-      eta: settings.delivery_eta,
+      eta: seller?.delivery_eta || settings.delivery_eta,
       pickup_enabled: Boolean(settings.pickup_enabled),
-      pickup_eta: settings.pickup_eta,
+      pickup_eta: seller?.pickup_eta || settings.pickup_eta,
       gym_name: tenant?.gym_name || tenant?.display_name || 'your gym',
     },
-    banners: live ? listBanners({ activeOnly: true }) : [],
-    products: live ? listStoreProducts({ activeOnly: true }) : [],
+    seller: seller ? { name: seller.name, city: seller.city, area: seller.area } : null,
+    banners: live
+      ? listBanners({ activeOnly: true }).filter((b) => b.link_type !== 'product' || onShelf.has(String(b.link_value)))
+      : [],
+    products,
   };
 }
 
@@ -1540,7 +1759,9 @@ export function tenantCommissionSummary(tenantSlug, from) {
   const settings = monetizationSettings();
   return {
     ...Object.fromEntries(Object.entries(row).map(([k, v]) => [k, round2(v)])),
-    store_commission_pct: settings.store_commission_pct,
+    // What this gym actually earns on its shelf — a shop serving it may carry
+    // its own rate, or none.
+    store_commission_pct: shopRates(catalogFor(tenantSlug).seller, settings).gym_commission_pct,
     addon_commission_pct: settings.addon_commission_pct,
     store_status: settings.store_status,
   };

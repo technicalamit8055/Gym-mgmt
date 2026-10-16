@@ -49,6 +49,38 @@ const TYPE_COPY = {
     livesAt: 'Your library lives at',
     submitLabel: 'Create my hall',
   },
+  coaching: {
+    heading: 'Set up your institute',
+    orgSection: 'Your institute',
+    orgLabel: 'Institute name',
+    orgPlaceholder: 'Apex Coaching Classes',
+    orgHint: 'Shown to staff, on student ID cards, fee receipts and parent messages.',
+    addressLabel: 'Institute address',
+    livesAt: 'Your institute lives at',
+    submitLabel: 'Create my institute',
+  },
+};
+
+/** What the "done" screen says, per product. */
+const DONE_COPY = {
+  gym: {
+    ready: 'Your gym is ready',
+    starter: (n) => `${n} starter plans are ready to edit under Plans.`,
+    next: 'Add your members, then print their QR cards from the check-in desk.',
+    open: 'Open my gym',
+  },
+  library: {
+    ready: 'Your library is ready',
+    starter: (n) => `${n} starter passes are ready to edit under Passes.`,
+    next: 'Map your seats — the seat map is where everything starts.',
+    open: 'Open my library',
+  },
+  coaching: {
+    ready: 'Your institute is ready',
+    starter: () => 'A starter course, batch and 3-installment fee structure are ready to edit under Courses & batches.',
+    next: 'Add your courses and batches, then admit students — parents get attendance and fee alerts on WhatsApp once you link it.',
+    open: 'Open my institute',
+  },
 };
 
 /**
@@ -84,22 +116,23 @@ function field(label, control, { hint, full = true } = {}) {
 /** The screen after a successful signup: the address, and the way in. */
 function renderDone({ result }) {
   const url = result.app_url || gymPathUrl(result.slug);
-  const isLibrary = result.business_type === 'library';
+  const type = TYPE_COPY[result.business_type] ? result.business_type : 'gym';
+  const done = DONE_COPY[type];
 
   return h(
     'div',
     { class: 'onboard' },
     h(
       'div',
-      { class: 'onboard-card onboard-done', 'data-brand': isLibrary ? 'library' : undefined },
+      { class: 'onboard-card onboard-done', 'data-brand': type === 'gym' ? undefined : type },
       h('div', { class: 'onboard-tick' }, renderIcon('check', { size: 26, stroke: 2.5 })),
-      h('h1', {}, isLibrary ? 'Your library is ready' : 'Your gym is ready'),
+      h('h1', {}, done.ready),
       h('p', { class: 'sub' }, `${result.gym_name} is set up and your ${result.trial_label} has started.`),
 
       h(
         'div',
         { class: 'onboard-url' },
-        h('span', { class: 'muted' }, isLibrary ? 'Your library lives at' : 'Your gym lives at'),
+        h('span', { class: 'muted' }, TYPE_COPY[type].livesAt),
         h('code', {}, url),
         h(
           'button',
@@ -125,32 +158,18 @@ function renderDone({ result }) {
           'li',
           {},
           result.signedInAlready
-            ? `You are signed in as ${result.admin_email} — the owner of this gym.`
+            ? `You are signed in as ${result.admin_email} — the owner of this ${TYPE_COPY[type].orgSection.replace('Your ', '')}.`
             : `Sign in as ${result.admin_email} with the password you just chose.`,
         ),
-        result.starter_plans
-          ? h(
-              'li',
-              {},
-              isLibrary
-                ? `${result.starter_plans} starter passes are ready to edit under Passes.`
-                : `${result.starter_plans} starter plans are ready to edit under Plans.`,
-            )
-          : null,
-        h(
-          'li',
-          {},
-          isLibrary
-            ? 'Map your seats — the seat map is where everything starts.'
-            : 'Add your members, then print their QR cards from the check-in desk.',
-        ),
+        result.starter_plans || type === 'coaching' ? h('li', {}, done.starter(result.starter_plans)) : null,
+        h('li', {}, done.next),
         h('li', {}, 'Bookmark the link above — it is where your staff sign in.'),
       ),
 
       // A real navigation, not an in-SPA one: this page is on the root domain
       // and the gym is somewhere else — another path, or another origin
       // entirely under subdomain addressing.
-      h('a', { class: 'btn primary block lg', href: url }, 'Open my gym'),
+      h('a', { class: 'btn primary block lg', href: url }, type === 'gym' ? 'Open my gym' : done.open),
 
       h(
         'p',
@@ -171,11 +190,13 @@ export function renderSignup({ context, navigate, rerender }) {
   let currentType = landingBrand === 'library' ? 'library' : 'gym';
   const typeGym = h('input', { type: 'radio', name: 'business_type', value: 'gym' });
   const typeLibrary = h('input', { type: 'radio', name: 'business_type', value: 'library' });
+  const typeCoaching = h('input', { type: 'radio', name: 'business_type', value: 'coaching' });
   typeGym.checked = currentType === 'gym';
   typeLibrary.checked = currentType === 'library';
+  typeCoaching.checked = currentType === 'coaching';
   const typeChoice = h(
     'div',
-    { class: 'type-choice full' },
+    { class: 'type-choice has-3 full' },
     h(
       'label',
       { class: 'type-card' },
@@ -189,6 +210,13 @@ export function renderSignup({ context, navigate, rerender }) {
       typeLibrary,
       h('span', { class: 'icon' }, renderIcon('book', { size: 20 })),
       h('div', {}, h('strong', {}, 'Library / study hall'), h('span', { class: 'muted' }, 'Seats, shifts, passes')),
+    ),
+    h(
+      'label',
+      { class: 'type-card' },
+      typeCoaching,
+      h('span', { class: 'icon' }, renderIcon('graduation', { size: 20 })),
+      h('div', {}, h('strong', {}, 'Coaching / Tuition Center'), h('span', { class: 'muted' }, 'Batches, fees, tests, parent alerts')),
     ),
   );
 
@@ -378,7 +406,7 @@ export function renderSignup({ context, navigate, rerender }) {
   const heading = h('h1', {}, TYPE_COPY[currentType].heading);
   const onboardCard = h(
     'div',
-    { class: 'onboard-card', 'data-brand': currentType === 'library' ? 'library' : undefined },
+    { class: 'onboard-card', 'data-brand': currentType === 'gym' ? undefined : currentType },
     h(
       'button',
       { class: 'btn sm ghost onboard-back', type: 'button', onclick: () => navigate('/') },
@@ -402,11 +430,12 @@ export function renderSignup({ context, navigate, rerender }) {
     gymName.placeholder = copy.orgPlaceholder;
     addressLabelNode.textContent = copy.addressLabel;
     submit.textContent = copy.submitLabel;
-    if (type === 'library') onboardCard.setAttribute('data-brand', 'library');
-    else onboardCard.removeAttribute('data-brand');
+    if (type === 'gym') onboardCard.removeAttribute('data-brand');
+    else onboardCard.setAttribute('data-brand', type);
   }
   typeGym.addEventListener('change', () => syncType('gym'));
   typeLibrary.addEventListener('change', () => syncType('library'));
+  typeCoaching.addEventListener('change', () => syncType('coaching'));
 
   return h('div', { class: 'onboard' }, onboardCard);
 }

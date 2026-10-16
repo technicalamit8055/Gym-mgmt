@@ -19,6 +19,7 @@ import { checkSummary, dnsRecordsTable, domainStatusBadge } from './customDomain
 import { renderCatalogSection } from './exerciseCatalog.js';
 import { renderFoodCatalogSection } from './foodCatalog.js';
 import { renderNavBadgesSection } from './navBadgesAdmin.js';
+import { renderShopsSection } from './shopsAdmin.js';
 import { renderStoreAdminSection } from './storeAdmin.js';
 
 /**
@@ -67,6 +68,10 @@ const bytes = (n) => {
 const statusBadge = (status) =>
   h('span', { class: `badge dot ${STATUS_TONE[status] || 'grey'}` }, STATUS_LABEL[status] || status);
 
+/** The three products, as the console names them. */
+const TYPE_LABEL = { gym: 'Gym', library: 'Library', coaching: 'Institute' };
+const TYPE_NOUN = { gym: 'gym', library: 'library', coaching: 'institute' };
+
 /** Two-letter monogram for a gym, tinted by business type, so a long list of
  * names has something to scan down besides text. */
 function gymAvatar(row) {
@@ -76,7 +81,7 @@ function gymAvatar(row) {
     .slice(0, 2)
     .map((word) => word[0].toUpperCase())
     .join('');
-  return h('span', { class: `op-avatar ${row.business_type === 'library' ? 'library' : 'gym'}`, 'aria-hidden': 'true' }, letters);
+  return h('span', { class: `op-avatar ${TYPE_LABEL[row.business_type] ? row.business_type : 'gym'}`, 'aria-hidden': 'true' }, letters);
 }
 
 /**
@@ -257,6 +262,7 @@ function openBusinessTypeModal(tenant, onSaved) {
           options: [
             { value: 'gym', label: 'Gym' },
             { value: 'library', label: 'Library / study hall' },
+            { value: 'coaching', label: 'Coaching / tuition institute' },
           ],
           hint: 'Changes the nav, the seeded catalogue and future member-code numbering. Existing members, plans and history are untouched.',
         },
@@ -266,7 +272,7 @@ function openBusinessTypeModal(tenant, onSaved) {
         onSubmit: async (values) => {
           await api.platformSetBusinessType(tenant.slug, { business_type: values.business_type });
           closeModal();
-          toast(`${tenant.gym_name} is now a ${values.business_type === 'library' ? 'library' : 'gym'} account`);
+          toast(`${tenant.gym_name} is now a${values.business_type === 'coaching' ? 'n' : ''} ${TYPE_NOUN[values.business_type] || 'gym'} account`);
           await onSaved();
         },
       },
@@ -640,7 +646,7 @@ async function openDetailModal(row, onChanged) {
   const bodyNode = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
   openModal({
     title: row.gym_name,
-    subtitle: `${row.business_type === 'library' ? 'Library' : 'Gym'} · /g/${row.slug} · ${STATUS_LABEL[row.status] || row.status}`,
+    subtitle: `${TYPE_LABEL[row.business_type] || 'Gym'} · /g/${row.slug} · ${STATUS_LABEL[row.status] || row.status}`,
     icon: 'building',
     className: 'op-detail',
     body: bodyNode,
@@ -1154,6 +1160,14 @@ const SECTIONS = [
     title: 'Store & monetization',
     sub: 'The member store, the Diet & Workout add-on and each gym’s revenue share.',
   },
+  {
+    id: 'shops',
+    group: 'Revenue',
+    icon: 'package',
+    label: 'Partner shops',
+    title: 'Partner shops',
+    sub: 'Local supplement shops that sell to their area’s gyms from their own Shop panel — no console access.',
+  },
 ];
 
 /**
@@ -1321,6 +1335,7 @@ export async function renderPlatformConsole({ context, rerender }) {
   if (consoleSection === 'catalog') return consoleShell(rerender, renderCatalogSection({ onExpired }));
   if (consoleSection === 'foods') return consoleShell(rerender, renderFoodCatalogSection({ onExpired }));
   if (consoleSection === 'store') return consoleShell(rerender, renderStoreAdminSection({ onExpired }));
+  if (consoleSection === 'shops') return consoleShell(rerender, renderShopsSection({ onExpired }));
   if (consoleSection === 'navbadges') return consoleShell(rerender, renderNavBadgesSection({ onExpired }));
 
   if (consoleSection === 'domains') {
@@ -1428,7 +1443,7 @@ export async function renderPlatformConsole({ context, rerender }) {
               'div',
               { class: 'op-gym-meta' },
               h('a', { href: gymPathUrl(row.slug), onclick: (e) => e.stopPropagation() }, `/g/${row.slug}`),
-              h('span', {}, row.business_type === 'library' ? 'Library' : 'Gym'),
+              h('span', {}, TYPE_LABEL[row.business_type] || 'Gym'),
             ),
             ...(row.custom_domains ?? []).map((domain) =>
               h(
@@ -1541,6 +1556,7 @@ export async function renderPlatformConsole({ context, rerender }) {
     h('option', { value: '' }, 'All types'),
     h('option', { value: 'gym' }, `Gyms (${businessTypeCounts.gym || 0})`),
     h('option', { value: 'library' }, `Libraries (${businessTypeCounts.library || 0})`),
+    h('option', { value: 'coaching' }, `Institutes (${businessTypeCounts.coaching || 0})`),
   );
 
   const sortSelect = h(
@@ -1603,7 +1619,7 @@ export async function renderPlatformConsole({ context, rerender }) {
         kpi('Accounts', data.total, {
           icon: 'building',
           tone: 'blue',
-          foot: `${businessTypeCounts.gym || 0} gyms · ${businessTypeCounts.library || 0} libraries`,
+          foot: `${businessTypeCounts.gym || 0} gyms · ${businessTypeCounts.library || 0} libraries · ${businessTypeCounts.coaching || 0} institutes`,
         }),
         kpi('Paying', paying, {
           icon: 'checkCircle',

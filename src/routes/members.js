@@ -35,9 +35,15 @@ export const MEMBER_SELECT = `
     FROM subscriptions s JOIN plans p ON p.id = s.plan_id
     WHERE s.status = 'active'
   ) active_sub ON active_sub.member_id = m.id AND active_sub.rn = 1
+  -- What a member owes for: their memberships, plus (CoachBook) any course
+  -- fee plan. Fee installments are collected as ordinary payments, so without
+  -- the plans here every fee paid would read as credit on the balance.
   LEFT JOIN (
-    SELECT member_id, SUM(price - discount + addon_total) AS total FROM subscriptions
-    WHERE status != 'cancelled' GROUP BY member_id
+    SELECT member_id, SUM(total) AS total FROM (
+      SELECT member_id, price - discount + addon_total AS total FROM subscriptions WHERE status != 'cancelled'
+      UNION ALL
+      SELECT member_id, final_amount AS total FROM student_fee_plans WHERE status != 'cancelled'
+    ) GROUP BY member_id
   ) billed ON billed.member_id = m.id
   LEFT JOIN (
     SELECT member_id, SUM(amount) AS total FROM payments GROUP BY member_id
@@ -84,6 +90,14 @@ const MEMBER_FIELDS = {
   // auto-checkout once that shift's end time has passed (see
   // autoCloseFinishedVisits() in maintenance.js). Leave unset to opt out.
   session_id: { type: 'int' },
+  // The admission-form fields a coaching institute and a study hall ask for
+  // (JEE/NEET/UPSC target, school, class, the guardian's relation and job).
+  // Optional everywhere, so a gym's form simply never sends them.
+  exam_target: { type: 'string', max: 60 },
+  school_name: { type: 'string', max: 120 },
+  current_class: { type: 'string', max: 40 },
+  guardian_relation: { type: 'string', max: 30 },
+  guardian_occupation: { type: 'string', max: 80 },
 };
 
 /**
@@ -148,7 +162,7 @@ function hasPhotoField(body) {
  * 'D0007', casts to 0, and hands every single student STD0001 — which surfaces
  * as an unhandled UNIQUE-constraint 500 on the *second* one added.
  */
-function nextMemberCode() {
+export function nextMemberCode() {
   const prefix = currentVertical().memberCodePrefix;
   const row = get('SELECT MAX(CAST(substr(code, ?) AS INTEGER)) AS n FROM members WHERE code LIKE ?', [
     prefix.length + 1,

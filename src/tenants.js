@@ -88,7 +88,8 @@ const MIGRATIONS = [
   // existed before this column, so it is both the right ALTER default and the
   // correct value for every already-provisioned tenant — no backfill needed.
   // Unlike most CHECKs added after the fact this one needs no table rebuild:
-  // SQLite accepts a column-level CHECK on ADD COLUMN.
+  // SQLite accepts a column-level CHECK on ADD COLUMN. Widening it later does
+  // need one — see widenBusinessTypeCheck() at the end of this list.
   (db) => ensureColumn(
     db,
     'tenants',
@@ -123,7 +124,43 @@ const MIGRATIONS = [
     const assign = db.prepare('UPDATE tenants SET gym_code = ? WHERE slug = ?');
     for (const row of missing) assign.run(newGymCode(db, row.gym_name || row.display_name), row.slug);
   },
+  // CoachBook: widens business_type's CHECK to admit 'coaching'. SQLite cannot
+  // alter a CHECK in place, so the table is rebuilt from its own stored DDL —
+  // every column added by the ALTERs above is already in that text, so nothing
+  // is lost and no column list has to be kept in step here. The indexes are
+  // read back first, because DROP TABLE takes them with it.
+  (db) => widenBusinessTypeCheck(db),
 ];
+
+const BUSINESS_TYPE_CHECK = "CHECK (business_type IN ('gym', 'library', 'coaching'))";
+
+function widenBusinessTypeCheck(db) {
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tenants'").get();
+  if (!table || table.sql.includes("'coaching'")) return;
+
+  const ddl = table.sql
+    .replace(/CHECK\s*\(\s*business_type\s+IN\s*\([^)]*\)\s*\)/i, BUSINESS_TYPE_CHECK)
+    .replace(/^CREATE TABLE\s+"?tenants"?/i, 'CREATE TABLE tenants_rebuilt');
+  if (!ddl.includes("'coaching'") || !ddl.startsWith('CREATE TABLE tenants_rebuilt')) {
+    throw new Error('Could not widen tenants.business_type: unexpected table definition');
+  }
+  const indexes = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tenants' AND sql IS NOT NULL")
+    .all();
+
+  db.exec('BEGIN');
+  try {
+    db.exec(ddl);
+    db.exec('INSERT INTO tenants_rebuilt SELECT * FROM tenants');
+    db.exec('DROP TABLE tenants');
+    db.exec('ALTER TABLE tenants_rebuilt RENAME TO tenants');
+    for (const index of indexes) db.exec(index.sql);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
 
 /**
  * Gym codes are read off a poster and typed on a phone, so the alphabet drops

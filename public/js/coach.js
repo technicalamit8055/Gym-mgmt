@@ -1,5 +1,6 @@
 import { ApiError, api, memberSession } from './api.js';
 import { SETTLE_CHARS, answerTokens, plainLength } from './coachText.js';
+import { MUSCLE_CHOICES, bestExercisesQuestion, planReplyExtras } from './planCoach.js';
 import { h, openModal, closeModal, renderIcon, svg, toast } from './ui.js';
 
 /**
@@ -36,12 +37,39 @@ const QUICK_PROMPTS = {
     ['fileText', 'Suggest a meal plan'],
     ['target', 'Is today on track for my goal?'],
   ],
+  // The plan editor's coach. The first is a rating: it is asked as one, so the
+  // reply always carries the score, the volume chart and the fixes.
+  plan: [
+    ['trophy', 'Rate my plan for muscle building'],
+    ['search', 'What’s missing in my plan?'],
+    ['barChart', 'Is my weekly volume right for each muscle?'],
+    ['refresh', 'Suggest better exercises to swap in'],
+  ],
 };
-const FEATURES = [
-  ['barbell', 'Personalised', 'advice', 'blue'],
-  ['apple', 'Nutrition', 'guidance', 'green'],
-  ['target', 'Workout', 'suggestions', 'blue'],
-];
+const RATE_PROMPT = QUICK_PROMPTS.plan[0][1];
+const FEATURES = {
+  workout: [
+    ['barbell', 'Personalised', 'advice', 'blue'],
+    ['apple', 'Nutrition', 'guidance', 'green'],
+    ['target', 'Workout', 'suggestions', 'blue'],
+  ],
+  plan: [
+    ['trophy', 'Plan', 'rating', 'blue'],
+    ['barChart', 'Volume', 'check', 'green'],
+    ['barbell', 'Exercise', 'ideas', 'blue'],
+  ],
+};
+FEATURES.diet = FEATURES.workout;
+const HERO = {
+  workout: 'Got a question about food, workouts or your goals? I’m here to help! 💪',
+  plan: 'Building a plan? I’ll rate it, spot what’s missing and pick the best exercises from your gym. 💪',
+};
+HERO.diet = HERO.workout;
+const HINTS = {
+  workout: 'The coach sees your plan, your history and this session — no need to explain.',
+  diet: 'The coach sees your plan, your history and this session — no need to explain.',
+  plan: 'The coach sees this plan as you edit it, your profile and your injuries — no need to explain.',
+};
 /** The diet sheet's "Recommended for you": each card asks the coach for that
  * kind of meal, fitted to what the member has left today. */
 const MEAL_IDEAS = [
@@ -282,8 +310,34 @@ const STEP_MS = 260;
 /** Gap between typed words; a backlog is typed faster so a long reply never lags. */
 const WORD_MS = 38;
 
-const threads = { workout: [], diet: [] };
-const inFlight = { workout: false, diet: false };
+const threads = { workout: [], diet: [], plan: [] };
+/** Each screen's question being answered, as the AbortController that stops it. */
+const inFlight = { workout: null, diet: null, plan: null };
+
+/** Forgets a screen's thread: the plan editor's, each time a plan is opened,
+ * since that chat was about another plan. */
+export function resetCoachThread(screen) {
+  threads[screen] = [];
+}
+
+/** The plan chat so far as { question, answer } pairs, for the plan coach's
+ * memory: answered turns only, the last few. */
+function planHistory(thread) {
+  const pairs = [];
+  for (let i = 0; i + 1 < thread.length; i += 2) {
+    const [asked, reply] = [thread[i], thread[i + 1]];
+    if (asked.role === 'user' && reply.role === 'coach' && !reply.live && !reply.error && reply.text) {
+      pairs.push({ question: asked.text, answer: reply.text });
+    }
+  }
+  return pairs.slice(-4);
+}
+
+/** Which of the status's counts a screen spends: plan questions have their own. */
+const countsFor = (screen) =>
+  screen === 'plan'
+    ? { left: 'reviews_remaining_today', limit: 'review_daily_limit', capped: 'review_limit_reached' }
+    : { left: 'remaining_today', limit: 'daily_limit', capped: 'coach_limit_reached' };
 /** The open sheet's hooks, for a reply that finishes after its sheet was
  * closed and opened again. */
 let activeSheet = null;
@@ -404,6 +458,10 @@ function createTyper(node) {
     get started() {
       return target.trim().length > 0;
     },
+    /** Words already on screen. */
+    get shown() {
+      return shown;
+    },
     push(chunk) {
       target += chunk;
       kick();
@@ -413,6 +471,13 @@ function createTyper(node) {
       final = true;
       kick();
       return finished;
+    },
+    /** Stopped by the member: leave what is on screen and type no more. */
+    halt() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      caret.remove();
+      resolveDone();
     },
   };
 }
@@ -643,8 +708,10 @@ export function mealPlanCard(plan, { onTrackPlan } = {}) {
 /**
  * One coach reply, live from the moment the question is sent. Its methods
  * are fed the stream's events; the turn object keeps what it ends up saying.
+ * `plan` is the plan editor's { getPlan, onAdd, onReplace }, for the rating
+ * and the suggestion cards under a plan answer.
  */
-function createCoachView(turn) {
+function createCoachView(turn, { plan } = {}) {
   const startedAt = performance.now();
   let thoughtFor = 0;
   let userToggled = false;
@@ -769,9 +836,12 @@ function createCoachView(turn) {
 
     /** The reply is in: type whatever is left, then settle into the final text. */
     async finish(reply) {
+      if (turn.stopped) return;
       stopThinking();
       bubble.classList.remove('is-empty');
       await typer.end(reply.answer);
+      // Stopped while the last of it was still being typed.
+      if (turn.stopped) return;
       Object.assign(turn, {
         live: false,
         text: reply.answer,
@@ -781,9 +851,14 @@ function createCoachView(turn) {
       });
       settle();
       answer.replaceChildren(...answerTokens(reply.answer).map((token) => tokenNode(token, false)));
-      // A meal plan is the answer itself, so it takes the rings' place: the
-      // reply already says how it sits against what is left.
-      if (reply.meal_plan) {
+      // A plan answer: the score, volume and fixes, and exercises to add,
+      // each card changing the plan in the editor behind the sheet.
+      if (plan && reply.weekly_sets) {
+        const parts = planReplyExtras(reply, plan);
+        if (parts.length) extras.append(h('div', { class: 'coach-plan-extras' }, ...parts));
+      } else if (reply.meal_plan) {
+        // A meal plan is the answer itself, so it takes the rings' place: the
+        // reply already says how it sits against what is left.
         extras.append(
           mealPlanCard(reply.meal_plan, {
             // Through whichever sheet is open when tapped: this one may have
@@ -810,6 +885,21 @@ function createCoachView(turn) {
       grow();
     },
 
+    /** The member tapped Stop: keep whatever was already typed, and say so. */
+    stop() {
+      if (!turn.live) return;
+      stopThinking();
+      typer.halt();
+      // An error turn, so a half answer is not sent back as history.
+      Object.assign(turn, { live: false, error: true, stopped: true, text: 'Stopped' });
+      if (turn.steps.length || turn.thoughts) label.textContent = 'Stopped';
+      settle();
+      bubble.classList.remove('is-empty');
+      if (typer.shown) answer.append(h('span', { class: 'coach-stopped' }, 'Stopped'));
+      else answer.replaceChildren(h('span', { class: 'coach-stopped' }, 'You stopped this answer'));
+      grow();
+    },
+
     setActions(...children) {
       actions.replaceChildren(...children.filter(Boolean));
     },
@@ -831,6 +921,9 @@ function createCoachView(turn) {
  * @param {(saved: object) => void} [opts.onTrackPlan] opens a saved meal plan in Quick track
  * @param {() => Promise<Array<{label: string, items: Array<{name: string, muscle_group?: string}>}>>} [opts.getExercises]
  *   what typing "@" lists: this workout's exercises and the rest of the plan's
+ * @param {{getPlan: () => object, onAdd: Function, onReplace: Function}} [opts.plan]
+ *   with screen 'plan', the plan editor's draft and how to put a suggested
+ *   exercise in it (see openPlanCoach in planCoach.js)
  */
 export function openCoachSheet({
   screen,
@@ -842,15 +935,25 @@ export function openCoachSheet({
   weightLabel = (kg) => `${kg} kg`,
   onTrackPlan,
   getExercises,
+  plan,
 }) {
   const thread = threads[screen];
+  const counts = countsFor(screen);
   // Follow the reply down as it grows, unless the member scrolled up to reread.
   let stick = true;
 
   const list = h('div', { class: 'coach-thread', 'aria-live': 'polite' });
   const remainingNode = h('span', { class: 'coach-remaining' });
   const placeholder =
-    screen === 'diet' ? 'Ask about food, macros, your goal…' : getExercises ? 'Ask, or @ an exercise…' : 'Ask about this workout…';
+    screen === 'diet'
+      ? 'Ask about food, macros, your goal…'
+      : screen === 'plan'
+        ? getExercises
+          ? 'Ask about this plan, or @ an exercise…'
+          : 'Ask about this plan…'
+        : getExercises
+          ? 'Ask, or @ an exercise…'
+          : 'Ask about this workout…';
   const input = h('textarea', {
     class: 'coach-input',
     rows: 1,
@@ -862,6 +965,19 @@ export function openCoachSheet({
     'button',
     { class: 'coach-send', type: 'button', 'aria-label': 'Send', title: 'Send' },
     renderIcon('send', { size: 22, stroke: 2.2 }),
+  );
+  // Takes the mic's (and Send's) place while an answer is coming.
+  const stopBtn = h(
+    'button',
+    {
+      class: 'coach-stop',
+      type: 'button',
+      'aria-label': 'Stop answering',
+      title: 'Stop',
+      hidden: true,
+      onclick: () => inFlight[screen]?.abort(),
+    },
+    h('span', { class: 'coach-stop-square', 'aria-hidden': 'true' }),
   );
   const mentions = getExercises
     ? createMentionPicker({
@@ -955,10 +1071,15 @@ export function openCoachSheet({
     input.placeholder = voiceState === 'writing' ? 'Writing down what you said…' : placeholder;
     if (mentionBtn) mentionBtn.disabled = voiceState !== 'idle';
     if (langSwitch) for (const button of langButtons) button.disabled = voiceState !== 'idle';
-    if (!voiceOn) return;
+    const busy = Boolean(inFlight[screen]);
+    stopBtn.hidden = !busy;
+    if (!voiceOn) {
+      sendBtn.hidden = busy;
+      return;
+    }
     const typed = input.value.trim() !== '';
-    sendBtn.hidden = voiceState !== 'idle' || !typed;
-    micBtn.hidden = voiceState === 'idle' && typed;
+    sendBtn.hidden = busy || voiceState !== 'idle' || !typed;
+    micBtn.hidden = busy || (voiceState === 'idle' && typed);
     micBtn.classList.toggle('is-recording', recordingNow);
     micBtn.classList.toggle('is-writing', voiceState === 'writing');
     micBtn.disabled = voiceState === 'writing';
@@ -980,8 +1101,8 @@ export function openCoachSheet({
       toast('Voice questions need a connection', 'error');
       return;
     }
-    if (status && status.remaining_today <= 0) {
-      toast(`That's your ${status.daily_limit} coach questions for today`, 'error');
+    if (status && status[counts.left] <= 0) {
+      toast(`That's your ${status[counts.limit]} coach questions for today`, 'error');
       return;
     }
     const free = voiceLang === 'en' && canRecognise;
@@ -1039,7 +1160,12 @@ export function openCoachSheet({
     voiceState = 'writing';
     paintCompose();
     try {
-      const { text } = await api.portal.coachTranscribe({ audio: await blobBase64(clip), mime_type: clip.type, screen });
+      // A plan question is a workout one, as far as writing it down goes.
+      const { text } = await api.portal.coachTranscribe({
+        audio: await blobBase64(clip),
+        mime_type: clip.type,
+        screen: screen === 'plan' ? 'workout' : screen,
+      });
       if (text) insertSpoken(text);
       else toast("Didn't catch that — try again a little closer to the phone", 'error');
     } catch (err) {
@@ -1079,7 +1205,7 @@ export function openCoachSheet({
 
   const paintRemaining = () => {
     if (!status?.enabled) return;
-    const left = status.remaining_today;
+    const left = status[counts.left];
     remainingNode.textContent = left > 0 ? `${left} question${left === 1 ? '' : 's'} left today` : 'No questions left today';
   };
 
@@ -1158,7 +1284,7 @@ export function openCoachSheet({
     chipButtons.forEach((chip, i) => chip.classList.toggle('is-on', QUICK_PROMPTS[screen][i][1] === asked));
   };
 
-  const hint = h('p', { class: 'coach-empty' }, 'The coach sees your plan, your history and this session — no need to explain.');
+  const hint = h('p', { class: 'coach-empty' }, HINTS[screen]);
 
   const notice = noticeSeen()
     ? null
@@ -1206,7 +1332,21 @@ export function openCoachSheet({
             ),
           ),
         )
-      : null;
+      : screen === 'plan'
+        ? // The plan's "Recommended for you": a muscle to get exercise picks for.
+          h(
+            'section',
+            { class: 'coach-ideas' },
+            h('div', { class: 'coach-ideas-head' }, h('h3', {}, 'Best exercises for')),
+            h(
+              'div',
+              { class: 'coach-muscles' },
+              ...MUSCLE_CHOICES.map(([label, words]) =>
+                h('button', { class: 'coach-muscle', type: 'button', onclick: () => send(bestExercisesQuestion(words)) }, label),
+              ),
+            ),
+          )
+        : null;
 
   const scroller = h(
     'div',
@@ -1214,7 +1354,7 @@ export function openCoachSheet({
     h(
       'div',
       { class: 'coach-pills' },
-      ...FEATURES.map(([icon, first, second, tone]) =>
+      ...FEATURES[screen].map(([icon, first, second, tone]) =>
         h(
           'div',
           { class: `coach-pill tone-${tone}` },
@@ -1226,7 +1366,7 @@ export function openCoachSheet({
     h(
       'div',
       { class: 'coach-hero' },
-      h('p', { class: 'coach-hero-bubble' }, 'Got a question about food, workouts or your goals? I’m here to help! 💪'),
+      h('p', { class: 'coach-hero-bubble' }, HERO[screen]),
       art('coach-hero', { class: 'coach-hero-art', width: 180, height: 200 }),
     ),
     h('div', { class: 'coach-card' }, notice, hint, list, ideas),
@@ -1252,8 +1392,11 @@ export function openCoachSheet({
     onGrow: scrollDown,
     onTrackPlan,
     paintActions: (turn) => turn.view.setActions(...actionButtons(turn)),
-    setBusy: (busy) => {
-      sendBtn.disabled = busy;
+    // Repaints for this screen's own question, whichever screen's just ended.
+    setBusy: () => {
+      paintCompose();
+      // The muscle and meal picks would only start another question; they come back with the answer.
+      if (ideas) ideas.hidden = Boolean(inFlight[screen]);
     },
     paintRemaining,
   };
@@ -1266,19 +1409,29 @@ export function openCoachSheet({
       toast('The coach needs a connection — your workout is still saved on this phone', 'error');
       return;
     }
-    if (status && status.remaining_today <= 0) {
-      toast(`That's your ${status.daily_limit} coach questions for today`, 'error');
+    if (status && status[counts.left] <= 0) {
+      toast(`That's your ${status[counts.limit]} coach questions for today`, 'error');
       return;
     }
-    inFlight[screen] = true;
-    sheet.setBusy(true);
+    // A rating needs something to rate; the server would refuse it anyway.
+    const mode = screen === 'plan' && text === RATE_PROMPT ? 'rate' : 'ask';
+    const draft = plan?.getPlan();
+    if (mode === 'rate' && !draft?.days?.some((day) => day.exercises.length)) {
+      toast('Add a few exercises first — there is nothing to rate yet', 'error');
+      return;
+    }
+    // The plan coach is told what was said before; Ask Coach reads it on the server.
+    const history = screen === 'plan' ? planHistory(thread) : undefined;
+    const stopper = new AbortController();
+    inFlight[screen] = stopper;
+    sheet.setBusy();
     const picked = mentions?.mentionsIn(text) ?? [];
     input.value = '';
     input.style.height = '';
     mentions?.close();
     paintCompose();
     const turn = { role: 'coach', live: true, steps: [], thoughts: '', text: '' };
-    turn.view = createCoachView(turn);
+    turn.view = createCoachView(turn, { plan });
     thread.push({ role: 'user', text, mentions: picked }, turn);
     // Appended rather than repainted, so earlier bubbles don't replay their entrance.
     hint.hidden = true;
@@ -1286,37 +1439,43 @@ export function openCoachSheet({
     markChips();
     stick = true;
     scrollDown();
+    // Cuts the reply short even while its last words are still being typed.
+    stopper.signal.addEventListener('abort', () => turn.view.stop());
 
     let done = null;
     let failure = null;
     try {
-      const payload = {
-        question: text,
-        screen,
-        unit,
-        session: getSession?.() ?? undefined,
-        mentions: picked.length ? picked : undefined,
-      };
-      const plain = await api.portal.coachAskStream(payload, (event, data) => {
+      const onEvent = (event, data) => {
         if (event === 'step') turn.view.step(data.text);
         else if (event === 'thought') turn.view.thought(data.text);
         else if (event === 'answer') turn.view.answer(data.text);
         else if (event === 'done') done = data;
         else if (event === 'error') failure = new ApiError(502, data.error, { code: data.code });
-      });
+      };
+      const plain =
+        screen === 'plan'
+          ? await api.portal.coachPlanReviewStream({ question: text, mode, plan: draft, history }, onEvent, { signal: stopper.signal })
+          : await api.portal.coachAskStream(
+              { question: text, screen, unit, session: getSession?.() ?? undefined, mentions: picked.length ? picked : undefined },
+              onEvent,
+              { signal: stopper.signal },
+            );
       if (failure) throw failure;
       // A server that answered with plain JSON hands back the whole reply at once.
       const reply = done ?? plain;
       if (!reply?.answer) throw new ApiError(502, UNAVAILABLE);
-      if (status) status.remaining_today = reply.remaining_today;
+      if (status) status[counts.left] = reply.remaining_today;
       await turn.view.finish(reply);
     } catch (err) {
+      // Stopped: the abort listener has already said so, and the server
+      // does not count a question it never finished.
+      if (stopper.signal.aborted) return;
       turn.view.fail(err instanceof ApiError && err.message ? err.message : UNAVAILABLE);
-      if (err instanceof ApiError && err.details?.code === 'coach_limit_reached' && status) status.remaining_today = 0;
+      if (err instanceof ApiError && err.details?.code === counts.capped && status) status[counts.left] = 0;
     } finally {
-      inFlight[screen] = false;
+      inFlight[screen] = null;
       // Whichever sheet is open now, which may not be the one that asked.
-      (activeSheet ?? sheet).setBusy(false);
+      (activeSheet ?? sheet).setBusy();
       (activeSheet ?? sheet).paintRemaining();
     }
   }
@@ -1342,7 +1501,7 @@ export function openCoachSheet({
 
   openModal({
     title: 'Ask Coach',
-    subtitle: 'Your AI fitness assistant',
+    subtitle: screen === 'plan' ? 'Your AI coach for this plan' : 'Your AI fitness assistant',
     icon: 'sparkle',
     className: 'coach-chat-modal',
     body: h(
@@ -1361,6 +1520,7 @@ export function openCoachSheet({
           recBar,
           voiceOn ? micBtn : null,
           sendBtn,
+          stopBtn,
         ),
         h('div', { class: 'coach-dock-foot' }, langSwitch, remainingNode),
       ),
@@ -1377,7 +1537,7 @@ export function openCoachSheet({
 
   paintThread();
   paintCompose();
-  sheet.setBusy(inFlight[screen]);
+  sheet.setBusy();
   coachStatus().then(paintRemaining);
   if (initialQuestion) send(initialQuestion);
 }

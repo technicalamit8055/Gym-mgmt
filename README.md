@@ -380,6 +380,37 @@ It signs in with its own credentials and its own token shape — a gym's admin
 token is rejected here, and the console's token is rejected inside every gym.
 With either variable unset the console returns 404 rather than opening up.
 
+### Partner shops (Shop panel)
+
+Local supplement shops can sell to the gyms in their area without any access to
+the operator console. In the console, **Partner shops → Add shop** takes the
+shop's details, the platform's fee on its sales, and the gyms it serves (picked
+by city, or one by one). It then shows a one-time password, ready to send on
+WhatsApp. The shop signs in at `/#/seller`, sets its own password, lists its
+products, and packs and ships orders from its own panel. It also gets an email
+when an order is paid, if mail is configured.
+
+- Each gym has one shelf. Members of a gym served by an active shop that has
+  stock see that shop's products, and their orders go to that shop. Every other
+  gym keeps the central catalogue. Checkout checks the same rule, so a member
+  can never buy from a shelf their gym doesn't show.
+- The platform still takes the payment. Each order fixes its split when it is
+  placed: the gym's commission, the platform fee, and the shop's share. The
+  shop's share becomes payable on delivery (for a pickup, when the gym's desk
+  marks it collected), and **Record payout** settles it.
+- Each shop is either a **partner shop** or **your own store** (e.g. a dark
+  store you run yourself). Your own store pays no platform fee, and since its
+  takings are already yours, it has no payouts. It starts with no gym
+  commission either, unless you set one.
+- **Gym commission per shop:** a shop's orders can follow the platform default
+  (Store & monetization), use a custom rate for its gyms, or carry no gym
+  commission at all. With none, the gym's statement gets no ₹0 lines.
+  The rates are fixed onto each order when it is placed, so changing them
+  never rewrites past orders.
+- A shop token (`scope: 'seller'`) works only on `/api/seller` and sees only
+  that shop's products and orders. Pausing a shop, resetting its password, or
+  changing its password signs out every device it was signed in on.
+
 ## Deploy (Fly.io)
 
 Fly.io was chosen over a bare VPS because it handles HTTPS and reverse-proxying for

@@ -49,6 +49,16 @@ export function generateReceiptPdf(data, options = {}) {
         if (data.discount) estimatedHeight += 19;
       }
       if (options.logoBuffer) estimatedHeight += 36;
+      // A CoachBook fee receipt: the course, every installment this payment
+      // went towards, the fee breakdown, and what is still owed after it.
+      const feeItems = Array.isArray(data.fee_items) ? data.fee_items : null;
+      const components = Array.isArray(data.components) ? data.components : [];
+      if (feeItems) {
+        estimatedHeight += 50 + feeItems.length * 19 + components.length * 19 + 19 * 4;
+        if (data.batch_name) estimatedHeight += 19;
+        if (data.plan_discount) estimatedHeight += 19;
+      }
+      if (options.gstin) estimatedHeight += 16;
 
       const doc = new PDFDocument({
         size: [RECEIPT_WIDTH, estimatedHeight],
@@ -78,7 +88,15 @@ export function generateReceiptPdf(data, options = {}) {
       });
       y += 24;
 
-      doc.fillColor('#6b7280').font('Helvetica').fontSize(11).text('PAYMENT RECEIPT', MARGIN_X, y, {
+      if (options.gstin) {
+        doc.fillColor('#6b7280').font('Helvetica').fontSize(9).text(`GSTIN: ${options.gstin}`, MARGIN_X, y, {
+          width: CONTENT_WIDTH,
+          align: 'center',
+        });
+        y += 16;
+      }
+
+      doc.fillColor('#6b7280').font('Helvetica').fontSize(11).text(options.title || 'PAYMENT RECEIPT', MARGIN_X, y, {
         width: CONTENT_WIDTH,
         align: 'center',
       });
@@ -129,8 +147,9 @@ export function generateReceiptPdf(data, options = {}) {
       drawDottedLine();
 
       // ── MEMBER Section ──
-      drawSectionTitle('Member');
-      const memberName = data.first_name ? `${data.first_name} ${data.last_name || ''}`.trim() : (data.member_name || 'Member');
+      const personLabel = data.person_label || 'Member';
+      drawSectionTitle(personLabel);
+      const memberName = data.first_name ? `${data.first_name} ${data.last_name || ''}`.trim() : (data.member_name || personLabel);
       drawRow('Name', memberName);
       if (data.member_code) drawRow('Code', data.member_code);
       if (data.phone) drawRow('Phone', data.phone);
@@ -140,7 +159,7 @@ export function generateReceiptPdf(data, options = {}) {
 
       // ── PAYMENT DETAILS Section ──
       drawSectionTitle('Payment Details');
-      drawRow('Receipt #', data.id ? `PAY-${String(data.id).padStart(5, '0')}` : '—');
+      drawRow('Receipt #', data.receipt_no || (data.id ? `PAY-${String(data.id).padStart(5, '0')}` : '—'));
       drawRow('Date', formatDate(data.paid_on || new Date().toISOString().split('T')[0]));
       drawRow('Method', String(data.method || 'cash').toUpperCase());
       if (data.reference) drawRow('Reference', data.reference);
@@ -156,6 +175,23 @@ export function generateReceiptPdf(data, options = {}) {
         }
         if (data.price != null) drawRow('Plan price', formatMoney(data.price, currencyCode));
         if (data.discount) drawRow('Discount', `− ${formatMoney(data.discount, currencyCode)}`);
+      }
+
+      if (feeItems) {
+        drawDottedLine();
+        drawSectionTitle('Course Fee');
+        if (data.course_name) drawRow('Course', data.course_name);
+        if (data.batch_name) drawRow('Batch', data.batch_name);
+        for (const component of components) drawRow(component.label, formatMoney(component.amount, currencyCode));
+        if (data.plan_total != null) drawRow('Course fee', formatMoney(data.plan_total, currencyCode));
+        if (data.plan_discount) drawRow('Concession', `− ${formatMoney(data.plan_discount, currencyCode)}`);
+        if (data.plan_final != null) drawRow('Payable', formatMoney(data.plan_final, currencyCode), true);
+        drawDottedLine();
+        drawSectionTitle('Paid Towards');
+        for (const item of feeItems) {
+          drawRow(item.label ? `#${item.installment_number} ${item.label}` : `Installment ${item.installment_number}`, formatMoney(item.amount, currencyCode));
+        }
+        drawRow('Balance after this', formatMoney(data.balance_after ?? 0, currencyCode), true);
       }
 
       // ── Thick Line Divider ──

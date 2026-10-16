@@ -162,6 +162,8 @@ describe('Ask Coach access', () => {
       plans_remaining_today: 2,
       // No Diet settings yet: the profile's defaults (4 days, maintain).
       plan_defaults: { goal: 'general_fitness', days_per_week: 4 },
+      review_daily_limit: 15,
+      reviews_remaining_today: 15,
     });
   });
 });
@@ -377,8 +379,8 @@ describe('Ask Coach limits and failures', () => {
 
 /** A streamed question: every Server-Sent Event in order, as { event, data }.
  * A refusal before streaming comes back as plain JSON, with no events. */
-const askStreamed = async (body, token) => {
-  const res = await fetch(`${base}/api/portal/coach/ask`, {
+const askStreamed = async (body, token, urlPath = '/api/portal/coach/ask') => {
+  const res = await fetch(`${base}${urlPath}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${token}`, 'X-Tenant-Slug': TENANT },
     body: JSON.stringify(body),
@@ -970,5 +972,241 @@ describe('Coach voice questions', () => {
     assert.equal(parseTranscript(fenced), 'aaj dinner mein kya khaun?');
     assert.equal(parseTranscript(JSON.stringify({ text: 'x'.repeat(900) })).length, 500);
     assert.throws(() => parseTranscript('{"answer":"hi"}'));
+  });
+});
+
+describe('Coach in the plan builder', () => {
+  let token;
+  const draft = () => ({
+    name: 'My PPL',
+    days: [
+      {
+        day_name: 'Push',
+        exercises: [
+          // A tampered muscle group: the library's wins for the volume count.
+          { exercise_name: 'Barbell Bench Press', muscle_group: 'biceps', target_sets: 4, target_reps: '6-8', rest_seconds: 150 },
+          { exercise_name: 'Cable Fly', muscle_group: 'chest', target_sets: 3, target_reps: '12', rest_seconds: 60 },
+        ],
+      },
+      { day_name: 'Pull', exercises: [{ exercise_name: 'Lat Pulldown', muscle_group: 'lats', target_sets: 3, target_reps: '10', rest_seconds: 90 }] },
+      // Half-written: still day 3, so a suggestion can point at it.
+      { day_name: '', exercises: [] },
+    ],
+  });
+  const review = (body) => call('POST', '/api/portal/coach/plan-review', body, { token });
+  const rated = () =>
+    JSON.stringify({
+      answer: 'A decent start: **7 sets of chest** but legs are missing.',
+      rating: {
+        score: 6,
+        verdict: 'Good start, no legs',
+        strengths: ['Heavy compound first on Push'],
+        improvements: ['Add a leg day', 'More back volume', 'Rear delts', 'Calves', 'A fifth one is cut'],
+      },
+      suggestions: [
+        { exercise_name: 'leg press', day: 3, target_sets: 4, target_reps: '8 – 12', rest_seconds: 120, reason: 'Quads have no work' },
+        // Not in the library: dropped and reported.
+        { exercise_name: 'Laser Squat', day: 3, target_sets: 3, target_reps: '10', rest_seconds: 90, reason: 'x' },
+        // A swap for something on that day.
+        { exercise_name: 'Seated Cable Row', day: 2, replaces: 'lat pulldown', target_sets: 3, target_reps: '10', rest_seconds: 90, reason: 'Rows' },
+        // Already on that day and not a swap: nothing to do.
+        { exercise_name: 'Cable Fly', day: 1, target_sets: 3, target_reps: '12', rest_seconds: 60, reason: 'dup' },
+        // A day that does not exist: kept, with no day picked but the new day it asked for.
+        { exercise_name: 'Romanian Deadlift', day: 9, new_day: 'Legs', target_sets: 3, target_reps: '8', rest_seconds: 120, reason: 'Hamstrings' },
+      ],
+    });
+
+  before(async () => {
+    const member = await call(
+      'POST',
+      '/api/members',
+      { first_name: 'Ravi', last_name: 'Das', phone: '9876500031', health_notes: 'Lower back pain' },
+      { token: adminToken },
+    );
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    token = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+  });
+
+  it('rates the draft with the weekly sets counted, and keeps only suggestions it can apply', async () => {
+    fake.reply = rated();
+    const res = await review({ mode: 'rate', plan: draft() });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.rating, { score: 6, verdict: 'Good start, no legs' });
+    assert.deepEqual(res.body.strengths, ['Heavy compound first on Push']);
+    assert.equal(res.body.improvements.length, 4);
+    assert.deepEqual(res.body.weekly_sets, [
+      { muscle_group: 'chest', sets: 7 },
+      { muscle_group: 'lats', sets: 3 },
+    ]);
+    assert.deepEqual(res.body.dropped, ['Laser Squat']);
+    assert.equal(res.body.suggestions.length, 3);
+    const [press, row, rdl] = res.body.suggestions;
+    assert.deepEqual(
+      { name: press.exercise_name, group: press.muscle_group, day: press.day_index, reps: press.target_reps, replaces: press.replaces },
+      { name: 'Leg Press', group: 'quadriceps', day: 2, reps: '8-12', replaces: null },
+    );
+    assert.deepEqual({ day: row.day_index, replaces: row.replaces, new_day: row.new_day }, { day: 1, replaces: 'Lat Pulldown', new_day: null });
+    assert.deepEqual({ day: rdl.day_index, new_day: rdl.new_day }, { day: null, new_day: 'Legs' });
+    assert.equal(res.body.remaining_today, config.aiCoach.planReviewDailyLimit - 1);
+
+    // What Gemini saw: the draft, the counted sets, the injury and the library.
+    const prompt = fake.calls[0].contents.at(-1).parts[0].text;
+    assert.match(prompt, /^TASK: rate/);
+    assert.match(prompt, /"day":3,"day_name":"Day 3"/);
+    assert.match(prompt, /WEEKLY SETS:\n\[\{"muscle_group":"chest","sets":7\}/);
+    assert.match(prompt, /"limitations":"Lower back pain"/);
+    assert.doesNotMatch(prompt, /"first_name"/);
+    assert.match(prompt, /Leg Press \| quadriceps \| machine/);
+    assert.match(prompt, /QUESTION:\nRate this plan for building muscle/);
+
+    const status = await call('GET', '/api/portal/coach/status', undefined, { token });
+    assert.equal(status.body.reviews_remaining_today, config.aiCoach.planReviewDailyLimit - 1);
+  });
+
+  it('answers a question, with the earlier turns as its memory', async () => {
+    fake.reply = JSON.stringify({
+      answer: 'Try **Incline Dumbbell Press**.',
+      strengths: ['dropped without a rating'],
+      suggestions: [{ exercise_name: 'Incline Dumbbell Press', day: 1, target_sets: 3, target_reps: '10', rest_seconds: 90, reason: 'Upper chest' }],
+    });
+    const res = await review({
+      question: 'Best exercises for chest?',
+      plan: draft(),
+      history: [{ question: 'Rate it', answer: 'A 6.' }, { question: 'no answer' }],
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.rating, null);
+    assert.deepEqual(res.body.strengths, []);
+    assert.equal(res.body.suggestions[0].exercise_name, 'Incline Dumbbell Press');
+    const { contents } = fake.calls[0];
+    assert.equal(contents.length, 3);
+    assert.equal(contents[0].parts[0].text, 'Rate it');
+    assert.match(contents[2].parts[0].text, /^TASK: ask/);
+  });
+
+  it('refuses a bad request or an empty plan to rate, and does not count failures', async () => {
+    for (const body of [{ plan: draft() }, { question: 'Hi', plan: 'nope' }, { mode: 'judge', question: 'Hi', plan: draft() }]) {
+      assert.equal((await review(body)).status, 400, JSON.stringify(body));
+    }
+    const empty = await review({ mode: 'rate', plan: { days: [{ day_name: 'A', exercises: [] }] } });
+    assert.equal(empty.status, 400);
+    assert.equal(fake.calls.length, 0);
+
+    fake.fail = true;
+    const down = await review({ question: 'Hi', plan: draft() });
+    assert.equal(down.status, 502);
+    assert.equal(down.body.details.code, 'coach_unavailable');
+    fake.fail = false;
+    fake.reply = 'not json';
+    assert.equal((await review({ question: 'Hi', plan: draft() })).status, 502);
+    const status = await call('GET', '/api/portal/coach/status', undefined, { token });
+    assert.equal(status.body.reviews_remaining_today, config.aiCoach.planReviewDailyLimit - 2);
+  });
+
+  it('stops at its own daily cap', async () => {
+    const cap = config.aiCoach.planReviewDailyLimit;
+    config.aiCoach.planReviewDailyLimit = 2;
+    try {
+      const capped = await review({ question: 'Hi', plan: draft() });
+      assert.equal(capped.status, 429);
+      assert.equal(capped.body.details.code, 'review_limit_reached');
+      assert.equal(fake.calls.length, 0);
+    } finally {
+      config.aiCoach.planReviewDailyLimit = cap;
+    }
+  });
+
+  it('works for staff on a gym template, counted against the staff user', async () => {
+    const status = await call('GET', '/api/workouts/coach/status', undefined, { token: adminToken });
+    assert.deepEqual(status.body, {
+      enabled: true,
+      daily_limit: config.aiCoach.staffPlanReviewDailyLimit,
+      remaining_today: config.aiCoach.staffPlanReviewDailyLimit,
+    });
+    fake.reply = rated();
+    const res = await call(
+      'POST',
+      '/api/workouts/coach/review',
+      { mode: 'rate', plan: { ...draft(), goal: 'muscle_gain', level: 'beginner', days_per_week: 6 } },
+      { token: adminToken },
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    // Two days with exercises run six times a week: each one three times.
+    assert.deepEqual(res.body.weekly_sets, [
+      { muscle_group: 'chest', sets: 21 },
+      { muscle_group: 'lats', sets: 9 },
+    ]);
+    const prompt = fake.calls[0].contents.at(-1).parts[0].text;
+    assert.match(prompt, /MEMBER: none/);
+    assert.match(prompt, /"goal":"muscle_gain","level":"beginner","days_per_week":6/);
+    assert.equal(res.body.remaining_today, config.aiCoach.staffPlanReviewDailyLimit - 1);
+
+    // A member token is not a staff session.
+    assert.equal((await call('POST', '/api/workouts/coach/review', { question: 'Hi', plan: draft() }, { token })).status, 401);
+  });
+
+  describe('streamed, for the Ask Coach sheet', () => {
+    // A member of their own: the questions above used most of Ravi's burst allowance.
+    let streamToken;
+    const streamed = (body) => askStreamed(body, streamToken, '/api/portal/coach/plan-review');
+
+    before(async () => {
+      const member = await call('POST', '/api/members', { first_name: 'Meera', last_name: 'Pillai', phone: '9876500032' }, { token: adminToken });
+      await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+      streamToken = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+    });
+
+    it('streams what it reads, its thinking and the answer, then the same reply the JSON route gives', async () => {
+      fake.thoughts = ['**Counting the sets**\nChest has 7.'];
+      fake.reply = rated();
+      const res = await streamed({ mode: 'rate', plan: draft() });
+      assert.equal(res.status, 200);
+      const steps = res.events.filter((e) => e.event === 'step').map((e) => e.data.text);
+      assert.deepEqual(steps.slice(0, 3), [
+        'Reading your plan — 2 days, 3 exercises',
+        'Counting sets per muscle — chest 7, lats 3',
+        'Checking balance and recovery between days',
+      ]);
+      assert.ok(steps.includes('Reading your profile and goal'));
+      assert.match(steps.at(-1), /^Choosing from your gym's \d+ exercises$/);
+      assert.deepEqual(res.events.filter((e) => e.event === 'thought').map((e) => e.data.text), fake.thoughts);
+      const typed = res.events.filter((e) => e.event === 'answer').map((e) => e.data.text).join('');
+      const done = res.events.at(-1);
+      assert.equal(done.event, 'done');
+      assert.equal(typed, done.data.answer);
+      assert.equal(done.data.rating.score, 6);
+      assert.equal(done.data.suggestions[0].exercise_name, 'Leg Press');
+      assert.equal(done.data.remaining_today, config.aiCoach.planReviewDailyLimit - 1);
+      // Asked for thought summaries, as the chat is.
+      assert.equal(fake.calls[0].config.thinkingConfig.includeThoughts, true);
+    });
+
+    it('ends with an error event, not counted, when Gemini fails mid-answer; refuses a bad question as plain JSON', async () => {
+      fake.reply = rated();
+      fake.failMidStream = true;
+      const res = await streamed({ question: 'Hi', plan: draft() });
+      assert.deepEqual(res.events.at(-1), {
+        event: 'error',
+        data: { error: 'The coach could not look at this plan just now — try again in a moment', code: 'coach_unavailable' },
+      });
+      fake.failMidStream = false;
+      const status = await call('GET', '/api/portal/coach/status', undefined, { token: streamToken });
+      assert.equal(status.body.reviews_remaining_today, config.aiCoach.planReviewDailyLimit - 1);
+
+      const bad = await streamed({ mode: 'rate', plan: { days: [] } });
+      assert.equal(bad.status, 400);
+      assert.deepEqual(bad.events, []);
+    });
+  });
+
+  it('is off when the gym switches the coach off', async () => {
+    await call('PUT', '/api/fitness-addons/settings', { ai_coach_enabled: false }, { token: adminToken });
+    try {
+      assert.equal((await review({ question: 'Hi', plan: draft() })).status, 503);
+      const staff = await call('GET', '/api/workouts/coach/status', undefined, { token: adminToken });
+      assert.equal(staff.body.enabled, false);
+    } finally {
+      await call('PUT', '/api/fitness-addons/settings', { ai_coach_enabled: true }, { token: adminToken });
+    }
   });
 });

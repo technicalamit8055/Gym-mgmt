@@ -14,6 +14,7 @@ import {
   clear,
   closeModal,
   h,
+  handleBackButton,
   isFullscreen,
   openModal,
   renderIcon,
@@ -27,6 +28,7 @@ import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
 import {
   getAppMode,
   getAppTheme,
+  isCoaching,
   isLibrary,
   setAppTheme,
   setVertical,
@@ -40,6 +42,7 @@ import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
 import { renderPlatformConsole } from './views/platform.js';
+import { renderSellerPanel } from './views/sellerPanel.js';
 import { renderReset } from './views/reset.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderMembers, renderMemberDetail } from './views/members.js';
@@ -60,6 +63,7 @@ import { renderExpenses } from './views/expenses.js';
 import { renderFitnessPlans } from './views/fitnessPlans.js';
 import { renderPortal } from './views/portal.js';
 import { renderFindGym } from './views/findGym.js';
+import { coachingNav, coachingRoutes, coachingTabs } from './views/coaching/routes.js';
 
 /**
  * Built by buildNav()/buildRoutes(), called from boot() once the vertical is
@@ -73,6 +77,8 @@ let ROUTES = [];
 /** `icon` names an entry in the icon set in ui.js — never a glyph, so the
  * sidebar renders identically on a Windows desk terminal and an iPad. */
 function buildNav() {
+  // CoachBook's sidebar lives with its views (views/coaching/routes.js).
+  if (isCoaching()) return coachingNav();
   if (isLibrary()) {
     return [
       { section: 'Daily' },
@@ -166,6 +172,11 @@ function buildRoutes() {
       view: renderSettings,
     },
   ];
+  if (isCoaching()) {
+    // Its own dashboard replaces the shared one; the rest of `shared`
+    // (students, gate check-in, reports, WhatsApp, staff, settings) stands.
+    return [...coachingRoutes(), ...shared.filter((route) => !route.pattern.test('/dashboard'))];
+  }
   if (isLibrary()) {
     return [
       ...shared,
@@ -210,6 +221,8 @@ const PUBLIC_ROUTES = [
   },
   { pattern: /^\/signup$/, title: 'Set up your account', view: renderSignup, platformOwned: true },
   { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole, platformOwned: true },
+  // Partner supplement shops — their own sign-in, not the console's or a gym's.
+  { pattern: /^\/seller$/, title: 'Shop panel', view: renderSellerPanel, platformOwned: true },
   // Public by necessity — someone redeeming a reset link cannot sign in. The
   // pattern allows the trailing `?token=…` the link carries in the hash.
   { pattern: /^\/reset(\?|$)/, title: 'Set a new password', view: renderReset },
@@ -250,6 +263,10 @@ let platform = { tenant: null };
 
 const gymName = () => platform.tenant?.gym_name || 'GymBook';
 
+/** The browser-tab suffix: what this product is, per vertical. */
+const productTagline = () =>
+  platform.tenant?.vertical?.tagline || (isCoaching() ? 'Coaching & Institute Management' : isLibrary() ? 'Study Hall Management' : 'Gym Management');
+
 async function loadPlatformContext() {
   try {
     return await api.tenantContext();
@@ -288,6 +305,17 @@ function renderNotice(title, body, actions) {
 /** What the sign-in panel says about the product, per vertical — a gym front desk
  * and a study hall care about different things, so the pitch follows the tenant. */
 function authPitch() {
+  if (isCoaching()) {
+    return {
+      title: 'Every batch, fee and result in one place.',
+      body: 'Run the institute from one screen — who attended, which installment is due, and how each batch did in the last test.',
+      points: [
+        ['checkin', 'One-tap attendance with instant parent alerts'],
+        ['wallet', 'Installment fees, receipts and reminders on WhatsApp'],
+        ['trophy', 'Test marks, ranks and report cards in seconds'],
+      ],
+    };
+  }
   if (isLibrary()) {
     return {
       title: 'Every seat, student and fee in one calm place.',
@@ -342,7 +370,7 @@ function renderLogin(message) {
   const logo = () =>
     tenant?.logo_url
       ? h('img', { class: 'login-logo-img', src: tenant.logo_url, alt: gymName() })
-      : h('span', { class: 'login-logo-mark' }, renderIcon(isLibrary() ? 'book' : 'dumbbell', { size: 22 }));
+      : h('span', { class: 'login-logo-mark' }, renderIcon(isCoaching() ? 'graduation' : isLibrary() ? 'book' : 'dumbbell', { size: 22 }));
   const pitch = authPitch();
 
   clear(root()).append(
@@ -414,7 +442,9 @@ function renderBrandLogoNode() {
     return h('div', { class: 'logo' }, h('img', { class: 'logo-img', src: logoUrl, alt: gymName() }));
   }
   // No uploaded logo: a gym falls back to the stock badge, a library keeps its
-  // book glyph (the badge is a dumbbell, which means nothing in a reading room).
+  // book glyph (the badge is a dumbbell, which means nothing in a reading room),
+  // and an institute its graduation cap.
+  if (isCoaching()) return h('div', { class: 'logo' }, renderIcon('graduation', { size: 19 }));
   if (!isLibrary()) {
     return h('div', { class: 'logo logo-default' }, h('img', { class: 'logo-img', src: '/icons/gym-logo.svg', alt: gymName() }));
   }
@@ -454,6 +484,7 @@ function setControlIcon(button, name, label) {
  * from the sidebar would be truncated to nothing useful.
  */
 function buildTabs() {
+  if (isCoaching()) return coachingTabs();
   return [
     { path: '/dashboard', label: 'Home', icon: 'home' },
     { path: '/check-in', label: isLibrary() ? 'Attendance' : 'Check-in', icon: 'checkin' },
@@ -904,12 +935,52 @@ let awaitingReconnect = false;
 /** The member app is GymVym in the store; the web stays GymBook. */
 const appBrand = isNativeApp ? 'GymVym' : 'GymBook';
 
+/**
+ * Which product the offline screen is for. A boot that failed before
+ * setVertical() ran never learned it, so fall back to the vertical the last
+ * successful boot left for the splash (see setVertical in vertical.js).
+ */
+function offlineVertical() {
+  if (document.body.dataset.vertical) return isLibrary() ? 'library' : 'gym';
+  try {
+    return localStorage.getItem('gymbook.splash.vertical') === 'library' ? 'library' : 'gym';
+  } catch {
+    return 'gym';
+  }
+}
+
+/** The gym's own "no internet" screen. Each vertical gets its own art, so a
+ * study hall keeps the plain notice until it has one. The image is in the
+ * service worker's shell so it is there with no network. */
+function renderGymOffline() {
+  const retry = h('button', { class: 'gym-offline-btn', type: 'button' }, 'Try again');
+  retry.onclick = () => {
+    retry.disabled = true;
+    boot();
+  };
+  clear(root()).append(
+    h(
+      'div',
+      { class: 'gym-offline', role: 'alert' },
+      h('img', { class: 'gym-offline-art', src: '/images/portal/offline-gym.webp', alt: '', width: 588, height: 512 }),
+      h('h1', {}, 'No internet connection'),
+      h('p', {}, 'Could not connect to the internet, please check your internet'),
+      retry,
+    ),
+  );
+  root().className = '';
+}
+
 /** The installed app has no browser error page behind it: a failed boot would
  * otherwise leave a home-screen icon that opens to "Loading…" forever. */
 function renderBootFailure(err) {
   console.error(err);
   if (isOfflineError(err)) {
     awaitingReconnect = true;
+    if (offlineVertical() === 'gym') {
+      renderGymOffline();
+      return;
+    }
     renderNotice(
       `Can't reach ${appBrand}`,
       'You appear to be offline. Nothing has been lost — reconnect and this page will pick up where it left off.',
@@ -933,7 +1004,7 @@ async function boot() {
     setVertical(platform.tenant?.business_type, platform.tenant?.theme);
     NAV = buildNav();
     ROUTES = buildRoutes();
-    document.title = `${gymName()} — ${isLibrary() ? 'Study Hall Management' : 'Gym Management'}`;
+    document.title = `${gymName()} — ${productTagline()}`;
     // A gym that uploaded a logo installs and appears in the tab strip under
     // its own brand, not GymBook's barbell. A member landing straight on
     // #/portal (their normal entry point — a link or QR code from the gym,
@@ -947,6 +1018,10 @@ async function boot() {
     renderBootFailure(err);
   }
 }
+
+// The Android app asks here on every back press (MainActivity.java), and
+// leaves to the home screen when this answers false: nothing left to close.
+if (isNativeApp) window.gymvymBack = handleBackButton;
 
 window.addEventListener('hashchange', () => {
   dispatch().catch(renderBootFailure);
@@ -1008,7 +1083,7 @@ window.addEventListener('gymbook:member-signed-out', () => {
 window.addEventListener('gymbook:gym-updated', (event) => {
   platform = { ...platform, tenant: event.detail };
   if (event.detail?.theme) setAppTheme(event.detail.theme);
-  document.title = `${gymName()} — Gym Management`;
+  document.title = `${gymName()} — ${productTagline()}`;
   applyGymIcons(platform.tenant?.app_icon_url, gymName());
   const brand = shell?.nav.querySelector('.brand');
   if (brand) fillBrand(brand);

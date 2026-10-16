@@ -1,4 +1,5 @@
 import { hashPassword } from './auth.js';
+import { seedCoachingStarter } from './coaching/seed.js';
 import { get, getDb, run } from './db.js';
 import { DEFAULT_ADDON_PRICE, addonPriceFor } from './fitnessSeed.js';
 import { currentVertical, starterPricesFor } from './verticals.js';
@@ -126,6 +127,9 @@ export function seedStarterPlans(currency = 'INR') {
   seedShifts(vertical);
   seedWhatsAppTemplates(vertical);
   seedFitnessAddonPrice(currency);
+  // CoachBook sells courses, not plans: its starter catalogue is a course, a
+  // batch and a fee structure instead (see src/coaching/seed.js).
+  seedCoachingStarter(vertical, currency);
 
   if (get('SELECT COUNT(*) AS n FROM plans').n > 0) return 0;
 

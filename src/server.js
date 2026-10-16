@@ -6,6 +6,7 @@ import { assertProductionReady, config, DEFAULT_TENANT_SLUG } from './config.js'
 import { closeDb, tenantStorage } from './db.js';
 import { closeRegistryDb, listTenants, tenantDbPath } from './tenants.js';
 import { sendAutomatedBirthdayWishes, sendAutomatedRenewalReminders } from './maintenance.js';
+import { sendCoachingFeeReminders } from './coaching/sweep.js';
 import { sweepPushNotifications } from './notifications.js';
 import { vapidKeys } from './webPush.js';
 import { closeAllWhatsAppSessions, connectWhatsApp, hasStoredCredentials } from './whatsapp.js';
@@ -53,6 +54,7 @@ function everyTenant() {
       timezone: tenant.timezone || undefined,
       businessType: tenant.business_type || 'gym',
       gymName: tenant.gym_name || tenant.display_name || config.gymName,
+      currency: tenant.currency || 'INR',
     }));
 }
 
@@ -76,6 +78,8 @@ function sweepAutomatedMessages() {
         () => {
           sendAutomatedRenewalReminders({ gymName: tenant.gymName });
           sendAutomatedBirthdayWishes({ gymName: tenant.gymName });
+          // CoachBook installment reminders; a no-op outside that vertical.
+          sendCoachingFeeReminders({ gymName: tenant.gymName, currency: tenant.currency });
         },
       );
     } catch (err) {

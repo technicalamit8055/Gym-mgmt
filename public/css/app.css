@@ -435,6 +435,110 @@ html[data-splash='ink'] .splash {
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
+/* The member app's version (html[data-splash-art='gym'], set pre-paint by
+   index.html): a dumbbell, shaker, apple and supplement jar that bob in turn,
+   in the member sign-in's gold. Only members see it, so it can say "gym"
+   where the tick above can't. */
+.splash-art, .splash-beads { display: none; }
+html[data-splash-art='gym'] .splash-mark,
+html[data-splash-art='gym'] .splash-dots { display: none; }
+html[data-splash-art='gym'] .splash-art { display: block; width: min(240px, 64vw); height: auto; overflow: visible; }
+html[data-splash-art='gym'] .splash-beads { display: flex; }
+html[data-splash-art='gym'] .splash-inner { gap: 18px; }
+html[data-splash-art='gym'] .splash-text {
+  margin-top: 6px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--text);
+}
+html[data-splash-art='gym'] .splash-text::after { content: '…'; margin-left: -6px; }
+
+.splash-art {
+  --sp-gold: #ffc51f; --sp-leaf: #43a047;
+  --sp-ink: #1d1d21; --sp-line: #1d1d21; --sp-glass: #fff;
+}
+/* Dark objects on a dark page would vanish, so they lift a shade and take a
+   light outline instead. */
+body[data-mode='dark'] .splash-art, html[data-splash='ink'] .splash-art {
+  --sp-ink: #26262b; --sp-line: rgba(255, 255, 255, 0.86); --sp-glass: rgba(255, 255, 255, 0.07);
+}
+.splash-art :is(.sp-ink, .sp-gold, .sp-glass, .sp-outline, .sp-leaf) {
+  stroke: var(--sp-line); stroke-width: 2.5; stroke-linejoin: round;
+}
+.splash-art .sp-ink { fill: var(--sp-ink); }
+.splash-art .sp-gold, .splash-art .sp-liquid, .splash-art .sp-bolt { fill: var(--sp-gold); }
+.splash-art .sp-glass { fill: var(--sp-glass); }
+.splash-art .sp-outline { fill: none; }
+.splash-art .sp-leaf { fill: var(--sp-leaf); }
+.splash-art .sp-shine { fill: #fff; opacity: 0.4; }
+.splash-art :is(.sp-stem, .sp-strap, .sp-tick, .sp-glint, .sp-spark, .sp-swoosh) {
+  fill: none; stroke-linecap: round;
+}
+.splash-art .sp-stem { stroke: var(--sp-line); stroke-width: 3; }
+.splash-art .sp-strap { stroke: var(--sp-line); stroke-width: 3.5; }
+.splash-art .sp-tick { stroke: var(--sp-line); stroke-width: 1.6; opacity: 0.7; }
+.splash-art .sp-glint { stroke: #fff; stroke-width: 3.5; opacity: 0.7; }
+.splash-art .sp-spark { stroke: var(--sp-gold); stroke-width: 3.5; }
+.splash-art .sp-swoosh { stroke: color-mix(in srgb, var(--sp-gold) 55%, transparent); stroke-width: 6; }
+.splash-art .sp-shadow { fill: color-mix(in srgb, var(--muted) 16%, transparent); }
+
+/* Every moving group scales and turns about its own middle. */
+.splash-art :is(.sp-pop, .sp-loop, .sp-spark, .sp-shadow, .sp-swoosh path) {
+  transform-box: fill-box; transform-origin: center;
+}
+.splash-art .sp-pop { animation: sp-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.splash-art .sp-p1 { animation-delay: 0.2s; }
+.splash-art .sp-p2 { animation-delay: 0.3s; }
+.splash-art .sp-p3 { animation-delay: 0.4s; }
+.splash-art .sp-p4 { animation-delay: 0.5s; }
+@keyframes sp-pop { from { opacity: 0; transform: scale(0.4) translateY(14px); } }
+
+/* One 2.4s beat shared by everything, each item offset so they bob in turn. */
+.splash-art .sp-loop { animation: 2.4s ease-in-out infinite; }
+.splash-art .sp-dumbbell { animation-name: sp-curl; animation-delay: 0.75s; }
+.splash-art .sp-shaker { animation-name: sp-shake; animation-delay: 0.95s; }
+.splash-art .sp-apple { animation-name: sp-hop; animation-delay: 1.15s; }
+.splash-art .sp-jar { animation-name: sp-hop; animation-delay: 1.35s; }
+@keyframes sp-curl { 0%, 100% { transform: none; } 45% { transform: translateY(-8px) rotate(-10deg); } }
+@keyframes sp-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateY(-5px) rotate(7deg); }
+  40% { transform: translateY(-5px) rotate(-6deg); }
+  60% { transform: translateY(-2px) rotate(3deg); }
+}
+@keyframes sp-hop {
+  0%, 60%, 100% { transform: none; }
+  30% { transform: translateY(-10px); }
+}
+/* Shadows shrink as the apple and jar above them leave the ground. */
+.splash-art .sp-shadow { animation: sp-shadow 2.4s ease-in-out infinite; }
+.splash-art .sp-sh1 { animation-delay: 1.15s; }
+.splash-art .sp-sh2 { animation-delay: 1.35s; }
+@keyframes sp-shadow { 0%, 60%, 100% { transform: none; } 30% { transform: scaleX(0.72); opacity: 0.6; } }
+
+/* The liquid's wavy top slides one wavelength (40 units) per loop. */
+.splash-art .sp-liquid { animation: sp-wave 1.6s linear infinite; }
+@keyframes sp-wave { to { transform: translateX(40px); } }
+
+.splash-art .sp-spark { animation: sp-twinkle 1.2s ease-in-out infinite alternate; }
+.splash-art .sp-k2 { animation-delay: 0.4s; }
+.splash-art .sp-k3 { animation-delay: 0.8s; }
+@keyframes sp-twinkle { from { opacity: 0.35; transform: scale(0.8); } to { opacity: 1; transform: scale(1.08); } }
+
+.splash-art .sp-swoosh path { animation: sp-swish 2.4s ease-in-out infinite; }
+.splash-art .sp-s2 { animation-delay: 0.3s; }
+.splash-art .sp-s3 { animation-delay: 0.6s; }
+@keyframes sp-swish { 0%, 100% { opacity: 0.4; transform: rotate(-4deg); } 50% { opacity: 1; transform: rotate(4deg); } }
+
+.splash-beads { gap: 10px; }
+.splash-beads i {
+  width: 12px; height: 12px; border-radius: 50%; background: #ffc51f;
+  animation: splash-bead 1.2s ease-in-out infinite;
+}
+.splash-beads i:nth-child(2) { animation-delay: 0.2s; }
+.splash-beads i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes splash-bead {
+  0%, 60%, 100% { opacity: 0.35; transform: scale(0.85); }
+  30% { opacity: 1; transform: scale(1.1); }
+}
+
 /* No turning, drawing or bouncing: the tick sits finished and the whole mark
    just breathes, which still says "working" without movement. */
 @media (prefers-reduced-motion: reduce) {
@@ -444,6 +548,9 @@ html[data-splash='ink'] .splash {
   .splash-dots i { opacity: 0.5; }
   .splash-mark { animation: splash-calm 2.4s ease-in-out infinite; }
   @keyframes splash-calm { 50% { opacity: 0.55; } }
+  .splash-art *, .splash-beads i { animation: none !important; }
+  .splash-beads i { opacity: 0.5; }
+  .splash-art { animation: splash-calm 2.4s ease-in-out infinite; }
 }
 
 /* ------------------------------------------------------------------- login */
@@ -2101,6 +2208,39 @@ body[data-vertical='library'] .stat.accent,
 .onboard-card p.sub { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
 .onboard-back { position: absolute; top: 14px; right: 14px; }
 
+/* ---- gym offline screen (renderGymOffline in app.js) ----
+ * Fixed light colours in either mode: the art is drawn on an opaque
+ * near-white ground (#fefefe), so the page matches it rather than framing it. */
+
+.gym-offline {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: calc(24px + var(--safe-top)) calc(24px + var(--safe-right))
+    calc(24px + var(--safe-bottom)) calc(24px + var(--safe-left));
+  background: #fefefe;
+  color: #182433;
+  text-align: center;
+}
+.gym-offline-art { width: min(260px, 68vw); height: auto; margin-bottom: 28px; }
+.gym-offline h1 { margin: 0 0 10px; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; color: #182433; }
+.gym-offline p { margin: 0 0 32px; max-width: 290px; font-size: 16px; line-height: 1.5; color: #5b6676; }
+.gym-offline-btn {
+  min-width: 156px;
+  padding: 14px 32px;
+  border: 0;
+  border-radius: 16px;
+  background: #febc26;
+  color: #111;
+  font: inherit; font-size: 16px; font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.15s;
+}
+.gym-offline-btn:hover { filter: brightness(0.96); }
+.gym-offline-btn:active { transform: scale(0.97); }
+.gym-offline-btn:disabled { opacity: 0.6; cursor: progress; }
+.gym-offline-btn:focus-visible { outline: 3px solid #182433; outline-offset: 3px; }
+
 .onboard-section {
   margin: 26px 0 14px;
   font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
@@ -3208,6 +3348,17 @@ body[data-mode='light'] .login {
   display: grid; place-items: center; padding: 40px 0; color: var(--muted); text-align: center; gap: 10px; font-size: 13.5px;
 }
 .portal-error { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 0; text-align: center; color: var(--muted); }
+/* A gym's full-page wait (portalLoader() in views/portal.js): the boot
+   splash's illustration, smaller. Held back a beat like the splash, so a tab
+   that loads quickly swaps straight in without the scene flashing up. */
+.portal-loader {
+  display: grid; justify-items: center; gap: 14px; padding: 9vh 0 40px;
+  animation: splash-in 0.4s var(--ease) 0.25s backwards;
+}
+.portal-loader .splash-art { display: block; width: min(200px, 56vw); height: auto; overflow: visible; }
+.portal-loader .splash-beads { display: flex; }
+.portal-loader-text { margin: 4px 0 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .portal-loader { animation: none; } }
 
 /* ---------------------------------------------------------------- tab bar */
 
@@ -5334,17 +5485,23 @@ body:not([data-mode='light']) .portal-pay {
   --lg-ink: #0a0a0b;
   --lg-text: #fff;
   --lg-muted: rgba(255, 255, 255, 0.62);
-  min-height: 100vh; min-height: 100dvh;
+  height: 100vh; height: 100dvh; overflow: hidden;
   display: flex; justify-content: center;
   background: var(--lg-ink); color: var(--lg-text);
 }
+/* Exactly one screen tall and scrolls inside itself: a scroll container's
+   background stays put while its content moves, which background-attachment:
+   fixed can't do on mobile (WebView and phone browsers ignore it). */
 .portal-login-stage {
-  position: relative; overflow: hidden; isolation: isolate;
-  width: min(100%, 520px); min-height: 100vh; min-height: 100dvh;
-  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  position: relative; overflow-x: hidden; overflow-y: auto; isolation: isolate;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  width: min(100%, 520px); height: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: clamp(12px, 2.6dvh, 22px);
+  /* Sizes below follow the screen height so the sign-in steps fit one screen
+     on short phones instead of scrolling. */
   padding:
-    calc(clamp(150px, 30dvh, 330px) + var(--safe-top)) calc(20px + var(--safe-right))
-    calc(clamp(72px, 16dvh, 190px) + var(--safe-bottom)) calc(20px + var(--safe-left));
+    calc(clamp(48px, 30dvh - 90px, 330px) + var(--safe-top)) calc(clamp(12px, 4vw, 20px) + var(--safe-right))
+    calc(clamp(16px, 14dvh - 60px, 190px) + var(--safe-bottom)) calc(clamp(12px, 4vw, 20px) + var(--safe-left));
   background:
     radial-gradient(520px 420px at 50% 8%, rgba(255, 186, 20, 0.22), transparent 70%),
     radial-gradient(420px 320px at 50% 100%, rgba(255, 170, 0, 0.12), transparent 70%),
@@ -5356,6 +5513,9 @@ body:not([data-mode='light']) .portal-pay {
     url('/images/portal/login-bg.webp') center top / cover no-repeat,
     radial-gradient(520px 420px at 50% 8%, rgba(255, 186, 20, 0.22), transparent 70%),
     var(--lg-ink);
+  /* "cover" against the full screen height (photo is 922x1706), so the photo
+     doesn't zoom out when the keyboard shrinks the viewport. */
+  background-size: 100% 100%, max(100%, calc(100lvh * 922 / 1706)) auto, auto, auto;
 }
 @media (min-width: 560px) {
   .portal-login-stage { box-shadow: 0 0 80px rgba(0, 0, 0, 0.9); }
@@ -5375,9 +5535,9 @@ body:not([data-mode='light']) .portal-pay {
 .portal-login-stripe-tl { top: -250px; left: 18px; }
 .portal-login-stripe-r { top: 28%; right: -34px; height: 380px; opacity: 0.9; }
 
-.portal-login-brand { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.portal-login-brand { display: flex; flex-direction: column; align-items: center; gap: clamp(8px, 1.8dvh, 14px); text-align: center; }
 .portal-login-logo, .portal-login-logo-img {
-  width: 78px; height: 78px; border-radius: 20px;
+  width: clamp(56px, 9dvh, 78px); height: clamp(56px, 9dvh, 78px); border-radius: 20px;
   border: 2.5px solid var(--lg-gold);
   box-shadow: 0 0 26px rgba(255, 190, 20, 0.45), 0 10px 24px rgba(0, 0, 0, 0.5);
 }
@@ -5398,8 +5558,8 @@ body:not([data-mode='light']) .portal-pay {
 }
 .portal-login-card {
   position: relative; overflow: hidden;
-  display: flex; flex-direction: column; gap: 16px;
-  padding: 30px 22px 36px; border-radius: 26px;
+  display: flex; flex-direction: column; gap: clamp(10px, 1.9dvh, 16px);
+  padding: clamp(18px, 3.6dvh, 30px) clamp(14px, 4.6vw, 22px) clamp(20px, 4.2dvh, 36px); border-radius: 26px;
   border: 1.5px solid rgba(255, 197, 31, 0.78);
   background: linear-gradient(165deg, rgba(34, 34, 36, 0.86), rgba(12, 12, 13, 0.9));
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
@@ -5417,7 +5577,7 @@ body:not([data-mode='light']) .portal-pay {
 .portal-login-card > * { position: relative; }
 
 .portal-login-avatar {
-  align-self: center; width: 84px; height: 84px; margin-bottom: 8px; border-radius: 50%;
+  align-self: center; width: clamp(56px, 9.6dvh, 84px); height: clamp(56px, 9.6dvh, 84px); margin-bottom: clamp(0px, 1dvh, 8px); border-radius: 50%;
   display: grid; place-items: center; color: var(--lg-gold);
   border: 1.5px solid rgba(255, 197, 31, 0.6);
   background: radial-gradient(circle at 50% 40%, #1f1f20, #0e0e0f 70%);
@@ -5425,7 +5585,7 @@ body:not([data-mode='light']) .portal-pay {
 }
 
 .portal-login-field {
-  align-items: center; gap: 14px; height: 60px; padding: 0 18px; border-radius: 14px;
+  align-items: center; gap: clamp(10px, 3vw, 14px); height: clamp(48px, 6.8dvh, 60px); padding: 0 clamp(12px, 4vw, 18px); border-radius: 14px;
   color: #cfcfd3; background: rgba(40, 40, 43, 0.92); border: 1px solid rgba(255, 255, 255, 0.14);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -5434,12 +5594,12 @@ body:not([data-mode='light']) .portal-pay {
 .portal-login-field .portal-input,
 .portal-login-field .portal-input:focus {
   flex: 1; min-width: 0; padding: 0; border: none; border-radius: 0; box-shadow: none;
-  background: transparent; color: var(--lg-text); font-size: 17px;
+  background: transparent; color: var(--lg-text); font-size: clamp(16px, 4.4vw, 17px);
 }
 .portal-login-field .portal-input::placeholder { color: rgba(255, 255, 255, 0.55); }
 
 .portal-login-cta {
-  position: relative; width: 100%; height: 60px; border: none; border-radius: 14px; cursor: pointer;
+  position: relative; flex: none; width: 100%; height: clamp(48px, 6.8dvh, 60px); border: none; border-radius: 14px; cursor: pointer;
   display: grid; place-items: center;
   font: inherit; font-size: 18px; font-weight: 700; color: #111;
   background: linear-gradient(180deg, var(--lg-gold-hi), var(--lg-gold-lo));
@@ -5493,7 +5653,17 @@ body:not([data-mode='light']) .portal-pay {
 .portal-login-hint { margin: -8px 2px 0; font-size: 12.5px; color: var(--lg-muted); }
 .portal-login-field .portal-login-code:not(:placeholder-shown) { letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
 /* Room for the Back pill above the avatar on the side steps */
-.portal-login-card:has(> .portal-back-link) { padding-top: 54px; }
+.portal-login-card:has(> .portal-back-link) { padding-top: clamp(50px, 6.6dvh, 54px); }
+/* The side steps (setup code, new password, WhatsApp) hold more, so the card
+   rides higher over the photo and sheds its decorative icon on shorter phones. */
+.portal-login:not(.findgym) .portal-login-stage:has(.portal-login-card > .portal-back-link) {
+  padding-top: calc(clamp(20px, 30dvh - 200px, 330px) + var(--safe-top));
+  padding-bottom: calc(16px + var(--safe-bottom));
+}
+@media (max-height: 800px) {
+  .portal-login:not(.findgym) .portal-login-card:has(> .portal-back-link) > .portal-login-avatar,
+  .portal-login:not(.findgym) .portal-login-card-wrap:has(> .portal-login-card > .portal-back-link) > .portal-login-dumbbell { display: none; }
+}
 
 /* ------------------------------------------------------------ find your gym */
 
@@ -7384,6 +7554,7 @@ button.portal-set-prev:hover { color: var(--brand); }
   padding-top: 14px;
   border-top: 1px solid #f1f5f9;
 }
+.coach-ideas[hidden] { display: none; }
 .coach-ideas-head {
   display: flex;
   align-items: center;
@@ -8025,6 +8196,33 @@ button.portal-set-prev:hover { color: var(--brand); }
   animation: coach-mic-spin 0.8s linear infinite;
 }
 @keyframes coach-mic-spin { to { transform: rotate(360deg); } }
+/* Stop: in the mic's spot while an answer is coming, a square like a media stop. */
+.coach-stop {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: #0f172a;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.3);
+  transition: transform 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.coach-stop:active { transform: scale(0.92); }
+.coach-stop-square { width: 14px; height: 14px; border-radius: 3px; background: #ffffff; }
+.pc-stop { background: #0f172a; }
+.pc-stop .coach-stop-square { width: 11px; height: 11px; border-radius: 2px; }
+.pc-send[hidden] { display: none; }
+body:not([data-mode='light']) .coach-stop,
+body:not([data-mode='light']) .pc-stop { background: #f1f5f9; box-shadow: none; }
+body:not([data-mode='light']) .coach-stop-square { background: #0f172a; }
+/* What a stopped answer says, after whatever it had written. */
+.coach-stopped { display: block; margin-top: 6px; font-size: 12.5px; font-style: italic; color: #94a3b8; }
+.coach-answer > .coach-stopped:first-child { margin-top: 0; }
+.pc-reply.is-stopped { color: var(--muted); font-size: 13.5px; font-style: italic; }
 .coach-rec {
   --level: 0;
   flex: 1;
@@ -8528,6 +8726,134 @@ body:not([data-mode='light']) .coach-lang-opt[aria-pressed='true'] {
 @keyframes gen-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .gen-go.is-busy svg { animation: none; } }
 
+/* The AI coach in the plan builders (openPlanCoach in public/js/planCoach.js). */
+.pc-modal .modal-body { display: flex; flex-direction: column; }
+.pc-sheet { display: flex; flex-direction: column; gap: 14px; }
+.pc-quick { display: flex; flex-direction: column; gap: 8px; }
+.pc-quick.is-busy { opacity: 0.55; pointer-events: none; }
+.pc-chip { display: inline-flex; align-items: center; gap: 6px; }
+.pc-muscles[hidden] { display: none; }
+.pc-muscles .gen-chip { height: 30px; padding: 0 12px; font-size: 13px; }
+.pc-thread { display: flex; flex-direction: column; gap: 16px; }
+.pc-turn { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 8px; }
+.pc-question {
+  align-self: flex-end; max-width: 85%; padding: 9px 14px; border-radius: 18px 18px 4px 18px;
+  background: var(--brand); color: #fff; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere;
+}
+.pc-reply {
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  border-radius: 4px 18px 18px 18px; border: 1px solid var(--border); background: var(--surface);
+}
+.pc-reply.is-loading { flex-direction: row; align-items: center; gap: 10px; color: var(--muted); font-size: 13.5px; }
+.pc-reply.is-error { color: var(--red); font-size: 13.5px; }
+.pc-dots { display: inline-flex; gap: 4px; }
+.pc-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); animation: pc-dot 1s ease-in-out infinite; }
+.pc-dots i:nth-child(2) { animation-delay: 0.15s; }
+.pc-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes pc-dot { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .pc-dots i { animation: none; } }
+.pc-answer { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text); }
+.pc-answer strong { font-weight: 700; }
+.pc-section-title {
+  display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
+}
+.pc-section-title span { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+.pc-rating { display: flex; align-items: center; gap: 14px; --pc-tone: var(--amber); }
+.pc-rating.is-good { --pc-tone: var(--green); }
+.pc-rating.is-poor { --pc-tone: var(--red); }
+.pc-score {
+  position: relative; flex: none; width: 62px; height: 62px; border-radius: 50%;
+  display: flex; align-items: baseline; justify-content: center; padding-top: 17px;
+  background: conic-gradient(var(--pc-tone) var(--pc-score), var(--surface-2) 0);
+}
+.pc-score::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); }
+.pc-score strong, .pc-score span { position: relative; }
+.pc-score strong { font-size: 21px; font-weight: 800; line-height: 1; }
+.pc-score span { font-size: 11px; color: var(--muted); }
+.pc-verdict { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pc-verdict small { font-size: 11.5px; color: var(--muted); }
+.pc-verdict strong { font-size: 16px; font-weight: 800; color: var(--pc-tone); }
+
+.pc-volume { display: flex; flex-direction: column; gap: 5px; }
+.pc-vol-row { display: grid; grid-template-columns: 92px 1fr 30px; align-items: center; gap: 8px; font-size: 12.5px; --pc-tone: var(--green); }
+.pc-vol-row.is-low { --pc-tone: var(--amber); }
+.pc-vol-row.is-high { --pc-tone: var(--blue); }
+.pc-vol-row.is-over { --pc-tone: var(--red); }
+.pc-vol-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-vol-track { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.pc-vol-bar { display: block; height: 100%; border-radius: inherit; background: var(--pc-tone); }
+.pc-vol-num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--pc-tone); }
+
+.pc-points { display: flex; flex-direction: column; gap: 6px; }
+.pc-point { display: flex; gap: 8px; font-size: 13.5px; line-height: 1.45; }
+.pc-point svg { flex: none; margin-top: 2px; }
+.pc-points.is-good svg { color: var(--green); }
+.pc-points.is-fix svg { color: var(--amber); }
+
+.pc-sugs { display: flex; flex-direction: column; gap: 8px; }
+.pc-sug { display: flex; gap: 12px; padding: 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); }
+.pc-sug-media {
+  flex: none; width: 56px; height: 56px; border-radius: 10px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--muted);
+}
+.pc-sug-thumb { width: 100%; height: 100%; object-fit: cover; }
+.pc-sug-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pc-sug-name { font-size: 14.5px; font-weight: 700; }
+.pc-sug-meta { font-size: 12.5px; color: var(--muted); }
+.pc-sug-reason { margin: 2px 0 0; font-size: 13px; line-height: 1.4; }
+.pc-sug-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.pc-sug-add { display: flex; gap: 6px; min-width: 0; flex: 1 1 180px; }
+.pc-sug-day {
+  flex: 1; min-width: 0; height: var(--control-h-sm); padding: 0 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+}
+.pc-sug-actions .btn { flex: none; gap: 5px; }
+.pc-sug-done { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--green); }
+.pc-sug-note { font-size: 12.5px; color: var(--muted); }
+
+.pc-foot { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.pc-field {
+  display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 14px;
+  border-radius: 22px; border: 1.5px solid var(--border); background: var(--surface-2);
+}
+.pc-field:focus-within { border-color: var(--brand); }
+.pc-field .pc-input { height: auto; min-height: 24px; max-height: 96px; padding: 4px 0; line-height: 1.4; color: var(--text); field-sizing: content; }
+.pc-field .pc-input::placeholder { color: var(--muted); }
+.pc-send {
+  flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; background: var(--brand); color: #fff;
+}
+.pc-send:disabled { opacity: 0.5; cursor: progress; }
+
+/* The same pieces under a plan answer in the Ask Coach sheet ('plan' screen):
+   one card like a meal plan's, and the muscles to ask about where the Diet
+   sheet has its meal ideas. */
+.coach-plan-extras {
+  display: flex; flex-direction: column; gap: 14px; margin-top: 10px; padding: 14px;
+  border-radius: 18px; background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+}
+.coach-muscles { display: flex; flex-wrap: wrap; gap: 8px; }
+.coach-muscle {
+  height: 32px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  border: 1px solid #e2e8f0; background: #ffffff; color: #334155;
+  font: inherit; font-size: 12.5px; font-weight: 600; transition: all 0.15s ease;
+}
+.coach-muscle:hover { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+body:not([data-mode='light']) .coach-plan-extras { background: var(--surface-2); border-color: var(--border); box-shadow: none; }
+body:not([data-mode='light']) .coach-muscle { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+body:not([data-mode='light']) .coach-muscle:hover { background: rgba(59, 130, 246, 0.18); border-color: #3b82f6; }
+body:not([data-mode='light']) .coach-plan-extras .pc-sug { background: var(--surface); }
+
+/* Its way in from the staff template builder. */
+.fit-builder-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.fit-builder-head .fit-builder-title { margin: 0; }
+.fit-coach-btn { gap: 6px; color: var(--brand); border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
+/* The member plan editor's coach button is the floating .coach-fab: room
+   under Delete plan so it never sits on top of it. */
+.portal-pe-wrap:has(.coach-fab) > .portal-pe { padding-bottom: 66px; }
+
 /* Recent workouts, before the first one: an illustrated card that also holds
    the units switch. With history, the switch sits on its own under the list. */
 .portal-history-empty {
@@ -8631,6 +8957,41 @@ body:not([data-mode='light']) .coach-lang-opt[aria-pressed='true'] {
 .portal-action-row:disabled { opacity: 0.45; cursor: not-allowed; }
 .portal-action-row > span { min-width: 0; overflow-wrap: anywhere; }
 .portal-action-hint { flex: none; margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 500; }
+
+/* Hevy's Select Set Type sheet: a centred title over one rounded card of rows,
+   each a coloured letter, its name and a ? that explains it. */
+.modal.portal-settype-modal .modal-head { justify-content: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.modal.portal-settype-modal .modal-head h2 { font-size: 17px; font-weight: 600; text-align: center; }
+.modal.portal-settype-modal .modal-head .spacer,
+.modal.portal-settype-modal .modal-head .icon-btn { display: none; }
+.modal.portal-settype-modal .modal-body { padding: 16px 16px 24px; }
+.portal-settype-list { border-radius: 16px; background: var(--surface-2); overflow: hidden; }
+.portal-settype-item + .portal-settype-item { border-top: 1px solid var(--border); }
+.portal-settype-item.active { background: color-mix(in srgb, var(--brand) 9%, transparent); }
+.portal-settype-line { display: flex; align-items: center; }
+.portal-settype-row {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 18px; min-height: 62px; padding: 0 18px 0 20px;
+  border: none; background: none; cursor: pointer; text-align: left;
+  color: var(--text); font: inherit; font-size: 16.5px; font-weight: 500;
+  -webkit-tap-highlight-color: transparent;
+}
+.portal-settype-row:active { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.portal-settype-row:disabled { opacity: 0.45; cursor: not-allowed; }
+.portal-settype-badge {
+  flex: none; width: 26px; display: grid; place-items: center;
+  font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--text);
+}
+.portal-settype-badge.t-warmup { color: var(--amber); }
+.portal-settype-badge.t-failure { color: var(--red); }
+.portal-settype-badge.t-drop { color: var(--blue); }
+.portal-settype-row.is-remove .portal-settype-badge { color: var(--red); }
+.portal-settype-q {
+  flex: none; width: 26px; height: 26px; margin-right: 18px; padding: 0; border: none; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center; font: inherit; font-size: 14px; font-weight: 700;
+  color: var(--muted); background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.portal-settype-q[aria-expanded='true'] { color: #fff; background: var(--brand); }
+.portal-settype-help { margin: -6px 0 0; padding: 0 20px 14px 64px; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
 
 /* The session clock's Duration sheet. */
 .portal-duration-sheet { display: flex; flex-direction: column; gap: 6px; }
@@ -10182,6 +10543,18 @@ video.portal-routine-thumb { pointer-events: none; }
 .portal-demo-expand { right: 10px; bottom: 10px; pointer-events: none; }
 .portal-demo-pause { right: 10px; top: 10px; cursor: pointer; padding: 0; }
 .portal-exd-panel > .portal-demo-stage { margin-bottom: 14px; }
+.portal-exd-panel > .portal-demo-actions { margin-bottom: 14px; }
+
+/* The pill row under the demo — Hevy's "YouTube" chip. */
+.portal-demo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.portal-yt-link {
+  display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text); font-size: 14px; font-weight: 600; text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.portal-yt-link .svg-icon { color: #ff0033; }
+.portal-yt-link:hover { background: color-mix(in srgb, var(--text) 8%, var(--surface-2)); }
+.portal-yt-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 .portal-demo-full {
   position: fixed; inset: 0; z-index: 1000;
@@ -12333,3 +12706,58 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
   .nb-row { flex-wrap: wrap; }
   .nb-row-badge { min-width: 0; }
 }
+
+/* ------------------------------------------------------------ shop panel (#/seller) + console shops */
+.sp-row .btn { flex-shrink: 0; }
+.sp-nav-count { margin-left: auto; background: var(--brand-soft); color: var(--brand); }
+.linklike {
+  border: 0; background: none; padding: 0; font: inherit; color: var(--brand);
+  cursor: pointer; text-align: left; text-decoration: underline; text-underline-offset: 3px;
+}
+.sp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sp-steps li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.sp-steps li.done { color: var(--muted); text-decoration: line-through; }
+.sp-step-mark {
+  display: grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%; border: 2px solid var(--border); color: #fff;
+}
+.sp-steps li.done .sp-step-mark { background: var(--green); border-color: var(--green); }
+.sp-attention { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); }
+
+.sp-order { display: flex; flex-direction: column; gap: 14px; }
+.sp-order-who { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.sp-contact { display: flex; gap: 6px; flex-wrap: wrap; }
+.sp-order-where {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px;
+  border-radius: var(--radius-sm); background: color-mix(in srgb, var(--muted) 9%, transparent);
+}
+.sp-order-where p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+.sp-order-where svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }
+.sp-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sp-items li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.sp-items li > div { flex: 1; min-width: 0; }
+.sp-items img, .sp-items .sa-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: contain; background: var(--surface-2); flex-shrink: 0; }
+.sp-money { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sp-money-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; font-variant-numeric: tabular-nums; padding: 2px 0; }
+.sp-money-row:last-child strong { color: var(--green); }
+.sp-wait { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; }
+
+/* Console → Partner shops */
+.shp-password {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: var(--radius-sm); border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+}
+.shp-password code { font-size: 20px; font-weight: 700; letter-spacing: 0.06em; }
+.shp-gyms { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; margin: 0 -4px; padding: 0 4px; }
+.shp-city { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 2px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.shp-gym { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
+.shp-gym:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.shp-gym span { flex: 1; min-width: 0; }
+.shp-gym small { color: var(--muted); }
+.shp-gym small.taken { color: var(--amber); }
+.shp-money-settings .sa-seg { margin: 4px 0 0; }
+@media (min-width: 641px) { .shp-money-settings .sa-seg.two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.shp-inline { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.shp-inline input { width: 110px; flex-shrink: 0; }
+.shp-example { margin-top: 12px; }

@@ -1,15 +1,29 @@
 import { Router } from 'express';
+import {
+  MAX_QUESTION_LENGTH,
+  PLAN_REVIEW_MODES,
+  coachConfigured,
+  libraryForPlan,
+  planReviewsToday,
+  reviewPlan,
+  reviewSteps,
+  sanitisePlanForReview,
+  streamReviewPlan,
+} from '../aiCoach.js';
 import { requireAuth } from '../auth.js';
+import { config } from '../config.js';
 import { all, get, run, tx } from '../db.js';
-import { badRequest, notFound } from '../errors.js';
+import { HttpError, badRequest, notFound, tooManyRequests } from '../errors.js';
 import { attachCatalogToExercises, listCatalog, mergeWithGymExercises } from '../exerciseCatalog.js';
 import {
   EQUIPMENT_TYPES,
   MUSCLE_GROUPS,
   WORKOUT_GOALS,
   WORKOUT_LEVELS,
+  fitnessSettings,
   muscleGroupOf,
 } from '../fitness.js';
+import { createLimiter } from '../rateLimit.js';
 import { parse, today, toInt } from '../validate.js';
 import { requireModule } from '../verticals.js';
 
@@ -425,3 +439,150 @@ workoutRoutes.delete('/exercises/:id', (req, res) => {
   run('DELETE FROM exercise_library WHERE id = ?', [id]);
   res.json({ ok: true });
 });
+
+/* ── Coach in the plan builder ─────────────────────────────────────────── */
+
+/** Whether the gym has the coach: the platform has Vertex set up and the gym
+ * has not switched it off. One switch for the member app and the builder. */
+export const planCoachEnabled = () => coachConfigured() && fitnessSettings().ai_coach_enabled !== 0;
+
+/** A stuck button or a script should not spend a day's reviews in a minute. */
+const reviewBurstLimiter = createLimiter({ maxAttempts: 6, windowMs: 60_000, lockoutMs: 60_000 });
+
+const REVIEW_FIELDS = {
+  mode: { type: 'enum', values: PLAN_REVIEW_MODES, default: 'ask' },
+  question: { type: 'string', max: MAX_QUESTION_LENGTH },
+};
+const RATE_QUESTION = 'Rate this plan for building muscle. What would make it better?';
+
+/**
+ * One question to the coach about the plan in the builder, checked — shared by
+ * the member app (POST /api/portal/coach/plan-review) and the staff template
+ * builder (POST /api/workouts/coach/review). Exactly one of memberId / userId
+ * says who asked: it is whose cap is counted and whose row is logged. `member`
+ * is the member's profile for the prompt, null for a gym template. Throws the
+ * request's errors before anything is sent, so a stream only ever starts for
+ * a question that will be asked.
+ */
+function preparePlanReview({ body, memberId = null, userId = null, member = null, tenantSlug = '' }) {
+  if (!planCoachEnabled()) throw new HttpError(503, 'The coach is not available at this gym', { code: 'ai_disabled' });
+  const { mode, question: asked } = parse(body ?? {}, REVIEW_FIELDS);
+  const question = asked?.trim() || (mode === 'rate' ? RATE_QUESTION : '');
+  if (!question) throw badRequest('Ask the coach a question', { question: 'is required' });
+
+  const library = libraryForPlan(exercisePickerRows({}), null);
+  const plan = sanitisePlanForReview(body?.plan, library);
+  if (!plan) throw badRequest('Send the plan being edited', { plan: 'is required' });
+  if (mode === 'rate' && !plan.days.some((day) => day.exercises.length)) {
+    throw badRequest('Add a few exercises first — there is nothing to rate yet');
+  }
+
+  const limit = memberId != null ? config.aiCoach.planReviewDailyLimit : config.aiCoach.staffPlanReviewDailyLimit;
+  const used = planReviewsToday({ memberId, userId });
+  if (used >= limit) {
+    throw tooManyRequests(`That's the ${limit} coach questions about plans for today — try again tomorrow`, {
+      code: 'review_limit_reached',
+    });
+  }
+  const burstKey = `${tenantSlug}:${memberId != null ? `m${memberId}` : `u${userId}`}`;
+  const burst = reviewBurstLimiter.check(burstKey);
+  if (burst.locked) {
+    throw tooManyRequests(`Slow down a little — try again in ${burst.retryAfterSeconds}s`, { code: 'coach_burst' });
+  }
+  reviewBurstLimiter.recordAttempt(burstKey);
+  return { plan, mode, question, history: body?.history, member, library, memberId, userId, limit, used };
+}
+
+const REVIEW_UNAVAILABLE = 'The coach could not look at this plan just now — try again in a moment';
+
+/** Asks Gemini — streamed when `stream` has the callbacks — and logs the
+ * reply. Nothing is saved to the plan: suggestions come back for the builder
+ * to apply. A failure is a 502 and is not counted: they got nothing for it. */
+async function runPlanReview(review, stream = null, signal = undefined) {
+  const { plan, mode, question, history, member, library, memberId, userId, limit, used } = review;
+  let result;
+  try {
+    const params = { plan, mode, question, history, member, library };
+    result = stream ? await streamReviewPlan({ ...params, ...stream }) : await reviewPlan({ ...params, signal });
+  } catch (err) {
+    // Stopped by the asker: nothing went wrong, and nothing is counted.
+    if (signal?.aborted || stream?.signal?.aborted) throw err;
+    console.error('AI plan review failed:', err?.message ?? err);
+    throw new HttpError(502, REVIEW_UNAVAILABLE, { code: 'coach_unavailable' });
+  }
+
+  const { input_tokens: inputTokens, output_tokens: outputTokens, ...reply } = result;
+  run(
+    `INSERT INTO ai_plan_reviews (member_id, user_id, mode, question, reply, input_tokens, output_tokens)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [memberId, userId, mode, question, JSON.stringify(reply), inputTokens, outputTokens],
+  );
+  return { ...reply, question, remaining_today: Math.max(0, limit - used - 1) };
+}
+
+/**
+ * Answers a plan question, as /api/portal/coach/ask does: plain JSON, or —
+ * asked with `Accept: text/event-stream` — streamed, with `step` events for
+ * what the coach is reading, `thought` for Gemini's thought summaries,
+ * `answer` for the reply as it is written, then one `done` with the same body
+ * the JSON reply has, or `error`. Anything refused before Gemini is called is
+ * still a plain JSON error. `who` is { memberId, member } or { userId }.
+ */
+export async function sendPlanReview(req, res, who) {
+  const review = preparePlanReview({ body: req.body, tenantSlug: req.tenant?.slug ?? '', ...who });
+  if (!String(req.get('accept') ?? '').includes('text/event-stream')) {
+    // Stopped from the builder: stop paying for an answer no one will read.
+    const gone = new AbortController();
+    res.on('close', () => {
+      if (!res.writableFinished) gone.abort();
+    });
+    let reply;
+    try {
+      reply = await runPlanReview(review, null, gone.signal);
+    } catch (err) {
+      if (gone.signal.aborted) return;
+      throw err;
+    }
+    return res.json(reply);
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    // Stop a reverse proxy holding the stream back until it ends.
+    'X-Accel-Buffering': 'no',
+  });
+  const emit = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // The sheet was closed mid-answer: stop paying for the rest of it.
+  const gone = new AbortController();
+  res.on('close', () => {
+    if (!res.writableFinished) gone.abort();
+  });
+
+  for (const text of reviewSteps(review)) emit('step', { text });
+  try {
+    const reply = await runPlanReview(review, {
+      signal: gone.signal,
+      onThought: (text) => emit('thought', { text }),
+      onAnswer: (text) => emit('answer', { text }),
+    });
+    emit('done', reply);
+  } catch (err) {
+    if (!gone.signal.aborted) emit('error', { error: err.message || REVIEW_UNAVAILABLE, code: err.details?.code ?? 'coach_unavailable' });
+  }
+  res.end();
+}
+
+workoutRoutes.get('/coach/status', (req, res) => {
+  const enabled = planCoachEnabled();
+  const limit = config.aiCoach.staffPlanReviewDailyLimit;
+  res.json({
+    enabled,
+    daily_limit: limit,
+    remaining_today: enabled ? Math.max(0, limit - planReviewsToday({ userId: req.user.id })) : 0,
+  });
+});
+
+/** The coach on a gym template: no member, so it judges the plan for anyone
+ * at the template's level and goal. */
+workoutRoutes.post('/coach/review', (req, res) => sendPlanReview(req, res, { userId: req.user.id }));

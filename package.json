@@ -16,9 +16,12 @@
     "vendor:zxing": "node scripts/vendor-zxing.js",
     "icons:gen": "node scripts/gen-icons.js",
     "icons:gen:library": "node scripts/gen-icons-library.js",
+    "icons:gen:coaching": "node scripts/gen-icons-coaching.js",
     "emulator": "powershell -ExecutionPolicy Bypass -File scripts/open-emulator.ps1",
     "seed:store": "node --no-warnings=ExperimentalWarning scripts/seed-store.js",
-    "android:apk": "node scripts/android.js"
+    "devices": "adb devices -l",
+    "android:apk": "node scripts/android.js",
+    "android:run": "node scripts/android.js --install"
   },
   "dependencies": {
     "@google/genai": "^2.28.0",

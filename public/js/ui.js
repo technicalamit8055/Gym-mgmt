@@ -2,8 +2,14 @@
 
 import { serverOrigin, serverUrl } from './api.js';
 
+/** A transparent 1×1 GIF: an "empty" poster, so the box's own background shows. */
+const BLANK_POSTER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 export function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
+  // With no poster, Android WebView paints its own big gray play button over
+  // a <video> until the first frame arrives — a camera view or a demo clip.
+  if (tag === 'video' && !props?.poster) el.setAttribute('poster', BLANK_POSTER);
   for (const [key, value] of Object.entries(props || {})) {
     if (value === null || value === undefined || value === false) continue;
     if (key === 'class') el.className = value;
@@ -124,6 +130,12 @@ const ICONS = {
     'M12 17.5v-11',
   ],
   book: ['M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z', 'M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z'],
+  // CoachBook's mark: a graduation cap.
+  graduation: [
+    'M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z',
+    'M22 10v6',
+    'M6 12.5V16a6 3 0 0 0 12 0v-3.5',
+  ],
   shield: [
     'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z',
   ],
@@ -318,6 +330,11 @@ const ICONS = {
     'M12 6V4',
   ],
   play: ['M6 4.5 19 12 6 19.5z'],
+  // A play button in a rounded screen — the exercise sheet's YouTube link.
+  youtube: [
+    'M2.5 12c0-3 .3-5 1.3-5.8C5 5.3 8 5 12 5s7 .3 8.2 1.2c1 .8 1.3 2.8 1.3 5.8s-.3 5-1.3 5.8C19 18.7 16 19 12 19s-7-.3-8.2-1.2C2.8 17 2.5 15 2.5 12z',
+    'M10 9.2v5.6l4.8-2.8z',
+  ],
   // Body parts — the Add Exercise filter chips.
   muscleBack: [
     { tag: 'circle', cx: 12, cy: 4, r: 2 },
@@ -1249,6 +1266,14 @@ export function goBack() {
   if (!backLayers.length) releaseTrap();
 }
 
+/** The Android app's back button (MainActivity.java): false when nothing is
+ * left to close, and the app should leave to the home screen. */
+export function handleBackButton() {
+  if (!backLayers.length) return false;
+  goBack();
+  return true;
+}
+
 /* ------------------------------------------------------------------- modal */
 
 let modalCount = 0;
@@ -1483,6 +1508,22 @@ function grabVideoFrame(url, onFrame, onFail) {
 }
 
 /**
+ * What a clip shows until its first frame decodes: its still when a
+ * thumbnail already drew one, else nothing at all (see h()).
+ */
+function videoPoster(url) {
+  const still = stills.get(url);
+  if (still) {
+    try {
+      return still.canvas.toDataURL('image/jpeg', 0.85);
+    } catch {
+      // a tainted canvas can't be read back; fall through to the blank one
+    }
+  }
+  return BLANK_POSTER;
+}
+
+/**
  * An exercise's demo — image, GIF or looping clip — or null when it has none,
  * so a caller can `?? fallback`. A clip plays muted and inline: browsers only
  * autoplay video that is both, and a demo must never grab the sound.
@@ -1510,6 +1551,7 @@ export function exerciseMedia(item, { className = '', still = false } = {}) {
     const video = h('video', {
       class: className,
       src: item.media_url,
+      poster: videoPoster(item.media_url),
       loop: '',
       playsinline: '',
       preload: 'metadata',

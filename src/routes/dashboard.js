@@ -65,8 +65,13 @@ dashboardRoutes.get('/', (req, res) => {
     [now, monthStart, startOfMonth(now, 1), monthStart],
   );
 
+  // Course fee plans are billed too (CoachBook) — their installments arrive
+  // as ordinary payments, so leaving them out would net every fee off the
+  // outstanding figure. Always zero for a gym or a library.
   const billed = get(
-    "SELECT COALESCE(SUM(price - discount + addon_total), 0) AS total FROM subscriptions WHERE status != 'cancelled'",
+    `SELECT
+       (SELECT COALESCE(SUM(price - discount + addon_total), 0) FROM subscriptions WHERE status != 'cancelled')
+       + (SELECT COALESCE(SUM(final_amount), 0) FROM student_fee_plans WHERE status != 'cancelled') AS total`,
   );
   const collected = get('SELECT COALESCE(SUM(amount), 0) AS total FROM payments');
   revenue.outstanding = Math.max(billed.total - collected.total, 0);

@@ -8,7 +8,7 @@
  */
 import { isNativeApp, pathPrefix } from './api.js';
 import { h, openModal, renderIcon, toast } from './ui.js';
-import { isLibrary } from './vertical.js';
+import { currentVerticalKey } from './vertical.js';
 
 const DISMISSED_KEY = 'gymbook.install.dismissed';
 /** Mirrors the banner's presence onto <body>, which is how app.css lifts the
@@ -48,19 +48,18 @@ function applyManifestLink() {
 const DEFAULT_APPLE_ICON = document.querySelector('link[rel="apple-touch-icon"]')?.href;
 const DEFAULT_FAVICONS = [...document.querySelectorAll('link[rel="icon"]')];
 
-/** SeatBook's own mark, mirroring the iconDir split in src/verticals.js —
- * a library tenant with no uploaded logo installs with the book, not the
- * barbell index.html happens to declare. */
-const LIBRARY_APPLE_ICON = '/icons/library/apple-touch-icon.png';
-const LIBRARY_FAVICONS = [
-  { href: '/icons/library/favicon-32.png', sizes: '32x32' },
-  { href: '/icons/library/icon-192.png', sizes: '192x192' },
-];
+/** SeatBook's and CoachBook's own marks, mirroring the iconDir split in
+ * src/verticals.js — a library or institute with no uploaded logo installs
+ * with the book or the graduation cap, not the barbell index.html declares.
+ * A gym has no entry: index.html's own icons are its defaults. */
+const VERTICAL_ICON_DIR = { library: '/icons/library', coaching: '/icons/coaching' };
+const VERTICAL_BRAND = { gym: 'GymBook', library: 'SeatBook', coaching: 'CoachBook' };
+const brandName = () => VERTICAL_BRAND[currentVerticalKey()] || VERTICAL_BRAND.gym;
 
 /** What the install banner/modal/toast call the app. Defaults to the
  * vertical's own brand until applyGymIcons() names a real gym — set once at
  * boot from platform.tenant, which is known before any of these can fire. */
-let appName = isLibrary() ? 'SeatBook' : 'GymBook';
+let appName = brandName();
 
 /**
  * Swaps in the gym's own logo as the home-screen and tab icon, and names it
@@ -82,10 +81,14 @@ let appName = isLibrary() ? 'SeatBook' : 'GymBook';
  *   to the vertical brand when absent.
  */
 export function applyGymIcons(iconUrl, name) {
-  appName = name || (isLibrary() ? 'SeatBook' : 'GymBook');
-  const defaultAppleIcon = isLibrary() ? LIBRARY_APPLE_ICON : DEFAULT_APPLE_ICON;
-  const defaultFavicons = isLibrary()
-    ? LIBRARY_FAVICONS.map((f) => h('link', { rel: 'icon', type: 'image/png', ...f }))
+  appName = name || brandName();
+  const iconDir = VERTICAL_ICON_DIR[currentVerticalKey()];
+  const defaultAppleIcon = iconDir ? `${iconDir}/apple-touch-icon.png` : DEFAULT_APPLE_ICON;
+  const defaultFavicons = iconDir
+    ? [
+        { href: `${iconDir}/favicon-32.png`, sizes: '32x32' },
+        { href: `${iconDir}/icon-192.png`, sizes: '192x192' },
+      ].map((f) => h('link', { rel: 'icon', type: 'image/png', ...f }))
     : DEFAULT_FAVICONS;
 
   for (const link of document.querySelectorAll('link[rel="apple-touch-icon"]')) {

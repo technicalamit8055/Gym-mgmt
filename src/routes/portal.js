@@ -20,6 +20,7 @@ import {
   contextSteps,
   generatePlan,
   libraryForPlan,
+  planReviewsToday,
   plansToday,
   questionsToday,
   recentTurns,
@@ -90,7 +91,7 @@ import { notifyMember } from '../notifications.js';
 import { setMemberPhoto } from '../photo.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { dietPlanTree } from './diets.js';
-import { exercisePickerRows, parseDays, workoutPlanTree, writeDays } from './workouts.js';
+import { exercisePickerRows, parseDays, sendPlanReview, workoutPlanTree, writeDays } from './workouts.js';
 import { generateReceiptPdf } from '../receiptPdf.js';
 import { ensureQrToken, qrPayload, qrPngDataUrl, qrSvg } from '../qr.js';
 import { createLimiter } from '../rateLimit.js';
@@ -1604,6 +1605,10 @@ portalRoutes.get('/coach/status', requireMemberAuth, requireModule('fitness'), r
     plan_daily_limit: config.aiCoach.planDailyLimit,
     plans_remaining_today: enabled ? Math.max(0, config.aiCoach.planDailyLimit - plansToday(req.member.id)) : 0,
     plan_defaults: enabled ? planDefaults(req.member.id) : null,
+    review_daily_limit: config.aiCoach.planReviewDailyLimit,
+    reviews_remaining_today: enabled
+      ? Math.max(0, config.aiCoach.planReviewDailyLimit - planReviewsToday({ memberId: req.member.id }))
+      : 0,
   });
 });
 
@@ -1867,6 +1872,21 @@ portalRoutes.post('/coach/plan', requireMemberAuth, requireModule('fitness'), re
     // short day is explained rather than mysterious.
     dropped: result.dropped,
     plans_remaining_today: Math.max(0, limit - made - 1),
+  });
+});
+
+/**
+ * The coach inside the plan builder: rate the plan being edited, say what is
+ * missing, suggest the best exercises for a muscle. The phone sends the draft
+ * as it stands (it may be unsaved); the coach also sees the member's profile,
+ * injuries and last week of training. Plain JSON or streamed, like /coach/ask
+ * — see sendPlanReview.
+ */
+portalRoutes.post('/coach/plan-review', requireMemberAuth, requireModule('fitness'), requireFitnessAccess, (req, res) => {
+  const { member, last_7_days: recent } = buildCoachContext(req.member.id, { screen: 'workout' });
+  return sendPlanReview(req, res, {
+    memberId: req.member.id,
+    member: { ...member, first_name: undefined, last_7_days: recent },
   });
 });
 

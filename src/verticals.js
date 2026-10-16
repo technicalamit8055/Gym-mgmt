@@ -138,6 +138,68 @@ export const VERTICALS = {
         + 'Your seat is held for you — message us when you are ready to resume.',
     },
   },
+
+  /**
+   * Coaching centres, tuition classes and test-prep institutes. A student is
+   * a member row like any other (code, photo, QR card, app login), but what
+   * they buy is a course — a fee split into installments, see
+   * src/coaching/fees.js — and what they attend is a batch, not a plan's
+   * date range. So `plans`/`subscriptions` stay empty here and the coaching
+   * tables (db.js, "CoachBook") carry the academic and financial year.
+   */
+  coaching: {
+    key: 'coaching',
+    brand: 'CoachBook',
+    tagline: 'Coaching & Institute Management',
+    memberCodePrefix: 'CB',
+    iconDir: '/icons/coaching',
+    themes: ['indigo', 'ocean', 'plum', 'saffron'],
+    vocabulary: {
+      org: 'institute',
+      member: 'student',
+      members: 'Students',
+      plan: 'course',
+      plans: 'Courses',
+      subscription: 'enrollment',
+      visit: 'lecture',
+      shift: 'batch',
+      shifts: 'Batches',
+      emergencyContact: 'Guardian',
+    },
+    modules: new Set(['batches', 'admissions', 'fees', 'installments', 'attendance', 'timetable', 'tests', 'materials', 'whatsapp']),
+    starterPrices: {},
+    starterPlans: [],
+    /**
+     * The course a new institute opens with, so its first screen is a batch
+     * to enroll into rather than an empty form — meant to be edited, the same
+     * as the gym's starter plans. Seeded by src/coaching/seed.js.
+     */
+    starterCourse: {
+      name: 'Class 12 Science (Board + JEE)',
+      code: '12-SCI',
+      target_exam: 'CBSE Board + JEE Main',
+      subjects: [
+        { name: 'Physics', code: 'PHY' },
+        { name: 'Chemistry', code: 'CHE' },
+        { name: 'Mathematics', code: 'MAT' },
+      ],
+      batch: { name: 'Batch 12-A (Evening)', code: 'B12A', capacity: 40, room: 'Room 101', weekdays: '1,3,5', start_time: '16:00', end_time: '19:00' },
+      feeStructure: { name: '3 installments', installments: 3, interval_days: 60 },
+    },
+    /** Course fee per currency for the starter fee structure; GENERIC_PRICES'
+     * top tier stands in for any currency not listed. */
+    starterCourseFee: { INR: 45000, USD: 600, EUR: 550, GBP: 480 },
+    whatsappTemplates: {
+      receipt_template:
+        'Dear Parent, we have received {{amount}} towards {{first_name}}\'s fees at {{gym_name}}. Receipt attached. Thank you!',
+      reminder_template:
+        'Dear Parent, {{first_name}}\'s enrollment at {{gym_name}} ends on {{end_date}}. Please contact the office to continue.',
+      welcome_template:
+        'Welcome to {{gym_name}}, {{first_name}}! Your admission is confirmed. Your timetable and notes are in the student app.',
+      freeze_template:
+        'Dear Parent, {{first_name}}\'s enrollment at {{gym_name}} is on hold from today. Please contact the office to resume.',
+    },
+  },
 };
 
 export const BUSINESS_TYPES = Object.keys(VERTICALS);
@@ -165,6 +227,11 @@ export function say(key) {
 
 export function starterPricesFor(vertical, currency) {
   return vertical.starterPrices[String(currency).toUpperCase()] ?? GENERIC_PRICES;
+}
+
+/** The starter course's fee, in the institute's own currency. */
+export function starterCourseFeeFor(vertical, currency) {
+  return vertical.starterCourseFee?.[String(currency).toUpperCase()] ?? GENERIC_PRICES[GENERIC_PRICES.length - 1];
 }
 
 /**

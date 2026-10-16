@@ -88,6 +88,7 @@ function tenantIcons(tenant, vertical) {
 const DESCRIPTIONS = {
   gym: 'Members, memberships, billing, check-ins, classes, trainers and equipment for your gym.',
   library: 'Seats, shifts, passes, lockers, expenses and student records for your study hall.',
+  coaching: 'Batches, admissions, installment fees, attendance, timetable and test results for your institute.',
 };
 
 /** For the member-facing manifest — written for the person carrying the
@@ -95,11 +96,13 @@ const DESCRIPTIONS = {
 const PORTAL_DESCRIPTIONS = {
   gym: 'Your digital membership pass, class schedule, payments and check-ins.',
   library: 'Your digital seat pass, shifts, payments and attendance.',
+  coaching: 'Your student ID, timetable, attendance, test results, notes and fee receipts.',
 };
 
 const CATEGORIES = {
   gym: ['business', 'productivity', 'health', 'fitness'],
   library: ['business', 'productivity', 'education'],
+  coaching: ['business', 'productivity', 'education'],
 };
 
 /** Long-press the home-screen icon on Android to reach these — the three
@@ -110,6 +113,13 @@ function shortcutLinks(vertical, prefix, icons) {
       { name: 'Seat map', url: `${prefix}/#/seats` },
       { name: 'Students', url: `${prefix}/#/members` },
       { name: 'Fees', short_name: 'Fees', url: `${prefix}/#/billing` },
+    ].map((s) => ({ ...s, icons }));
+  }
+  if (vertical.key === 'coaching') {
+    return [
+      { name: 'Attendance', url: `${prefix}/#/attendance` },
+      { name: 'Students', url: `${prefix}/#/members` },
+      { name: 'Fees & installments', short_name: 'Fees', url: `${prefix}/#/fees` },
     ].map((s) => ({ ...s, icons }));
   }
   return [

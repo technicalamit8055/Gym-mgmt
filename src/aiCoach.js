@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { all, get } from './db.js';
-import { MEAL_TYPES, exerciseHistory } from './fitness.js';
+import { MEAL_TYPES, MUSCLE_GROUPS, exerciseHistory } from './fitness.js';
 import { ageOn, effectiveDietTargets, exerciseForDay, nutritionProfile, weightOn } from './nutrition.js';
 import { addDays, today } from './validate.js';
 
@@ -953,4 +953,368 @@ export async function generatePlan({ request, context, library }) {
   });
   const parsed = parsePlanReply(response?.text, library, { days: request.days_per_week });
   return { ...parsed, ...usageOf(response?.usageMetadata) };
+}
+
+/* ── Plan review ──────────────────────────────────────────────────────── */
+
+/** The coach inside the plan builder: rates the plan being edited, says what
+ * is missing and suggests exercises from the gym's library, each one a button
+ * that puts it in the plan. Members and staff (writing a gym template) both
+ * use it, so the plan is reviewed as sent — the draft, not anything saved. */
+export const PLAN_REVIEW_MODES = ['ask', 'rate'];
+const MAX_REVIEW_DAYS = 7;
+const MAX_REVIEW_DAY_EXERCISES = 30;
+const MAX_REVIEW_SUGGESTIONS = 8;
+const REVIEW_HISTORY_TURNS = 4;
+
+/** Reviews in the last 24 hours, by a member or by a staff user. */
+export function planReviewsToday({ memberId = null, userId = null }) {
+  const [column, id] = memberId != null ? ['member_id', memberId] : ['user_id', userId];
+  return get(
+    `SELECT COUNT(*) AS n FROM ai_plan_reviews WHERE ${column} = ? AND created_at >= datetime('now', '-1 day')`,
+    [id],
+  ).n;
+}
+
+/**
+ * The plan as the editor sent it, cut to what the coach needs. It came from
+ * the client and may be half-written (an unnamed day, an empty one), so it is
+ * coerced rather than validated; muscle groups come from the library where
+ * the exercise is in it, so a tampered group cannot skew the volume count.
+ */
+export function sanitisePlanForReview(plan, library = []) {
+  if (!plan || typeof plan !== 'object') return null;
+  const byName = new Map(library.map((item) => [nameKey(item.name), item]));
+  const days = (Array.isArray(plan.days) ? plan.days : []).slice(0, MAX_REVIEW_DAYS).map((day, index) => ({
+    day: index + 1,
+    day_name: text(day?.day_name, 60) || `Day ${index + 1}`,
+    exercises: (Array.isArray(day?.exercises) ? day.exercises : [])
+      .slice(0, MAX_REVIEW_DAY_EXERCISES)
+      .map((exercise) => {
+        const name = text(exercise?.exercise_name, 120);
+        const known = byName.get(nameKey(name));
+        const sent = text(exercise?.muscle_group, 30);
+        return {
+          exercise_name: name,
+          muscle_group: known?.muscle_group ?? (MUSCLE_GROUPS.includes(sent) ? sent : 'other'),
+          equipment: known?.equipment ?? undefined,
+          sets: clampInt(exercise?.target_sets, 1, 20, 3),
+          reps: text(exercise?.target_reps, 30) || '8-12',
+          rest_seconds: clampInt(exercise?.rest_seconds, 0, 900, 90),
+        };
+      })
+      .filter((exercise) => exercise.exercise_name),
+  }));
+  return {
+    name: text(plan.name, 100) || null,
+    goal: text(plan.goal, 30) || null,
+    level: text(plan.level, 30) || null,
+    days_per_week: plan.days_per_week == null || plan.days_per_week === '' ? null : clampInt(plan.days_per_week, 1, 7, null),
+    days,
+  };
+}
+
+/**
+ * Direct working sets per muscle group in a week: each day's sets on its
+ * primary muscle, scaled when the plan runs more or fewer times a week than
+ * it has days. Worked out here rather than by the model, which miscounts, and
+ * shown beside the rating so its numbers can be checked.
+ */
+export function weeklySets(plan) {
+  const counted = plan?.days?.filter((day) => day.exercises.length) ?? [];
+  if (!counted.length) return [];
+  const scale = plan.days_per_week ? plan.days_per_week / counted.length : 1;
+  const totals = new Map();
+  for (const day of counted) {
+    for (const exercise of day.exercises) {
+      if (exercise.muscle_group === 'cardio' || exercise.muscle_group === 'other') continue;
+      totals.set(exercise.muscle_group, (totals.get(exercise.muscle_group) ?? 0) + exercise.sets);
+    }
+  }
+  return [...totals]
+    .map(([muscle_group, sets]) => ({ muscle_group, sets: Math.round(sets * scale * 2) / 2 }))
+    .sort((a, b) => b.sets - a.sets);
+}
+
+const REVIEW_INSTRUCTION = `You are an expert strength coach inside a gym's workout plan builder. The person editing the plan (a member building their own, or a trainer writing one for the gym) asks you about it: rate it, find what is missing, or suggest the best exercises for a muscle.
+
+You get the PLAN being edited (its days and exercises with sets, reps and rest), WEEKLY SETS (direct working sets per muscle group per week, already counted for you — use these numbers, do not recount), the MEMBER profile when there is one (sex, age, goal, injuries or limitations, recent training), and the gym's EXERCISE LIBRARY, one per line as "name | muscle group | equipment".
+
+Judging a plan for muscle building (hypertrophy), the evidence-based standard:
+- About 10-20 hard sets per muscle per week for most people (beginners do well from ~8-10); under ~8 is low, over ~25 is junk volume that hurts recovery.
+- Each muscle trained about twice a week beats once.
+- Mostly 6-15 reps (5-8 on heavy compounds, 10-20 on isolation and small muscles), close to failure (RPE 7-9).
+- Rest 2-3 min on heavy compounds, 60-120 s on isolation; under 60 s on big lifts costs growth.
+- Compound lifts first, then isolation. About 4-8 exercises and 12-25 sets per session; much more is too long to train hard.
+- Balanced: horizontal and vertical pushes matched by pulls, quads matched by hamstrings and glutes, rear delts and calves not forgotten, some core work.
+- No two days in a row that hit the same muscle hard.
+- Count indirect work sensibly: pressing also trains triceps and front delts, rows and pulldowns train biceps and rear delts, squats and lunges train glutes. Do not call a muscle neglected just because it has few direct sets when the big lifts cover it.
+For other goals judge against that goal instead (strength: heavy low reps and long rests; fat loss and endurance: higher reps, shorter rest, some conditioning).
+
+How to answer:
+- "answer": 2-5 short sentences. Lead with the verdict or the answer, then the reason that matters most. Use their actual exercise names and numbers. Wrap key numbers and exercise names in **double asterisks**; no other markdown, no lists.
+- When TASK is "rate" (or the question asks you to rate, review or judge the plan), fill "rating": a score from 1 to 10 for the goal (be honest: 9-10 only for a plan with no real gaps, 5-6 for one that works but has clear problems, 3 or less for one that is mostly missing), a 2-5 word verdict, "strengths" with 1-3 things it does well, and "improvements" with 2-4 concrete fixes, most important first, each one short sentence naming the day and the change. Leave "rating" out otherwise.
+- "suggestions": exercises to add or swap in, ONLY copied character for character from the EXERCISE LIBRARY, never invented or renamed. Fill them whenever you recommend an exercise: always for "best exercises for X" (3-5 picks, varied equipment and angles, the best first), and for the fixes behind a rating (at most 8). "day" is the number of the plan day it belongs on (the day that already trains that area or has room). When no existing day suits it (say, leg exercises in a plan with no leg day) and the plan has fewer than 7 days, leave "day" out and set "new_day" to a short name for a day to add ("Legs"), the same name for every exercise meant for that day. "replaces" is the exact name of an exercise on that day it should replace, only for a swap. Give target sets, reps and rest suited to the goal, and a one-line "reason". Do not suggest an exercise already on that day.
+- Respect any injuries or limitations absolutely: never suggest something that loads an injured area.
+- Stay on training. Politely decline anything else.
+- Answer in the language the person writes in. Many write Hinglish — Hindi in Roman letters mixed with English; answer them the same way, keeping exercise names, units and numbers in English.`;
+
+// No minItems/maxItems on the lists: Vertex rejects nested ones with a 400.
+// parseReviewReply enforces the counts.
+const REVIEW_SCHEMA = {
+  type: 'object',
+  properties: {
+    answer: { type: 'string' },
+    // Strengths and fixes inside the rating, so they are required with it:
+    // left beside it, the model often gave a score and skipped the fixes.
+    rating: {
+      type: 'object',
+      description: 'Only when asked to rate or review the plan.',
+      properties: {
+        score: { type: 'integer', minimum: 1, maximum: 10 },
+        verdict: { type: 'string', description: '2-5 words, e.g. "Solid, needs more back".' },
+        strengths: { type: 'array', items: { type: 'string' }, description: 'Up to 3 things the plan does well.' },
+        improvements: { type: 'array', items: { type: 'string' }, description: 'Up to 4 concrete fixes, most important first.' },
+      },
+      required: ['score', 'verdict', 'strengths', 'improvements'],
+    },
+    suggestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          exercise_name: { type: 'string', description: 'Exactly as written in the EXERCISE LIBRARY.' },
+          day: { type: 'integer', description: 'The plan day number it goes on.' },
+          new_day: { type: 'string', description: 'Instead of day: the name of a new day to add, when no existing day suits it.' },
+          replaces: { type: 'string', description: 'Only for a swap: the exact name of the exercise on that day it replaces.' },
+          target_sets: { type: 'integer', minimum: 1, maximum: 8 },
+          target_reps: { type: 'string' },
+          rest_seconds: { type: 'integer', minimum: 0, maximum: 300 },
+          reason: { type: 'string' },
+        },
+        required: ['exercise_name', 'target_sets', 'target_reps', 'rest_seconds', 'reason'],
+      },
+    },
+  },
+  required: ['answer'],
+};
+
+const points = (list, max, count) =>
+  (Array.isArray(list) ? list : [])
+    .map((item) => text(item, max))
+    .filter(Boolean)
+    .slice(0, count);
+
+/**
+ * The model's review, checked: an answer is required; a rating is kept only
+ * with a usable score; every suggestion must name a library exercise (given
+ * back in the library's spelling, with its muscle group and demo), its day
+ * must exist in the plan and a swap must name an exercise on that day. What
+ * fails is dropped — the answer still says it, there is just no button.
+ */
+export function parseReviewReply(raw, { library, plan }) {
+  let data;
+  const cleaned = stripCodeFences(raw);
+  try {
+    data = JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try {
+        data = JSON.parse(cleaned.slice(start, end + 1));
+      } catch {}
+    }
+    if (!data) throw new Error('Review reply was not JSON');
+  }
+  const answer = typeof data?.answer === 'string' ? data.answer.trim() : '';
+  if (!answer) throw new Error('Review reply had no answer');
+
+  const score = Math.round(Number(data.rating?.score));
+  const rating =
+    Number.isFinite(score) && score >= 1 && score <= 10 ? { score, verdict: text(data.rating.verdict, 60) || null } : null;
+  // Inside the rating as asked for, or beside it as an older reply had them.
+  const strengths = data.rating?.strengths ?? data.strengths;
+  const improvements = data.rating?.improvements ?? data.improvements;
+
+  const byName = new Map(library.map((item) => [nameKey(item.name), item]));
+  const days = plan?.days ?? [];
+  const dropped = [];
+  const seen = new Set();
+  const suggestions = [];
+  for (const wanted of Array.isArray(data.suggestions) ? data.suggestions : []) {
+    if (suggestions.length >= MAX_REVIEW_SUGGESTIONS) break;
+    const name = text(wanted?.exercise_name, 120);
+    const item = byName.get(nameKey(name));
+    if (!item) {
+      if (name) dropped.push(name);
+      continue;
+    }
+    const dayNumber = Number(wanted?.day);
+    const day = Number.isInteger(dayNumber) && dayNumber >= 1 && dayNumber <= days.length ? days[dayNumber - 1] : null;
+    const replaced = day?.exercises.find(
+      (exercise) => nameKey(exercise.exercise_name) === nameKey(wanted?.replaces) && nameKey(exercise.exercise_name) !== nameKey(item.name),
+    );
+    // Already on that day and not a swap for something else: nothing to do.
+    if (day && !replaced && day.exercises.some((exercise) => nameKey(exercise.exercise_name) === nameKey(item.name))) continue;
+    const key = `${item.name}|${day?.day ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const reps = String(wanted?.target_reps ?? '').trim();
+    suggestions.push({
+      exercise_name: item.name,
+      muscle_group: item.muscle_group,
+      equipment: item.equipment ?? null,
+      day_index: day ? day.day - 1 : null,
+      // A day to add for it, when none suits it and there is room for one more.
+      new_day: !day && days.length < MAX_REVIEW_DAYS ? text(wanted?.new_day, 60) || null : null,
+      replaces: replaced?.exercise_name ?? null,
+      target_sets: clampInt(wanted?.target_sets, 1, 8, 3),
+      target_reps: REPS_PATTERN.test(reps) ? reps.replace(/\s+/g, '').replace('–', '-') : '8-12',
+      rest_seconds: clampInt(wanted?.rest_seconds, 0, 300, 90),
+      reason: text(wanted?.reason, 200) || null,
+      // The demo, so the card and the builder row show the same picture.
+      media_url: item.media_url ?? null,
+      media_type: item.media_type ?? null,
+      instructions: item.instructions ?? null,
+      secondary_muscles: item.secondary_muscles ?? [],
+    });
+  }
+
+  return {
+    answer: answer.slice(0, 2000),
+    rating,
+    strengths: rating ? points(strengths, 200, 3) : [],
+    improvements: rating ? points(improvements, 240, 4) : [],
+    suggestions,
+    dropped,
+  };
+}
+
+/** Earlier turns from the same sheet, as the client sent them back. */
+export function sanitiseReviewHistory(history) {
+  return (Array.isArray(history) ? history : [])
+    .slice(-REVIEW_HISTORY_TURNS)
+    .map((turn) => ({ question: text(turn?.question, MAX_QUESTION_LENGTH), answer: text(turn?.answer, 2000) }))
+    .filter((turn) => turn.question && turn.answer);
+}
+
+/**
+ * What the coach reads before it answers about a plan, as the "reading" lines
+ * of the streamed reply — the same pattern as contextSteps, from what it is
+ * actually sent.
+ */
+export function reviewSteps({ plan, member, library }) {
+  const days = plan.days.filter((day) => day.exercises.length);
+  const exercises = days.reduce((n, day) => n + day.exercises.length, 0);
+  const steps = [
+    exercises
+      ? `Reading your plan — ${plural(days.length, 'day')}, ${plural(exercises, 'exercise')}`
+      : 'Reading your plan — no exercises in it yet',
+  ];
+  const sets = weeklySets(plan);
+  if (sets.length) {
+    const top = sets
+      .slice(0, 3)
+      .map((row) => `${row.muscle_group.replace(/_/g, ' ')} ${row.sets}`)
+      .join(', ');
+    steps.push(`Counting sets per muscle — ${top}${sets.length > 3 ? '…' : ''}`);
+    steps.push('Checking balance and recovery between days');
+  }
+  if (member) steps.push('Reading your profile and goal');
+  if (member?.limitations) steps.push('Keeping your injury notes in mind');
+  steps.push(`Choosing from your gym's ${plural(library.length, 'exercise')}`);
+  return steps;
+}
+
+/** The generateContent params for one question about a plan, shared by the
+ * plain and the streamed review. */
+function reviewParams({ plan, mode, question, history, member, library, signal }) {
+  const sets = weeklySets(plan);
+  const lines = library.map((item) => `${item.name} | ${item.muscle_group} | ${item.equipment ?? 'other'}`).join('\n');
+  const contents = [];
+  for (const turn of sanitiseReviewHistory(history)) {
+    contents.push({ role: 'user', parts: [{ text: turn.question }] });
+    contents.push({ role: 'model', parts: [{ text: JSON.stringify({ answer: turn.answer }) }] });
+  }
+  // The plan rides on the newest question, so a follow-up sees the edits made since.
+  contents.push({
+    role: 'user',
+    parts: [
+      {
+        text: [
+          `TASK: ${mode}`,
+          `PLAN:\n${JSON.stringify(plan)}`,
+          `WEEKLY SETS:\n${JSON.stringify(sets)}`,
+          member ? `MEMBER:\n${JSON.stringify(member)}` : 'MEMBER: none — a gym template for any member at its level',
+          `EXERCISE LIBRARY:\n${lines}`,
+          `QUESTION:\n${question}`,
+        ].join('\n\n'),
+      },
+    ],
+  });
+  const timeout = AbortSignal.timeout(Math.max(config.aiCoach.timeoutMs, 60000));
+  return {
+    model: config.aiCoach.model,
+    contents,
+    config: {
+      systemInstruction: REVIEW_INSTRUCTION,
+      responseMimeType: 'application/json',
+      responseJsonSchema: REVIEW_SCHEMA,
+      temperature: 0.4,
+      // Thinking counts against this on thinking models; a rating with its
+      // fixes and suggestions is a few hundred tokens of JSON after it. At a
+      // 2048 thinking budget a rating took ~26 s.
+      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingBudget: 1024 },
+      abortSignal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+    },
+  };
+}
+
+/**
+ * One question about the plan being edited. `plan` is the sanitised plan,
+ * `member` the member's profile (null for a staff template), `library` the
+ * exercises it may suggest. Resolves to the parsed review plus weekly_sets and
+ * token counts; throws like askCoach.
+ */
+export async function reviewPlan({ plan, mode = 'ask', question, history = [], member = null, library, signal }) {
+  const ai = await getClient();
+  const response = await ai.models.generateContent(reviewParams({ plan, mode, question, history, member, library, signal }));
+  const parsed = parseReviewReply(response?.text, { library, plan });
+  return { ...parsed, weekly_sets: weeklySets(plan), ...usageOf(response?.usageMetadata) };
+}
+
+/**
+ * The same review, streamed like streamCoach: thought summaries to onThought,
+ * the "answer" string to onAnswer as it is written. Resolves and throws
+ * exactly like reviewPlan.
+ */
+export async function streamReviewPlan({ plan, mode = 'ask', question, history = [], member = null, library, signal, onThought, onAnswer }) {
+  const ai = await getClient();
+  const params = reviewParams({ plan, mode, question, history, member, library, signal });
+  params.config.thinkingConfig = { ...params.config.thinkingConfig, includeThoughts: true };
+  const stream = await ai.models.generateContentStream(params);
+
+  let raw = '';
+  let sent = 0;
+  let usage;
+  for await (const chunk of stream) {
+    if (chunk?.usageMetadata) usage = chunk.usageMetadata;
+    for (const part of chunk?.candidates?.[0]?.content?.parts ?? []) {
+      if (typeof part.text !== 'string' || !part.text) continue;
+      if (part.thought) {
+        onThought?.(part.text);
+        continue;
+      }
+      raw += part.text;
+      const soFar = partialAnswer(raw);
+      if (soFar.length > sent) {
+        onAnswer?.(soFar.slice(sent));
+        sent = soFar.length;
+      }
+    }
+  }
+  const parsed = parseReviewReply(raw, { library, plan });
+  return { ...parsed, weekly_sets: weeklySets(plan), ...usageOf(usage) };
 }

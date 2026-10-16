@@ -15,7 +15,7 @@
  * Bump VERSION whenever a shell file changes in a way that must not wait for
  * revalidation; installs then re-run and the old caches are dropped.
  */
-const VERSION = 'v33';
+const VERSION = 'v39';
 const SHELL_CACHE = `gymbook-shell-${VERSION}`;
 const RUNTIME_CACHE = `gymbook-runtime-${VERSION}`;
 const KEEP = new Set([SHELL_CACHE, RUNTIME_CACHE]);
@@ -39,6 +39,9 @@ const SHELL_URLS = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',
+  // The art on the gym offline screen (renderGymOffline in app.js): it is only
+  // ever needed when there is no network to fetch it.
+  '/images/portal/offline-gym.webp',
 ];
 
 /** Mirrors the server's /g/<slug> tenant prefix (see src/tenant.js) so path-

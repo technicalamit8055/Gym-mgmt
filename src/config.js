@@ -79,6 +79,12 @@ export const config = {
     // AI-generated workout plans per member per day. Each one sends the whole
     // exercise library, so it costs several questions' worth.
     planDailyLimit: Number(process.env.AI_PLAN_DAILY_LIMIT || 3),
+    // Questions to the coach inside the plan builder (rate this plan, best
+    // exercises for a muscle), per member and per staff user per day. Each
+    // sends the plan and the library, so they have their own ceilings; staff
+    // get more because a trainer writes plans for the whole gym.
+    planReviewDailyLimit: Number(process.env.AI_PLAN_REVIEW_DAILY_LIMIT || 15),
+    staffPlanReviewDailyLimit: Number(process.env.AI_STAFF_PLAN_REVIEW_DAILY_LIMIT || 40),
     // Voice questions written down per member per day. Writing one down is
     // not a question (only sending it is), so it has its own ceiling: twice
     // the questions leaves room to re-record a misheard one.

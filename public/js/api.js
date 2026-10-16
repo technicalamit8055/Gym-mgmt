@@ -252,6 +252,25 @@ export const platformSession = {
   },
 };
 
+/**
+ * A partner shop's Shop panel session — the third credential that is nobody's
+ * gym session. Unscoped by path for the same reason as the console's: a shop
+ * belongs to no one gym.
+ */
+const SELLER_TOKEN_KEY = 'gymbook.seller.token';
+
+export const sellerSession = {
+  get token() {
+    return localStorage.getItem(SELLER_TOKEN_KEY);
+  },
+  save(token) {
+    localStorage.setItem(SELLER_TOKEN_KEY, token);
+  },
+  clear() {
+    localStorage.removeItem(SELLER_TOKEN_KEY);
+  },
+};
+
 export class ApiError extends Error {
   constructor(status, message, details) {
     super(message);
@@ -279,7 +298,7 @@ async function uploadFile(path, file, { token, method = 'PUT' } = {}) {
  * /g/<slug> one — for the platform-wide gym directory, which must keep
  * working when the remembered gym has since closed and its prefix 404s.
  */
-async function request(method, path, body, { token, anonymous = false, member = false, root = false } = {}) {
+async function request(method, path, body, { token, anonymous = false, member = false, root = false, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const bearer = token ?? (member ? memberSession.token : anonymous ? null : session.token);
@@ -289,6 +308,7 @@ async function request(method, path, body, { token, anonymous = false, member = 
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
 
   // An explicit token means this call is not the calling session's own —
@@ -318,12 +338,13 @@ async function request(method, path, body, { token, anonymous = false, member = 
  * onEvent(name, data) as it arrives, and the promise resolves once the stream
  * ends. When the server answers with plain JSON instead — a refusal before it
  * started streaming, or the service worker's offline reply — that payload is
- * returned, or thrown as an ApiError, just as request() would.
+ * returned, or thrown as an ApiError, just as request() would. `signal`
+ * stops it part way; the server then stops the answer and does not count it.
  */
-async function streamRequest(path, body, onEvent) {
+async function streamRequest(path, body, onEvent, { signal } = {}) {
   const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
   if (memberSession.token) headers.Authorization = `Bearer ${memberSession.token}`;
-  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), { method: 'POST', headers, body: JSON.stringify(body), signal });
 
   if (res.status === 401) {
     memberSession.clear();
@@ -517,6 +538,33 @@ export const api = {
     request('DELETE', `/platform/admin/nav-badges/${tab}/image`, undefined, { token: platformSession.token }),
   platformRecordPayout: (slug, payload) =>
     request('POST', `/platform/admin/commissions/${slug}/payout`, payload, { token: platformSession.token }),
+  // Partner shops: their accounts, the gyms each one serves, their payouts.
+  platformSellers: () => request('GET', '/platform/admin/sellers', undefined, { token: platformSession.token }),
+  platformCreateSeller: (payload) => request('POST', '/platform/admin/sellers', payload, { token: platformSession.token }),
+  platformUpdateSeller: (id, payload) => request('PATCH', `/platform/admin/sellers/${id}`, payload, { token: platformSession.token }),
+  platformDeleteSeller: (id) => request('DELETE', `/platform/admin/sellers/${id}`, undefined, { token: platformSession.token }),
+  platformResetSellerPassword: (id) =>
+    request('POST', `/platform/admin/sellers/${id}/reset-password`, {}, { token: platformSession.token }),
+  platformSellerPayout: (id, payload) => request('POST', `/platform/admin/sellers/${id}/payout`, payload, { token: platformSession.token }),
+  platformSellerProducts: (id) =>
+    request('GET', `/platform/admin/store/products${query({ seller: id })}`, undefined, { token: platformSession.token }),
+
+  // The Shop panel — a partner shop's own token, never a gym's or the console's.
+  sellerLogin: (email, password) => request('POST', '/seller/login', { email, password }, { anonymous: true }),
+  sellerMe: () => request('GET', '/seller/me', undefined, { token: sellerSession.token }),
+  sellerUpdateMe: (payload) => request('PATCH', '/seller/me', payload, { token: sellerSession.token }),
+  sellerChangePassword: (payload) => request('POST', '/seller/me/password', payload, { token: sellerSession.token }),
+  sellerProducts: (params) => request('GET', `/seller/products${query(params)}`, undefined, { token: sellerSession.token }),
+  sellerCreateProduct: (payload) => request('POST', '/seller/products', payload, { token: sellerSession.token }),
+  sellerUpdateProduct: (id, payload) => request('PATCH', `/seller/products/${id}`, payload, { token: sellerSession.token }),
+  sellerDeleteProduct: (id) => request('DELETE', `/seller/products/${id}`, undefined, { token: sellerSession.token }),
+  sellerAddProductImage: (id, file) => uploadFile(`/seller/products/${id}/images`, file, { token: sellerSession.token, method: 'POST' }),
+  sellerDeleteProductImage: (id, imageId) =>
+    request('DELETE', `/seller/products/${id}/images/${imageId}`, undefined, { token: sellerSession.token }),
+  sellerPrimaryProductImage: (id, imageId) =>
+    request('POST', `/seller/products/${id}/images/${imageId}/primary`, {}, { token: sellerSession.token }),
+  sellerOrders: (params) => request('GET', `/seller/orders${query(params)}`, undefined, { token: sellerSession.token }),
+  sellerUpdateOrder: (id, payload) => request('PATCH', `/seller/orders/${id}`, payload, { token: sellerSession.token }),
 
   dashboard: () => request('GET', '/dashboard'),
 
@@ -688,6 +736,9 @@ export const api = {
   memberWorkouts: (memberId, params) => request('GET', `/workouts/members/${memberId}${query(params)}`),
   workoutLog: (id) => request('GET', `/workouts/logs/${id}`),
   exercises: (params) => request('GET', `/workouts/exercises${query(params)}`),
+  // The AI coach in the template builder (src/routes/workouts.js).
+  workoutCoachStatus: () => request('GET', '/workouts/coach/status'),
+  workoutCoachReview: (payload, { signal } = {}) => request('POST', '/workouts/coach/review', payload, { signal }),
   createExercise: (payload) => request('POST', '/workouts/exercises', payload),
   deleteExercise: (id) => request('DELETE', `/workouts/exercises/${id}`),
 
@@ -783,11 +834,15 @@ export const api = {
     coachStatus: () => request('GET', '/portal/coach/status', undefined, { member: true }),
     // Streamed: onEvent gets step / thought / answer / done / error as the
     // coach works (see the route in src/routes/portal.js).
-    coachAskStream: (payload, onEvent) => streamRequest('/portal/coach/ask', payload, onEvent),
+    coachAskStream: (payload, onEvent, options) => streamRequest('/portal/coach/ask', payload, onEvent, options),
     // A spoken question as text, for the composer: { audio (base64), mime_type, screen }.
     coachTranscribe: (payload) => request('POST', '/portal/coach/transcribe', payload, { member: true }),
     // The AI workout generator: a draft plan to open in the plan builder.
     coachPlan: (payload) => request('POST', '/portal/coach/plan', payload, { member: true }),
+    // The coach inside the plan editor: rates the draft, suggests exercises.
+    coachPlanReview: (payload) => request('POST', '/portal/coach/plan-review', payload, { member: true }),
+    // The same, streamed like coachAskStream, for the Ask Coach sheet.
+    coachPlanReviewStream: (payload, onEvent, options) => streamRequest('/portal/coach/plan-review', payload, onEvent, options),
     // The member's own plans, and which plan (theirs or the trainer's) the
     // Workout tab follows. setActivePlan(null) goes back to the trainer's.
     routines: () => request('GET', '/portal/workouts/routines', undefined, { member: true }),
@@ -872,3 +927,7 @@ export const api = {
     },
   },
 };
+
+/** For a feature that keeps its own endpoint list beside this one (CoachBook's
+ * coachingApi.js), so it shares the same auth, 401 and error handling. */
+export { request as apiRequest, query as apiQuery };

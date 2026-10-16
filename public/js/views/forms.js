@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { addDays, buildForm, closeModal, confirmDialog, h, money, openModal, today, toast } from '../ui.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { createPhotoPicker } from '../photo.js';
-import { t } from '../vertical.js';
+import { isCoaching, t } from '../vertical.js';
 
 /** Members formatted for a <datalist>-backed picker: "GM0004 — Priya Sharma".
  * Exported for seats.js and lockers.js, which need the same search-by-code-
@@ -24,13 +24,76 @@ export function datalist(id, options) {
 
 /* ------------------------------------------------------------ member form */
 
+/**
+ * CoachBook's admission form: the guardian is the person every alert goes
+ * to, so their name and WhatsApp number lead, with the school, class and
+ * target exam a coaching office files a student by. A batch replaces the gym
+ * session, so that field is not asked.
+ */
+function coachingStudentFields(member) {
+  return [
+    { name: 'first_name', label: 'First name', required: true, value: member?.first_name },
+    { name: 'last_name', label: 'Last name', value: member?.last_name },
+    { name: 'phone', label: 'Student phone', value: member?.phone, placeholder: '9876543210' },
+    { name: 'email', label: 'Email', type: 'email', value: member?.email },
+    { name: 'emergency_contact', label: 'Guardian name', value: member?.emergency_contact, placeholder: 'Father / mother' },
+    { name: 'emergency_phone', label: 'Guardian WhatsApp', value: member?.emergency_phone, hint: 'Absentee alerts, fee reminders and scorecards go here' },
+    {
+      name: 'guardian_relation',
+      label: 'Relation',
+      type: 'select',
+      value: member?.guardian_relation || '',
+      options: ['', 'Father', 'Mother', 'Guardian', 'Sibling', 'Other'].map((v) => ({ value: v, label: v || '—' })),
+    },
+    { name: 'guardian_occupation', label: 'Guardian occupation', value: member?.guardian_occupation },
+    { name: 'school_name', label: 'School / college', value: member?.school_name },
+    { name: 'current_class', label: 'Class', value: member?.current_class, placeholder: 'Class 12' },
+    { name: 'exam_target', label: 'Target exam', value: member?.exam_target, placeholder: 'JEE Main 2027' },
+    {
+      name: 'gender',
+      label: 'Gender',
+      type: 'select',
+      value: member?.gender || '',
+      options: [
+        { value: '', label: '—' },
+        { value: 'male', label: 'Male' },
+        { value: 'female', label: 'Female' },
+        { value: 'other', label: 'Other' },
+      ],
+    },
+    { name: 'date_of_birth', label: 'Date of birth', type: 'date', value: member?.date_of_birth },
+    { name: 'joined_on', label: 'Admitted on', type: 'date', value: member?.joined_on || today() },
+    {
+      name: 'device_pin',
+      label: 'Fingerprint device PIN',
+      type: 'number',
+      value: member?.device_pin,
+      hint: 'The ID this student is enrolled under on the gate terminal, if any',
+    },
+    {
+      name: 'status',
+      label: 'Status',
+      type: 'select',
+      value: member?.status || 'active',
+      options: [
+        { value: 'active', label: 'Active' },
+        { value: 'frozen', label: 'On hold' },
+        { value: 'inactive', label: 'Left' },
+      ],
+    },
+    { name: 'address', label: 'Address', type: 'textarea', full: true, value: member?.address },
+    { name: 'health_notes', label: 'Notes', type: 'textarea', full: true, value: member?.health_notes, hint: 'Medical needs, learning support, anything teachers should know' },
+  ];
+}
+
 export async function openMemberForm({ member, onSaved }) {
   const editing = Boolean(member);
-  const { items: sessions } = await api.sessions({ active: 'true' });
+  const coachingForm = isCoaching();
+  const { items: sessions } = coachingForm ? { items: [] } : await api.sessions({ active: 'true' });
   const photoPicker = createPhotoPicker({ initialUrl: member?.photo_url });
 
   const form = buildForm(
-    [
+    coachingForm ? coachingStudentFields(member) : [
       { name: 'first_name', label: 'First name', required: true, value: member?.first_name },
       { name: 'last_name', label: 'Last name', value: member?.last_name },
       { name: 'phone', label: 'Phone', value: member?.phone, placeholder: '9876543210' },
@@ -99,7 +162,7 @@ export async function openMemberForm({ member, onSaved }) {
         if (photoPicker.changed()) values.photo = photoPicker.getValue() || '';
         const saved = editing ? await api.updateMember(member.id, values) : await api.createMember(values);
         closeModal();
-        toast(editing ? 'Member updated' : `${saved.first_name} added as ${saved.code}`);
+        toast(editing ? `${t('member')} updated` : `${saved.first_name} added as ${saved.code}`);
         await onSaved?.(saved);
       },
     },
@@ -109,7 +172,7 @@ export async function openMemberForm({ member, onSaved }) {
   if (grid) grid.prepend(photoPicker);
 
   openModal({
-    title: editing ? `Edit ${member.first_name} ${member.last_name}` : 'Add a new member',
+    title: editing ? `Edit ${member.first_name} ${member.last_name}` : coachingForm ? 'Add a new student' : 'Add a new member',
     wide: true,
     body: form,
   });

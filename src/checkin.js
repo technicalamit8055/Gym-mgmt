@@ -5,6 +5,8 @@ import { all, get, run, tx } from './db.js';
 import { PHOTO_JOIN, PHOTO_PRESENT_COL, withPhotoUrl } from './photo.js';
 import { today } from './validate.js';
 import { moduleEnabled } from './verticals.js';
+import { markPresentFromScan } from './coaching/attendance.js';
+import { activeEnrollmentToday } from './coaching/enrollment.js';
 
 /**
  * How far back a rescan looks for a still-open visit to close.
@@ -124,6 +126,8 @@ export function performCheckIn(member, source) {
   if (member.status === 'frozen') throw badRequest(`${member.first_name}'s membership is frozen`);
   if (member.status === 'inactive') throw badRequest(`${member.first_name}'s membership is inactive`);
 
+  if (moduleEnabled('batches')) return checkInStudent(member, source);
+
   expireOverdueSubscriptions();
   const seatsOn = moduleEnabled('seats');
   // start_date/end_date are gym-local calendar dates, so the day they are
@@ -191,6 +195,42 @@ export function performCheckIn(member, source) {
       session_id: sub.session_id ?? null,
       session_name: sub.session_name ?? null,
       seat_code: seat?.seat_code ?? null,
+    },
+  };
+}
+
+/**
+ * CoachBook's gate: a student comes in on an active batch enrollment rather
+ * than a dated membership, and the scan also marks them present for the day
+ * in every batch they have a lecture in (see markPresentFromScan in
+ * src/coaching/attendance.js). The response carries the same `membership`
+ * shape as a gym check-in, filled from the batch, so the kiosk and the QR
+ * desk need no special case.
+ */
+function checkInStudent(member, source) {
+  const enrollment = activeEnrollmentToday(member.id);
+  if (!enrollment) throw badRequest(`${member.first_name} is not enrolled in an active batch`);
+
+  const visitId = tx(() => {
+    const info = run('INSERT INTO attendance (member_id, source) VALUES (?, ?)', [member.id, source]);
+    markPresentFromScan(member.id);
+    return info.lastInsertRowid;
+  });
+
+  return {
+    action: 'checked_in',
+    visit: publicVisit(get(`${ATTENDANCE_SELECT} WHERE a.id = ?`, [visitId])),
+    membership: {
+      plan_id: null,
+      plan_name: enrollment.batch_name,
+      end_date: enrollment.batch_end,
+      sessions_total: null,
+      sessions_left: null,
+      session_id: null,
+      session_name: enrollment.batch_name,
+      seat_code: enrollment.seat_no ?? null,
+      batch_id: enrollment.batch_id,
+      roll_number: enrollment.roll_number,
     },
   };
 }

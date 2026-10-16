@@ -257,7 +257,13 @@ export async function renderStoreHub({ billStat }) {
         h(
           'div',
           {},
-          h('strong', {}, `You earn ${p.store_commission_pct}% of every store order and ${p.addon_commission_pct}% of in-app Diet & Workout purchases by your members.`),
+          h(
+            'strong',
+            {},
+            p.store_commission_pct > 0
+              ? `You earn ${p.store_commission_pct}% of every store order and ${p.addon_commission_pct}% of in-app Diet & Workout purchases by your members.`
+              : `You earn ${p.addon_commission_pct}% of in-app Diet & Workout purchases by your members. Store orders at your gym carry no commission.`,
+          ),
           h('p', { class: 'muted' }, `${storeNote} Store commissions become payable once the order is delivered; payouts go to your bank monthly.`),
         ),
         h(

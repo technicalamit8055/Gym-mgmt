@@ -6,6 +6,8 @@ import { HttpError } from './errors.js';
 import { attendanceRoutes } from './routes/attendance.js';
 import { authRoutes, staffRoutes } from './routes/auth.js';
 import { bookingRoutes, classRoutes } from './routes/classes.js';
+import { coachingRoutes } from './routes/coaching/index.js';
+import { coachingPortalRoutes } from './routes/coaching/portal.js';
 import { handleTlsAsk } from './routes/customDomains.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { dietRoutes } from './routes/diets.js';
@@ -26,6 +28,7 @@ import { pwaRoutes } from './routes/pwa.js';
 import { qrRoutes } from './routes/qr.js';
 import { reportRoutes } from './routes/reports.js';
 import { seatRoutes } from './routes/seats.js';
+import { sellerRoutes } from './routes/seller.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { storeHubRoutes } from './routes/storeHub.js';
 import { storeMediaRoutes } from './routes/storeMedia.js';
@@ -128,6 +131,9 @@ export function createApp() {
   app.use('/api/exercise-media', exerciseMediaRoutes);
   // Store product photos and banners: platform-wide, public, like the above.
   app.use('/api/store-media', storeMediaRoutes);
+  // The partner shops' own panel. A shop belongs to no gym, so no gym's
+  // subscription can gate it; it has its own sign-in (routes/seller.js).
+  app.use('/api/seller', sellerRoutes);
   // Same reasoning as member photos: an unauthenticated but signed URL, so an
   // <img>/<a> tag can fetch it, and reachable even for a lapsed gym.
   app.use('/api/document-files', documentFileRoutes);
@@ -146,6 +152,9 @@ export function createApp() {
   // Member push subscriptions, preferences and the notification center — a
   // router of its own (see routes/notifications.js) under the portal's path.
   app.use('/api/portal/notifications', portalNotificationRoutes);
+  // CoachBook's student & parent screens (timetable, attendance, tests,
+  // notes, fees) — the same member sign-in, gated on the coaching modules.
+  app.use('/api/portal/coaching', coachingPortalRoutes);
   app.use('/api/portal', portalRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/plans', planRoutes);
@@ -171,6 +180,9 @@ export function createApp() {
   app.use('/api/diets', dietRoutes);
   app.use('/api/fitness-addons', fitnessAddonRoutes);
   app.use('/api/store-hub', storeHubRoutes);
+  // CoachBook: courses, batches, admissions, fees, attendance, timetable,
+  // tests and study material — one mount, gated per module inside.
+  app.use('/api/coaching', coachingRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

@@ -1990,7 +1990,14 @@ export function renderLiveStore({ store, memberId }) {
       : null,
     bannersBlock(),
     products.length ? gridSection : h('div', { class: 'bk-empty' }, h('strong', {}, 'New stock is on its way'), h('p', {}, 'Check back soon.')),
-    h('footer', { class: 'bk-sign' }, h('strong', {}, 'Fuel your gains.'), h('span', {}, `${store.delivery.gym_name} store · 100% authentic · secure UPI`)),
+    h(
+      'footer',
+      { class: 'bk-sign' },
+      h('strong', {}, 'Fuel your gains.'),
+      h('span', {}, `${store.delivery.gym_name} store · 100% authentic · secure UPI`),
+      // A partner shop near the gym fulfils this gym's orders — say who.
+      store.seller ? h('span', {}, `Sold & delivered by ${store.seller.name}${store.seller.area || store.seller.city ? `, ${store.seller.area || store.seller.city}` : ''}`) : null,
+    ),
     cartBar(ctx),
   );
   return root;

@@ -1,6 +1,6 @@
 import { api, session } from '../api.js';
 import { confirmDialog, date, h, renderIcon, toast } from '../ui.js';
-import { isLibrary } from '../vertical.js';
+import { t } from '../vertical.js';
 
 /**
  * A gym's own domain (app.theirgym.com), connected from Gym settings.
@@ -313,7 +313,7 @@ export function customDomainCard(data, { reload }) {
       h(
         'p',
         { class: 'muted stg-domain-text' },
-        `Running your ${isLibrary() ? 'library' : 'gym'} on your own address (like app.yourbrand.com) is not switched on for this deployment yet. Until then your ${isLibrary() ? 'library' : 'gym'} lives at `,
+        `Running your ${t('org')} on your own address (like app.yourbrand.com) is not switched on for this deployment yet. Until then your ${t('org')} lives at `,
         h('code', {}, data.platform_url),
         '.',
       ),

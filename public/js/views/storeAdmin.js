@@ -15,7 +15,7 @@ const fill = (el, ...children) => append(clear(el), children);
  * gym.
  */
 
-const inr = (value) => {
+export const inr = (value) => {
   const n = Number(value || 0);
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -34,11 +34,11 @@ const COLLECTION = {
   desk: 'Front desk only',
   both: 'Both — in-app UPI plus the desk',
 };
-const CATEGORY_LABEL = {
+export const CATEGORY_LABEL = {
   protein: 'Protein', creatine: 'Creatine', preworkout: 'Pre-workout', bcaa: 'BCAA & aminos', vitamins: 'Vitamins',
   snacks: 'Snacks & bars', gear: 'Gear & accessories', other: 'Other',
 };
-const FULFILLMENT_TONE = { placed: 'blue', packed: 'amber', shipped: 'violet', ready: 'amber', delivered: 'green', cancelled: 'grey' };
+export const FULFILLMENT_TONE = { placed: 'blue', packed: 'amber', shipped: 'violet', ready: 'amber', delivered: 'green', cancelled: 'grey' };
 const NUTRITION_FIELDS = [
   ['serving_size', 'Serving size', 'text', '1 scoop (33 g)'],
   ['servings', 'Servings / pack', 'number', '30'],
@@ -52,7 +52,7 @@ const NUTRITION_FIELDS = [
   ['caffeine_mg', 'Caffeine (mg)', 'number'],
 ];
 
-const STATUS_LABEL = {
+export const STATUS_LABEL = {
   placed: 'Placed', packed: 'Packed', shipped: 'Shipped', ready: 'Ready at gym', delivered: 'Delivered / collected', cancelled: 'Cancelled',
 };
 
@@ -99,8 +99,24 @@ const field = (label, control, { full = false, hint } = {}) =>
 
 /* ── Product editor ───────────────────────────────────────────────────── */
 
-function openProductModal(product, onSaved, badges = []) {
+/** Where the product editor saves to. The console writes the central
+ * catalogue; the Shop panel (sellerPanel.js) passes its own, shop-scoped set. */
+const CONSOLE_PRODUCT_OPS = {
+  create: (payload) => api.platformCreateStoreProduct(payload),
+  update: (id, payload) => api.platformUpdateStoreProduct(id, payload),
+  addImage: (id, file) => api.platformAddProductImage(id, file),
+  deleteImage: (id, imageId) => api.platformDeleteProductImage(id, imageId),
+  primaryImage: (id, imageId) => api.platformPrimaryProductImage(id, imageId),
+};
+
+/**
+ * The product editor. `badges` is the operator's quality-badge library to
+ * pick from, or null to leave the picker out — badges are the operator's to
+ * vouch for, so a partner shop's editor has none.
+ */
+export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS) {
   const isNew = !product;
+  const library = badges ?? [];
   const p = product ?? { category: 'protein', active: 1, featured: 0, variants: [], nutrition_facts: null, badges: [] };
   const input = (name, value, attrs = {}) => h('input', { name, value: value ?? '', ...attrs });
 
@@ -186,8 +202,8 @@ function openProductModal(product, onSaved, badges = []) {
   function drawBadgePicker() {
     fill(
       badgePicker,
-      badges.length
-        ? badges.map((b) =>
+      library.length
+        ? library.map((b) =>
             h(
               'button',
               {
@@ -232,9 +248,9 @@ function openProductModal(product, onSaved, badges = []) {
             'div',
             { class: 'sa-photo-actions' },
             i > 0
-              ? h('button', { type: 'button', title: 'Make cover', 'aria-label': 'Make cover', onclick: () => photoAction(() => api.platformPrimaryProductImage(product.id, img.id)) }, renderIcon('crown', { size: 13 }))
+              ? h('button', { type: 'button', title: 'Make cover', 'aria-label': 'Make cover', onclick: () => photoAction(() => ops.primaryImage(product.id, img.id)) }, renderIcon('crown', { size: 13 }))
               : null,
-            h('button', { type: 'button', title: 'Remove photo', 'aria-label': 'Remove photo', onclick: () => photoAction(() => api.platformDeleteProductImage(product.id, img.id)) }, renderIcon('trash', { size: 13 })),
+            h('button', { type: 'button', title: 'Remove photo', 'aria-label': 'Remove photo', onclick: () => photoAction(() => ops.deleteImage(product.id, img.id)) }, renderIcon('trash', { size: 13 })),
           ),
         ),
       ),
@@ -243,7 +259,7 @@ function openProductModal(product, onSaved, badges = []) {
             multiple: true,
             onFiles: async (files) => {
               for (const file of files.slice(0, 8 - images.length)) {
-                await photoAction(async () => api.platformAddProductImage(product.id, await shrinkImage(file)));
+                await photoAction(async () => ops.addImage(product.id, await shrinkImage(file)));
               }
             },
           })
@@ -283,7 +299,7 @@ function openProductModal(product, onSaved, badges = []) {
           lab_report_url: inputs.lab_report_url.value.trim() || null,
           description: inputs.description.value.trim() || null,
           featured: inputs.featured.checked,
-          badge_ids: badges.filter((b) => picked.has(b.id)).map((b) => b.id),
+          badge_ids: library.filter((b) => picked.has(b.id)).map((b) => b.id),
           active: inputs.active.checked,
           nutrition_facts: Object.keys(facts).length ? facts : null,
           variants: variants.map((v) => ({
@@ -298,13 +314,13 @@ function openProductModal(product, onSaved, badges = []) {
         };
         submit.disabled = true;
         try {
-          const saved = isNew ? await api.platformCreateStoreProduct(payload) : await api.platformUpdateStoreProduct(product.id, payload);
+          const saved = isNew ? await ops.create(payload) : await ops.update(product.id, payload);
           closeModal();
           await onSaved();
           if (isNew) {
             // Straight into edit mode, where the photos section lives.
             toast('Product added — now add its photos');
-            openProductModal(saved, onSaved, badges);
+            openProductModal(saved, onSaved, badges, ops);
           } else toast('Product saved');
         } catch (err) {
           const detail = err.details && Object.entries(err.details).map(([k, v]) => `${k.replace('_', ' ')} ${v}`).join(', ');
@@ -324,7 +340,7 @@ function openProductModal(product, onSaved, badges = []) {
       field('Selling price (₹) *', inputs.price, { hint: 'Variants can override both.' }),
       h('div', { class: 'field full' }, h('span', {}, 'Photos'), photosBlock),
       field('…or an image link', inputs.image_url, { full: true, hint: 'Only used while the product has no uploaded photos.' }),
-      h('div', { class: 'field full' }, h('span', {}, 'Quality badges'), badgePicker),
+      badges ? h('div', { class: 'field full' }, h('span', {}, 'Quality badges'), badgePicker) : null,
       field('Lab report URL', inputs.lab_report_url, { full: true, hint: 'Third-party purity / label-claim test, shown to members as a link.' }),
       field('Description', inputs.description, { full: true }),
       h(
@@ -1016,7 +1032,11 @@ export function renderStoreAdminSection({ onExpired } = {}) {
       table(
         [
           { label: 'Order', render: (o) => h('div', {}, h('strong', {}, o.order_code), h('div', { class: 'muted' }, date(o.paid_at || o.created_at))) },
-          { label: 'Gym', render: (o) => o.tenant_slug },
+          { label: 'Gym', render: (o) => o.gym_name || o.tenant_slug },
+          {
+            label: 'Fulfilled by',
+            render: (o) => (o.seller_name ? h('span', { class: 'badge violet' }, o.seller_name) : h('span', { class: 'muted' }, 'Central')),
+          },
           {
             label: 'Member',
             render: (o) =>
