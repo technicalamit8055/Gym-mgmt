@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { barcodeInput, openProductScanner } from '../productScanner.js';
 import { append, clear, closeModal, confirmDialog, date, h, openModal, renderIcon, stat, table, toast } from '../ui.js';
 
 /** Replaces an element's children. ui.js's append, not the DOM's: the DOM's
@@ -114,10 +115,11 @@ const CONSOLE_PRODUCT_OPS = {
  * pick from, or null to leave the picker out — badges are the operator's to
  * vouch for, so a partner shop's editor has none.
  */
-export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS) {
+export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS, { prefill = null, variantId = null } = {}) {
   const isNew = !product;
   const library = badges ?? [];
-  const p = product ?? { category: 'protein', active: 1, featured: 0, variants: [], nutrition_facts: null, badges: [] };
+  // `prefill`: a new product's starting values, from a scanned barcode.
+  const p = product ?? { category: 'protein', active: 1, featured: 0, variants: [], nutrition_facts: null, badges: [], ...prefill };
   const input = (name, value, attrs = {}) => h('input', { name, value: value ?? '', ...attrs });
 
   const inputs = {
@@ -130,7 +132,8 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
     ),
     mrp: input('mrp', p.mrp, { type: 'number', min: 0, step: '0.01', required: true }),
     price: input('price', p.price, { type: 'number', min: 0, step: '0.01', required: true }),
-    image_url: input('image_url', isNew ? '' : p.image_link, { type: 'url', placeholder: 'https://…/product.webp' }),
+    image_url: input('image_url', p.image_link, { type: 'url', placeholder: 'https://…/product.webp' }),
+    barcode: input('barcode', p.barcode, { inputmode: 'numeric', maxlength: 20, placeholder: 'Scan or type the pack’s code' }),
     lab_report_url: input('lab_report_url', p.lab_report_url, { type: 'url', placeholder: 'https://…/lab-report.pdf' }),
     description: h('textarea', { name: 'description', rows: 3, maxlength: 2000 }, p.description ?? ''),
     featured: h('input', { type: 'checkbox', checked: Boolean(p.featured) }),
@@ -145,7 +148,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
 
   // Variant rows are plain objects; the table is redrawn from them.
   let variants = p.variants.map((v) => ({
-    id: v.id, flavor: v.flavor ?? '', weight: v.weight ?? '', sku: v.sku ?? '', mrp: v.mrp ?? '', price: v.price ?? '', in_stock: Boolean(v.in_stock),
+    id: v.id, flavor: v.flavor ?? '', weight: v.weight ?? '', sku: v.sku ?? '', barcode: v.barcode ?? '', mrp: v.mrp ?? '', price: v.price ?? '', in_stock: Boolean(v.in_stock ?? true),
   }));
   const variantBody = h('tbody', {});
   function drawVariants() {
@@ -156,10 +159,16 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
               h('td', {}, h('input', { value: v[key], ...attrs, oninput: (e) => { v[key] = e.target.value; } }));
             return h(
               'tr',
-              {},
+              // The flavour × size a scan just found.
+              { class: variantId && v.id === variantId ? 'sa-variant-hit' : null },
               cell('flavor', { placeholder: 'Chocolate', maxlength: 60 }),
               cell('weight', { placeholder: '1 kg', maxlength: 40 }),
               cell('sku', { placeholder: 'SKU', maxlength: 60 }),
+              h(
+                'td',
+                {},
+                barcodeInput(h('input', { value: v.barcode, placeholder: 'Barcode', maxlength: 20, inputmode: 'numeric', oninput: (e) => { v.barcode = e.target.value; } })),
+              ),
               cell('mrp', { type: 'number', min: 0, step: '0.01', placeholder: 'Product MRP' }),
               cell('price', { type: 'number', min: 0, step: '0.01', placeholder: 'Product price' }),
               h('td', { class: 'sa-center' }, h('input', { type: 'checkbox', checked: v.in_stock, 'aria-label': 'In stock', onchange: (e) => { v.in_stock = e.target.checked; } })),
@@ -170,7 +179,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
               ),
             );
           })
-        : [h('tr', {}, h('td', { colspan: 7, class: 'muted sa-center' }, 'No variants — the product sells at its own price.'))]),
+        : [h('tr', {}, h('td', { colspan: 8, class: 'muted sa-center' }, 'No variants — the product sells at its own price.'))]),
     );
   }
   drawVariants();
@@ -186,7 +195,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
     for (const flavor of flavors.length ? flavors : ['']) {
       for (const weight of weights.length ? weights : ['']) {
         if (!variants.some((v) => v.flavor === flavor && v.weight === weight)) {
-          variants.push({ flavor, weight, sku: '', mrp: '', price: '', in_stock: true });
+          variants.push({ flavor, weight, sku: '', barcode: '', mrp: '', price: '', in_stock: true });
         }
       }
     }
@@ -296,6 +305,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
           mrp: num(inputs.mrp.value),
           price: num(inputs.price.value),
           image_url: inputs.image_url.value.trim() || null,
+          barcode: inputs.barcode.value.trim() || null,
           lab_report_url: inputs.lab_report_url.value.trim() || null,
           description: inputs.description.value.trim() || null,
           featured: inputs.featured.checked,
@@ -307,6 +317,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
             flavor: v.flavor.trim() || null,
             weight: v.weight.trim() || null,
             sku: String(v.sku).trim() || null,
+            barcode: String(v.barcode ?? '').trim() || null,
             mrp: num(v.mrp),
             price: num(v.price),
             in_stock: v.in_stock,
@@ -338,6 +349,10 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
       field('Category', inputs.category),
       field('MRP (₹) *', inputs.mrp),
       field('Selling price (₹) *', inputs.price, { hint: 'Variants can override both.' }),
+      field('Barcode', barcodeInput(inputs.barcode), {
+        full: true,
+        hint: 'The code printed on the pack — scanning it later finds this product. A flavour or size with its own code takes it in the table below.',
+      }),
       h('div', { class: 'field full' }, h('span', {}, 'Photos'), photosBlock),
       field('…or an image link', inputs.image_url, { full: true, hint: 'Only used while the product has no uploaded photos.' }),
       badges ? h('div', { class: 'field full' }, h('span', {}, 'Quality badges'), badgePicker) : null,
@@ -367,7 +382,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
       h(
         'table',
         {},
-        h('thead', {}, h('tr', {}, ...['Flavour', 'Size', 'SKU', 'MRP', 'Price', 'In stock', ''].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ...['Flavour', 'Size', 'SKU', 'Barcode', 'MRP', 'Price', 'In stock', ''].map((t) => h('th', {}, t)))),
         variantBody,
       ),
     ),
@@ -377,7 +392,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
         type: 'button',
         class: 'btn sm ghost',
         onclick: () => {
-          variants.push({ flavor: '', weight: '', sku: '', mrp: '', price: '', in_stock: true });
+          variants.push({ flavor: '', weight: '', sku: '', barcode: '', mrp: '', price: '', in_stock: true });
           drawVariants();
         },
       },
@@ -393,6 +408,55 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
   );
 
   openModal({ title: isNew ? 'New store product' : `Edit · ${product.title}`, wide: true, body: form });
+}
+
+/* ── Scanning a pack ──────────────────────────────────────────────────── */
+
+const SOURCE_NOTE = {
+  catalogue: 'Filled in from an existing listing of this pack — check it and set your price',
+  openfoodfacts: 'Filled in from Open Food Facts — check it and set your price',
+};
+
+/**
+ * "Scan barcode" on a product list. A pack the list already carries opens for
+ * editing (its flavour × size row marked); a new one opens the editor with
+ * whatever is known about it, and the barcode, already filled in.
+ * `lookup(code)` is the panel's own barcode endpoint.
+ */
+export function scanStoreProduct({ lookup, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS }) {
+  openProductScanner({
+    title: 'Scan a product',
+    subtitle: 'Finds it on your list, or starts a new listing from its barcode',
+    resolve: lookup,
+    onDone: (res) => {
+      if (res.existing) {
+        toast(`Already listed — ${res.existing.title}`);
+        openProductModal(res.existing, onSaved, badges, ops, { variantId: res.variant_id });
+        return;
+      }
+      const s = res.suggestion;
+      const prefill = { barcode: res.barcode };
+      if (s) {
+        Object.assign(prefill, {
+          title: s.title,
+          brand: s.brand ?? '',
+          category: s.category,
+          description: s.description,
+          nutrition_facts: s.nutrition_facts,
+          lab_report_url: s.lab_report_url ?? null,
+          image_link: s.image_url,
+          mrp: s.mrp ?? '',
+        });
+        // A code belongs to one flavour × size: it goes on that variant.
+        if (s.flavor || s.size) {
+          prefill.variants = [{ flavor: s.flavor ?? '', weight: s.size ?? '', barcode: res.barcode, in_stock: 1 }];
+          prefill.barcode = '';
+        }
+      }
+      toast(s ? SOURCE_NOTE[res.source] : res.lookup_error ? `${res.lookup_error} — add the details by hand` : `New barcode ${res.barcode} — add its details`);
+      openProductModal(null, onSaved, badges, ops, { prefill });
+    },
+  });
 }
 
 /* ── Orders ───────────────────────────────────────────────────────────── */
@@ -947,6 +1011,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
         h('h3', {}, renderIcon('bag', { size: 17 }), 'Central catalogue'),
         h('span', { class: 'muted' }, `${products.filter((p) => p.active).length} active of ${products.length}`),
         h('div', { class: 'spacer' }),
+        h('button', { class: 'btn sm', onclick: () => scanStoreProduct({ lookup: api.platformStoreBarcode, onSaved: onChanged, badges }) }, renderIcon('scan', { size: 14 }), 'Scan barcode'),
         h('button', { class: 'btn primary sm', onclick: () => openProductModal(null, onChanged, badges) }, renderIcon('plus', { size: 14 }), 'Add product'),
       ),
       table(

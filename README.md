@@ -407,6 +407,15 @@ when an order is paid, if mail is configured.
   commission at all. With none, the gym's statement gets no ₹0 lines.
   The rates are fixed onto each order when it is placed, so changing them
   never rewrites past orders.
+- **Scan barcode:** the console's central catalogue, every Shop panel and
+  each gym's own shelf (Billing → Store & Commissions → Our gym products) can
+  scan a pack's barcode with the camera, or type it in. A USB or Bluetooth
+  barcode gun works too, since it just types the digits and presses Enter. A
+  pack already on that list opens for editing; at a gym desk it offers Sell,
+  Restock or Edit. A new pack opens the add form already filled in, first from
+  any platform listing with the same barcode (name, brand, label, MRP, never
+  anyone's price), then from Open Food Facts. Each flavour or size can carry
+  its own barcode, and a shelf can't list the same barcode twice.
 - A shop token (`scope: 'seller'`) works only on `/api/seller` and sees only
   that shop's products and orders. Pausing a shop, resetting its password, or
   changing its password signs out every device it was signed in on.

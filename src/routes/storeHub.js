@@ -9,6 +9,8 @@ import {
   tenantCommissionLedger,
   tenantCommissionSummary,
 } from '../monetization.js';
+import { normaliseBarcode } from '../foodBarcode.js';
+import { gymProductByBarcode, lookupGymBarcode } from '../productBarcode.js';
 import { parse, startOfMonth, today, toInt } from '../validate.js';
 
 /**
@@ -93,12 +95,31 @@ const PRODUCT_FIELDS = {
   category: { type: 'enum', values: GYM_PRODUCT_CATEGORIES },
   description: { type: 'string', max: 500 },
   sku: { type: 'string', max: 60 },
+  barcode: { type: 'string', max: 20 },
   price: { type: 'number', min: 0, max: 1000000 },
   cost_price: { type: 'number', min: 0, max: 1000000 },
   stock_quantity: { type: 'int', min: 0, max: 1000000 },
   low_stock_at: { type: 'int', min: 0, max: 100000 },
   active: { type: 'boolean' },
 };
+
+/** A barcode is checked and kept in one form, and one pack is one product. */
+function cleanProductBarcode(body, exceptId = null) {
+  if (body.barcode === undefined) return;
+  if (body.barcode === null || body.barcode === '') {
+    body.barcode = null;
+    return;
+  }
+  body.barcode = normaliseBarcode(body.barcode);
+  const taken = gymProductByBarcode(body.barcode, exceptId);
+  if (taken) throw conflict(`Barcode ${body.barcode} is already on “${taken.name}”`);
+}
+
+/** A scanned pack: the gym's own product (to restock or sell), or details to
+ * start a new one from (src/productBarcode.js). */
+storeHubRoutes.get('/barcode/:code', async (req, res) => {
+  res.json(await lookupGymBarcode(req.params.code));
+});
 
 storeHubRoutes.get('/products', (req, res) => {
   const includeRetired = req.query.all === '1' || req.query.all === 'true';
@@ -123,14 +144,16 @@ storeHubRoutes.post('/products', (req, res) => {
     stock_quantity: { ...PRODUCT_FIELDS.stock_quantity, default: 0 },
     low_stock_at: { ...PRODUCT_FIELDS.low_stock_at, default: 5 },
   });
+  cleanProductBarcode(body);
   const info = run(
-    `INSERT INTO gym_products (name, category, description, sku, price, cost_price, stock_quantity, low_stock_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO gym_products (name, category, description, sku, barcode, price, cost_price, stock_quantity, low_stock_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       body.name,
       body.category,
       body.description ?? null,
       body.sku ?? null,
+      body.barcode ?? null,
       body.price,
       body.cost_price ?? null,
       body.stock_quantity,
@@ -144,9 +167,10 @@ storeHubRoutes.patch('/products/:id', (req, res) => {
   const id = Number(req.params.id);
   if (!get('SELECT id FROM gym_products WHERE id = ?', [id])) throw notFound('Product not found');
   const body = parse(req.body, PRODUCT_FIELDS);
+  cleanProductBarcode(body, id);
   // Required columns cannot be blanked; optional text ones can be cleared.
   const columns = Object.keys(body).filter(
-    (c) => body[c] !== null || ['description', 'sku', 'cost_price'].includes(c),
+    (c) => body[c] !== null || ['description', 'sku', 'barcode', 'cost_price'].includes(c),
   );
   if (!columns.length) throw badRequest('Nothing to update');
   run(

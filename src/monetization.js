@@ -6,6 +6,7 @@ import { tenantStorage } from './db.js';
 import { badRequest, conflict, HttpError, notFound } from './errors.js';
 import { sniffMedia } from './exerciseCatalog.js';
 import { activateFitnessAddon } from './fitness.js';
+import { barcodeVariants, normaliseBarcode } from './foodBarcode.js';
 import { emailEnabled, sendEmail } from './mailer.js';
 import { notifyMember } from './notifications.js';
 import { createOrder, isRazorpayOrdersConfigured } from './razorpay.js';
@@ -135,6 +136,10 @@ function migrate(handle) {
   // Partner shops (see src/sellers.js): who sells a product, who fulfils an
   // order, and the shop's side of the money on it. NULL is the platform's own.
   ensure('store_products', 'seller_id', 'INTEGER');
+  // A pack's printed barcode: the product's own, and each flavour × size's
+  // (a 1 kg chocolate and a 2 kg vanilla tub carry different codes).
+  ensure('store_products', 'barcode', 'TEXT');
+  ensure('store_product_variants', 'barcode', 'TEXT');
   ensure('store_sellers', 'owned', 'INTEGER NOT NULL DEFAULT 0');
   ensure('store_sellers', 'gym_commission_pct', 'REAL');
   for (const [column, type] of [
@@ -149,6 +154,8 @@ function migrate(handle) {
   }
   handle.exec(`
     CREATE INDEX IF NOT EXISTS idx_store_products_seller ON store_products(seller_id);
+    CREATE INDEX IF NOT EXISTS idx_store_products_barcode ON store_products(barcode);
+    CREATE INDEX IF NOT EXISTS idx_store_variants_barcode ON store_product_variants(barcode);
     CREATE INDEX IF NOT EXISTS idx_store_orders_seller ON store_orders(seller_id);
   `);
 }
@@ -527,6 +534,46 @@ const PRODUCT_FIELDS = {
   active: { type: 'boolean' },
 };
 
+/** A printed barcode, or null to clear it; undefined leaves it as it is. */
+function cleanBarcode(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || String(raw).trim() === '') return null;
+  return normaliseBarcode(raw);
+}
+
+/**
+ * The product on `sellerId`'s shelf (null: the central catalogue) that
+ * carries `code`, on itself or on one of its variants — skipping
+ * `exceptProductId`, the product being saved.
+ */
+export function shelfProductByBarcode(code, sellerId, exceptProductId = null) {
+  const codes = barcodeVariants(code);
+  const marks = codes.map(() => '?').join(',');
+  return one(
+    `SELECT p.id, p.title, v.id AS variant_id FROM store_products p
+     LEFT JOIN store_product_variants v ON v.product_id = p.id AND v.barcode IN (${marks})
+     WHERE p.seller_id IS ? AND p.id IS NOT ? AND (p.barcode IN (${marks}) OR v.id IS NOT NULL)
+     ORDER BY p.active DESC, p.id DESC LIMIT 1`,
+    ...codes,
+    sellerId,
+    exceptProductId,
+    ...codes,
+  );
+}
+
+/** One shelf lists a pack once: a scan should find one product, not two. */
+function assertBarcodesFree(sellerId, productId, productBarcode, variants) {
+  const codes = [productBarcode, ...(variants ?? []).map((v) => v.barcode)].filter(Boolean);
+  const seen = new Set();
+  for (const code of codes) {
+    const key = barcodeVariants(code).sort()[0];
+    if (seen.has(key)) throw badRequest(`Barcode ${code} is used twice on this product`, { barcode: 'is used twice' });
+    seen.add(key);
+    const taken = shelfProductByBarcode(code, sellerId, productId);
+    if (taken) throw conflict(`Barcode ${code} is already on this shelf, on “${taken.title}”`);
+  }
+}
+
 function cleanVariants(raw) {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) throw badRequest('Variants must be a list', { variants: 'must be a list' });
@@ -537,6 +584,7 @@ function cleanVariants(raw) {
       flavor: { type: 'string', max: 60 },
       weight: { type: 'string', max: 40 },
       sku: { type: 'string', max: 60 },
+      barcode: { type: 'string', max: 20 },
       mrp: { type: 'number', min: 0, max: 1000000 },
       price: { type: 'number', min: 0, max: 1000000 },
       in_stock: { type: 'boolean', default: 1 },
@@ -544,7 +592,7 @@ function cleanVariants(raw) {
     if (!v.flavor && !v.weight) {
       throw badRequest(`Variant ${i + 1} needs a flavour or a size`, { variants: `row ${i + 1} is empty` });
     }
-    return { ...v, sort_order: i };
+    return { ...v, barcode: cleanBarcode(v.barcode) ?? null, sort_order: i };
   });
 }
 
@@ -783,16 +831,16 @@ function writeVariants(productId, variants) {
       : null;
     if (existing) {
       exec(
-        `UPDATE store_product_variants SET flavor = ?, weight = ?, sku = ?, mrp = ?, price = ?, in_stock = ?, sort_order = ?
+        `UPDATE store_product_variants SET flavor = ?, weight = ?, sku = ?, barcode = ?, mrp = ?, price = ?, in_stock = ?, sort_order = ?
          WHERE id = ?`,
-        v.flavor ?? null, v.weight ?? null, v.sku ?? null, v.mrp ?? null, v.price ?? null, v.in_stock, v.sort_order, existing.id,
+        v.flavor ?? null, v.weight ?? null, v.sku ?? null, v.barcode ?? null, v.mrp ?? null, v.price ?? null, v.in_stock, v.sort_order, existing.id,
       );
       keep.add(existing.id);
     } else {
       const info = exec(
-        `INSERT INTO store_product_variants (product_id, flavor, weight, sku, mrp, price, in_stock, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        productId, v.flavor ?? null, v.weight ?? null, v.sku ?? null, v.mrp ?? null, v.price ?? null, v.in_stock, v.sort_order,
+        `INSERT INTO store_product_variants (product_id, flavor, weight, sku, barcode, mrp, price, in_stock, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        productId, v.flavor ?? null, v.weight ?? null, v.sku ?? null, v.barcode ?? null, v.mrp ?? null, v.price ?? null, v.in_stock, v.sort_order,
       );
       keep.add(Number(info.lastInsertRowid));
     }
@@ -821,12 +869,14 @@ export function createStoreProduct(payload, { sellerId = null } = {}) {
   const variants = cleanVariants(payload?.variants) ?? [];
   for (const v of variants) assertPricing(v.mrp ?? body.mrp, v.price ?? body.price);
   const badgeIds = sellerId === null ? (cleanBadgeIds(payload?.badge_ids) ?? []) : [];
+  const barcode = cleanBarcode(payload?.barcode) ?? null;
+  assertBarcodesFree(sellerId, null, barcode, variants);
 
   return registryTx(() => {
     const info = exec(
       `INSERT INTO store_products (title, brand, category, description, image_url, nutrition_facts, lab_report_url,
-                                   mrp, price, featured, active, seller_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                   mrp, price, featured, active, seller_id, barcode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       body.title,
       body.brand,
       body.category,
@@ -839,6 +889,7 @@ export function createStoreProduct(payload, { sellerId = null } = {}) {
       body.featured ?? 0,
       body.active ?? 1,
       sellerId,
+      barcode,
     );
     const id = Number(info.lastInsertRowid);
     writeVariants(id, variants);
@@ -862,6 +913,8 @@ export function updateStoreProduct(id, payload, { sellerId } = {}) {
   if (lab !== undefined) sets.lab_report_url = lab;
   const nutrition = cleanNutrition(payload?.nutrition_facts);
   if (nutrition !== undefined) sets.nutrition_facts = nutrition;
+  const barcode = cleanBarcode(payload?.barcode);
+  if (barcode !== undefined) sets.barcode = barcode;
 
   const mrp = sets.mrp ?? current.mrp;
   const price = sets.price ?? current.price;
@@ -869,6 +922,10 @@ export function updateStoreProduct(id, payload, { sellerId } = {}) {
   const variants = cleanVariants(payload?.variants);
   for (const v of variants ?? []) assertPricing(v.mrp ?? mrp, v.price ?? price);
   const badgeIds = sellerId === undefined ? cleanBadgeIds(payload?.badge_ids) : undefined;
+  if (barcode !== undefined || variants) {
+    const currentVariants = variants ?? many('SELECT barcode FROM store_product_variants WHERE product_id = ?', id);
+    assertBarcodesFree(current.seller_id ?? null, id, barcode === undefined ? current.barcode : barcode, currentVariants);
+  }
 
   return registryTx(() => {
     const columns = Object.keys(sets);

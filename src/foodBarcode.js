@@ -48,6 +48,9 @@ const FIELDS = [
   'states_tags',
   'countries_tags',
   'lang',
+  // For store and gym products prefilled from a scan (src/productBarcode.js).
+  'image_front_url',
+  'image_url',
 ].join(',');
 
 /** Digits only, and a valid check digit for the lengths that carry a plain
@@ -71,14 +74,14 @@ export function normaliseBarcode(raw) {
 
 /** A 12-digit UPC-A and its 13-digit EAN form (a leading zero) are the same
  * product; scanners and Open Food Facts disagree on which to report. */
-function variants(code) {
+export function barcodeVariants(code) {
   if (code.length === 12) return [code, `0${code}`];
   if (code.length === 13 && code.startsWith('0')) return [code, code.slice(1)];
   return [code];
 }
 
 export function libraryFoodByBarcode(code) {
-  const forms = variants(code);
+  const forms = barcodeVariants(code);
   return get(`SELECT * FROM food_library WHERE barcode IN (${forms.map(() => '?').join(', ')})`, forms) ?? null;
 }
 
@@ -442,9 +445,29 @@ export async function openFoodFactsProduct(code) {
   return food ? { ...food, external_id: String(code) } : null;
 }
 
+/** Codes Open Food Facts had no record of at all, for productRecord(). */
+const recordMisses = new Map();
+
+/**
+ * A product's whole Open Food Facts record — name, brand, picture, label —
+ * for prefilling a store or gym product from its barcode, or null when Open
+ * Food Facts has never heard of it. Unlike lookupBarcode() a product with an
+ * incomplete label still counts: a shop needs its name and picture, not its
+ * macros. Shares the food lookup's rate window.
+ */
+export async function openFoodFactsRecord(rawCode) {
+  const code = normaliseBarcode(rawCode);
+  const missedUntil = recordMisses.get(code);
+  if (missedUntil && missedUntil > Date.now()) return null;
+  const product = await fetchProduct(code);
+  if (!product) recordMisses.set(code, Date.now() + MISS_TTL_MS);
+  return product;
+}
+
 /** Test hook: forget remembered misses and the upstream rate windows. */
 export function resetBarcodeCaches() {
   misses.clear();
+  recordMisses.clear();
   windowStart = 0;
   windowCount = 0;
   searchWindowStart = 0;

@@ -1,7 +1,7 @@
 import { api, sellerSession } from '../api.js';
 import { buildForm, clear, closeModal, confirmDialog, date, h, openModal, renderIcon, table, toast } from '../ui.js';
 import { getAppMode, toggleAppMode } from '../vertical.js';
-import { CATEGORY_LABEL, FULFILLMENT_TONE, inr, openProductModal } from './storeAdmin.js';
+import { CATEGORY_LABEL, FULFILLMENT_TONE, inr, openProductModal, scanStoreProduct } from './storeAdmin.js';
 
 /**
  * The Shop panel (#/seller) — what a partner supplement shop signs in to.
@@ -453,6 +453,12 @@ function productsPage(products, { onChanged }) {
       cardTitle('package', 'Your shelf', 'blue'),
       h('span', { class: 'muted' }, `${products.filter((p) => p.active).length} on sale of ${products.length}`),
       h('div', { class: 'spacer' }),
+      h(
+        'button',
+        { class: 'btn sm', onclick: () => scanStoreProduct({ lookup: api.sellerBarcode, onSaved: onChanged, badges: null, ops: SHOP_PRODUCT_OPS }) },
+        renderIcon('scan', { size: 14 }),
+        'Scan barcode',
+      ),
       h('button', { class: 'btn primary sm', onclick: add }, renderIcon('plus', { size: 14 }), 'Add product'),
     ),
     table(

@@ -1515,6 +1515,14 @@ const MIGRATIONS = [
   // timetable, tests and study material — see src/coaching/schema.js. Carried
   // by every tenant's database, like the SeatBook tables above.
   ...COACHING_MIGRATIONS,
+
+  // The barcode printed on a gym product, so the desk can scan a pack to find
+  // it (restock, sell) or to add a new one with its details filled in — see
+  // src/productBarcode.js.
+  (db) => {
+    ensureColumn(db, 'gym_products', 'barcode', 'TEXT');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_gym_products_barcode ON gym_products(barcode)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

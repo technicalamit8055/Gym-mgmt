@@ -12761,3 +12761,17 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .shp-inline { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .shp-inline input { width: 110px; flex-shrink: 0; }
 .shp-example { margin-top: 12px; }
+
+/* ------------------------------------------------------------ product barcode scanner (productScanner.js) */
+.pscan { display: flex; flex-direction: column; gap: 12px; }
+.pscan .portal-scan-stage { width: 100%; max-height: 300px; }
+.pscan .btn.hidden { display: none; }
+.pscan .btn.sm { align-self: center; }
+.pscan-note { margin: 0; text-align: center; font-size: 13px; }
+.pscan-form { display: flex; gap: 8px; }
+.pscan-form input { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.pscan-field { display: flex; gap: 6px; align-items: stretch; }
+.pscan-field input { flex: 1; min-width: 0; }
+.pscan-field .btn { flex-shrink: 0; }
+.sa-variants td .pscan-field input { min-width: 120px; }
+.sa-variant-hit td { background: color-mix(in srgb, var(--brand) 12%, transparent); }

@@ -87,6 +87,7 @@ import {
   updateStoreOrder,
   updateStoreProduct,
 } from '../monetization.js';
+import { lookupStoreBarcode } from '../productBarcode.js';
 import { isRazorpayOrdersConfigured } from '../razorpay.js';
 import {
   createSeller,
@@ -834,6 +835,12 @@ platformAdminRoutes.get('/store/products', (req, res) => {
     category: req.query.category ? String(req.query.category) : undefined,
   });
   res.json({ items, total: items.length, categories: STORE_CATEGORIES });
+});
+
+/** A scanned pack: the central catalogue's own product, or details to start
+ * a new one from (src/productBarcode.js). */
+platformAdminRoutes.get('/store/barcode/:code', async (req, res) => {
+  res.json(await lookupStoreBarcode(req.params.code, { sellerId: null }));
 });
 
 platformAdminRoutes.post('/store/products', (req, res) => {

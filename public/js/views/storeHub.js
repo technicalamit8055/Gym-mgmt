@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { barcodeInput, openProductScanner } from '../productScanner.js';
 import { append, buildForm, clear, closeModal, confirmDialog, date, fullName, h, money, openModal, renderIcon, table, toast } from '../ui.js';
 
 /** Replaces an element's children. ui.js's append, not the DOM's: the DOM's
@@ -38,46 +39,98 @@ const iconBadge = (tone, icon, text) =>
 
 /* ── Our gym products: forms ──────────────────────────────────────────── */
 
-function openProductForm(product, onSaved) {
+/** `prefill`: a new product's starting values, from a scanned barcode. */
+function openProductForm(product, onSaved, { prefill = null } = {}) {
   const isNew = !product;
-  const p = product ?? { category: 'apparel', stock_quantity: 0, low_stock_at: 5 };
-  openModal({
-    title: isNew ? 'Add a gym product' : `Edit · ${product.name}`,
-    icon: 'bag',
-    body: buildForm(
-      [
-        { name: 'name', label: 'Product name', value: p.name ?? '', required: true, full: true, placeholder: 'Iron Works dry-fit tee' },
-        { name: 'category', label: 'Category', type: 'select', value: p.category, options: Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ value, label })) },
-        { name: 'sku', label: 'SKU / size', value: p.sku ?? '', placeholder: 'TEE-BLK-M' },
-        { name: 'price', label: 'Selling price', type: 'number', step: '0.01', min: 0, value: p.price ?? '', required: true },
-        { name: 'cost_price', label: 'Cost price', type: 'number', step: '0.01', min: 0, value: p.cost_price ?? '', hint: 'Optional — for your own margin.' },
-        isNew
-          ? { name: 'stock_quantity', label: 'Opening stock', type: 'number', min: 0, step: '1', value: p.stock_quantity }
-          : null,
-        { name: 'low_stock_at', label: 'Warn when stock falls to', type: 'number', min: 0, step: '1', value: p.low_stock_at },
-        { name: 'description', label: 'Description', type: 'textarea', value: p.description ?? '', full: true },
-      ],
-      {
-        submitLabel: isNew ? 'Add product' : 'Save changes',
-        onSubmit: async (values) => {
-          const payload = {
-            name: values.name,
-            category: values.category,
-            sku: values.sku.trim() || null,
-            price: Number(values.price),
-            cost_price: values.cost_price === '' ? null : Number(values.cost_price),
-            low_stock_at: Number(values.low_stock_at || 0),
-            description: values.description.trim() || null,
-          };
-          if (isNew) payload.stock_quantity = Number(values.stock_quantity || 0);
-          if (isNew) await api.storeHub.createProduct(payload);
-          else await api.storeHub.updateProduct(product.id, payload);
-          closeModal();
-          toast(isNew ? 'Product added' : 'Product saved');
-          await onSaved();
-        },
+  const p = product ?? { category: 'apparel', stock_quantity: 0, low_stock_at: 5, ...prefill };
+  const form = buildForm(
+    [
+      { name: 'name', label: 'Product name', value: p.name ?? '', required: true, full: true, placeholder: 'Iron Works dry-fit tee' },
+      { name: 'category', label: 'Category', type: 'select', value: p.category, options: Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ value, label })) },
+      { name: 'sku', label: 'SKU / size', value: p.sku ?? '', placeholder: 'TEE-BLK-M' },
+      { name: 'barcode', label: 'Barcode', value: p.barcode ?? '', placeholder: 'Scan or type the pack’s code' },
+      { name: 'price', label: 'Selling price', type: 'number', step: '0.01', min: 0, value: p.price ?? '', required: true },
+      { name: 'cost_price', label: 'Cost price', type: 'number', step: '0.01', min: 0, value: p.cost_price ?? '', hint: 'Optional — for your own margin.' },
+      isNew
+        ? { name: 'stock_quantity', label: 'Opening stock', type: 'number', min: 0, step: '1', value: p.stock_quantity }
+        : null,
+      { name: 'low_stock_at', label: 'Warn when stock falls to', type: 'number', min: 0, step: '1', value: p.low_stock_at },
+      { name: 'description', label: 'Description', type: 'textarea', value: p.description ?? '', full: true },
+    ],
+    {
+      submitLabel: isNew ? 'Add product' : 'Save changes',
+      onSubmit: async (values) => {
+        const payload = {
+          name: values.name,
+          category: values.category,
+          sku: values.sku.trim() || null,
+          barcode: values.barcode.trim() || null,
+          price: Number(values.price),
+          cost_price: values.cost_price === '' ? null : Number(values.cost_price),
+          low_stock_at: Number(values.low_stock_at || 0),
+          description: values.description.trim() || null,
+        };
+        if (isNew) payload.stock_quantity = Number(values.stock_quantity || 0);
+        if (isNew) await api.storeHub.createProduct(payload);
+        else await api.storeHub.updateProduct(product.id, payload);
+        closeModal();
+        toast(isNew ? 'Product added' : 'Product saved');
+        await onSaved();
       },
-    ),
+    },
+  );
+  // The barcode box gets its own scan button beside it.
+  const code = form.querySelector('input[name="barcode"]');
+  code.setAttribute('inputmode', 'numeric');
+  const after = code.nextSibling;
+  const holder = code.parentNode;
+  holder.insertBefore(barcodeInput(code), after);
+  openModal({ title: isNew ? 'Add a gym product' : `Edit · ${product.name}`, icon: 'bag', body: form });
+}
+
+/**
+ * The desk scans a pack. One the gym already stocks offers what the desk
+ * usually came to do — sell it, restock it — and a new one opens "Add a gym
+ * product" with what is known about it, and its barcode, filled in.
+ */
+function scanGymProduct(products, onSaved) {
+  openProductScanner({
+    title: 'Scan a product',
+    subtitle: 'Sell or restock what you stock, or add a new product from its barcode',
+    resolve: (code) => api.storeHub.barcode(code),
+    onDone: (res) => {
+      const found = res.existing;
+      if (!found) {
+        const s = res.suggestion;
+        toast(
+          s
+            ? `Filled in from ${res.source === 'catalogue' ? 'an existing listing' : 'Open Food Facts'} — check it and set your price`
+            : res.lookup_error
+              ? `${res.lookup_error} — add the details by hand`
+              : `New barcode ${res.barcode} — add its details`,
+        );
+        openProductForm(null, onSaved, { prefill: { ...(s ?? {}), barcode: res.barcode } });
+        return;
+      }
+      const listed = products.find((x) => x.id === found.id) ?? found;
+      const go = (fn) => () => {
+        closeModal();
+        fn();
+      };
+      openModal({
+        title: found.name,
+        subtitle: found.active ? `${found.stock_quantity} in stock · ${money(found.price)}` : 'Retired — no longer on sale',
+        icon: 'bag',
+        body: h('p', { class: 'muted', style: 'margin:0' }, `Barcode ${res.barcode} is this product.`),
+        footer: [
+          h('button', { class: 'btn ghost', onclick: go(() => openProductForm(listed, onSaved)) }, 'Edit'),
+          found.active ? h('button', { class: 'btn', onclick: go(() => openRestockForm(listed, onSaved)) }, renderIcon('package', { size: 15 }), 'Restock') : null,
+          found.active && found.stock_quantity > 0
+            ? h('button', { class: 'btn primary', onclick: go(() => openSaleForm(products, listed, onSaved)) }, renderIcon('cart', { size: 15 }), 'Sell')
+            : null,
+        ].filter(Boolean),
+      });
+    },
   });
 }
 
@@ -400,6 +453,7 @@ export async function renderStoreHub({ billStat }) {
           lowStock.length ? iconBadge('amber', 'alert', `${lowStock.length} running low`) : null,
           h('div', { class: 'spacer' }),
           h('button', { class: 'btn', onclick: () => openSaleForm(products, null, refresh) }, renderIcon('cart', { size: 16 }), 'Record sale'),
+          h('button', { class: 'btn', onclick: () => scanGymProduct(products, refresh) }, renderIcon('scan', { size: 16 }), 'Scan barcode'),
           h('button', { class: 'btn primary', onclick: () => openProductForm(null, refresh) }, renderIcon('plus', { size: 16 }), 'Add product'),
         ),
         table(

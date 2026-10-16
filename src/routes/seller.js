@@ -17,6 +17,7 @@ import {
   updateStoreOrder,
   updateStoreProduct,
 } from '../monetization.js';
+import { lookupStoreBarcode } from '../productBarcode.js';
 import { createLimiter } from '../rateLimit.js';
 import {
   changeSellerPassword,
@@ -102,6 +103,12 @@ sellerRoutes.get('/products', (req, res) => {
     category: req.query.category ? String(req.query.category) : undefined,
   });
   res.json({ items, total: items.length, categories: STORE_CATEGORIES });
+});
+
+/** A scanned pack: this shop's own product, or details to start a new one
+ * from — never another shop's price (src/productBarcode.js). */
+sellerRoutes.get('/barcode/:code', async (req, res) => {
+  res.json(await lookupStoreBarcode(req.params.code, { sellerId: sellerId(req) }));
 });
 
 sellerRoutes.post('/products', (req, res) => {

@@ -505,6 +505,9 @@ export const api = {
   platformUpdateMonetization: (payload) => request('PUT', '/platform/admin/monetization', payload, { token: platformSession.token }),
   platformStoreProducts: (params) =>
     request('GET', `/platform/admin/store/products${query(params)}`, undefined, { token: platformSession.token }),
+  // A scanned pack: the catalogue's own product, or details for a new one.
+  platformStoreBarcode: (code) =>
+    request('GET', `/platform/admin/store/barcode/${encodeURIComponent(code)}`, undefined, { token: platformSession.token }),
   platformCreateStoreProduct: (payload) => request('POST', '/platform/admin/store/products', payload, { token: platformSession.token }),
   platformUpdateStoreProduct: (id, payload) =>
     request('PATCH', `/platform/admin/store/products/${id}`, payload, { token: platformSession.token }),
@@ -555,6 +558,7 @@ export const api = {
   sellerUpdateMe: (payload) => request('PATCH', '/seller/me', payload, { token: sellerSession.token }),
   sellerChangePassword: (payload) => request('POST', '/seller/me/password', payload, { token: sellerSession.token }),
   sellerProducts: (params) => request('GET', `/seller/products${query(params)}`, undefined, { token: sellerSession.token }),
+  sellerBarcode: (code) => request('GET', `/seller/barcode/${encodeURIComponent(code)}`, undefined, { token: sellerSession.token }),
   sellerCreateProduct: (payload) => request('POST', '/seller/products', payload, { token: sellerSession.token }),
   sellerUpdateProduct: (id, payload) => request('PATCH', `/seller/products/${id}`, payload, { token: sellerSession.token }),
   sellerDeleteProduct: (id) => request('DELETE', `/seller/products/${id}`, undefined, { token: sellerSession.token }),
@@ -772,6 +776,7 @@ export const api = {
     summary: () => request('GET', '/store-hub/summary'),
     commissions: (params) => request('GET', `/store-hub/commissions${query(params)}`),
     products: (params) => request('GET', `/store-hub/products${query(params)}`),
+    barcode: (code) => request('GET', `/store-hub/barcode/${encodeURIComponent(code)}`),
     createProduct: (payload) => request('POST', '/store-hub/products', payload),
     updateProduct: (id, payload) => request('PATCH', `/store-hub/products/${id}`, payload),
     restock: (id, quantity) => request('POST', `/store-hub/products/${id}/restock`, { quantity }),
