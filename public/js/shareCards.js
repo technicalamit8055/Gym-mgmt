@@ -1,4 +1,4 @@
-import { isNativeApp, serverUrl } from './api.js';
+import { isNativeApp, nativeAppName, serverUrl } from './api.js';
 import { BODY_H, BODY_W, bodyFigure, musclesWorked } from './bodyMap.js';
 import { h, initials, openModal, renderIcon, toast } from './ui.js';
 import { muscleSplit, setsByExercise, workoutTimeLabel } from './workoutDetail.js';
@@ -430,12 +430,12 @@ async function saveImage(blob, filename, title) {
   }
   try {
     await native('Filesystem', 'writeFile', {
-      path: `GymVym/${filename}`,
+      path: `${nativeAppName}/${filename}`,
       data: await blobBase64(blob),
       directory: 'DOCUMENTS',
       recursive: true,
     });
-    toast('Saved to Documents/GymVym');
+    toast(`Saved to Documents/${nativeAppName}`);
   } catch {
     // Older Androids keep Documents behind a storage permission; the share
     // sheet's "Save to…" targets need none.

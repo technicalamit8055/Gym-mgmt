@@ -39,6 +39,21 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    // Two store apps from one web bundle. GymVym serves every business on the
+    // server; CoachBook is the students' app, for coaching institutes only. A
+    // flavor's src/<flavor>/ holds its name, icons, splash and
+    // assets/public/native-app.json, which tells the page which app it is in.
+    flavorDimensions = ["app"]
+    productFlavors {
+        gymvym {
+            dimension "app"
+            applicationId "com.gymbook.member"
+        }
+        coachbook {
+            dimension "app"
+            applicationId "com.gymbook.coachbook"
+        }
+    }
 }
 
 repositories {
@@ -65,6 +80,15 @@ try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
+        // An app not yet added to the Firebase project would fail the whole
+        // build. Build it without push instead, until google-services.json is
+        // downloaded again with that app in it.
+        android.productFlavors.each { flavor ->
+            if (!servicesJSON.text.contains("\"${flavor.applicationId}\"")) {
+                logger.warn("${flavor.applicationId} is not in google-services.json: the ${flavor.name} app builds without push notifications.")
+                tasks.matching { it.name ==~ /process${flavor.name.capitalize()}\w*GoogleServices/ }.configureEach { enabled = false }
+            }
+        }
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")

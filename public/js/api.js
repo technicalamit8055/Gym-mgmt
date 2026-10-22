@@ -8,16 +8,24 @@ export const isNativeApp = Boolean(window.Capacitor?.isNativePlatform?.());
  * The native app serves its bundled copy of public/ from https://localhost,
  * which has no API behind it — so it reads which server and gym to talk to
  * from native-config.json, written into the bundle by scripts/android.js.
+ * Which store app it is comes from native-app.json, which only the CoachBook
+ * build flavor bundles (android/app/src/coachbook/assets/public) — so a
+ * release built in Android Studio cannot pick up the other app's identity.
  */
 const nativeConfig = isNativeApp ? await loadNativeConfig() : null;
 
-async function loadNativeConfig() {
+async function readBundled(file) {
   try {
-    const res = await fetch('/native-config.json');
+    const res = await fetch(file);
     return res.ok ? await res.json() : {};
   } catch {
     return {};
   }
+}
+
+async function loadNativeConfig() {
+  const [config, app] = await Promise.all([readBundled('/native-config.json'), readBundled('/native-app.json')]);
+  return { ...config, app: app.app };
 }
 
 const nativeServer = String(nativeConfig?.serverUrl || '').replace(/\/+$/, '');
@@ -25,6 +33,13 @@ const nativeServer = String(nativeConfig?.serverUrl || '').replace(/\/+$/, '');
 /** Whether the app was built with Firebase (android/app/google-services.json),
  * which push notifications need — scripts/android.js records it. */
 export const nativePushConfigured = isNativeApp && nativeConfig?.push !== false;
+
+/** True in the CoachBook app: the students' app, which finds coaching
+ * institutes only. False in GymVym, which serves every gym, and on the web. */
+export const coachBookApp = isNativeApp && nativeConfig?.app === 'coachbook';
+
+/** The store app's own name, for "Settings › Apps › …" and the like. */
+export const nativeAppName = coachBookApp ? 'CoachBook' : 'GymVym';
 
 const SLUG_RE = /^[a-z][a-z0-9-]{2,39}$/;
 

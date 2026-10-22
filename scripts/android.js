@@ -1,10 +1,12 @@
 /**
- * Builds the member app's debug APK (android/, a Capacitor project bundling
- * public/) pointed at one server. Without --gym it is the store app, serving
- * every gym on that server: members pick theirs on the "find your gym"
- * screen. With --gym it is that one gym's own app, and never asks.
+ * Builds a member app's debug APK (android/, a Capacitor project bundling
+ * public/) pointed at one server. --app picks which store app: `gymvym` (the
+ * default) serves every gym on that server, and `coachbook` is the students'
+ * app, for coaching institutes only. Either way members pick theirs on the
+ * finder screen. With --gym it is that one business's own app, and never asks.
  *
  *   npm run android:apk
+ *   npm run android:apk -- --app coachbook
  *   npm run android:apk -- --server https://gymbook.fly.dev --install
  *   npm run android:apk -- --gym amit-gym
  *
@@ -24,10 +26,16 @@ import { parseArgs } from 'node:util';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ANDROID = path.join(ROOT, 'android');
-const APK = path.join(ANDROID, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+
+/** The product flavors in android/app/build.gradle, and their applicationIds. */
+const APPS = {
+  gymvym: { appId: 'com.gymbook.member', finder: 'gym finder', picks: 'members pick their gym' },
+  coachbook: { appId: 'com.gymbook.coachbook', finder: 'institute finder', picks: 'students pick their institute' },
+};
 
 const { values: args } = parseArgs({
   options: {
+    app: { type: 'string', default: 'gymvym' },
     gym: { type: 'string' },
     server: { type: 'string' },
     install: { type: 'boolean', default: false },
@@ -75,20 +83,28 @@ function resolveServerUrl() {
   return lanServerUrl().replace(/\/+$/, '');
 }
 
+const app = APPS[args.app];
+if (!app) fail(`--app is one of: ${Object.keys(APPS).join(', ')}`);
+const flavor = args.app[0].toUpperCase() + args.app.slice(1);
+const APK = path.join(ANDROID, 'app', 'build', 'outputs', 'apk', args.app, 'debug', `app-${args.app}-debug.apk`);
+
 if (args.gym && !/^[a-z][a-z0-9-]{2,39}$/.test(args.gym)) fail(`"${args.gym}" is not a valid gym slug.`);
 const serverUrl = resolveServerUrl();
 
 // Without Firebase's config the push plugin crashes the app when asked to
-// register, so the app is told to leave notifications off instead.
-const push = fs.existsSync(path.join(ANDROID, 'app', 'google-services.json'));
-if (!push) console.warn('No android/app/google-services.json — push notifications are off in this build.');
+// register, so the app is told to leave notifications off instead. Each app
+// needs its own entry in google-services.json: a flavor that is missing from
+// it builds without Firebase (see android/app/build.gradle).
+const servicesFile = path.join(ANDROID, 'app', 'google-services.json');
+const push = fs.existsSync(servicesFile) && fs.readFileSync(servicesFile, 'utf8').includes(`"${app.appId}"`);
+if (!push) console.warn(`${app.appId} is not in android/app/google-services.json — push notifications are off in this build.`);
 
 const nativeConfig = args.gym ? { serverUrl, gymSlug: args.gym, push } : { serverUrl, push };
 fs.writeFileSync(path.join(ROOT, 'public', 'native-config.json'), `${JSON.stringify(nativeConfig, null, 2)}\n`);
 console.log(
   args.gym
     ? `App is locked to one gym: ${serverUrl}/g/${args.gym}/#/portal`
-    : `App opens the gym finder on ${serverUrl} — members pick their gym by QR, code or search`,
+    : `App opens the ${app.finder} on ${serverUrl} — ${app.picks} by QR, code or search`,
 );
 
 // Called through node, not npx/gradlew.bat: Windows .cmd shims break on a
@@ -100,11 +116,11 @@ if (process.platform === 'win32') {
   if (!javaHome) fail('JAVA_HOME is not set — point it at a JDK 21+ (Android Studio ships one in its jbr folder).');
   run(
     path.join(javaHome, 'bin', 'java.exe'),
-    ['-classpath', path.join(ANDROID, 'gradle', 'wrapper', 'gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain', 'assembleDebug'],
+    ['-classpath', path.join(ANDROID, 'gradle', 'wrapper', 'gradle-wrapper.jar'), 'org.gradle.wrapper.GradleWrapperMain', `assemble${flavor}Debug`],
     { cwd: ANDROID },
   );
 } else {
-  run('./gradlew', ['assembleDebug'], { cwd: ANDROID });
+  run('./gradlew', [`assemble${flavor}Debug`], { cwd: ANDROID });
 }
 console.log(`\nDebug APK: ${APK}`);
 
@@ -144,6 +160,6 @@ if (args.install) {
 
   // Launch the app
   console.log('\nLaunching app on device...');
-  run(adb, ['-s', targetId, 'shell', 'am', 'start', '-n', 'com.gymbook.member/.MainActivity']);
+  run(adb, ['-s', targetId, 'shell', 'am', 'start', '-n', `${app.appId}/com.gymbook.member.MainActivity`]);
   console.log('\nApp launched successfully!');
 }

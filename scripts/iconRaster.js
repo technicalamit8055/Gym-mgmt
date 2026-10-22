@@ -67,13 +67,14 @@ export const glow = (cx, cy, radius, peak) => (x, y) => {
  * @param {object} options
  * @param {boolean} options.bleed  square background (Apple + maskable) rather
  *                                 than a rounded tile with clear corners
+ * @param {boolean} options.round  a circular tile (Android's legacy round icon)
  * @param {number} options.scale   size of the mark relative to the canvas
  * @param {{bg:number[], bgTop:number[], brand:number[]}} options.colors
  * @param {(c: object, k: number) => void} options.drawMark
  */
-export function drawIcon(size, { bleed = false, scale = 1, colors, drawMark }) {
+export function drawIcon(size, { bleed = false, round = false, scale = 1, colors, drawMark }) {
   const c = canvas(size * SS);
-  const shape = bleed ? () => true : roundedRect(0, 0, 1, 1, 0.22);
+  const shape = bleed ? () => true : roundedRect(0, 0, 1, 1, round ? 0.5 : 0.22);
 
   fill(c, colors.bg, shape);
   fill(c, colors.bgTop, shape, glow(0.28, 0.1, 0.95, 0.85));
@@ -114,6 +115,38 @@ function downsample(c, size) {
   return out;
 }
 
+/** The bare mark on transparency, with no tile behind it. */
+export function drawMarkOnly(size, drawMark, scale) {
+  const c = canvas(size * SS);
+  drawMark(c, scale);
+  return downsample(c, size);
+}
+
+/**
+ * A width × height picture of flat `bg` with a square `tile` (RGBA, `size`
+ * pixels a side) laid over its centre — an Android splash screen.
+ */
+export function centreOnBackground(width, height, [r, g, b], tile, size) {
+  const out = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < out.length; i += 4) {
+    out[i] = r;
+    out[i + 1] = g;
+    out[i + 2] = b;
+    out[i + 3] = 255;
+  }
+  const left = Math.round((width - size) / 2);
+  const top = Math.round((height - size) / 2);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const t = (y * size + x) * 4;
+      const a = tile[t + 3] / 255;
+      const o = ((top + y) * width + left + x) * 4;
+      for (let k = 0; k < 3; k++) out[o + k] = Math.round(tile[t + k] * a + out[o + k] * (1 - a));
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ png encoder */
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
@@ -138,16 +171,16 @@ function chunk(type, data) {
 }
 
 /** 8-bit RGBA (colour type 6), one filter byte per scanline, filter 0. */
-export function encodePng(rgba, size) {
+export function encodePng(rgba, width, height = width) {
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8;
   ihdr[9] = 6;
 
-  const stride = size * 4;
-  const raw = Buffer.alloc((stride + 1) * size);
-  for (let y = 0; y < size; y++) {
+  const stride = width * 4;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
     raw[y * (stride + 1)] = 0;
     rgba.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   }
@@ -181,9 +214,7 @@ export const ICON_SPECS = [
  * drawn larger than on the app icon because it renders at about 24dp.
  */
 export function renderBadge(outFile, drawMark, { size = 96, scale = 1.25 } = {}) {
-  const c = canvas(size * SS);
-  drawMark(c, scale);
-  const png = encodePng(downsample(c, size), size);
+  const png = encodePng(drawMarkOnly(size, drawMark, scale), size);
   fs.writeFileSync(outFile, png);
   console.log(`${path.basename(outFile).padEnd(22)} ${size}×${size}  ${(png.length / 1024).toFixed(1)} kB`);
 }

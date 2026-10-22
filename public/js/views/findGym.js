@@ -1,4 +1,16 @@
-import { ApiError, api, chooseGym, isNativeApp, landingBrand, recentGyms, removeRecentGym, serverUrl, selectedGym } from '../api.js';
+import {
+  ApiError,
+  api,
+  chooseGym,
+  coachBookApp,
+  isNativeApp,
+  landingBrand,
+  nativeAppName,
+  recentGyms,
+  removeRecentGym,
+  serverUrl,
+  selectedGym,
+} from '../api.js';
 import { startQrScan } from '../barcodeScanner.js';
 import { append, clear, h, renderIcon } from '../ui.js';
 
@@ -15,13 +27,22 @@ import { append, clear, h, renderIcon } from '../ui.js';
  * Shares the sign-in screen's dark-and-gold shell, so the two read as one flow.
  */
 
+/**
+ * The CoachBook app (the students' app) finds coaching institutes and nothing
+ * else; GymVym and the web find gyms, or study halls on SeatBook's site. Codes
+ * and QRs work alike for every business — only the words and the search differ.
+ */
+const PLACE = coachBookApp ? 'institute' : 'gym';
+const PLACE_CAP = coachBookApp ? 'Institute' : 'Gym';
+const SEARCH_TYPE = coachBookApp ? 'coaching' : landingBrand === 'library' ? 'library' : 'gym';
+
 /** Gym codes skip 0/O and 1/I/L — the same alphabet as src/tenants.js. */
 const CODE_RE = /^[A-HJKMNP-Z2-9]{6}$/;
 const cleanCode = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 
 const TABS = [
   { id: 'scan', label: 'Scan QR', icon: 'scan' },
-  { id: 'code', label: 'Gym code', icon: 'key' },
+  { id: 'code', label: `${PLACE_CAP} code`, icon: 'key' },
   { id: 'search', label: 'Search', icon: 'search' },
 ];
 
@@ -56,7 +77,13 @@ export function renderFindGym() {
 
   function fail(err) {
     busy = false;
-    error = err instanceof ApiError || err instanceof Error ? err.message : String(err);
+    // The server's "not found" answers speak of gyms.
+    const notFound = coachBookApp && err instanceof ApiError && err.status === 404;
+    error = notFound
+      ? 'No institute found — check the code or QR on the poster at your institute.'
+      : err instanceof ApiError || err instanceof Error
+        ? err.message
+        : String(err);
     paint();
   }
 
@@ -68,6 +95,9 @@ export function renderFindGym() {
     paint();
     try {
       const { gym } = await work();
+      if (coachBookApp && gym.business_type !== 'coaching') {
+        throw new Error(`${gym.gym_name} is not a coaching institute — open it in the GymVym app instead.`);
+      }
       busy = false;
       found = gym;
       paint();
@@ -81,7 +111,7 @@ export function renderFindGym() {
   const gymLogo = (gym, size = 'sm') =>
     gym.logo_url
       ? h('img', { class: `findgym-logo findgym-logo-${size}`, src: serverUrl(gym.logo_url), alt: '' })
-      : h('span', { class: `findgym-logo findgym-logo-${size}` }, renderIcon('dumbbell', { size: size === 'lg' ? 34 : 20 }));
+      : h('span', { class: `findgym-logo findgym-logo-${size}` }, renderIcon(coachBookApp ? 'graduation' : 'dumbbell', { size: size === 'lg' ? 34 : 20 }));
 
   /** One gym as a tappable row — a search result or a recently used gym. */
   const gymRow = (gym, onclick, aside) =>
@@ -136,10 +166,10 @@ export function renderFindGym() {
     const cameraReady = window.isSecureContext && navigator.mediaDevices?.getUserMedia;
     if (!cameraReady) {
       return [
-        h('p', { class: 'portal-login-note' }, 'This device cannot open the camera here. Enter the gym code printed under the QR instead.'),
+        h('p', { class: 'portal-login-note' }, `This device cannot open the camera here. Enter the ${PLACE} code printed under the QR instead.`),
       ];
     }
-    if (busy) return [h('p', { class: 'portal-login-note findgym-wait' }, 'Finding your gym…')];
+    if (busy) return [h('p', { class: 'portal-login-note findgym-wait' }, `Finding your ${PLACE}…`)];
     // The camera only opens on a tap: no permission prompt the moment the app
     // starts, and a code that did not resolve is not re-read every frame.
     if (scanState !== 'live') {
@@ -149,7 +179,7 @@ export function renderFindGym() {
           { class: 'findgym-scan-start', type: 'button', onclick: () => { scanState = 'live'; error = ''; paint(); } },
           renderIcon('scan', { size: 44, stroke: 1.6 }),
           h('strong', {}, scanState === 'idle' ? 'Scan the QR code' : 'Scan again'),
-          h('span', {}, 'It’s on the poster at your gym’s front desk'),
+          h('span', {}, `It’s on the poster at your ${PLACE}’s front desk`),
         ),
       ];
     }
@@ -159,7 +189,7 @@ export function renderFindGym() {
       { class: 'findgym-viewfinder' },
       video,
       h('span', { class: 'findgym-corners', 'aria-hidden': 'true' }),
-      h('span', { class: 'findgym-scan-hint' }, 'Point at the QR on your gym’s front desk'),
+      h('span', { class: 'findgym-scan-hint' }, `Point at the QR on your ${PLACE}’s front desk`),
     );
     startQrScan(video, {
       onCode: (text) => {
@@ -179,8 +209,8 @@ export function renderFindGym() {
         const denied = err?.name === 'NotAllowedError' || /denied|permission/i.test(err?.message || '');
         fail(
           denied
-            ? 'Camera permission is off. Allow it in your phone’s settings, or enter the gym code instead.'
-            : 'Could not start the camera. Enter the gym code instead.',
+            ? `Camera permission is off. Allow it in your phone’s settings, or enter the ${PLACE} code instead.`
+            : `Could not start the camera. Enter the ${PLACE} code instead.`,
         );
       });
     return [frame];
@@ -197,12 +227,12 @@ export function renderFindGym() {
       spellcheck: 'false',
       maxlength: '8',
       placeholder: 'e.g. IRN482',
-      'aria-label': 'Gym code',
+      'aria-label': `${PLACE_CAP} code`,
       value: code,
     });
     const submit = () => {
       if (!CODE_RE.test(code)) {
-        error = 'A gym code is 6 letters and numbers — it is printed under the QR at your gym.';
+        error = `A ${PLACE} code is 6 letters and numbers — it is printed under the QR at your ${PLACE}.`;
         paint();
         return;
       }
@@ -226,7 +256,7 @@ export function renderFindGym() {
       h(
         'button',
         { class: 'portal-login-cta', type: 'button', disabled: busy, onclick: submit },
-        h('span', {}, busy ? 'Finding…' : 'Find my gym'),
+        h('span', {}, busy ? 'Finding…' : `Find my ${PLACE}`),
         renderIcon('arrowRight', { size: 22, stroke: 2 }),
       ),
     ];
@@ -238,8 +268,8 @@ export function renderFindGym() {
       type: 'search',
       enterkeyhint: 'search',
       autocomplete: 'off',
-      placeholder: 'Gym name, city or PIN code',
-      'aria-label': 'Search gyms by name, city or PIN code',
+      placeholder: `${PLACE_CAP} name, city or PIN code`,
+      'aria-label': `Search ${PLACE}s by name, city or PIN code`,
       value: searchText,
     });
     const list = h('div', { class: 'findgym-results', 'aria-live': 'polite' });
@@ -249,7 +279,7 @@ export function renderFindGym() {
       if (results === null) return;
       if (!results.length) {
         list.append(
-          h('p', { class: 'portal-login-note' }, 'No gyms found. Try the city, or ask your gym for its code — not every gym is listed.'),
+          h('p', { class: 'portal-login-note' }, `No ${PLACE}s found. Try the city, or ask your ${PLACE} for its code — not every ${PLACE} is listed.`),
         );
         return;
       }
@@ -265,7 +295,7 @@ export function renderFindGym() {
         return;
       }
       try {
-        const { items } = await api.directory.search(q, landingBrand === 'library' ? 'library' : 'gym');
+        const { items } = await api.directory.search(q, SEARCH_TYPE);
         if (seq !== searchSeq) return; // a newer keystroke's answer wins
         results = items;
         error = '';
@@ -296,7 +326,7 @@ export function renderFindGym() {
     return h(
       'div',
       { class: 'findgym-recent' },
-      h('h3', { class: 'findgym-section' }, 'Your gyms'),
+      h('h3', { class: 'findgym-section' }, `Your ${PLACE}s`),
       ...recent.map((gym) =>
         gymRow(
           gym,
@@ -354,13 +384,13 @@ export function renderFindGym() {
       h(
         'button',
         { class: 'portal-login-cta', type: 'button', onclick: choose },
-        h('span', {}, 'This is my gym'),
+        h('span', {}, `This is my ${PLACE}`),
         renderIcon('arrowRight', { size: 22, stroke: 2 }),
       ),
       h(
         'button',
         { class: 'portal-login-link findgym-not', type: 'button', onclick: lookAgain },
-        'Not your gym? Look again',
+        `Not your ${PLACE}? Look again`,
       ),
     ]);
   }
@@ -369,7 +399,9 @@ export function renderFindGym() {
 
   return h(
     'div',
-    { class: 'portal-login has-art findgym' },
+    // The gym photo is gym art: CoachBook's finder keeps the plain backdrop,
+    // like an institute's own sign-in screen.
+    { class: `portal-login${coachBookApp ? '' : ' has-art'} findgym` },
     h(
       'div',
       { class: 'portal-login-stage findgym-stage' },
@@ -377,9 +409,13 @@ export function renderFindGym() {
       h(
         'div',
         { class: 'portal-login-brand' },
-        h('img', { class: 'findgym-brand', src: '/images/brand/gymvym-icon.webp', alt: 'GymVym' }),
-        h('h1', { class: 'portal-login-gymname' }, 'Find your ', h('em', {}, 'gym')),
-        h('p', { class: 'findgym-tagline' }, 'Scan the QR at your gym’s front desk, enter its code, or search by name.'),
+        h('img', {
+          class: `findgym-brand${coachBookApp ? ' findgym-brand-coachbook' : ''}`,
+          src: coachBookApp ? '/icons/coaching/icon-192.png' : '/images/brand/gymvym-icon.webp',
+          alt: nativeAppName,
+        }),
+        h('h1', { class: 'portal-login-gymname' }, 'Find your ', h('em', {}, PLACE)),
+        h('p', { class: 'findgym-tagline' }, `Scan the QR at your ${PLACE}’s front desk, enter its code, or search by name.`),
       ),
       h('div', { class: 'portal-login-card-wrap' }, card),
     ),

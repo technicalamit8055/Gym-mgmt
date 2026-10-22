@@ -206,7 +206,7 @@ function appListingCard(tenant, { isAdmin, reload }) {
       'search',
       'blue',
       `Find us in the ${t('member').toLowerCase()} app`,
-      `${t('members')} pick your ${Noun.toLowerCase()} in the GymVym app before they sign in — by this code, by scanning your desk poster, or by searching your name and city.`,
+      `${t('members')} pick your ${Noun.toLowerCase()} in the ${isCoaching() ? 'CoachBook' : 'GymVym'} app before they sign in — by this code, by scanning your desk poster, or by searching your name and city.`,
     ),
     h(
       'div',

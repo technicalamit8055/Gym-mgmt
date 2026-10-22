@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- The students' app: overrides the GymVym names in src/main/res/values. -->
+<resources>
+    <string name="app_name">CoachBook</string>
+    <string name="title_activity_main">CoachBook</string>
+    <string name="package_name">com.gymbook.coachbook</string>
+    <string name="custom_url_scheme">com.gymbook.coachbook</string>
+</resources>

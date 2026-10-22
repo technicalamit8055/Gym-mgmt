@@ -1855,8 +1855,8 @@ function renderPortalLogin(ctx) {
           ? h(
             'p',
             { class: 'portal-login-switch' },
-            'Not your gym?',
-            h('button', { class: 'portal-login-link', type: 'button', onclick: forgetGym }, 'Change gym'),
+            `Not your ${t('org')}?`,
+            h('button', { class: 'portal-login-link', type: 'button', onclick: forgetGym }, `Change ${t('org')}`),
           )
           : null,
       ),
@@ -11850,9 +11850,9 @@ function renderPortalApp(ctx, initialMe) {
    */
   function confirmSwitchGym() {
     confirmDialog({
-      title: 'Switch to another gym?',
+      title: `Switch to another ${t('org')}?`,
       message: `You stay signed in to ${gymDisplayName(ctx)}, so switching back is quick — but its notifications stop on this phone until you come back and turn them on.`,
-      confirmLabel: 'Switch gym',
+      confirmLabel: `Switch ${t('org')}`,
       onConfirm: async () => {
         await push.disablePush().catch(() => {});
         await flushMemberSync();
@@ -12244,7 +12244,7 @@ function renderPortalApp(ctx, initialMe) {
         installRow,
         isNativeApp && !gymLocked
           ? profileRow({
-              icon: 'building', tone: 'blue', title: 'Switch gym', sub: `Now: ${gymDisplayName(ctx)}`,
+              icon: 'building', tone: 'blue', title: `Switch ${t('org')}`, sub: `Now: ${gymDisplayName(ctx)}`,
               onclick: confirmSwitchGym,
             })
           : null,

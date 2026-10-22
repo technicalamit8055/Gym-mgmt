@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <!-- The diet and workout widgets are GymVym's: students' app has neither. -->
+        <receiver android:name=".DietWidget" tools:node="remove" />
+        <receiver android:name=".WorkoutWidget" tools:node="remove" />
+    </application>
+</manifest>

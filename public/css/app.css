@@ -5687,6 +5687,10 @@ body:not([data-mode='light']) .portal-pay {
   width: 78px; height: 78px; border-radius: 18px;
   box-shadow: 0 0 26px rgba(255, 110, 30, 0.45), 0 10px 24px rgba(0, 0, 0, 0.5);
 }
+/* The CoachBook app's tile glows in its cap's indigo instead. */
+.findgym-brand-coachbook {
+  box-shadow: 0 0 26px rgba(129, 140, 248, 0.45), 0 10px 24px rgba(0, 0, 0, 0.5);
+}
 .findgym-tagline {
   margin: -4px 0 0; max-width: 34ch; font-size: 14px; line-height: 1.45;
   color: rgba(255, 255, 255, 0.86); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);

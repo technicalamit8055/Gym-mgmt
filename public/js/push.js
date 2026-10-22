@@ -15,7 +15,7 @@
  *   - A denied permission cannot be re-asked from script; only the browser's
  *     own site settings can undo it.
  */
-import { api, isNativeApp, memberSession, nativePushConfigured, pathPrefix } from './api.js';
+import { api, isNativeApp, memberSession, nativeAppName, nativePushConfigured, pathPrefix } from './api.js';
 import { isIos, isStandalone } from './pwa.js';
 
 /** Which member turned notifications on in this browser. Scoped per gym like
@@ -375,7 +375,7 @@ async function enableNativePush() {
   if (!hasNativePush) throw new PushError('unavailable', 'Notifications are not available in this version of the app');
   nativePermission = (await nativeCall('requestPermissions')).receive;
   if (nativePermission === 'denied') {
-    throw new PushError('denied', 'Notifications are blocked — allow them in your phone’s Settings › Apps › GymVym');
+    throw new PushError('denied', `Notifications are blocked — allow them in your phone’s Settings › Apps › ${nativeAppName}`);
   }
   if (nativePermission !== 'granted') throw new PushError('dismissed', 'Notifications were not turned on');
   await registerNativeDevice();

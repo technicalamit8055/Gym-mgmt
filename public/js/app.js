@@ -1,10 +1,12 @@
 import {
   ApiError,
   api,
+  coachBookApp,
   forgetGym,
   gymLocked,
   isNativeApp,
   landingBrand,
+  nativeAppName,
   needsGymChoice,
   pathSlug,
   session,
@@ -846,10 +848,11 @@ async function dispatch() {
   // out of a gym that has since closed is back to the finder.
   const backToFinder = isNativeApp && !gymLocked;
   if ((platform.missing || platform.closed) && backToFinder && !findingGym) {
+    const place = coachBookApp ? 'institute' : 'gym';
     renderNotice(
-      platform.missing ? 'This gym is no longer on GymBook' : 'This gym’s account is closed',
-      'Ask your gym about it, or choose another gym.',
-      [h('button', { class: 'btn primary', type: 'button', onclick: forgetGym }, 'Choose a gym')],
+      platform.missing ? `This ${place} is no longer on ${nativeAppName}` : `This ${place}’s account is closed`,
+      `Ask your ${place} about it, or choose another ${place}.`,
+      [h('button', { class: 'btn primary', type: 'button', onclick: forgetGym }, coachBookApp ? 'Choose an institute' : 'Choose a gym')],
     );
     return;
   }
@@ -932,8 +935,8 @@ function isOfflineError(err) {
  * reconnecting can clear it without anyone tapping anything. */
 let awaitingReconnect = false;
 
-/** The member app is GymVym in the store; the web stays GymBook. */
-const appBrand = isNativeApp ? 'GymVym' : 'GymBook';
+/** The member app is GymVym or CoachBook in the store; the web stays GymBook. */
+const appBrand = isNativeApp ? nativeAppName : 'GymBook';
 
 /**
  * Which product the offline screen is for. A boot that failed before
@@ -1001,7 +1004,8 @@ async function boot() {
     setCurrency(platform.tenant?.currency);
     // Decides every label in the sidebar and every route title below — must
     // run before buildNav()/buildRoutes(), and before anything reads t().
-    setVertical(platform.tenant?.business_type, platform.tenant?.theme);
+    // The CoachBook app before an institute is chosen is still CoachBook's.
+    setVertical(platform.tenant?.business_type ?? (coachBookApp ? 'coaching' : undefined), platform.tenant?.theme);
     NAV = buildNav();
     ROUTES = buildRoutes();
     document.title = `${gymName()} — ${productTagline()}`;
