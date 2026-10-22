@@ -69,8 +69,11 @@ export function createApp() {
   const corsOrigins = new Set(config.corsOrigins);
   app.use((req, res, next) => {
     const origin = req.get('origin');
-    if (!origin || !corsOrigins.has(origin)) return next();
+    // On every response, not only the CORS ones: an <img> fetches with no
+    // Origin, and without Vary its cached copy (photos and logos are cached as
+    // immutable) would answer the app's later CORS read and fail it.
     res.vary('Origin');
+    if (!origin || !corsOrigins.has(origin)) return next();
     res.set('Access-Control-Allow-Origin', origin);
     // Receipts and exports name their download in Content-Disposition.
     res.set('Access-Control-Expose-Headers', 'Content-Disposition');

@@ -345,7 +345,10 @@ function brandColor() {
 }
 
 async function toDataUrl(url) {
-  const res = await fetch(serverUrl(url));
+  // Past the HTTP cache: the app's <img> tags already fetched the photo and
+  // logo without an Origin, and that cached copy (immutable, no CORS header)
+  // would fail this cross-origin read in the native app.
+  const res = await fetch(serverUrl(url), { cache: 'no-store' });
   if (!res.ok) throw new Error(`Could not load ${url}`);
   const blob = await res.blob();
   return new Promise((resolve, reject) => {
