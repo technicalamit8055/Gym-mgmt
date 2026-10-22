@@ -97,6 +97,28 @@ export const config = {
     // off. The sheet shows the coach working meanwhile, so waiting is fine.
     timeoutMs: Number(process.env.AI_COACH_TIMEOUT_MS || 45000),
   },
+  // CoachBook's WhatsApp admissions receptionist (src/coaching/receptionist.js):
+  // the same Vertex project as the coach, so it is off until that is set and
+  // each institute has also switched it on in its own settings.
+  aiReceptionist: {
+    model: process.env.AI_RECEPTIONIST_MODEL || process.env.AI_COACH_MODEL || 'gemini-3.8-flash',
+    // A parent types "hi" / "fees?" / "for 12th JEE" as three messages; the
+    // bot waits this long after the last one before answering all of them.
+    // With a model reply at 3–10 s and a moment of "typing…", 2.5 s keeps
+    // the whole answer inside 15 s of the parent's last message.
+    debounceMs: Number(process.env.AI_RECEPTIONIST_DEBOUNCE_MS || 2500),
+    // ...but never longer than this after the first, so a parent typing a
+    // long stream of messages is not left waiting either.
+    maxWaitMs: Number(process.env.AI_RECEPTIONIST_MAX_WAIT_MS || 6000),
+    // The whole tool-calling exchange for one reply. Past it the parent gets
+    // a holding message and the desk gets the chat to answer.
+    timeoutMs: Number(process.env.AI_RECEPTIONIST_TIMEOUT_MS || 25000),
+    // AI replies per institute per rolling day — the cost ceiling.
+    dailyLimit: Number(process.env.AI_RECEPTIONIST_DAILY_LIMIT || 400),
+    // AI replies to one chat per rolling hour. A parent never needs more; two
+    // auto-responders talking to each other would need thousands.
+    chatHourlyLimit: Number(process.env.AI_RECEPTIONIST_CHAT_HOURLY_LIMIT || 15),
+  },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',

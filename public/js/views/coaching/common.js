@@ -36,6 +36,7 @@ export const INQUIRY_STATUS = {
 export const INQUIRY_SOURCE = {
   walk_in: 'Walk-in',
   phone: 'Phone call',
+  whatsapp: 'WhatsApp',
   referral: 'Referral',
   banner: 'Banner / hoarding',
   social: 'Social media',

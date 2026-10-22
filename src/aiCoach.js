@@ -45,7 +45,9 @@ export function setAiClientForTests(fake) {
   testClient = fake;
 }
 
-async function getClient() {
+/** The shared Vertex client — also CoachBook's admissions assistant's
+ * (src/coaching/receptionistAi.js), so one stub covers both in tests. */
+export async function getClient() {
   if (testClient) return testClient;
   if (!client) {
     // Loaded on first use, so a server without the coach configured never

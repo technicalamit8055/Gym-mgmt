@@ -83,6 +83,15 @@ export const coaching = {
   updateInquiry: (id, payload) => request('PATCH', `${C}/inquiries/${id}`, payload),
   deleteInquiry: (id) => request('DELETE', `${C}/inquiries/${id}`),
   admitInquiry: (id, payload) => request('POST', `${C}/inquiries/${id}/admit`, payload),
+  // The WhatsApp chat behind a lead, and the admissions assistant answering it
+  inquiryChat: (id, params) => request('GET', `${C}/inquiries/${id}/whatsapp${query(params)}`),
+  replyInquiryChat: (id, text) => request('POST', `${C}/inquiries/${id}/whatsapp/reply`, { text }),
+  pauseInquiryAssistant: (id, paused) => request('POST', `${C}/inquiries/${id}/whatsapp/assistant`, { paused }),
+  assistant: () => request('GET', `${C}/admissions/assistant`),
+  updateAssistant: (payload) => request('PATCH', `${C}/admissions/assistant`, payload),
+  createDemoSlot: (payload) => request('POST', `${C}/admissions/demo-slots`, payload),
+  updateDemoSlot: (id, payload) => request('PATCH', `${C}/admissions/demo-slots/${id}`, payload),
+  deleteDemoSlot: (id) => request('DELETE', `${C}/admissions/demo-slots/${id}`),
 
   // Fees
   feeSummary: () => request('GET', `${C}/fees/summary`),

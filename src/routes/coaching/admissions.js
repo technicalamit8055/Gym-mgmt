@@ -1,23 +1,32 @@
 import { Router } from 'express';
+import { coachConfigured } from '../../aiCoach.js';
+import { MANAGES_BILLING, requireRole } from '../../auth.js';
+import { inquiryTranscript, setAssistantPaused, staffReply } from '../../coaching/receptionist.js';
+import { listDemoSlots } from '../../coaching/receptionistData.js';
 import { all, get, run, tx } from '../../db.js';
 import { badRequest, conflict, notFound } from '../../errors.js';
 import { parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
+import { formatPhoneNumber, whatsappReady } from '../../whatsapp.js';
 import { nextMemberCode } from '../members.js';
 import { enrollWithFee, parseFeeInput } from './students.js';
-import { idParam, insertSql, optional, updateSql } from './shared.js';
+import { idParam, insertSql, optional, updateSql, weekdaysValue } from './shared.js';
 
 /**
  * The admissions pipeline: a walk-in or a call becomes an inquiry, maybe a
  * demo class, a follow-up, and then either an admission or a decline.
  * Admitting turns the lead into a student (a members row, with the next
  * CB code), enrolls them, and can open their fee plan — one step at the desk.
+ *
+ * Leads also arrive on their own: the WhatsApp admissions assistant
+ * (src/coaching/receptionist.js) files them with `ai_captured` set, and the
+ * chat behind each one is readable — and answerable — from here.
  */
 export const admissionRoutes = Router();
-admissionRoutes.use('/inquiries', requireModule('admissions'));
+admissionRoutes.use(['/inquiries', '/admissions'], requireModule('admissions'));
 
 export const INQUIRY_STATUSES = ['inquiry', 'demo_scheduled', 'demo_attended', 'follow_up', 'admitted', 'declined'];
-export const INQUIRY_SOURCES = ['walk_in', 'phone', 'referral', 'banner', 'social', 'website', 'school', 'other'];
+export const INQUIRY_SOURCES = ['walk_in', 'phone', 'whatsapp', 'referral', 'banner', 'social', 'website', 'school', 'other'];
 
 const INQUIRY_FIELDS = {
   student_name: { type: 'string', required: true, min: 2, max: 100 },
@@ -29,14 +38,20 @@ const INQUIRY_FIELDS = {
   school_name: { type: 'string', max: 120 },
   status: { type: 'enum', values: INQUIRY_STATUSES, default: 'inquiry' },
   demo_on: { type: 'date' },
+  demo_time: { type: 'time' },
   follow_up_on: { type: 'date' },
   notes: { type: 'string', max: 2000 },
   source: { type: 'enum', values: INQUIRY_SOURCES, default: 'walk_in' },
   assigned_to: { type: 'int', min: 1 },
 };
 
+// The WhatsApp chat columns are subqueries rather than a join: an inquiry
+// can (rarely) have two chats, and a join would list it twice.
 const INQUIRY_SELECT = `
-  SELECT i.*, c.name AS course_name, u.name AS assigned_name, m.code AS member_code
+  SELECT i.*, c.name AS course_name, u.name AS assigned_name, m.code AS member_code,
+         (SELECT MAX(wc.last_message_at) FROM wa_conversations wc WHERE wc.inquiry_id = i.id) AS wa_last_message_at,
+         (SELECT MAX(wc.needs_staff) FROM wa_conversations wc WHERE wc.inquiry_id = i.id) AS wa_needs_staff,
+         (SELECT MAX(wc.bot_paused_until > datetime('now')) FROM wa_conversations wc WHERE wc.inquiry_id = i.id) AS wa_paused
   FROM student_inquiries i
   LEFT JOIN academic_courses c ON c.id = i.course_id
   LEFT JOIN users u ON u.id = i.assigned_to
@@ -61,6 +76,10 @@ admissionRoutes.get('/inquiries', (req, res) => {
   if (req.query.course_id) {
     where.push('i.course_id = ?');
     params.push(Number(req.query.course_id));
+  }
+  if (req.query.ai === '1') where.push('i.ai_captured = 1');
+  if (req.query.needs_reply === '1') {
+    where.push('EXISTS (SELECT 1 FROM wa_conversations wc WHERE wc.inquiry_id = i.id AND wc.needs_staff = 1)');
   }
   const q = String(req.query.q || '').trim();
   if (q) {
@@ -89,6 +108,14 @@ admissionRoutes.get('/inquiries', (req, res) => {
   res.json({
     items,
     counts,
+    ai: {
+      on: Boolean(get('SELECT ai_receptionist FROM coaching_settings WHERE id = 1')?.ai_receptionist),
+      captured_this_month: get('SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND created_at >= ?', [`${today().slice(0, 7)}-01`]).n,
+      needs_reply: get(
+        `SELECT COUNT(*) AS n FROM student_inquiries i
+         WHERE EXISTS (SELECT 1 FROM wa_conversations wc WHERE wc.inquiry_id = i.id AND wc.needs_staff = 1)`,
+      ).n,
+    },
     month: { leads: thisMonth.leads, admitted: thisMonth.admitted ?? 0 },
     follow_ups_due: get(
       "SELECT COUNT(*) AS n FROM student_inquiries WHERE status NOT IN ('admitted', 'declined') AND (follow_up_on <= ? OR demo_on <= ?)",
@@ -199,4 +226,166 @@ admissionRoutes.post('/inquiries/:id/admit', (req, res) => {
     member: get('SELECT id, code, first_name, last_name, phone FROM members WHERE id = ?', [memberId]),
     inquiry: get(`${INQUIRY_SELECT} WHERE i.id = ?`, [id]),
   });
+});
+
+/* ── The WhatsApp chat behind an inquiry ─────────────────────────────── */
+
+// Replies go out under the institute's own number, so faculty (role
+// 'trainer') read the chat but do not write into it — like the WhatsApp page.
+const DESK_WRITERS = ['admin', 'manager', 'staff'];
+
+admissionRoutes.get('/inquiries/:id/whatsapp', (req, res) => {
+  const after = Number(req.query.after);
+  res.json(inquiryTranscript(idParam(req), { after: Number.isInteger(after) && after > 0 ? after : 0 }));
+});
+
+admissionRoutes.post('/inquiries/:id/whatsapp/reply', requireRole(...DESK_WRITERS), async (req, res, next) => {
+  try {
+    res.status(201).json(await staffReply(idParam(req), { text: req.body?.text, userName: req.user?.name }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+admissionRoutes.post('/inquiries/:id/whatsapp/assistant', requireRole(...DESK_WRITERS), (req, res) => {
+  const body = parse(req.body, { paused: { type: 'boolean', required: true } });
+  res.json(setAssistantPaused(idParam(req), Boolean(body.paused)));
+});
+
+/* ── The assistant's settings and demo slots ─────────────────────────── */
+
+const ASSISTANT_FIELDS = {
+  ai_receptionist: { type: 'boolean' },
+  ai_persona_name: { type: 'string', max: 40 },
+  ai_persona_notes: { type: 'string', max: 2000 },
+  ai_reply_mode: { type: 'enum', values: ['always', 'after_hours'] },
+  office_open: { type: 'time' },
+  office_close: { type: 'time' },
+  office_days: { type: 'string', max: 20 },
+  ai_pause_minutes: { type: 'int', min: 5, max: 10080 },
+  institute_phone: { type: 'string', max: 30 },
+  institute_address: { type: 'string', max: 300 },
+  landmark_directions: { type: 'string', max: 300 },
+  latitude: { type: 'number', min: -90, max: 90 },
+  longitude: { type: 'number', min: -180, max: 180 },
+  maps_url: { type: 'string', max: 500 },
+  director_phone: { type: 'string', max: 30 },
+  hot_lead_alerts: { type: 'boolean' },
+};
+const ASSISTANT_COLUMNS = Object.keys(ASSISTANT_FIELDS);
+/** Fields an owner may clear back to empty. */
+const CLEARABLE = new Set([
+  'ai_persona_name', 'ai_persona_notes', 'institute_phone', 'institute_address', 'landmark_directions', 'maps_url', 'director_phone', 'latitude', 'longitude',
+]);
+
+/**
+ * The coordinates in a pasted Google Maps link — "…/@28.6129,77.2295,17z",
+ * "…?q=28.6129,77.2295", "…!3d28.6129!4d77.2295" — or null. A short
+ * maps.app.goo.gl link carries none; the owner types them in then.
+ */
+export function coordinatesFromMapsUrl(url) {
+  let text = String(url || '');
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // A stray % — read it as typed.
+  }
+  const patterns = [
+    /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
+    /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/,
+    /[?&](?:q|query|ll|destination)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const latitude = Number(m[1]);
+    const longitude = Number(m[2]);
+    if (Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 && (latitude || longitude)) return { latitude, longitude };
+  }
+  return null;
+}
+
+function assistantPayload() {
+  return {
+    settings: get(`SELECT ${ASSISTANT_COLUMNS.join(', ')} FROM coaching_settings WHERE id = 1`),
+    slots: listDemoSlots(),
+    faculty: all("SELECT id, name, qualification FROM users WHERE active = 1 AND role IN ('trainer', 'manager', 'admin') ORDER BY role = 'trainer' DESC, name"),
+    courses: all('SELECT id, name FROM academic_courses WHERE active = 1 ORDER BY name'),
+    ai_configured: coachConfigured(),
+    whatsapp_connected: whatsappReady(),
+  };
+}
+
+admissionRoutes.get('/admissions/assistant', (_req, res) => {
+  res.json(assistantPayload());
+});
+
+admissionRoutes.patch('/admissions/assistant', requireRole(...MANAGES_BILLING), (req, res) => {
+  const body = parse(req.body, ASSISTANT_FIELDS);
+  if (body.office_days !== undefined) body.office_days = weekdaysValue(body.office_days) ?? '';
+  // A pasted map link fills in the pin, unless the owner typed one too.
+  if (body.maps_url && body.latitude == null && body.longitude == null) {
+    Object.assign(body, coordinatesFromMapsUrl(body.maps_url) ?? {});
+  }
+  if (('latitude' in body || 'longitude' in body) && (body.latitude == null) !== (body.longitude == null)) {
+    throw badRequest('Give both latitude and longitude, or neither', { latitude: 'pair', longitude: 'pair' });
+  }
+  if (body.director_phone && !formatPhoneNumber(body.director_phone)) {
+    throw badRequest('That is not a phone number WhatsApp can reach', { director_phone: 'invalid' });
+  }
+  const hours = { ...get('SELECT office_open, office_close FROM coaching_settings WHERE id = 1'), ...body };
+  if (hours.office_open && hours.office_close && hours.office_open >= hours.office_close) {
+    throw badRequest('Office hours must close after they open', { office_close: 'before open' });
+  }
+  const columns = Object.keys(body).filter((c) => body[c] !== null || CLEARABLE.has(c));
+  if (!columns.length) throw badRequest('Nothing to update');
+  run(
+    `UPDATE coaching_settings SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = 1`,
+    columns.map((c) => (body[c] === '' && CLEARABLE.has(c) ? null : body[c])),
+  );
+  res.json(assistantPayload());
+});
+
+const SLOT_FIELDS = {
+  weekday: { type: 'int', required: true, min: 0, max: 6 },
+  start_time: { type: 'time', required: true },
+  duration_min: { type: 'int', min: 15, max: 480, default: 60 },
+  capacity: { type: 'int', min: 1, max: 200, default: 5 },
+  course_id: { type: 'int', min: 1 },
+  faculty_id: { type: 'int', min: 1 },
+  room: { type: 'string', max: 40 },
+  active: { type: 'boolean', default: 1 },
+};
+
+function checkSlotRefs(body) {
+  if (body.course_id && !get('SELECT id FROM academic_courses WHERE id = ?', [body.course_id])) throw notFound('Course not found');
+  if (body.faculty_id && !get('SELECT id FROM users WHERE id = ? AND active = 1', [body.faculty_id])) throw notFound('Teacher not found');
+}
+
+admissionRoutes.post('/admissions/demo-slots', requireRole(...MANAGES_BILLING), (req, res) => {
+  const body = parse(req.body, SLOT_FIELDS);
+  checkSlotRefs(body);
+  const { sql, params } = insertSql('admission_demo_slots', body);
+  run(sql, params);
+  res.status(201).json(assistantPayload());
+});
+
+admissionRoutes.patch('/admissions/demo-slots/:id', requireRole(...MANAGES_BILLING), (req, res) => {
+  const id = idParam(req);
+  if (!get('SELECT id FROM admission_demo_slots WHERE id = ?', [id])) throw notFound('Demo slot not found');
+  const body = parse(req.body, optional(SLOT_FIELDS));
+  checkSlotRefs(body);
+  const { sql, params } = updateSql('admission_demo_slots', body, id);
+  run(sql, params);
+  res.json(assistantPayload());
+});
+
+/** A slot with bookings is archived rather than deleted, so the leads booked
+ * into it keep their demo time. */
+admissionRoutes.delete('/admissions/demo-slots/:id', requireRole(...MANAGES_BILLING), (req, res) => {
+  const id = idParam(req);
+  if (!get('SELECT id FROM admission_demo_slots WHERE id = ?', [id])) throw notFound('Demo slot not found');
+  if (get('SELECT 1 FROM student_inquiries WHERE demo_slot_id = ? LIMIT 1', [id])) run('UPDATE admission_demo_slots SET active = 0 WHERE id = ?', [id]);
+  else run('DELETE FROM admission_demo_slots WHERE id = ?', [id]);
+  res.json(assistantPayload());
 });

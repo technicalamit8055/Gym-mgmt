@@ -415,6 +415,130 @@ a.cb-chip:hover { border-color: var(--brand); }
 .cb-lead-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cb-lead-actions .spacer { flex: 1; }
 .cb-stage-select { width: auto; min-height: var(--control-h-sm); padding-top: 0; padding-bottom: 0; font-size: 13px; }
+.cb-lead.needs-reply { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+.cb-lead-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.cb-ai-badge, .cb-reply-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+  font: inherit; font-size: 11.5px; font-weight: 700; letter-spacing: 0.01em; line-height: 18px;
+}
+.cb-ai-badge {
+  color: var(--brand); background: var(--brand-soft);
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);
+}
+.cb-reply-badge {
+  color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent); cursor: pointer;
+}
+.cb-reply-badge:hover { background: color-mix(in srgb, var(--red) 18%, transparent); }
+.cb-lead-actions .btn { position: relative; }
+.cb-chat-paused-dot {
+  position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--amber); border: 2px solid var(--surface);
+}
+.cb-link { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+.cb-link:hover { text-decoration: underline; }
+
+/* The assistant's banner over the admissions list. */
+.cb-assist-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
+.cb-assist-banner .cb-grow { min-width: 220px; }
+.cb-assist-banner.is-off {
+  background: linear-gradient(120deg, color-mix(in srgb, var(--brand) 10%, var(--surface)), var(--surface) 70%);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+}
+.cb-assist-icon {
+  flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
+  background: var(--brand-soft); color: var(--brand);
+}
+.cb-assist-icon.is-live { background: var(--brand); color: #fff; box-shadow: 0 0 0 4px var(--brand-soft); }
+
+/* The assistant's settings modal. */
+.cb-assist { display: flex; flex-direction: column; gap: 18px; }
+.cb-assist-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cb-assist-slots { padding: 14px; border-radius: 12px; background: var(--surface-2); }
+.cb-assist-slots h3 { margin: 0 0 2px; font-size: 14px; }
+.cb-assist-slots > p { margin: 0 0 10px; }
+.cb-demo-slots { display: flex; flex-direction: column; gap: 8px; }
+.cb-demo-slot {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.cb-demo-slot.is-off { opacity: 0.6; }
+.cb-demo-slot-when { display: flex; flex-direction: column; min-width: 88px; }
+.cb-demo-slot-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
+.cb-demo-slot-add select, .cb-demo-slot-add input { width: auto; min-height: var(--control-h-sm); font-size: 13px; }
+.cb-demo-slot-add .cb-demo-slot-seats { width: 70px; }
+
+/* The WhatsApp chat drawer: the modal, pinned to the right edge. */
+.modal-backdrop:has(> .modal.cb-chat-drawer) { place-items: stretch end; padding: 0; overflow: hidden; }
+.modal.cb-chat-drawer {
+  display: flex; flex-direction: column; width: min(480px, 100%); height: 100dvh;
+  border-radius: 18px 0 0 18px; animation: cb-drawer-in 0.22s var(--ease);
+}
+@keyframes cb-drawer-in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.modal.cb-chat-drawer .modal-head { padding: 14px 18px; }
+.modal.cb-chat-drawer .modal-body { flex: 1; min-height: 0; padding: 0; display: flex; }
+.cb-chat { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cb-chat-banners { display: flex; flex-direction: column; }
+.cb-chat-banners:empty { display: none; }
+.cb-chat-banner {
+  display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: 12.5px;
+  border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.cb-chat-banner .svg-icon { flex: none; }
+.cb-chat-banner .spacer { flex: 1; }
+.cb-chat-banner .btn { flex: none; }
+.cb-chat-banner.is-live .svg-icon { color: var(--brand); }
+.cb-chat-banner.is-paused { background: color-mix(in srgb, var(--amber) 10%, var(--surface)); }
+.cb-chat-banner.is-paused .svg-icon, .cb-chat-banner.is-amber .svg-icon { color: var(--amber); }
+.cb-chat-banner.is-amber { background: color-mix(in srgb, var(--amber) 14%, var(--surface)); }
+.cb-chat-banner.is-red { background: color-mix(in srgb, var(--red) 12%, var(--surface)); }
+.cb-chat-banner.is-red .svg-icon { color: var(--red); }
+.cb-chat-list {
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 16px;
+  background: color-mix(in srgb, var(--surface-2) 60%, var(--bg));
+}
+.cb-chat-list .empty { margin: auto; }
+.cb-chat-msg {
+  max-width: 82%; display: flex; flex-direction: column; gap: 4px; padding: 8px 11px 6px;
+  border-radius: 14px; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+.cb-chat-msg.is-in { align-self: flex-start; border-bottom-left-radius: 4px; }
+.cb-chat-msg.is-out { align-self: flex-end; border-bottom-right-radius: 4px; }
+.cb-chat-msg.by-ai { background: color-mix(in srgb, var(--brand) 9%, var(--surface)); border-color: color-mix(in srgb, var(--brand) 25%, var(--border)); }
+.cb-chat-msg.by-staff { background: color-mix(in srgb, var(--green) 10%, var(--surface)); border-color: color-mix(in srgb, var(--green) 28%, var(--border)); }
+.cb-chat-msg.is-failed { border-color: color-mix(in srgb, var(--red) 50%, var(--border)); }
+.cb-chat-who { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.cb-chat-who.is-ai { color: var(--brand); }
+.cb-chat-text strong { font-weight: 700; }
+.cb-chat-location { display: flex; gap: 8px; align-items: flex-start; }
+.cb-chat-location .svg-icon { flex: none; color: var(--red); margin-top: 2px; }
+.cb-chat-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.cb-chat-tools span {
+  padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 650;
+  color: var(--brand); background: var(--brand-soft);
+}
+.cb-chat-tools span.is-warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 15%, transparent); }
+.cb-chat-meta { display: flex; justify-content: flex-end; gap: 8px; font-size: 10.5px; color: var(--muted); }
+.cb-chat-note {
+  align-self: center; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 90%;
+  padding: 4px 10px; border-radius: 999px; font-size: 11.5px; color: var(--muted); text-align: center;
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+}
+.cb-chat-note time { opacity: 0.75; }
+.cb-chat-compose { display: flex; align-items: flex-end; gap: 8px; padding: 12px 16px 6px; border-top: 1px solid var(--border); }
+.cb-chat-input { flex: 1; min-height: 44px; max-height: 140px; resize: vertical; font-size: 14px; }
+.cb-chat-hint { padding: 0 16px 12px; }
+/* On a phone it is the app's bottom sheet, nearly full height. */
+@media (max-width: 560px) {
+  .modal-backdrop:has(> .modal.cb-chat-drawer) { padding-top: calc(24px + var(--safe-top, 0px)); }
+  .modal.cb-chat-drawer {
+    width: 100%; height: auto; flex: 1; min-height: 0;
+    border-radius: 22px 22px 0 0; animation: sheet-up 0.28s var(--ease);
+  }
+  .cb-chat-msg { max-width: 90%; }
+  .cb-demo-slot-add > * { flex: 1 1 120px; }
+}
 
 /* -------------------------------------------------------------- faculty */
 

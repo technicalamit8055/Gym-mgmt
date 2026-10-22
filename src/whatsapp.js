@@ -1,4 +1,18 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  generateMessageIDV2,
+  getContentType,
+  isJidBroadcast,
+  isJidGroup,
+  isJidNewsletter,
+  isJidStatusBroadcast,
+  isLidUser,
+  isPnUser,
+  jidNormalizedUser,
+  normalizeMessageContent,
+} from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import fs from 'node:fs';
@@ -64,6 +78,15 @@ function sessionFor(slug) {
       reconnectTimer: null,
       /** Serialises sends so MESSAGE_GAP_MS actually applies across callers. */
       queue: Promise.resolve(),
+      /** The conversation lane (see sendChatMessage): its own queue, so a
+       * parent's reply never waits behind a 40-message reminder sweep. */
+      chatQueue: Promise.resolve(),
+      /** When each recent chat send went out, for the per-minute ceiling. */
+      chatSentAt: [],
+      /** Ids of messages this server sent. WhatsApp echoes every send back
+       * as an event with fromMe set; one whose id is not here was typed by a
+       * person on the linked phone — a staff takeover. */
+      ownIds: new Set(),
     };
     sessions.set(slug, session);
   }
@@ -112,6 +135,7 @@ function teardown(session) {
   try {
     sock.ev.removeAllListeners('connection.update');
     sock.ev.removeAllListeners('creds.update');
+    sock.ev.removeAllListeners('messages.upsert');
     sock.end(undefined);
   } catch {
     // Already dead; nothing to clean up.
@@ -177,6 +201,13 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false } = 
     session.sock = sock;
 
     sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('messages.upsert', (upsert) => {
+      if (session.sock !== sock) return;
+      handleUpsert(session, sock, upsert).catch((err) => {
+        console.error(`[whatsapp:${slug}] could not process an incoming message:`, err.message);
+      });
+    });
 
     sock.ev.on('connection.update', async (update) => {
       // A socket replaced by a newer one must not keep mutating shared state.
@@ -361,20 +392,20 @@ export async function sendWhatsAppMessage({ phone, message, logMessage = message
 
     try {
       if (image && image.buffer) {
-        await sock.sendMessage(jid, {
+        await ownSend(session, sock, jid, {
           image: image.buffer,
           mimetype: image.mimetype || 'image/png',
           caption: image.caption || message || '',
         });
       } else if (document && document.buffer) {
-        await sock.sendMessage(jid, {
+        await ownSend(session, sock, jid, {
           document: document.buffer,
           fileName: document.fileName || 'Receipt.pdf',
           mimetype: document.mimetype || 'application/pdf',
           caption: message || '',
         });
       } else {
-        await sock.sendMessage(jid, { text: message });
+        await ownSend(session, sock, jid, { text: message });
       }
     } catch (err) {
       fail(err.message || 'WhatsApp rejected the message');
@@ -391,6 +422,237 @@ export async function sendWhatsAppMessage({ phone, message, logMessage = message
     () => new Promise((resolve) => setTimeout(resolve, MESSAGE_GAP_MS)),
   );
   return result;
+}
+
+/* ── Conversations: incoming messages and the reply lane ─────────────── */
+
+/** Sends one message under an id chosen here, remembered before it goes out —
+ * WhatsApp's echo of it can arrive before sendMessage() resolves. */
+async function ownSend(session, sock, jid, content) {
+  const messageId = generateMessageIDV2(sock.user?.id);
+  rememberOwnId(session, messageId);
+  const sent = await sock.sendMessage(jid, content, { messageId });
+  return sent?.key?.id || messageId;
+}
+
+const OWN_IDS_KEPT = 1000;
+function rememberOwnId(session, id) {
+  session.ownIds.add(id);
+  if (session.ownIds.size > OWN_IDS_KEPT) session.ownIds.delete(session.ownIds.values().next().value);
+}
+
+/** Messages older than this when they reach us (the phone was offline and
+ * the queue is replaying) are left for staff: an AI answer six hours late
+ * reads worse than none. */
+const MAX_INBOUND_AGE_S = Number(process.env.WHATSAPP_MAX_INBOUND_AGE_S || 6 * 60 * 60);
+
+let inboundHandler = null;
+
+/**
+ * Registers the one consumer of incoming chat messages (CoachBook's
+ * admissions assistant). Called with a plain event — never the raw socket —
+ * carrying the gym's slug, which is the only tenant identity it may trust:
+ * it comes from which gym's socket heard the message, not from the message.
+ */
+export function onInboundMessage(handler) {
+  inboundHandler = handler;
+}
+
+/**
+ * The readable part of a message, unwrapped from the containers WhatsApp
+ * nests content in (disappearing, view-once, captioned document). Null for
+ * what is not a message a person wrote: reactions, edits, deletes, receipts,
+ * key distribution.
+ */
+export function messageText(message) {
+  const content = normalizeMessageContent(message);
+  const type = content ? getContentType(content) : undefined;
+  if (!type) return null;
+  const m = content[type];
+  switch (type) {
+    case 'conversation':
+      return { kind: 'text', text: String(m || '') };
+    case 'extendedTextMessage':
+      return { kind: 'text', text: String(m?.text || '') };
+    case 'imageMessage':
+      return { kind: 'media', text: m?.caption ? `[photo] ${m.caption}` : '[photo]' };
+    case 'videoMessage':
+      return { kind: 'media', text: m?.caption ? `[video] ${m.caption}` : '[video]' };
+    case 'documentMessage':
+      return { kind: 'media', text: `[document${m?.fileName ? `: ${m.fileName}` : ''}]${m?.caption ? ` ${m.caption}` : ''}` };
+    case 'audioMessage':
+      return { kind: 'media', text: '[voice note]' };
+    case 'stickerMessage':
+      return { kind: 'media', text: '[sticker]' };
+    case 'locationMessage':
+    case 'liveLocationMessage':
+      return { kind: 'media', text: '[location]' };
+    case 'contactMessage':
+    case 'contactsArrayMessage':
+      return { kind: 'media', text: '[contact card]' };
+    case 'buttonsResponseMessage':
+      return { kind: 'text', text: String(m?.selectedDisplayText || m?.selectedButtonId || '') };
+    case 'listResponseMessage':
+      return { kind: 'text', text: String(m?.title || m?.singleSelectReply?.selectedRowId || '') };
+    case 'templateButtonReplyMessage':
+      return { kind: 'text', text: String(m?.selectedDisplayText || m?.selectedId || '') };
+    default:
+      return null;
+  }
+}
+
+/** A one-to-one chat with a person — not a group, a broadcast list, a
+ * channel or a status update. */
+export function isPersonalChat(jid) {
+  if (!jid || isJidGroup(jid) || isJidBroadcast(jid) || isJidNewsletter(jid) || isJidStatusBroadcast(jid)) return false;
+  return Boolean(isPnUser(jid) || isLidUser(jid));
+}
+
+const digitsOf = (jid) => (jid ? jidNormalizedUser(jid).split('@')[0].replace(/\D/g, '') || null : null);
+
+/** The phone number behind a chat. Newer chats arrive under a privacy @lid
+ * address; WhatsApp usually sends the number alongside, else the session's
+ * own mapping may know it. Null when neither does. */
+async function phoneForChat(sock, key) {
+  if (isPnUser(key.remoteJid)) return digitsOf(key.remoteJid);
+  if (isPnUser(key.remoteJidAlt)) return digitsOf(key.remoteJidAlt);
+  try {
+    const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(key.remoteJid);
+    return pn ? digitsOf(pn) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function handleUpsert(session, sock, { messages = [], type } = {}) {
+  if (!inboundHandler) return;
+  for (const msg of messages) {
+    const key = msg?.key;
+    if (!key?.remoteJid || !msg.message || !isPersonalChat(key.remoteJid)) continue;
+    // Our own send, echoed back.
+    if (key.fromMe && session.ownIds.has(key.id)) continue;
+    // fromMe outside 'notify' is history and replays, not someone typing now.
+    if (key.fromMe && type !== 'notify') continue;
+    const sentAt = Number(msg.messageTimestamp || 0);
+    if (sentAt && Date.now() / 1000 - sentAt > MAX_INBOUND_AGE_S) continue;
+    const content = messageText(msg.message);
+    if (!content || !content.text.trim()) continue;
+    const event = {
+      slug: session.slug,
+      jid: jidNormalizedUser(key.remoteJid),
+      phone: await phoneForChat(sock, key),
+      pushName: key.fromMe ? null : msg.pushName || null,
+      id: key.id,
+      fromMe: Boolean(key.fromMe),
+      kind: content.kind,
+      text: content.text.slice(0, 4000),
+      at: sentAt ? sentAt * 1000 : Date.now(),
+      key,
+    };
+    try {
+      await inboundHandler(event);
+    } catch (err) {
+      console.error(`[whatsapp:${session.slug}] inbound handler failed:`, err.message);
+    }
+  }
+}
+
+/** Hands one incoming message to the registered handler exactly as the socket
+ * would. For tests and the memory transport, which have no socket. */
+export async function simulateInboundMessage(event) {
+  if (!inboundHandler) return null;
+  return inboundHandler({ fromMe: false, kind: 'text', at: Date.now(), pushName: null, key: null, ...event });
+}
+
+/** The reply lane's spacing and ceiling, per gym. A reply to a parent who
+ * just wrote is the conversational shape WhatsApp expects, so the gap is far
+ * shorter than the broadcast queue's — but a burst of conversations is
+ * still metered so the number never looks like a bulk sender. */
+const CHAT_GAP_MS = Number(process.env.WHATSAPP_CHAT_GAP_MS || 900);
+const CHAT_PER_MINUTE = Number(process.env.WHATSAPP_CHAT_PER_MINUTE || 30);
+const MAX_TYPING_MS = 4000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Sends a message into a conversation: a text, or a native location pin
+ * (`location: { latitude, longitude, name, address }`). `jid` addresses the
+ * chat as it arrived (it may be an @lid); `phone` is accepted instead for a
+ * number typed into settings.
+ *
+ * `typingMs` shows "typing…" first, the way a person's reply arrives.
+ * Resolves to `{ id }` once WhatsApp has the message, and throws a 400 with
+ * a readable reason otherwise. Never writes the delivery log — conversations
+ * keep their own transcript.
+ */
+export async function sendChatMessage({ slug = currentSlug(), jid = null, phone = null, text = null, location = null, typingMs = 0 }) {
+  const target = jid || formatPhoneNumber(phone);
+  if (!target) throw badRequest(phone ? `"${phone}" is not a valid phone number` : 'No chat to send to');
+  if (!text && !location) throw badRequest('Message is empty');
+  const content = location
+    ? {
+        location: {
+          degreesLatitude: Number(location.latitude),
+          degreesLongitude: Number(location.longitude),
+          name: location.name || undefined,
+          address: location.address || undefined,
+        },
+      }
+    : { text };
+
+  if (memoryMode()) {
+    const id = `MEM${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+    sentInMemory.push({ phone: phone ? String(phone) : digitsOf(target), jid: target, message: text, location, type: 'chat', slug, id });
+    return { id };
+  }
+
+  const session = sessionFor(slug);
+  if (session.state !== 'CONNECTED' || !session.sock) {
+    throw badRequest('WhatsApp is not connected. Scan the QR code on the WhatsApp page first.');
+  }
+
+  const send = async () => {
+    // Per-minute ceiling: wait for the oldest send in the window to age out.
+    const now = Date.now();
+    session.chatSentAt = session.chatSentAt.filter((t) => now - t < 60_000);
+    if (session.chatSentAt.length >= CHAT_PER_MINUTE) await sleep(60_000 - (now - session.chatSentAt[0]));
+
+    const sock = session.sock;
+    if (session.state !== 'CONNECTED' || !sock) throw badRequest('WhatsApp disconnected before this message could be sent');
+    const typing = Math.min(Math.max(0, typingMs), MAX_TYPING_MS);
+    if (typing) {
+      try {
+        await sock.sendPresenceUpdate('composing', target);
+        await sleep(typing);
+      } catch {
+        // Presence is cosmetic; the message still goes.
+      }
+    }
+    try {
+      const id = await ownSend(session, sock, target, content);
+      session.chatSentAt.push(Date.now());
+      return { id };
+    } catch (err) {
+      throw badRequest(err.message || 'WhatsApp rejected the message');
+    } finally {
+      if (typing) sock.sendPresenceUpdate('paused', target).catch(() => {});
+    }
+  };
+
+  const result = session.chatQueue.then(send);
+  session.chatQueue = result.then(
+    () => sleep(CHAT_GAP_MS),
+    () => sleep(CHAT_GAP_MS),
+  );
+  return result;
+}
+
+/** Blue ticks on the messages a reply answers. Best effort. */
+export function markChatRead(slug, keys) {
+  const sock = sessionFor(slug).sock;
+  const list = (keys || []).filter(Boolean);
+  if (!sock || !list.length || memoryMode()) return;
+  sock.readMessages(list).catch(() => {});
 }
 
 /** Substitutes {{placeholders}} in a message template. Unknown placeholders are

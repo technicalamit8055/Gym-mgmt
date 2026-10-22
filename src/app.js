@@ -40,8 +40,12 @@ import { handleRazorpayWebhook } from './routes/billing.js';
 import { deviceAttendanceRoutes } from './routes/deviceAttendance.js';
 import { deviceRoutes } from './routes/devices.js';
 import { requireActiveSubscription, resolveTenant } from './tenant.js';
+import { startReceptionist } from './coaching/receptionist.js';
 
 export function createApp() {
+  // CoachBook's WhatsApp admissions assistant listens on every gym's socket;
+  // it ignores all but CoachBook accounts that have switched it on.
+  startReceptionist();
   const app = express();
   app.disable('x-powered-by');
   // Opt-in (config.trustProxy, TRUST_PROXY env var): only correct once a real

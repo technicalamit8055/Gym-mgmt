@@ -443,4 +443,128 @@ export const COACHING_MIGRATIONS = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id)');
   },
+
+  /* ------------------------------------- AI WhatsApp receptionist --- */
+  // See src/coaching/receptionist.js. Off by default: it answers parents from
+  // the institute's own number, so switching it on is the owner's decision.
+  (db) => {
+    ensureColumn(db, 'coaching_settings', 'ai_receptionist', 'INTEGER NOT NULL DEFAULT 0');
+    // Shown to parents as the assistant's name; NULL means "the admissions desk".
+    ensureColumn(db, 'coaching_settings', 'ai_persona_name', 'TEXT');
+    // Free text from the owner: tone, and facts the assistant may repeat
+    // (results, scholarships, a sibling discount). The only source of claims
+    // beyond the academic tables, so it is the owner's words, not the model's.
+    ensureColumn(db, 'coaching_settings', 'ai_persona_notes', 'TEXT');
+    // 'always', or 'after_hours' to leave office hours to the desk.
+    ensureColumn(db, 'coaching_settings', 'ai_reply_mode', "TEXT NOT NULL DEFAULT 'always'");
+    ensureColumn(db, 'coaching_settings', 'office_open', "TEXT NOT NULL DEFAULT '09:00'");
+    ensureColumn(db, 'coaching_settings', 'office_close', "TEXT NOT NULL DEFAULT '19:00'");
+    ensureColumn(db, 'coaching_settings', 'office_days', "TEXT NOT NULL DEFAULT '1,2,3,4,5,6'");
+    // How long the bot stays quiet in a chat after a staff member replies by hand.
+    ensureColumn(db, 'coaching_settings', 'ai_pause_minutes', 'INTEGER NOT NULL DEFAULT 720');
+    ensureColumn(db, 'coaching_settings', 'institute_address', 'TEXT');
+    ensureColumn(db, 'coaching_settings', 'landmark_directions', 'TEXT');
+    ensureColumn(db, 'coaching_settings', 'latitude', 'REAL');
+    ensureColumn(db, 'coaching_settings', 'longitude', 'REAL');
+    ensureColumn(db, 'coaching_settings', 'maps_url', 'TEXT');
+    // The director's own phone, for the "hot lead" alert when a demo is booked.
+    ensureColumn(db, 'coaching_settings', 'director_phone', 'TEXT');
+    ensureColumn(db, 'coaching_settings', 'hot_lead_alerts', 'INTEGER NOT NULL DEFAULT 1');
+
+    // A recurring free demo class: "Wednesdays 4 PM, 6 seats, Er. Verma".
+    // Seats left on a date are the capacity minus the inquiries booked into
+    // it for that date — counted, never stored, like every other balance.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS admission_demo_slots (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        weekday      INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+        start_time   TEXT NOT NULL,
+        duration_min INTEGER NOT NULL DEFAULT 60 CHECK (duration_min > 0),
+        capacity     INTEGER NOT NULL DEFAULT 5 CHECK (capacity > 0),
+        course_id    INTEGER REFERENCES academic_courses(id) ON DELETE CASCADE,
+        faculty_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        room         TEXT,
+        active       INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    ensureColumn(db, 'student_inquiries', 'demo_time', 'TEXT');
+    ensureColumn(db, 'student_inquiries', 'demo_slot_id', 'INTEGER REFERENCES admission_demo_slots(id) ON DELETE SET NULL');
+    // Set when the lead was first written by the WhatsApp assistant.
+    ensureColumn(db, 'student_inquiries', 'ai_captured', 'INTEGER NOT NULL DEFAULT 0');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_inquiries_demo_slot ON student_inquiries(demo_slot_id, demo_on)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_inquiries_phone ON student_inquiries(phone)');
+
+    // One row per WhatsApp chat the institute's number has had with a contact.
+    // `jid` is the chat as WhatsApp addresses it (a phone JID, or a privacy
+    // @lid one); `phone` is the number when WhatsApp tells us it.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS wa_conversations (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid              TEXT NOT NULL UNIQUE,
+        phone            TEXT,
+        contact_name     TEXT,
+        inquiry_id       INTEGER REFERENCES student_inquiries(id) ON DELETE SET NULL,
+        bot_paused_until TEXT,
+        paused_by        TEXT,
+        needs_staff      INTEGER NOT NULL DEFAULT 0,
+        handoff_reason   TEXT,
+        last_message_at  TEXT,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_conv_inquiry ON wa_conversations(inquiry_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_conv_phone ON wa_conversations(phone)');
+    // The transcript. `wa_id` is WhatsApp's own message id, unique per chat,
+    // which is what makes a redelivered message (a reconnect replays the
+    // offline queue) a no-op instead of a second reply.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS wa_messages (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL REFERENCES wa_conversations(id) ON DELETE CASCADE,
+        direction       TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+        author          TEXT NOT NULL CHECK (author IN ('parent', 'ai', 'staff', 'system')),
+        kind            TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'location', 'media', 'note')),
+        body            TEXT NOT NULL,
+        wa_id           TEXT,
+        status          TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('received', 'sent', 'failed')),
+        error           TEXT,
+        meta            TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_msg_once ON wa_messages(conversation_id, wa_id) WHERE wa_id IS NOT NULL');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_msg_conv ON wa_messages(conversation_id, id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_msg_author ON wa_messages(author, created_at)');
+  },
+
+  // The delivery log admits the director's hot-lead alert. Same rebuild as
+  // the step above; WHATSAPP_LOG_TYPES stays as it was so that step still
+  // builds exactly what it always has on a fresh database.
+  (db) => {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'whatsapp_logs'").get();
+    if (!row || row.sql.includes("'lead_alert'")) return;
+    const types = [...WHATSAPP_LOG_TYPES, 'lead_alert'].map((type) => `'${type}'`).join(', ');
+    db.exec(`
+      CREATE TABLE whatsapp_logs_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone       TEXT NOT NULL,
+        member_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        type        TEXT NOT NULL CHECK (type IN (${types})),
+        message     TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'failed')),
+        error       TEXT,
+        sent_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec(`
+      INSERT INTO whatsapp_logs_new (id, phone, member_id, type, message, status, error, sent_at)
+      SELECT id, phone, member_id, type, message, status, error, sent_at FROM whatsapp_logs
+    `);
+    db.exec('DROP TABLE whatsapp_logs');
+    db.exec('ALTER TABLE whatsapp_logs_new RENAME TO whatsapp_logs');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id)');
+  },
 ];
