@@ -15,7 +15,7 @@
  *   - A denied permission cannot be re-asked from script; only the browser's
  *     own site settings can undo it.
  */
-import { api, isNativeApp, memberSession, pathPrefix } from './api.js';
+import { api, isNativeApp, memberSession, nativePushConfigured, pathPrefix } from './api.js';
 import { isIos, isStandalone } from './pwa.js';
 
 /** Which member turned notifications on in this browser. Scoped per gym like
@@ -300,7 +300,7 @@ if ('serviceWorker' in navigator) {
  */
 
 const PLUGIN = 'PushNotifications';
-const hasNativePush = isNativeApp && Boolean(window.Capacitor?.isPluginAvailable?.(PLUGIN));
+const hasNativePush = nativePushConfigured && Boolean(window.Capacitor?.isPluginAvailable?.(PLUGIN));
 /** The FCM token this device registered with the server, if it did. */
 const NATIVE_TOKEN_KEY = `gymbook.push.fcm-token${pathPrefix ? `.${pathPrefix.slice(3)}` : ''}`;
 

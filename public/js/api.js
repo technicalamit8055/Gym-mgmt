@@ -22,6 +22,10 @@ async function loadNativeConfig() {
 
 const nativeServer = String(nativeConfig?.serverUrl || '').replace(/\/+$/, '');
 
+/** Whether the app was built with Firebase (android/app/google-services.json),
+ * which push notifications need — scripts/android.js records it. */
+export const nativePushConfigured = isNativeApp && nativeConfig?.push !== false;
+
 const SLUG_RE = /^[a-z][a-z0-9-]{2,39}$/;
 
 /**

@@ -19,6 +19,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // One debug key for every PC, so a build from any of them installs over
+    // another's on the phone instead of needing an uninstall. The file is not
+    // in git; without it, the PC's own ~/.android/debug.keystore signs.
+    def sharedDebugKey = file('debug.keystore')
+    if (sharedDebugKey.exists()) {
+        signingConfigs {
+            debug {
+                storeFile sharedDebugKey
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false

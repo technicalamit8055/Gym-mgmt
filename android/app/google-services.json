@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "658419259768",
+    "project_id": "gymbook-f1f11",
+    "storage_bucket": "gymbook-f1f11.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:658419259768:android:a7f2ca1f40b4c59d38d08d",
+        "android_client_info": {
+          "package_name": "com.gymbook.member"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ8zgOxfIZiOKfWyROER1o9J2ZURXT0lw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

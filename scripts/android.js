@@ -78,7 +78,12 @@ function resolveServerUrl() {
 if (args.gym && !/^[a-z][a-z0-9-]{2,39}$/.test(args.gym)) fail(`"${args.gym}" is not a valid gym slug.`);
 const serverUrl = resolveServerUrl();
 
-const nativeConfig = args.gym ? { serverUrl, gymSlug: args.gym } : { serverUrl };
+// Without Firebase's config the push plugin crashes the app when asked to
+// register, so the app is told to leave notifications off instead.
+const push = fs.existsSync(path.join(ANDROID, 'app', 'google-services.json'));
+if (!push) console.warn('No android/app/google-services.json — push notifications are off in this build.');
+
+const nativeConfig = args.gym ? { serverUrl, gymSlug: args.gym, push } : { serverUrl, push };
 fs.writeFileSync(path.join(ROOT, 'public', 'native-config.json'), `${JSON.stringify(nativeConfig, null, 2)}\n`);
 console.log(
   args.gym
