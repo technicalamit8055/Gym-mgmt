@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The home-screen widgets (DietWidget, WorkoutWidget), light; values-night
-     has the dark set. The macro colours are the portal's (--macro-* in app.css). -->
+     has the dark set. The macro colours are the portal's (the macro-* custom properties in app.css). -->
 <resources>
     <color name="widget_bg">#FFFFFFFF</color>
     <color name="widget_text">#FF111827</color>

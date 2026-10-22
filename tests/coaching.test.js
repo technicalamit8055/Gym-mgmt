@@ -410,13 +410,22 @@ describe('batch attendance with parent alerts', () => {
   it('marks a student present for the day when they scan in at the gate', async () => {
     const scanner = await createStudent('Gate');
     await call('POST', '/api/coaching/enrollments', { member_id: scanner.id, batch_id: batch.id });
-    const res = await call('POST', '/api/attendance/check-in', { member_id: scanner.id });
-    assert.equal(res.status, 201, JSON.stringify(res.body));
-    assert.equal(res.body.membership.session_name, batch.name);
-    const sheet = await call('GET', `/api/coaching/attendance/sheet?batch_id=${batch.id}`);
-    const row = sheet.body.items.find((i) => i.member_id === scanner.id);
-    assert.equal(row.status, 'present');
-    assert.equal(row.source, 'scan');
+    // The scan only marks a batch that has a lecture today, and the starter
+    // batch meets Mon/Wed/Fri — so meet today, whatever day the suite runs.
+    const todayWeekday = new Date(`${today()}T00:00:00Z`).getUTCDay();
+    const weekdays = String(batch.weekdays).split(',').map(Number);
+    assert.equal((await call('PATCH', `/api/coaching/batches/${batch.id}`, { weekdays: [...weekdays, todayWeekday] })).status, 200);
+    try {
+      const res = await call('POST', '/api/attendance/check-in', { member_id: scanner.id });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.membership.session_name, batch.name);
+      const sheet = await call('GET', `/api/coaching/attendance/sheet?batch_id=${batch.id}`);
+      const row = sheet.body.items.find((i) => i.member_id === scanner.id);
+      assert.equal(row.status, 'present');
+      assert.equal(row.source, 'scan');
+    } finally {
+      await call('PATCH', `/api/coaching/batches/${batch.id}`, { weekdays });
+    }
 
     const stranger = await createStudent('NotEnrolled');
     const refused = await call('POST', '/api/attendance/check-in', { member_id: stranger.id });
