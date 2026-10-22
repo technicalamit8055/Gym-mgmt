@@ -1,7 +1,8 @@
 import { api, pathSlug } from '../api.js';
-import { append, clear, closeModal, date, goBack, h, money, openModal, pushBackLayer, removeBackLayer, renderIcon, toast } from '../ui.js';
+import { append, clear, closeModal, date, goBack, h, money, openModal, pushBackLayer, removeBackLayer, renderIcon, svg, toast } from '../ui.js';
 import { memberSynced } from '../memberSync.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
+import { isCoaching } from '../vertical.js';
 
 /**
  * The member app's Store once the operator takes it live, laid out the way
@@ -34,8 +35,131 @@ const CATEGORY = {
   gear: { label: 'Gear', icon: 'dumbbell', tint: '#f4f1ea', art: 'cat-gear' },
   other: { label: 'More', icon: 'bag', tint: '#eef2f6', art: null },
 };
+/** The CoachBook store's shelves (src/monetization.js). No pictures of their
+ * own: a tile shows its first product's cover, or its icon. */
+const COACHING_CATEGORY = {
+  books: { label: 'Books', icon: 'book', tint: '#eef0ff', art: null },
+  test_prep: { label: 'Test prep', icon: 'target', tint: '#fff1e6', art: null },
+  pyq: { label: 'PYQs', icon: 'fileText', tint: '#e9f8ef', art: null },
+  stationery: { label: 'Stationery', icon: 'pencil', tint: '#fdf0f7', art: null },
+  calculators: { label: 'Calculators', icon: 'calculator', tint: '#eaf4ff', art: null },
+  desk: { label: 'Study desk', icon: 'lamp', tint: '#fff8e1', art: null },
+  bags: { label: 'Bags', icon: 'backpack', tint: '#f1ecff', art: null },
+  other: { label: 'More', icon: 'bag', tint: '#eef2f6', art: null },
+};
 const STORE_ART = '/images/store';
-const categoryOf = (key) => CATEGORY[key] ?? CATEGORY.other;
+
+/**
+ * What the store calls things, per store. An institute's students shop the
+ * CoachBook store (books and stationery, picked up at the office); everyone
+ * else the gym store. Read at render time through words(), never at module
+ * load — isCoaching() only answers once boot() has set the vertical.
+ */
+const WORDS = {
+  gym: {
+    categories: CATEGORY,
+    org: 'gym',
+    desk: 'front desk',
+    counter: 'desk',
+    pickup: 'Gym pickup',
+    optionA: 'Flavour',
+    optionsA: 'Flavours',
+    optionsB: 'Sizes',
+    manyA: (n) => `${n} flavours`,
+    pickUnit: 'Select unit',
+    trust: ['100% authentic', 'Sourced from brands and their authorised distributors'],
+    hints: ['"pre-workout"', '"whey protein"', '"creatine"'],
+    searchEmpty: 'Try a product type like “whey” or a brand name.',
+    heroChip: 'Fitness nutrition',
+    heroTitle: 'Supplements',
+    // The hero's three promises. Keep them true: "Easy Returns" must match
+    // the returns the operator actually honours.
+    heroTrust: [
+      ['shield', '100%', 'Original'],
+      ['truck', 'Wide', 'Range'],
+      ['package', 'Easy', 'Returns'],
+    ],
+    signOff: 'Fuel your gains.',
+    promise: '100% authentic',
+  },
+  coaching: {
+    categories: COACHING_CATEGORY,
+    org: 'institute',
+    desk: 'office',
+    counter: 'office',
+    pickup: 'Institute pickup',
+    optionA: 'Edition',
+    optionsA: 'Editions',
+    optionsB: 'Formats',
+    manyA: (n) => `${n} editions`,
+    pickUnit: 'Select format',
+    trust: ['Original editions', 'Straight from publishers and their authorised distributors'],
+    hints: ['"physics"', '"NCERT"', '"previous year papers"'],
+    searchEmpty: 'Try a subject like “physics”, an exam, or a publisher.',
+    heroChip: 'Study essentials',
+    heroTitle: 'Books & notes',
+    heroTrust: [
+      ['shield', 'Original', 'Editions'],
+      ['book', 'Latest', 'Syllabus'],
+      ['package', 'Easy', 'Returns'],
+    ],
+    signOff: 'Study smarter.',
+    promise: 'original editions',
+  },
+};
+const words = () => (isCoaching() ? WORDS.coaching : WORDS.gym);
+const categoryOf = (key) => words().categories[key] ?? words().categories.other;
+
+/** The coaching store's hero picture: a stack of books and a pencil, drawn
+ * rather than shipped as a photo so it takes the institute's own colours
+ * (the cbs-* classes in coaching.css follow its palette). Also the art on its
+ * coming-soon screen (portal.js). */
+export function coachingHeroArt() {
+  const book = (x, y, width, cover, tilt = 0) =>
+    svg(
+      'g',
+      { transform: tilt ? `rotate(${tilt} ${x + width / 2} ${y + 12})` : null },
+      svg('rect', { x, y, width, height: 24, rx: 5, class: cover }),
+      svg('rect', { x: x + 9, y: y + 5, width: width - 15, height: 14, rx: 2, class: 'cbs-pages' }),
+      svg('path', { d: `M${x + 9} ${y + 9.5}h${width - 15}M${x + 9} ${y + 14.5}h${width - 15}`, class: 'cbs-lines' }),
+      svg('rect', { x, y, width: 9, height: 24, rx: 4, class: `${cover} cbs-spine` }),
+    );
+  const spark = (cx, cy, r) =>
+    svg('path', {
+      d: `M${cx} ${cy - r}l${r * 0.36} ${r * 0.64} ${r * 0.64} ${r * 0.36}-${r * 0.64} ${r * 0.36}-${r * 0.36} ${r * 0.64}-${r * 0.36}-${r * 0.64}-${r * 0.64}-${r * 0.36} ${r * 0.64}-${r * 0.36}z`,
+      class: 'cbs-spark',
+    });
+  return svg(
+    'svg',
+    { class: 'bk-hero-art cbs-hero-art', viewBox: '0 0 170 150', preserveAspectRatio: 'xMaxYMax meet', 'aria-hidden': 'true', focusable: 'false' },
+    svg('ellipse', { cx: 86, cy: 136, rx: 66, ry: 7, class: 'cbs-shadow' }),
+    book(20, 104, 132, 'cbs-c1'),
+    book(30, 78, 116, 'cbs-c2', -5),
+    book(38, 52, 100, 'cbs-c3', 3),
+    svg(
+      'g',
+      { transform: 'rotate(-38 128 34)' },
+      svg('rect', { x: 100, y: 29, width: 50, height: 10, rx: 2, class: 'cbs-pencil' }),
+      svg('path', { d: 'M150 29l13 5-13 5z', class: 'cbs-pencil-wood' }),
+      svg('path', { d: 'M158.5 32.3l4.5 1.7-4.5 1.7z', class: 'cbs-pencil-tip' }),
+      svg('rect', { x: 93, y: 29, width: 9, height: 10, rx: 2, class: 'cbs-eraser' }),
+    ),
+    spark(40, 38, 9),
+    spark(154, 96, 5),
+  );
+}
+
+/** A book's own details, in the order the product page lists them. */
+const BOOK_ROWS = [
+  ['author', 'Author'],
+  ['publisher', 'Publisher'],
+  ['edition', 'Edition'],
+  ['year', 'Published'],
+  ['language', 'Language'],
+  ['pages', 'Pages'],
+  ['exam', 'For'],
+  ['isbn', 'ISBN'],
+];
 
 const NUTRITION_ROWS = [
   ['serving_size', 'Serving size', ''],
@@ -52,21 +176,24 @@ const NUTRITION_ROWS = [
 
 const MAX_QTY = 10;
 /** [status, short label, icon, what it means — for the order page's timeline] */
-const STEPS = {
-  delivery: [
+function stepsFor(method) {
+  const w = words();
+  if (method !== 'pickup') {
+    return [
+      ['placed', 'Placed', 'receipt', 'We have your order and payment'],
+      ['packed', 'Packed', 'package', 'Your items are packed and sealed'],
+      ['shipped', 'Shipped', 'truck', 'Handed to the courier'],
+      ['delivered', 'Delivered', 'checkCircle', 'Delivered to your address'],
+    ];
+  }
+  return [
     ['placed', 'Placed', 'receipt', 'We have your order and payment'],
     ['packed', 'Packed', 'package', 'Your items are packed and sealed'],
-    ['shipped', 'Shipped', 'truck', 'Handed to the courier'],
-    ['delivered', 'Delivered', 'checkCircle', 'Delivered to your address'],
-  ],
-  pickup: [
-    ['placed', 'Placed', 'receipt', 'We have your order and payment'],
-    ['packed', 'Packed', 'package', 'Your items are packed and sealed'],
-    ['shipped', 'To your gym', 'truck', 'On its way to your gym'],
-    ['ready', 'At the desk', 'building', 'Waiting for you at the front desk'],
-    ['delivered', 'Collected', 'checkCircle', 'Collected from the desk'],
-  ],
-};
+    ['shipped', `To your ${w.org}`, 'truck', `On its way to your ${w.org}`],
+    ['ready', `At the ${w.counter}`, 'building', `Waiting for you at the ${w.desk}`],
+    ['delivered', 'Collected', 'checkCircle', `Collected from the ${w.counter}`],
+  ];
+}
 
 /* ── Local state ──────────────────────────────────────────────────────── */
 
@@ -119,7 +246,7 @@ function unitLabel(product) {
   if (!product.variants.length) return '1 unit';
   if (product.variants.length === 1) return product.variants[0].weight || product.variants[0].flavor || '1 unit';
   if (product.weights.length) return product.weights.join(' · ');
-  return `${product.flavors.length} flavours`;
+  return words().manyA(product.flavors.length);
 }
 
 function createCart(products) {
@@ -628,7 +755,7 @@ function openAddressSheet(ctx, { onSaved } = {}) {
       },
     },
     method === 'pickup'
-      ? h('p', { class: 'bk-form-note' }, renderIcon('building', { size: 16 }), `Collect from the front desk at ${ctx.store.delivery.gym_name}. We'll notify you when it arrives.`)
+      ? h('p', { class: 'bk-form-note' }, renderIcon('building', { size: 16 }), `Collect from the ${words().desk} at ${ctx.store.delivery.gym_name}. We'll notify you when it arrives.`)
       : null,
     h(
       'div',
@@ -693,11 +820,13 @@ function openMethodSheet(ctx) {
 /* ── Pages ────────────────────────────────────────────────────────────── */
 
 function searchMatches(products, q) {
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
   return products.filter((p) => {
-    const hay = [p.title, p.brand, categoryOf(p.category).label, ...p.flavors, ...p.weights].join(' ').toLowerCase();
-    return words.every((w) => hay.includes(w));
+    // A book is found by its author, exam and ISBN as well as its title.
+    const book = p.book_details ? Object.values(p.book_details) : [];
+    const hay = [p.title, p.brand, categoryOf(p.category).label, ...p.flavors, ...p.weights, ...book].join(' ').toLowerCase();
+    return terms.every((w) => hay.includes(w));
   });
 }
 
@@ -774,7 +903,7 @@ function openSearchPage(ctx, initial = '') {
             { class: 'bk-empty' },
             h('span', { class: 'bk-empty-icon' }, renderIcon('search', { size: 34, stroke: 1.6 })),
             h('strong', {}, `Nothing found for “${q.trim()}”`),
-            h('p', {}, 'Try a product type like “whey” or a brand name.'),
+            h('p', {}, words().searchEmpty),
           ),
     );
   }
@@ -844,7 +973,7 @@ function openCategoryPage(ctx, key) {
   let active = key;
   let sort = 'relevance';
   let brand = '';
-  const present = Object.keys(CATEGORY).filter((k) => ctx.products.some((p) => p.category === k));
+  const present = Object.keys(words().categories).filter((k) => ctx.products.some((p) => p.category === k));
   const side = h('nav', { class: 'bk-cat-side', 'aria-label': 'Categories' });
   const main = h('div', { class: 'bk-cat-main' });
   const head = pageHead(ctx, categoryOf(active).label, {});
@@ -948,7 +1077,7 @@ function openProductPage(ctx, product, initialVariant) {
         ? h(
             'div',
             { class: 'bk-pd-opt' },
-            h('h4', {}, 'Flavour'),
+            h('h4', {}, words().optionA),
             h(
               'div',
               { class: 'bk-chips' },
@@ -980,7 +1109,7 @@ function openProductPage(ctx, product, initialVariant) {
         ? h(
             'div',
             { class: 'bk-pd-opt' },
-            h('h4', {}, byFlavour ? 'Select unit' : 'Select option'),
+            h('h4', {}, byFlavour ? words().pickUnit : 'Select option'),
             h(
               'div',
               { class: 'bk-unit-row' },
@@ -1023,11 +1152,19 @@ function openProductPage(ctx, product, initialVariant) {
   paint();
 
   const d = ctx.store.delivery;
+  const w = words();
+  const books = isCoaching();
   const nutrition = product.nutrition_facts ?? {};
   const facts = NUTRITION_ROWS.filter(([k]) => nutrition[k] !== undefined && nutrition[k] !== null);
+  const book = product.book_details ?? {};
+  const bookRows = BOOK_ROWS.filter(([k]) => book[k] !== undefined && book[k] !== null && book[k] !== '');
   const similar = ctx.products.filter((p) => p.category === product.category && p.id !== product.id).slice(0, 10);
   const why = (icon, title, sub) =>
     h('div', { class: 'bk-why-row' }, h('span', { class: 'bk-why-icon' }, renderIcon(icon, { size: 20, stroke: 2 })), h('div', {}, h('strong', {}, title), h('small', {}, sub)));
+  // The coaching store's link is a few sample pages, not a lab report.
+  const sampleLink = books
+    ? ['book', 'Look inside', 'Sample pages from the book']
+    : ['fileText', 'View lab test report', 'Independent purity & label-claim test'];
 
   ctx.pages.push(
     h(
@@ -1051,27 +1188,39 @@ function openProductPage(ctx, product, initialVariant) {
         'section',
         { class: 'bk-card-block' },
         h('h3', {}, 'Why shop from us?'),
-        why('shield', '100% authentic', 'Sourced from brands and their authorised distributors'),
-        product.lab_report_url ? why('verified', 'Lab tested', 'Independent purity and label-claim report below') : null,
+        why('shield', w.trust[0], w.trust[1]),
+        product.lab_report_url
+          ? books
+            ? why('book', 'Look inside first', 'Flip through sample pages before you buy')
+            : why('verified', 'Lab tested', 'Independent purity and label-claim report below')
+          : null,
         d.pickup_enabled
-          ? why('building', 'Delivery or gym pickup', `${d.eta} · or collect at ${d.gym_name}`)
+          ? why('building', `Delivery or ${w.org} pickup`, `${d.eta} · or collect at ${d.gym_name}`)
           : why('truck', 'Doorstep delivery', d.eta),
       ),
       h(
         'section',
         { class: 'bk-card-block' },
-        h('h3', {}, 'Product details'),
+        h('h3', {}, books ? 'About this item' : 'Product details'),
         h(
           'dl',
           { class: 'bk-details' },
-          h('dt', {}, 'Brand'),
+          h('dt', {}, books ? 'Publisher' : 'Brand'),
           h('dd', {}, product.brand),
           h('dt', {}, 'Category'),
           h('dd', {}, categoryOf(product.category).label),
-          product.flavors.length ? [h('dt', {}, 'Flavours'), h('dd', {}, product.flavors.join(', '))] : null,
-          product.weights.length ? [h('dt', {}, 'Sizes'), h('dd', {}, product.weights.join(', '))] : null,
+          product.flavors.length ? [h('dt', {}, w.optionsA), h('dd', {}, product.flavors.join(', '))] : null,
+          product.weights.length ? [h('dt', {}, w.optionsB), h('dd', {}, product.weights.join(', '))] : null,
         ),
         product.description ? h('p', { class: 'bk-desc' }, product.description) : null,
+        bookRows.length
+          ? h(
+              'div',
+              { class: 'bk-facts bk-book' },
+              h('h4', {}, 'Book details'),
+              h('dl', {}, ...bookRows.flatMap(([k, label]) => [h('dt', {}, label), h('dd', {}, String(book[k]))])),
+            )
+          : null,
         facts.length
           ? h(
               'div',
@@ -1084,8 +1233,8 @@ function openProductPage(ctx, product, initialVariant) {
           ? h(
               'a',
               { class: 'bk-lab', href: product.lab_report_url, target: '_blank', rel: 'noopener noreferrer' },
-              renderIcon('fileText', { size: 20, stroke: 2 }),
-              h('span', {}, h('strong', {}, 'View lab test report'), h('small', {}, 'Independent purity & label-claim test')),
+              renderIcon(sampleLink[0], { size: 20, stroke: 2 }),
+              h('span', {}, h('strong', {}, sampleLink[1]), h('small', {}, sampleLink[2])),
               renderIcon('chevronRight', { size: 16, stroke: 2.4 }),
             )
           : null,
@@ -1106,7 +1255,7 @@ function orderTracker(order) {
       order.payment_status === 'refunded' ? 'Cancelled and refunded' : 'Cancelled — any refund goes back to your UPI account',
     );
   }
-  const steps = STEPS[order.fulfillment_method] ?? STEPS.delivery;
+  const steps = stepsFor(order.fulfillment_method);
   const reached = steps.findIndex(([key]) => key === order.fulfillment_status);
   return h(
     'ol',
@@ -1152,10 +1301,10 @@ function orderStatus(order, gymName) {
         tone: 'amber',
         icon: 'truck',
         title: pickup ? `On its way to ${gymName}` : 'On the way',
-        sub: order.courier_name ? `With ${order.courier_name}` : pickup ? 'We will tell you when it reaches the desk' : 'Your order has shipped',
+        sub: order.courier_name ? `With ${order.courier_name}` : pickup ? `We will tell you when it reaches the ${words().counter}` : 'Your order has shipped',
       };
     case 'ready':
-      return { tone: 'green', icon: 'building', title: 'Ready for pickup', sub: `Collect it at the ${gymName} front desk` };
+      return { tone: 'green', icon: 'building', title: 'Ready for pickup', sub: `Collect it at the ${gymName} ${words().desk}` };
     case 'delivered':
       return { tone: 'green', icon: 'checkCircle', title: pickup ? 'Collected' : 'Delivered', sub: when(order.updated_at, { time: false }) };
     default:
@@ -1227,7 +1376,7 @@ export function orderCard(order, { gymName, onOpen, compact = false }) {
 /** The steps top to bottom, Blinkit-style: done in green with the time we
  * know, the current one pulsing, the rest still to come. */
 function orderTimeline(order) {
-  const steps = STEPS[order.fulfillment_method] ?? STEPS.delivery;
+  const steps = stepsFor(order.fulfillment_method);
   const reached = steps.findIndex(([key]) => key === order.fulfillment_status);
   return h(
     'ol',
@@ -1310,7 +1459,7 @@ function openOrderPage(ctx, order) {
           h(
             'div',
             {},
-            h('strong', {}, pickup ? `${gymName} front desk` : order.shipping_name),
+            h('strong', {}, pickup ? `${gymName} ${words().desk}` : order.shipping_name),
             h('small', {}, pickup ? `For ${order.shipping_name} · ${order.shipping_phone}` : address),
             pickup ? null : h('small', {}, order.shipping_phone),
           ),
@@ -1339,7 +1488,7 @@ function openOrderPage(ctx, order) {
           { class: 'bk-bill' },
           h('dt', {}, 'Item total'),
           h('dd', {}, saved ? h('s', {}, money(order.mrp_total)) : null, money(order.subtotal)),
-          h('dt', {}, pickup ? 'Gym pickup' : 'Delivery'),
+          h('dt', {}, pickup ? words().pickup : 'Delivery'),
           h('dd', { class: 'free' }, 'FREE'),
           h('dt', { class: 'grand' }, order.payment_status === 'refunded' ? 'Refunded' : 'Paid'),
           h('dd', { class: 'grand' }, money(order.total_amount)),
@@ -1361,7 +1510,7 @@ function openOrderPage(ctx, order) {
           h('dd', {}, order.payment_status === 'refunded' ? 'Refunded to UPI' : 'Paid online · UPI'),
           order.razorpay_payment_id ? [h('dt', {}, 'Payment ref'), h('dd', {}, order.razorpay_payment_id)] : null,
         ),
-        h('p', { class: 'bk-od-help' }, renderIcon('building', { size: 15 }), `Need help? Show this order ID at the ${gymName} front desk.`),
+        h('p', { class: 'bk-od-help' }, renderIcon('building', { size: 15 }), `Need help? Show this order ID at the ${gymName} ${words().desk}.`),
       ),
       ctx.onShop
         ? h('div', { class: 'bk-placed-actions' }, h('button', { type: 'button', class: 'bk-btn-ghost', onclick: () => ctx.onShop() }, 'Shop again'))
@@ -1446,7 +1595,7 @@ function orderPlacedView(ctx, order) {
       { class: 'bk-placed-hero' },
       h('span', { class: 'bk-placed-check' }, renderIcon('check', { size: 44, stroke: 3 })),
       h('h2', {}, 'Order placed!'),
-      h('p', {}, pickup ? `${d.pickup_eta}. We'll notify you when it reaches the desk.` : `${d.eta}. We'll notify you when it ships.`),
+      h('p', {}, pickup ? `${d.pickup_eta}. We'll notify you when it reaches the ${words().counter}.` : `${d.eta}. We'll notify you when it ships.`),
       h('span', { class: 'bk-placed-code' }, order.order_code),
     ),
     h(
@@ -1592,7 +1741,7 @@ function openCartPage(ctx) {
           { class: 'bk-bill' },
           h('dt', {}, renderIcon('receipt', { size: 15 }), 'Items total', saved > 0 ? h('span', { class: 'bk-pill' }, `Saved ${money(saved)}`) : null),
           h('dd', {}, saved > 0 ? h('s', {}, money(mrpTotal)) : null, money(total)),
-          h('dt', {}, renderIcon(pickup ? 'building' : 'truck', { size: 15 }), pickup ? 'Gym pickup' : 'Delivery charge'),
+          h('dt', {}, renderIcon(pickup ? 'building' : 'truck', { size: 15 }), pickup ? words().pickup : 'Delivery charge'),
           h('dd', { class: 'free' }, 'FREE'),
           h('dt', { class: 'grand' }, 'Grand total'),
           h('dd', { class: 'grand' }, money(total)),
@@ -1608,7 +1757,7 @@ function openCartPage(ctx) {
               { class: 'bk-method-pair' },
               ...[
                 ['delivery', 'truck', 'Delivery', d.eta],
-                ['pickup', 'building', 'Gym pickup', d.pickup_eta],
+                ['pickup', 'building', words().pickup, d.pickup_eta],
               ].map(([m, icon, label, sub]) =>
                 h(
                   'button',
@@ -1631,7 +1780,7 @@ function openCartPage(ctx) {
           missing
             ? h('strong', {}, pickup ? 'Add who will collect' : 'Add a delivery address')
             : pickup
-              ? [h('strong', {}, `Pick up at ${d.gym_name}`), h('p', {}, `${ctx.ship.name} · ${ctx.ship.phone} — collect from the front desk`)]
+              ? [h('strong', {}, `Pick up at ${d.gym_name}`), h('p', {}, `${ctx.ship.name} · ${ctx.ship.phone} — collect from the ${words().desk}`)]
               : [h('strong', {}, `Delivering to ${ctx.ship.name}`), h('p', {}, [ctx.ship.address, ctx.ship.city, ctx.ship.state, ctx.ship.pincode].filter(Boolean).join(', '))],
         ),
         h('button', { type: 'button', class: 'bk-link-btn', onclick: () => openAddressSheet(ctx, { onSaved: paint }) }, missing ? 'Add' : 'Change'),
@@ -1675,14 +1824,6 @@ function openCartPage(ctx) {
 
 /* ── The tab ──────────────────────────────────────────────────────────── */
 
-/** The hero's three promises. Keep them true: "Easy Returns" must match the
- * returns the operator actually honours. */
-const HERO_TRUST = [
-  ['shield', '100%', 'Original'],
-  ['truck', 'Wide', 'Range'],
-  ['package', 'Easy', 'Returns'],
-];
-
 /** The deepest discount in the catalogue — the hero's "UP TO x% OFF" tag. */
 function bestDeal(products) {
   let best = 0;
@@ -1720,7 +1861,7 @@ export function renderLiveStore({ store, memberId }) {
     ship: { name: '', phone: '', address: '', city: '', state: '', pincode: '', ...defaults, ...(loadJson(addressKey, null) ?? {}) },
     etaShort() {
       const text = this.method === 'pickup' ? store.delivery.pickup_eta : store.delivery.eta;
-      return text.replace(/^(?:delivery|delivered|ready at your gym)\s+(?:in\s+)?/i, '');
+      return text.replace(/^(?:delivery|delivered|ready at your (?:gym|institute))\s+(?:in\s+)?/i, '');
     },
     setMethod(method) {
       this.method = method;
@@ -1806,32 +1947,35 @@ export function renderLiveStore({ store, memberId }) {
   const deal = bestDeal(products);
   function paintHero() {
     const pickup = ctx.method === 'pickup';
+    const w = words();
     fill(
       hero,
       h(
         'div',
         { class: 'bk-hero-copy' },
-        h('span', { class: 'bk-hero-chip' }, 'Fitness nutrition'),
-        h('h2', {}, 'Supplements', h('br'), pickup ? 'at your gym in' : 'delivered in'),
+        h('span', { class: 'bk-hero-chip' }, w.heroChip),
+        h('h2', {}, w.heroTitle, h('br'), pickup ? `at your ${w.org} in` : 'delivered in'),
         h('span', { class: 'bk-hero-pill' }, ctx.etaShort(), renderIcon('zap', { size: 18, stroke: 2.6 })),
         h(
           'div',
           { class: 'bk-hero-trust' },
-          ...HERO_TRUST.map(([icon, a, b]) =>
+          ...w.heroTrust.map(([icon, a, b]) =>
             h('span', {}, renderIcon(icon, { size: 17, stroke: 1.9 }), h('span', {}, a, h('br'), b)),
           ),
         ),
       ),
-      h('img', {
-        class: 'bk-hero-art',
-        src: `${STORE_ART}/hero.webp`,
-        alt: '',
-        decoding: 'async',
-        onerror: (e) => {
-          hero.classList.add('no-art');
-          e.currentTarget.remove();
-        },
-      }),
+      isCoaching()
+        ? coachingHeroArt()
+        : h('img', {
+            class: 'bk-hero-art',
+            src: `${STORE_ART}/hero.webp`,
+            alt: '',
+            decoding: 'async',
+            onerror: (e) => {
+              hero.classList.add('no-art');
+              e.currentTarget.remove();
+            },
+          }),
       deal >= 10 ? h('span', { class: 'bk-hero-tag' }, h('small', {}, 'Up to'), h('b', {}, `${deal}%`), h('small', {}, 'Off')) : null,
     );
   }
@@ -1844,7 +1988,7 @@ export function renderLiveStore({ store, memberId }) {
 
   /* The search box is a button: it opens the search page. Its hint cycles
      through what people come here for. */
-  const hints = ['"pre-workout"', '"whey protein"', '"creatine"', ...[...new Set(products.map((p) => `"${p.brand}"`))].slice(0, 3)];
+  const hints = [...words().hints, ...[...new Set(products.map((p) => `"${p.brand}"`))].slice(0, 3)];
   const hint = h('span', { class: 'bk-search-hint' }, hints[0]);
   const searchBar = h(
     'button',
@@ -1864,7 +2008,7 @@ export function renderLiveStore({ store, memberId }) {
 
   /* Categories: tapping one filters the grid below; "See all" opens the
      full category browser. A wishlist tile appears once something is saved. */
-  const present = Object.keys(CATEGORY).filter((k) => products.some((p) => p.category === k));
+  const present = Object.keys(words().categories).filter((k) => products.some((p) => p.category === k));
   const catRow = h('div', { class: 'bk-cats', role: 'tablist', 'aria-label': 'Categories' });
   function paintCats() {
     const tile = (key, label, art) =>
@@ -1993,8 +2137,8 @@ export function renderLiveStore({ store, memberId }) {
     h(
       'footer',
       { class: 'bk-sign' },
-      h('strong', {}, 'Fuel your gains.'),
-      h('span', {}, `${store.delivery.gym_name} store · 100% authentic · secure UPI`),
+      h('strong', {}, words().signOff),
+      h('span', {}, `${store.delivery.gym_name} store · ${words().promise} · secure UPI`),
       // A partner shop near the gym fulfils this gym's orders — say who.
       store.seller ? h('span', {}, `Sold & delivered by ${store.seller.name}${store.seller.area || store.seller.city ? `, ${store.seller.area || store.seller.city}` : ''}`) : null,
     ),

@@ -1,10 +1,11 @@
 import { api, sellerSession } from '../api.js';
 import { buildForm, clear, closeModal, confirmDialog, date, h, openModal, renderIcon, table, toast } from '../ui.js';
 import { getAppMode, toggleAppMode } from '../vertical.js';
-import { CATEGORY_LABEL, FULFILLMENT_TONE, inr, openProductModal, scanStoreProduct } from './storeAdmin.js';
+import { categoryLabels, FULFILLMENT_TONE, inr, openProductModal, scanStoreProduct } from './storeAdmin.js';
 
 /**
- * The Shop panel (#/seller) — what a partner supplement shop signs in to.
+ * The Shop panel (#/seller) — what a partner shop signs in to: a supplement
+ * shop serving gyms, or a bookshop serving coaching institutes.
  *
  * Its own credentials, handed over by the operator, and its own token: it
  * cannot open the operator console or any gym, and only ever sees this one
@@ -16,10 +17,24 @@ import { CATEGORY_LABEL, FULFILLMENT_TONE, inr, openProductModal, scanStoreProdu
 /** Which page is showing; module state so it survives each full redraw. */
 let section = 'today';
 
-const SECTIONS = [
+/** Who the shop sells to, in its own store's words. */
+const PLACE = {
+  gym: {
+    store: 'gym', org: 'gym', Org: 'Gym', orgs: 'gyms', Orgs: 'Gyms', desk: 'front desk', counter: 'desk',
+    person: 'member', Person: 'Member', people: 'members', People: 'Members', variants: 'each flavour and size',
+  },
+  coaching: {
+    store: 'coaching', org: 'institute', Org: 'Institute', orgs: 'institutes', Orgs: 'Institutes', desk: 'office', counter: 'office',
+    person: 'student', Person: 'Student', people: 'students', People: 'Students', variants: 'each edition and format',
+  },
+};
+/** The signed-in shop's store, set each time its panel loads. */
+let place = PLACE.gym;
+
+const sections = () => [
   { id: 'today', icon: 'dashboard', label: 'Today', title: 'Today', sub: 'What needs packing, what is on its way, and what you are owed.' },
-  { id: 'orders', icon: 'truck', label: 'Orders', title: 'Orders', sub: 'Every paid order from the gyms you serve.' },
-  { id: 'products', icon: 'package', label: 'Products', title: 'Your products', sub: 'What members of your gyms can buy from you.' },
+  { id: 'orders', icon: 'truck', label: 'Orders', title: 'Orders', sub: `Every paid order from the ${place.orgs} you serve.` },
+  { id: 'products', icon: 'package', label: 'Products', title: 'Your products', sub: `What ${place.people} of your ${place.orgs} can buy from you.` },
   { id: 'shop', icon: 'store', label: 'Shop & payouts', title: 'Shop & payouts', sub: 'Your delivery promise, contact details, password and payouts.' },
 ];
 
@@ -29,8 +44,8 @@ function statusText(order) {
   return {
     placed: 'New — to pack',
     packed: 'Packed',
-    shipped: pickup ? 'Sent to the gym' : 'Out for delivery',
-    ready: 'At the gym desk',
+    shipped: pickup ? `Sent to the ${place.org}` : 'Out for delivery',
+    ready: `At the ${place.org} ${place.counter}`,
     delivered: pickup ? 'Collected' : 'Delivered',
     cancelled: 'Cancelled',
   }[order.fulfillment_status] ?? order.fulfillment_status;
@@ -47,7 +62,7 @@ function nextStep(order) {
     case 'placed':
       return { to: 'packed', label: 'Mark packed', icon: 'package' };
     case 'packed':
-      return { to: 'shipped', label: pickup ? 'Sent to the gym' : 'Mark shipped', icon: 'truck' };
+      return { to: 'shipped', label: pickup ? `Sent to the ${place.org}` : 'Mark shipped', icon: 'truck' };
     case 'shipped':
       return pickup ? null : { to: 'delivered', label: 'Mark delivered', icon: 'checkCircle' };
     default:
@@ -57,8 +72,8 @@ function nextStep(order) {
 
 function waitingNote(order) {
   if (order.fulfillment_method !== 'pickup') return null;
-  if (order.fulfillment_status === 'shipped') return `${order.gym_name}'s front desk marks it received when it arrives.`;
-  if (order.fulfillment_status === 'ready') return `Waiting at ${order.gym_name}'s desk for the member to collect.`;
+  if (order.fulfillment_status === 'shipped') return `${order.gym_name}'s ${place.desk} marks it received when it arrives.`;
+  if (order.fulfillment_status === 'ready') return `Waiting at ${order.gym_name}'s ${place.desk} for the ${place.person} to collect.`;
   return null;
 }
 
@@ -109,7 +124,7 @@ function openOrder(order, onChanged) {
         h(
           'div',
           { class: 'muted' },
-          order.member_name && order.member_name !== order.shipping_name ? `${order.member_name} · ${order.gym_name}` : `Member at ${order.gym_name}`,
+          order.member_name && order.member_name !== order.shipping_name ? `${order.member_name} · ${order.gym_name}` : `${place.Person} at ${order.gym_name}`,
         ),
       ),
       h(
@@ -124,7 +139,7 @@ function openOrder(order, onChanged) {
       { class: 'sp-order-where' },
       renderIcon(pickup ? 'building' : 'mapPin', { size: 16 }),
       pickup
-        ? h('p', {}, h('strong', {}, `Pickup at ${order.gym_name}`), ' — take the parcel to the gym’s front desk; they hand it over.')
+        ? h('p', {}, h('strong', {}, `Pickup at ${order.gym_name}`), ` — take the parcel to the ${place.org}’s ${place.desk}; they hand it over.`)
         : h('p', {}, [order.shipping_address, order.shipping_city, order.shipping_state, order.shipping_pincode].filter(Boolean).join(', ')),
     ),
     h(
@@ -144,7 +159,7 @@ function openOrder(order, onChanged) {
       'div',
       { class: 'sp-money' },
       line('Order value', inr(order.total_amount)),
-      order.commission_amount > 0 ? line(`Gym’s share (${order.commission_pct}%)`, `− ${inr(order.commission_amount)}`) : null,
+      order.commission_amount > 0 ? line(`${place.Org}’s share (${order.commission_pct}%)`, `− ${inr(order.commission_amount)}`) : null,
       order.seller_fee_amount > 0 ? line(`Platform fee (${order.seller_fee_pct}%)`, `− ${inr(order.seller_fee_amount)}`) : null,
       line(order.seller_paid_at ? 'Paid to you' : order.seller_fee_amount > 0 || order.commission_amount > 0 ? 'You receive' : 'You keep', inr(order.seller_amount), true),
     ),
@@ -173,7 +188,7 @@ function openOrder(order, onChanged) {
             closeModal();
             confirmDialog({
               title: `Cancel ${order.order_code}?`,
-              message: 'Only if you cannot fulfil it. The platform refunds the member, and you are not paid for it.',
+              message: `Only if you cannot fulfil it. The platform refunds the ${place.person}, and you are not paid for it.`,
               confirmLabel: 'Cancel order',
               danger: true,
               onConfirm: () => move(order, 'cancelled', onChanged),
@@ -300,7 +315,7 @@ function gettingStarted(me, products, go) {
       ),
     ),
     !products.some((p) => p.active)
-      ? h('p', { class: 'muted', style: 'margin:10px 0 0' }, 'Until your shelf has an active product, your gyms keep showing the central catalogue.')
+      ? h('p', { class: 'muted', style: 'margin:10px 0 0' }, `Until your shelf has an active product, your ${place.orgs} keep showing the central catalogue.`)
       : null,
   );
 }
@@ -313,7 +328,7 @@ function todayPage(me, orders, products, { onChanged, go }) {
     'div',
     { class: 'op-stack' },
     me.store_status !== 'live'
-      ? h('div', { class: 'card sa-warn' }, renderIcon('alert', { size: 18 }), h('p', {}, 'The member store is not open yet, so no orders can come in. Stock your shelf now — it shows the moment the platform goes live.'))
+      ? h('div', { class: 'card sa-warn' }, renderIcon('alert', { size: 18 }), h('p', {}, `The ${place.person} store is not open yet, so no orders can come in. Stock your shelf now — it shows the moment the platform goes live.`))
       : null,
     gettingStarted(me, products, go),
     h(
@@ -323,7 +338,7 @@ function todayPage(me, orders, products, { onChanged, go }) {
       kpi('On the way', String(moving.length), { icon: 'truck', tone: 'violet', foot: `${inr(s.pending)} to be earned on delivery` }),
       ...(me.seller.owned
         ? [
-            kpi('Delivered sales', inr(s.payable + s.paid), { icon: 'wallet', tone: 'green', foot: 'After any gym share — yours already' }),
+            kpi('Delivered sales', inr(s.payable + s.paid), { icon: 'wallet', tone: 'green', foot: `After any ${place.org} share — yours already` }),
             kpi('Total sales', inr(s.gmv), { icon: 'bank', tone: 'blue', foot: `${s.orders} paid order${s.orders === 1 ? '' : 's'}` }),
           ]
         : [
@@ -351,7 +366,7 @@ function todayPage(me, orders, products, { onChanged, go }) {
       h(
         'div',
         { class: 'card' },
-        h('div', { class: 'card-head' }, cardTitle('building', 'Gyms you serve', 'blue')),
+        h('div', { class: 'card-head' }, cardTitle('building', `${place.Orgs} you serve`, 'blue')),
         me.seller.gyms.length
           ? h(
               'div',
@@ -360,12 +375,12 @@ function todayPage(me, orders, products, { onChanged, go }) {
                 h(
                   'div',
                   { class: 'op-list-row' },
-                  h('span', { class: 'op-list-icon' }, renderIcon('dumbbell', { size: 15 })),
+                  h('span', { class: 'op-list-icon' }, renderIcon(place.store === 'coaching' ? 'graduation' : 'dumbbell', { size: 15 })),
                   h('div', { class: 'op-list-main' }, h('div', { class: 'op-list-title' }, g.gym_name), g.city ? h('div', { class: 'op-list-note' }, g.city) : null),
                 ),
               ),
             )
-          : h('p', { class: 'muted', style: 'margin:0' }, 'No gyms assigned yet — the platform team adds the gyms in your area.'),
+          : h('p', { class: 'muted', style: 'margin:0' }, `No ${place.orgs} assigned yet — the platform team adds the ${place.orgs} in your area.`),
       ),
     ),
   );
@@ -434,11 +449,11 @@ const SHOP_PRODUCT_OPS = {
 };
 
 function productsPage(products, { onChanged }) {
-  const add = () => openProductModal(null, onChanged, null, SHOP_PRODUCT_OPS);
+  const add = () => openProductModal(null, onChanged, null, SHOP_PRODUCT_OPS, { vertical: place.store });
   const toggle = async (p) => {
     try {
       await api.sellerUpdateProduct(p.id, { active: !p.active });
-      toast(p.active ? `${p.title} hidden from members` : `${p.title} is on sale`);
+      toast(p.active ? `${p.title} hidden from ${place.people}` : `${p.title} is on sale`);
       await onChanged();
     } catch (err) {
       toast(err.message || 'Could not update the product', 'error');
@@ -455,9 +470,9 @@ function productsPage(products, { onChanged }) {
       h('div', { class: 'spacer' }),
       h(
         'button',
-        { class: 'btn sm', onclick: () => scanStoreProduct({ lookup: api.sellerBarcode, onSaved: onChanged, badges: null, ops: SHOP_PRODUCT_OPS }) },
+        { class: 'btn sm', onclick: () => scanStoreProduct({ lookup: api.sellerBarcode, onSaved: onChanged, badges: null, ops: SHOP_PRODUCT_OPS, vertical: place.store }) },
         renderIcon('scan', { size: 14 }),
-        'Scan barcode',
+        place.store === 'coaching' ? 'Scan ISBN / barcode' : 'Scan barcode',
       ),
       h('button', { class: 'btn primary sm', onclick: add }, renderIcon('plus', { size: 14 }), 'Add product'),
     ),
@@ -470,7 +485,7 @@ function productsPage(products, { onChanged }) {
               'div',
               { class: 'sa-product' },
               p.image_url ? h('img', { class: 'sa-thumb', src: p.image_url, alt: '', loading: 'lazy' }) : h('span', { class: 'sa-thumb' }, renderIcon('bag', { size: 16 })),
-              h('div', {}, h('strong', {}, p.title), h('div', { class: 'muted' }, `${p.brand} · ${CATEGORY_LABEL[p.category] ?? p.category}`)),
+              h('div', {}, h('strong', {}, p.title), h('div', { class: 'muted' }, `${p.brand} · ${categoryLabels(p.vertical)[p.category] ?? p.category}`)),
             ),
         },
         {
@@ -520,7 +535,7 @@ function productsPage(products, { onChanged }) {
         },
       ],
       products,
-      { onRowClick: (p) => openProductModal(p, onChanged, null, SHOP_PRODUCT_OPS), empty: 'No products yet. Add your best sellers first — a clear photo, the MRP, your price, and each flavour and size.' },
+      { onRowClick: (p) => openProductModal(p, onChanged, null, SHOP_PRODUCT_OPS), empty: `No products yet. Add your best sellers first — a clear photo, the MRP, your price, and ${place.variants}.` },
     ),
   );
 }
@@ -530,7 +545,7 @@ function shopPage(me, { onChanged, rerender }) {
   const profile = buildForm(
     [
       { name: 'delivery_eta', label: 'Delivery promise', value: s.delivery_eta ?? '', placeholder: me.defaults.delivery_eta, full: true },
-      me.defaults.pickup_enabled ? { name: 'pickup_eta', label: 'Gym pickup promise', value: s.pickup_eta ?? '', placeholder: me.defaults.pickup_eta, full: true } : null,
+      me.defaults.pickup_enabled ? { name: 'pickup_eta', label: `${place.Org} pickup promise`, value: s.pickup_eta ?? '', placeholder: me.defaults.pickup_eta, full: true } : null,
       { name: 'phone', label: 'Shop phone', value: s.phone },
       { name: 'gstin', label: 'GSTIN', value: s.gstin ?? '', placeholder: 'Optional' },
       { name: 'address', label: 'Shop address', type: 'textarea', value: s.address ?? '', full: true },
@@ -572,7 +587,7 @@ function shopPage(me, { onChanged, rerender }) {
     h(
       'div',
       { class: 'op-stack' },
-      h('div', { class: 'card' }, h('div', { class: 'card-head' }, cardTitle('truck', 'What members see', 'blue')), h('p', { class: 'muted', style: 'margin-top:0' }, 'Your delivery promise is the big line at the top of the store. Leave it empty to use the platform’s.'), profile),
+      h('div', { class: 'card' }, h('div', { class: 'card-head' }, cardTitle('truck', `What ${place.people} see`, 'blue')), h('p', { class: 'muted', style: 'margin-top:0' }, 'Your delivery promise is the big line at the top of the store. Leave it empty to use the platform’s.'), profile),
       h(
         'div',
         { class: `card${s.must_change_password ? ' sp-attention' : ''}` },
@@ -592,7 +607,8 @@ function shopPage(me, { onChanged, rerender }) {
         info('Sign-in email', s.email),
         info('Area', [s.area, s.city].filter(Boolean).join(', ')),
         info('Store type', s.owned ? 'Your own store' : 'Partner shop'),
-        info('Gym share', me.gym_commission_pct > 0 ? `${me.gym_commission_pct}% of each order` : 'None'),
+        info('Sells in', place.store === 'coaching' ? 'Coaching store (CoachBook)' : 'Gym store (GymVym)'),
+        info(`${place.Org} share`, me.gym_commission_pct > 0 ? `${me.gym_commission_pct}% of each order` : 'None'),
         s.owned ? null : info('Platform fee', `${me.platform_fee_pct}% of each order`),
         h('p', { class: 'muted sa-hint' }, 'To change these, contact the platform team.'),
       ),
@@ -604,14 +620,14 @@ function shopPage(me, { onChanged, rerender }) {
           'p',
           { class: 'muted', style: 'margin-top:0' },
           s.owned
-            ? `This is your own store: members pay into the platform account, which is yours, so there are no payouts to wait for and no platform fee. On a ${inr(example)} order:`
-            : `Members pay online; once an order is delivered, its amount is added to your payout. On a ${inr(example)} order:`,
+            ? `This is your own store: ${place.people} pay into the platform account, which is yours, so there are no payouts to wait for and no platform fee. On a ${inr(example)} order:`
+            : `${place.People} pay online; once an order is delivered, its amount is added to your payout. On a ${inr(example)} order:`,
         ),
         h(
           'div',
           { class: 'sp-money' },
           info('Order value', inr(example)),
-          info(`Gym’s share (${me.gym_commission_pct}%)`, gymCut ? `− ${inr(gymCut)}` : 'none'),
+          info(`${place.Org}’s share (${me.gym_commission_pct}%)`, gymCut ? `− ${inr(gymCut)}` : 'none'),
           s.owned ? null : info(`Platform fee (${me.platform_fee_pct}%)`, `− ${inr(fee)}`),
           h('div', { class: 'sp-money-row' }, h('strong', {}, s.owned ? 'You keep' : 'You receive'), h('strong', {}, inr(example - gymCut - fee))),
         ),
@@ -671,8 +687,8 @@ function loginCard(rerender) {
         'div',
         { class: 'auth-pitch' },
         h('span', { class: 'op-eyebrow' }, renderIcon('store', { size: 14 }), 'For partner shops'),
-        h('h2', {}, 'Sell to every gym in your area.'),
-        h('p', {}, 'List your supplements once. Members of your nearby gyms order and pay in their gym app, and you pack and deliver.'),
+        h('h2', {}, 'Sell to the gyms and institutes in your area.'),
+        h('p', {}, 'List your products once — supplements for gyms, books and stationery for coaching institutes. Their members and students order and pay in their app, and you pack and deliver.'),
         h(
           'ul',
           { class: 'auth-points' },
@@ -699,6 +715,7 @@ function loginCard(rerender) {
 }
 
 function shell(me, body, { rerender }) {
+  const SECTIONS = sections();
   const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const go = async (id) => {
     if (id === section) return;
@@ -798,6 +815,7 @@ export async function renderSellerPanel({ rerender }) {
     }
     throw err;
   }
+  place = PLACE[me.seller.vertical] ?? PLACE.gym;
 
   // Redraws just the page body (a filter tab), without refetching.
   const host = h('div', {});

@@ -506,3 +506,74 @@ a.cb-chip:hover { border-color: var(--brand); }
 .cbp-progress { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 10px 0 6px; }
 .cbp-progress span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
 .cbp-empty { padding: 26px 10px; text-align: center; color: var(--muted); font-size: 13.5px; }
+.cbp-shop { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.cbp-shop > .svg-icon:last-child { flex: none; color: var(--muted); }
+.cbp-id-link { cursor: pointer; border-radius: 8px; }
+.cbp-id-link:focus-visible, .cbp-shop:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+/* ------------------------------------------------- the CoachBook store */
+
+/*
+ * The student app's Store tab is the gym store's Blinkit-style screens
+ * (portalStore.js, app.css .bk-*) in CoachBook's clothes: its green and blue
+ * accents become the institute's own palette colour (so indigo, ocean, plum
+ * and saffron each get a store to match), the hero is a ruled notebook page
+ * with a drawn stack of books, and category tiles without a cover photo show
+ * their icon in that colour.
+ */
+body[data-vertical='coaching'] :is(.bk, .bk-page, .modal.bk-sheet, .portal-prof-orders) {
+  --bk-green: var(--brand);
+  --bk-green-dark: color-mix(in srgb, var(--brand) 78%, #000);
+  --bk-green-soft: color-mix(in srgb, var(--brand) 11%, var(--surface));
+  --bk-blue: color-mix(in srgb, var(--brand) 72%, #1e1b4b);
+  --bk-blue-soft: color-mix(in srgb, var(--brand) 12%, #fff);
+  --bk-add: color-mix(in srgb, var(--brand) 14%, #fff);
+  --bk-add-ink: color-mix(in srgb, var(--brand) 82%, #000);
+}
+body[data-vertical='coaching']:not([data-mode='light']) :is(.bk, .bk-page, .modal.bk-sheet, .portal-prof-orders) {
+  --bk-green: var(--brand);
+  --bk-green-dark: color-mix(in srgb, var(--brand) 80%, #fff);
+  --bk-green-soft: color-mix(in srgb, var(--brand) 16%, transparent);
+  --bk-blue: color-mix(in srgb, var(--brand) 62%, #1e1b4b);
+  --bk-blue-soft: color-mix(in srgb, var(--brand) 18%, transparent);
+  --bk-add: color-mix(in srgb, var(--brand) 18%, transparent);
+  --bk-add-ink: color-mix(in srgb, var(--brand) 72%, #fff);
+}
+
+/* Hero: a page of a ruled notebook, light in both themes like the gym's. */
+body[data-vertical='coaching'] .bk-hero {
+  background:
+    radial-gradient(circle at 80% 28%, rgba(255, 255, 255, 0.9) 0%, transparent 40%),
+    repeating-linear-gradient(180deg, transparent 0 21px, color-mix(in srgb, var(--brand) 13%, transparent) 21px 22px),
+    linear-gradient(135deg, color-mix(in srgb, var(--brand) 5%, #fff) 0%, color-mix(in srgb, var(--brand) 15%, #fff) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 14%, transparent);
+}
+body[data-vertical='coaching'] .bk-hero-chip { color: color-mix(in srgb, var(--brand) 80%, #000); }
+body[data-vertical='coaching'] .bk-cat-art .bk-art-none { color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, var(--surface)); }
+body[data-vertical='coaching'] .bk-cat.on .bk-cat-art { border-color: var(--brand); }
+body[data-vertical='coaching'] .bk-card-img .bk-art-none,
+body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix(in srgb, var(--brand) 55%, #94a3b8); }
+/* A book's details: the facts box, with room for a long author line. */
+.bk-book dd { text-align: right; overflow-wrap: anywhere; }
+
+/* The drawn stack of books (portalStore.js coachingHeroArt). */
+.cbs-c1 { fill: color-mix(in srgb, var(--brand) 88%, #1e1b4b); }
+.cbs-c2 { fill: #f59e0b; }
+.cbs-c3 { fill: #10b981; }
+.cbs-spine { filter: brightness(0.78); }
+.cbs-pages { fill: #fff; }
+.cbs-lines { fill: none; stroke: color-mix(in srgb, var(--brand) 22%, #e5e7eb); stroke-width: 1.4; }
+.cbs-shadow { fill: rgba(30, 27, 75, 0.14); }
+.cbs-pencil { fill: #fbbf24; }
+.cbs-pencil-wood { fill: #fde3b0; }
+.cbs-pencil-tip { fill: #1f2937; }
+.cbs-eraser { fill: #f472b6; }
+.cbs-spark { fill: var(--brand); opacity: 0.55; }
+/* On the coming-soon screen the drawing stands in for the product shot. */
+.cbs-soon .portal-store-hero-art svg { position: absolute; right: 8px; bottom: 18px; width: 94%; height: 64%; }
+.cbs-soon .portal-store-blob { top: auto; bottom: 26%; left: 22%; width: 56%; }
+
+/* The institute's Study store page (views/coaching/store.js). */
+.cb-store-note { display: flex; align-items: flex-start; gap: 12px; }
+.cb-store-note p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
+.cb-store-items { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }

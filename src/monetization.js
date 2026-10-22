@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, DEFAULT_TENANT_SLUG } from './config.js';
-import { tenantStorage } from './db.js';
+import { getBusinessType, tenantStorage } from './db.js';
 import { badRequest, conflict, HttpError, notFound } from './errors.js';
 import { sniffMedia } from './exerciseCatalog.js';
 import { activateFitnessAddon } from './fitness.js';
@@ -28,11 +28,21 @@ import { parse, today } from './validate.js';
  *
  * The gym's own shelf (tees, shakers it stocks itself) is the opposite case
  * and lives in the gym's file — see routes/storeHub.js.
+ *
+ * There are two stores on the one engine: the gym store (GymVym's
+ * supplements and gear — libraries shop here too) and the CoachBook store
+ * (books, test prep and stationery for coaching students). Each product,
+ * banner and partner shop belongs to one of them (`vertical`), each has its
+ * own switch, cut and delivery promise in the settings row, and a tenant's
+ * members only ever see the one that matches its business type.
  */
 
 export const STORE_STATUSES = ['coming_soon', 'live', 'disabled'];
 export const COLLECTION_MODES = ['online', 'desk', 'both'];
+export const STORE_VERTICALS = ['gym', 'coaching'];
 export const STORE_CATEGORIES = ['protein', 'creatine', 'preworkout', 'bcaa', 'vitamins', 'snacks', 'gear', 'other'];
+export const COACHING_STORE_CATEGORIES = ['books', 'test_prep', 'pyq', 'stationery', 'calculators', 'desk', 'bags', 'other'];
+export const storeCategoriesFor = (vertical) => (vertical === 'coaching' ? COACHING_STORE_CATEGORIES : STORE_CATEGORIES);
 // 'ready' is pickup-only: the parcel reached the gym and waits at the desk.
 // For a pickup order 'shipped' means "on its way to the gym" and 'delivered'
 // means the member collected it.
@@ -48,6 +58,28 @@ const TIERS = [
 ];
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
+/** Which store a business type shops from: an institute has its own, every
+ * other tenant (a gym, a study hall) the gym store. */
+export const storeVerticalOfType = (businessType) => (businessType === 'coaching' ? 'coaching' : 'gym');
+
+export function storeVerticalOf(tenantSlug) {
+  if (tenantSlug === DEFAULT_TENANT_SLUG) return 'gym';
+  return storeVerticalOfType(findTenantBySlug(tenantSlug)?.business_type);
+}
+
+/** How the member-facing copy names the place a pickup goes to. */
+const PLACE = {
+  gym: { org: 'gym', desk: 'front desk', counter: 'desk', brand: 'GymBook' },
+  coaching: { org: 'institute', desk: 'office', counter: 'office', brand: 'CoachBook' },
+};
+const placeOf = (vertical) => PLACE[vertical] ?? PLACE.gym;
+
+function cleanVertical(raw) {
+  if (raw === undefined || raw === null || raw === '') return 'gym';
+  if (!STORE_VERTICALS.includes(raw)) throw badRequest('Pick the gym or the coaching store', { vertical: `must be one of: ${STORE_VERTICALS.join(', ')}` });
+  return raw;
+}
 
 /* ── Storage ──────────────────────────────────────────────────────────── */
 
@@ -152,7 +184,20 @@ function migrate(handle) {
   ]) {
     ensure('store_orders', column, type);
   }
+  // The CoachBook store: which store each row belongs to — everything that
+  // predates it is the gym store's — a book's own details, and the coaching
+  // store's switch, cut and promises beside the gym store's.
+  for (const table of ['store_products', 'store_banners', 'store_sellers', 'store_orders']) {
+    ensure(table, 'vertical', "TEXT NOT NULL DEFAULT 'gym'");
+  }
+  ensure('store_products', 'book_details', 'TEXT');
+  ensure('platform_monetization_settings', 'coaching_store_status', "TEXT NOT NULL DEFAULT 'coming_soon'");
+  ensure('platform_monetization_settings', 'coaching_store_commission_pct', 'REAL NOT NULL DEFAULT 7.5');
+  ensure('platform_monetization_settings', 'coaching_delivery_eta', "TEXT NOT NULL DEFAULT 'Delivery in 3–5 days'");
+  ensure('platform_monetization_settings', 'coaching_pickup_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  ensure('platform_monetization_settings', 'coaching_pickup_eta', "TEXT NOT NULL DEFAULT 'Ready at your institute in 3–5 days'");
   handle.exec(`
+    CREATE INDEX IF NOT EXISTS idx_store_products_vertical ON store_products(vertical, active);
     CREATE INDEX IF NOT EXISTS idx_store_products_seller ON store_products(seller_id);
     CREATE INDEX IF NOT EXISTS idx_store_products_barcode ON store_products(barcode);
     CREATE INDEX IF NOT EXISTS idx_store_variants_barcode ON store_product_variants(barcode);
@@ -405,18 +450,39 @@ export function monetizationSettings() {
   return one('SELECT * FROM platform_monetization_settings WHERE id = 1');
 }
 
-const SETTINGS_FIELDS = {
+/** The settings columns each store keeps for itself; the coaching store's
+ * carry a `coaching_` prefix in the one settings row. */
+const STORE_SETTING_KEYS = ['store_status', 'store_commission_pct', 'delivery_eta', 'pickup_enabled', 'pickup_eta'];
+const storeColumn = (vertical, key) => (vertical === 'coaching' ? `coaching_${key}` : key);
+
+/** One store's switch, gym/institute cut and delivery promises, under the
+ * gym store's names whichever store it is. */
+export function storeSettings(vertical, settings = monetizationSettings()) {
+  return {
+    vertical,
+    ...Object.fromEntries(STORE_SETTING_KEYS.map((key) => [key, settings[storeColumn(vertical, key)]])),
+  };
+}
+
+const STORE_FIELD_RULES = {
   store_status: { type: 'enum', values: STORE_STATUSES },
-  fitness_addon_collection_mode: { type: 'enum', values: COLLECTION_MODES },
-  addon_commission_pct: { type: 'number', min: 0, max: 100 },
   store_commission_pct: { type: 'number', min: 0, max: 100 },
-  addon_price_1m: { type: 'number', min: 1, max: 100000 },
-  addon_price_3m: { type: 'number', min: 1, max: 100000 },
-  addon_price_6m: { type: 'number', min: 1, max: 100000 },
   delivery_eta: { type: 'string', min: 3, max: 60 },
   pickup_enabled: { type: 'boolean' },
   pickup_eta: { type: 'string', min: 3, max: 60 },
 };
+
+const SETTINGS_FIELDS = {
+  ...STORE_FIELD_RULES,
+  ...Object.fromEntries(Object.entries(STORE_FIELD_RULES).map(([key, rule]) => [`coaching_${key}`, rule])),
+  fitness_addon_collection_mode: { type: 'enum', values: COLLECTION_MODES },
+  addon_commission_pct: { type: 'number', min: 0, max: 100 },
+  addon_price_1m: { type: 'number', min: 1, max: 100000 },
+  addon_price_3m: { type: 'number', min: 1, max: 100000 },
+  addon_price_6m: { type: 'number', min: 1, max: 100000 },
+};
+
+const hasActiveProducts = (vertical) => Boolean(one('SELECT 1 AS ok FROM store_products WHERE active = 1 AND vertical = ?', vertical));
 
 export function updateMonetizationSettings(payload) {
   const body = parse(payload, SETTINGS_FIELDS);
@@ -425,10 +491,13 @@ export function updateMonetizationSettings(payload) {
 
   // Opening a shop with nothing on the shelves would show every member an
   // empty page where the "coming soon" screen used to be.
-  if (body.store_status === 'live' && !one('SELECT 1 AS ok FROM store_products WHERE active = 1')) {
-    throw badRequest('Add at least one active product before taking the store live', {
-      store_status: 'needs at least one active product',
-    });
+  for (const vertical of STORE_VERTICALS) {
+    const column = storeColumn(vertical, 'store_status');
+    if (body[column] === 'live' && !hasActiveProducts(vertical)) {
+      throw badRequest(`Add at least one active product before taking the ${vertical === 'coaching' ? 'coaching ' : ''}store live`, {
+        [column]: 'needs at least one active product',
+      });
+    }
   }
 
   exec(
@@ -460,12 +529,13 @@ export function addonTiers(settings = monetizationSettings()) {
  * console is live in the app — and `online_payments` tells the cart whether
  * checkout can open yet. The add-on paywall, which has nothing to show but a
  * pay button, falls back to the desk instead when Razorpay keys are missing.
+ * `store_status` is the switch of the store this tenant's members shop in.
  */
-export function portalMonetization() {
+export function portalMonetization(vertical = storeVerticalOfType(getBusinessType())) {
   const settings = monetizationSettings();
   const online = isRazorpayOrdersConfigured();
   return {
-    store_status: settings.store_status,
+    store_status: storeSettings(vertical, settings).store_status,
     online_payments: online,
     addon_collection_mode: online ? settings.fitness_addon_collection_mode : 'desk',
     addon_tiers: addonTiers(settings),
@@ -507,6 +577,54 @@ function cleanNutrition(raw) {
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }
 
+/** A book's own details — who wrote it, which edition, for which exam — kept
+ * as a small fixed-shape JSON object like the nutrition facts, so the store
+ * can lay them out as a table. [key, max length] or [key, 'int']. */
+const BOOK_KEYS = [
+  ['author', 120],
+  ['publisher', 80],
+  ['edition', 40],
+  ['year', 'int'],
+  ['language', 40],
+  ['pages', 'int'],
+  ['isbn', 20],
+  ['exam', 80],
+];
+
+function cleanBookDetails(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return null;
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      throw badRequest('Book details must be valid JSON', { book_details: 'is not valid JSON' });
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw badRequest('Book details must be an object', { book_details: 'must be an object' });
+  }
+  const out = {};
+  for (const [key, rule] of BOOK_KEYS) {
+    if (value[key] === undefined || value[key] === null || String(value[key]).trim() === '') continue;
+    if (rule === 'int') {
+      const n = Number(value[key]);
+      if (!Number.isInteger(n) || n < 1 || n > 100000) throw badRequest(`${key} must be a whole number`, { book_details: `${key} is invalid` });
+      out[key] = n;
+    } else out[key] = String(value[key]).trim().slice(0, rule);
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
+/** A category from the product's own store, the gym store's or the coaching
+ * store's list. */
+function cleanCategory(raw, vertical) {
+  const allowed = storeCategoriesFor(vertical);
+  if (!allowed.includes(raw)) throw badRequest('Pick a category', { category: `must be one of: ${allowed.join(', ')}` });
+  return raw;
+}
+
 /** Only links a browser can safely open: http(s), or a path on this site. */
 function cleanUrl(raw, field) {
   if (raw === undefined) return undefined;
@@ -523,10 +641,11 @@ function cleanUrl(raw, field) {
   throw badRequest(`${field} must be an http(s) link`, { [field]: 'must be an http(s) link' });
 }
 
+// The category is checked against the product's own store (cleanCategory).
 const PRODUCT_FIELDS = {
   title: { type: 'string', min: 2, max: 120 },
   brand: { type: 'string', min: 1, max: 80 },
-  category: { type: 'enum', values: STORE_CATEGORIES },
+  category: { type: 'string', max: 40 },
   description: { type: 'string', max: 2000 },
   mrp: { type: 'number', min: 0, max: 1000000 },
   price: { type: 'number', min: 0, max: 1000000 },
@@ -542,39 +661,40 @@ function cleanBarcode(raw) {
 }
 
 /**
- * The product on `sellerId`'s shelf (null: the central catalogue) that
- * carries `code`, on itself or on one of its variants — skipping
- * `exceptProductId`, the product being saved.
+ * The product on `sellerId`'s shelf (null: the central catalogue of
+ * `vertical`'s store) that carries `code`, on itself or on one of its
+ * variants — skipping `exceptProductId`, the product being saved.
  */
-export function shelfProductByBarcode(code, sellerId, exceptProductId = null) {
+export function shelfProductByBarcode(code, sellerId, exceptProductId = null, vertical = 'gym') {
   const codes = barcodeVariants(code);
   const marks = codes.map(() => '?').join(',');
   return one(
     `SELECT p.id, p.title, v.id AS variant_id FROM store_products p
      LEFT JOIN store_product_variants v ON v.product_id = p.id AND v.barcode IN (${marks})
-     WHERE p.seller_id IS ? AND p.id IS NOT ? AND (p.barcode IN (${marks}) OR v.id IS NOT NULL)
+     WHERE p.seller_id IS ? AND p.vertical = ? AND p.id IS NOT ? AND (p.barcode IN (${marks}) OR v.id IS NOT NULL)
      ORDER BY p.active DESC, p.id DESC LIMIT 1`,
     ...codes,
     sellerId,
+    vertical,
     exceptProductId,
     ...codes,
   );
 }
 
 /** One shelf lists a pack once: a scan should find one product, not two. */
-function assertBarcodesFree(sellerId, productId, productBarcode, variants) {
+function assertBarcodesFree(sellerId, productId, productBarcode, variants, vertical) {
   const codes = [productBarcode, ...(variants ?? []).map((v) => v.barcode)].filter(Boolean);
   const seen = new Set();
   for (const code of codes) {
     const key = barcodeVariants(code).sort()[0];
     if (seen.has(key)) throw badRequest(`Barcode ${code} is used twice on this product`, { barcode: 'is used twice' });
     seen.add(key);
-    const taken = shelfProductByBarcode(code, sellerId, productId);
+    const taken = shelfProductByBarcode(code, sellerId, productId, vertical);
     if (taken) throw conflict(`Barcode ${code} is already on this shelf, on “${taken.title}”`);
   }
 }
 
-function cleanVariants(raw) {
+function cleanVariants(raw, vertical = 'gym') {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) throw badRequest('Variants must be a list', { variants: 'must be a list' });
   if (raw.length > 40) throw badRequest('At most 40 variants per product', { variants: 'at most 40' });
@@ -590,7 +710,9 @@ function cleanVariants(raw) {
       in_stock: { type: 'boolean', default: 1 },
     });
     if (!v.flavor && !v.weight) {
-      throw badRequest(`Variant ${i + 1} needs a flavour or a size`, { variants: `row ${i + 1} is empty` });
+      // flavor × weight is a book's edition/language × format, too.
+      const needs = vertical === 'coaching' ? 'an edition or a format' : 'a flavour or a size';
+      throw badRequest(`Variant ${i + 1} needs ${needs}`, { variants: `row ${i + 1} is empty` });
     }
     return { ...v, barcode: cleanBarcode(v.barcode) ?? null, sort_order: i };
   });
@@ -721,14 +843,16 @@ function badgesFor(productIds, { activeOnly = false } = {}) {
   return byProduct;
 }
 
+const parseJson = (text) => {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+};
+
 function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map(), badgesByProduct = new Map()) {
   if (!row) return row;
-  let nutrition = null;
-  try {
-    nutrition = row.nutrition_facts ? JSON.parse(row.nutrition_facts) : null;
-  } catch {
-    nutrition = null;
-  }
   const variants = (variantsByProduct.get(row.id) ?? []).map((v) => ({
     ...v,
     label: [v.flavor, v.weight].filter(Boolean).join(' · '),
@@ -743,7 +867,8 @@ function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map(), bad
     image_url: uploaded[0]?.url ?? row.image_url,
     image_link: row.image_url,
     images: uploaded.length ? uploaded : row.image_url ? [{ id: null, url: row.image_url }] : [],
-    nutrition_facts: nutrition,
+    nutrition_facts: parseJson(row.nutrition_facts),
+    book_details: parseJson(row.book_details),
     badges: badgesByProduct.get(row.id) ?? [],
     variants,
     from_price: Math.min(...priced),
@@ -753,8 +878,9 @@ function hydrateProduct(row, variantsByProduct, imagesByProduct = new Map(), bad
 }
 
 /** `sellerId`: undefined lists every product, null the platform's own
- * catalogue, a number one partner shop's shelf. */
-export function listStoreProducts({ activeOnly = false, q, category, sellerId } = {}) {
+ * catalogue, a number one partner shop's shelf. `vertical`: one store's
+ * products only. */
+export function listStoreProducts({ activeOnly = false, q, category, sellerId, vertical } = {}) {
   const where = [];
   const params = [];
   if (activeOnly) where.push('active = 1');
@@ -762,7 +888,11 @@ export function listStoreProducts({ activeOnly = false, q, category, sellerId } 
     where.push('seller_id IS ?');
     params.push(sellerId);
   }
-  if (category && STORE_CATEGORIES.includes(category)) {
+  if (vertical !== undefined) {
+    where.push('vertical = ?');
+    params.push(vertical);
+  }
+  if (category && [...STORE_CATEGORIES, ...COACHING_STORE_CATEGORIES].includes(category)) {
     where.push('category = ?');
     params.push(category);
   }
@@ -854,8 +984,10 @@ function assertPricing(mrp, price) {
   if (price > mrp) throw badRequest('The selling price cannot be above the MRP', { price: 'must not exceed MRP' });
 }
 
-/** A partner shop's products carry its `sellerId`. Quality badges are the
- * operator's to vouch for, so a shop's own listing never sets them. */
+/** A partner shop's products carry its `sellerId`, and belong to the store
+ * the shop sells in; the console names the store in `payload.vertical`.
+ * Quality badges are the operator's to vouch for, so a shop's own listing
+ * never sets them. */
 export function createStoreProduct(payload, { sellerId = null } = {}) {
   const body = parse(payload, {
     ...PRODUCT_FIELDS,
@@ -865,24 +997,27 @@ export function createStoreProduct(payload, { sellerId = null } = {}) {
     price: { ...PRODUCT_FIELDS.price, required: true },
     category: { ...PRODUCT_FIELDS.category, default: 'other' },
   });
+  const vertical = sellerId === null ? cleanVertical(payload?.vertical) : (one('SELECT vertical FROM store_sellers WHERE id = ?', sellerId)?.vertical ?? 'gym');
+  cleanCategory(body.category, vertical);
   assertPricing(body.mrp, body.price);
-  const variants = cleanVariants(payload?.variants) ?? [];
+  const variants = cleanVariants(payload?.variants, vertical) ?? [];
   for (const v of variants) assertPricing(v.mrp ?? body.mrp, v.price ?? body.price);
   const badgeIds = sellerId === null ? (cleanBadgeIds(payload?.badge_ids) ?? []) : [];
   const barcode = cleanBarcode(payload?.barcode) ?? null;
-  assertBarcodesFree(sellerId, null, barcode, variants);
+  assertBarcodesFree(sellerId, null, barcode, variants, vertical);
 
   return registryTx(() => {
     const info = exec(
-      `INSERT INTO store_products (title, brand, category, description, image_url, nutrition_facts, lab_report_url,
-                                   mrp, price, featured, active, seller_id, barcode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO store_products (title, brand, category, description, image_url, nutrition_facts, book_details, lab_report_url,
+                                   mrp, price, featured, active, seller_id, barcode, vertical)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       body.title,
       body.brand,
       body.category,
       body.description ?? null,
       cleanUrl(payload?.image_url, 'image_url') ?? null,
       cleanNutrition(payload?.nutrition_facts) ?? null,
+      cleanBookDetails(payload?.book_details) ?? null,
       cleanUrl(payload?.lab_report_url, 'lab_report_url') ?? null,
       body.mrp,
       body.price,
@@ -890,6 +1025,7 @@ export function createStoreProduct(payload, { sellerId = null } = {}) {
       body.active ?? 1,
       sellerId,
       barcode,
+      vertical,
     );
     const id = Number(info.lastInsertRowid);
     writeVariants(id, variants);
@@ -913,18 +1049,22 @@ export function updateStoreProduct(id, payload, { sellerId } = {}) {
   if (lab !== undefined) sets.lab_report_url = lab;
   const nutrition = cleanNutrition(payload?.nutrition_facts);
   if (nutrition !== undefined) sets.nutrition_facts = nutrition;
+  const book = cleanBookDetails(payload?.book_details);
+  if (book !== undefined) sets.book_details = book;
   const barcode = cleanBarcode(payload?.barcode);
   if (barcode !== undefined) sets.barcode = barcode;
+  // A product stays in the store it was listed in; only its category moves.
+  if (sets.category !== undefined) cleanCategory(sets.category, current.vertical);
 
   const mrp = sets.mrp ?? current.mrp;
   const price = sets.price ?? current.price;
   assertPricing(mrp, price);
-  const variants = cleanVariants(payload?.variants);
+  const variants = cleanVariants(payload?.variants, current.vertical);
   for (const v of variants ?? []) assertPricing(v.mrp ?? mrp, v.price ?? price);
   const badgeIds = sellerId === undefined ? cleanBadgeIds(payload?.badge_ids) : undefined;
   if (barcode !== undefined || variants) {
     const currentVariants = variants ?? many('SELECT barcode FROM store_product_variants WHERE product_id = ?', id);
-    assertBarcodesFree(current.seller_id ?? null, id, barcode === undefined ? current.barcode : barcode, currentVariants);
+    assertBarcodesFree(current.seller_id ?? null, id, barcode === undefined ? current.barcode : barcode, currentVariants, current.vertical);
   }
 
   return registryTx(() => {
@@ -940,14 +1080,14 @@ export function updateStoreProduct(id, payload, { sellerId } = {}) {
     if (badgeIds) writeProductBadges(id, badgeIds);
     // The last active product going away would leave a live store empty. A
     // shop's gyms fall back to the central catalogue instead (catalogFor).
-    if (sets.active === 0 && !byShop) guardLiveStoreHasStock();
+    if (sets.active === 0 && !byShop) guardLiveStoreHasStock(current.vertical);
     return getStoreProduct(id);
   });
 }
 
-function guardLiveStoreHasStock() {
-  if (monetizationSettings().store_status !== 'live') return;
-  if (one('SELECT 1 AS ok FROM store_products WHERE active = 1')) return;
+function guardLiveStoreHasStock(vertical) {
+  if (storeSettings(vertical).store_status !== 'live') return;
+  if (hasActiveProducts(vertical)) return;
   throw conflict('The store is live — keep at least one product active, or switch the store back to "Coming soon" first');
 }
 
@@ -959,7 +1099,7 @@ export function deleteStoreProduct(id, { sellerId } = {}) {
   return registryTx(() => {
     if (one('SELECT 1 AS ok FROM store_order_items WHERE product_id = ? LIMIT 1', id)) {
       exec("UPDATE store_products SET active = 0, updated_at = datetime('now') WHERE id = ?", id);
-      if (!byShop) guardLiveStoreHasStock();
+      if (!byShop) guardLiveStoreHasStock(product.vertical);
       return { retired: true };
     }
     const files = many('SELECT file FROM store_product_images WHERE product_id = ?', id).map((r) => r.file);
@@ -967,7 +1107,7 @@ export function deleteStoreProduct(id, { sellerId } = {}) {
     exec('DELETE FROM store_product_images WHERE product_id = ?', id);
     exec('DELETE FROM store_product_badges WHERE product_id = ?', id);
     exec('DELETE FROM store_products WHERE id = ?', id);
-    if (!byShop) guardLiveStoreHasStock();
+    if (!byShop) guardLiveStoreHasStock(product.vertical);
     for (const file of files) removeStoreImage(file);
     return { deleted: true };
   });
@@ -981,27 +1121,34 @@ export function deleteStoreProduct(id, { sellerId } = {}) {
  * One shelf per gym, so a cart never mixes two sellers and every order has
  * exactly one shop to fulfil it. Storefront and checkout both ask here, so a
  * member can never buy from a shelf their gym does not show.
+ *
+ * Only a shop of the tenant's own store counts (sellers.js keeps the two
+ * apart when gyms are assigned), and the central catalogue is that store's:
+ * an institute never lands on the supplement shelf, nor a gym on the books.
  */
 export function catalogFor(tenantSlug) {
+  const vertical = storeVerticalOf(tenantSlug);
   const seller = one(
     `SELECT s.* FROM store_seller_gyms g JOIN store_sellers s ON s.id = g.seller_id
-     WHERE g.tenant_slug = ? AND s.active = 1`,
+     WHERE g.tenant_slug = ? AND s.active = 1 AND s.vertical = ?`,
     tenantSlug,
+    vertical,
   );
   if (seller && one('SELECT 1 AS ok FROM store_products WHERE seller_id = ? AND active = 1', seller.id)) {
-    return { seller, sellerId: seller.id };
+    return { seller, sellerId: seller.id, vertical };
   }
-  return { seller: null, sellerId: null };
+  return { seller: null, sellerId: null, vertical };
 }
 
 /**
- * The cuts on an order from `seller`'s shelf (null: the central catalogue).
- * The gym's share follows the shop's own setting when it has one — a custom
- * rate, or 0 for none — and the platform-wide rate otherwise. The operator's
- * own store pays no platform fee: its takings are the operator's already.
+ * The cuts on an order from `seller`'s shelf (null: the central catalogue of
+ * `vertical`'s store). The gym's share follows the shop's own setting when it
+ * has one — a custom rate, or 0 for none — and that store's rate otherwise.
+ * The operator's own store pays no platform fee: its takings are the
+ * operator's already.
  */
-export function shopRates(seller, settings = monetizationSettings()) {
-  const gymPct = seller?.gym_commission_pct ?? settings.store_commission_pct;
+export function shopRates(seller, settings = monetizationSettings(), vertical = seller?.vertical ?? 'gym') {
+  const gymPct = seller?.gym_commission_pct ?? storeSettings(vertical, settings).store_commission_pct;
   return {
     gym_commission_pct: gymPct,
     gym_commission_custom: seller ? seller.gym_commission_pct !== null && seller.gym_commission_pct !== undefined : false,
@@ -1022,7 +1169,7 @@ function requireOnlinePayments() {
 function checkoutName(tenantSlug) {
   if (tenantSlug === DEFAULT_TENANT_SLUG) return 'GymBook';
   const tenant = findTenantBySlug(tenantSlug);
-  return tenant?.gym_name || tenant?.display_name || 'GymBook';
+  return tenant?.gym_name || tenant?.display_name || placeOf(storeVerticalOfType(tenant?.business_type)).brand;
 }
 
 function checkoutPayload(order, { tenantSlug, member, description }) {
@@ -1143,9 +1290,10 @@ const SHIPPING_FIELDS = {
   pincode: { type: 'string', required: true, max: 10 },
 };
 
-function orderCode() {
+/** GB-202610-8X9Y9A for a gym store order, CB-… for a coaching one. */
+function orderCode(vertical) {
   const stamp = today().slice(0, 7).replace('-', '');
-  return `GB-${stamp}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  return `${vertical === 'coaching' ? 'CB' : 'GB'}-${stamp}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 }
 
 /**
@@ -1155,10 +1303,12 @@ function orderCode() {
  * was promised on a sale already made.
  */
 export async function createStoreCheckout({ tenantSlug, member, items, shipping, method = 'delivery' }) {
+  const { seller, sellerId, vertical } = catalogFor(tenantSlug);
   const settings = monetizationSettings();
-  if (settings.store_status !== 'live') throw badRequest('The store is not open yet');
+  const store = storeSettings(vertical, settings);
+  if (store.store_status !== 'live') throw badRequest('The store is not open yet');
   if (!FULFILLMENT_METHODS.includes(method)) throw badRequest('Choose delivery or pickup', { method: 'is invalid' });
-  if (method === 'pickup' && !settings.pickup_enabled) throw badRequest('Pickup at the gym is not available right now');
+  if (method === 'pickup' && !store.pickup_enabled) throw badRequest(`Pickup at the ${placeOf(vertical).org} is not available right now`);
   requireOnlinePayments();
 
   if (!Array.isArray(items) || !items.length) throw badRequest('Your cart is empty', { items: 'is required' });
@@ -1173,20 +1323,25 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
     throw badRequest('Enter a 6-digit PIN code', { pincode: 'must be 6 digits' });
   }
 
-  const { seller, sellerId } = catalogFor(tenantSlug);
   const lines = items.map((raw, i) => {
     const item = parse(raw, {
       product_id: { type: 'int', required: true, min: 1 },
       variant_id: { type: 'int', min: 1 },
       quantity: { type: 'int', required: true, min: 1, max: 10 },
     });
-    const product = one('SELECT * FROM store_products WHERE id = ? AND active = 1 AND seller_id IS ?', item.product_id, sellerId);
+    const product = one(
+      'SELECT * FROM store_products WHERE id = ? AND active = 1 AND seller_id IS ? AND vertical = ?',
+      item.product_id,
+      sellerId,
+      vertical,
+    );
     if (!product) throw badRequest(`Item ${i + 1} is no longer available`, { items: `row ${i + 1} unavailable` });
     const variants = many('SELECT * FROM store_product_variants WHERE product_id = ?', product.id);
     let variant = null;
     if (variants.length) {
       variant = variants.find((v) => v.id === item.variant_id);
-      if (!variant) throw badRequest(`Pick a flavour or size for ${product.title}`, { items: `row ${i + 1} needs a variant` });
+      const option = vertical === 'coaching' ? 'an edition or format' : 'a flavour or size';
+      if (!variant) throw badRequest(`Pick ${option} for ${product.title}`, { items: `row ${i + 1} needs a variant` });
       if (!variant.in_stock) throw badRequest(`${product.title} (${[variant.flavor, variant.weight].filter(Boolean).join(' · ')}) is out of stock`);
     }
     const unitPrice = variant?.price ?? product.price;
@@ -1208,7 +1363,7 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
   const subtotal = round2(lines.reduce((sum, l) => sum + l.line_total, 0));
   const mrpTotal = round2(lines.reduce((sum, l) => sum + l.unit_mrp * l.quantity, 0));
   if (subtotal < 1) throw badRequest('The order total must be at least ₹1');
-  const rates = shopRates(seller, settings);
+  const rates = shopRates(seller, settings, vertical);
   const commissionPct = rates.gym_commission_pct;
   const commission = round2((subtotal * commissionPct) / 100);
   // A partner shop's side, fixed now like the gym's: the platform's fee, and
@@ -1216,7 +1371,7 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
   const sellerFeePct = rates.platform_fee_pct;
   const sellerFee = seller ? round2((subtotal * sellerFeePct) / 100) : null;
   const sellerAmount = seller ? Math.max(0, round2(subtotal - commission - sellerFee)) : null;
-  const code = orderCode();
+  const code = orderCode(vertical);
 
   const order = await createOrder({
     amount: subtotal,
@@ -1229,8 +1384,8 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
       `INSERT INTO store_orders
          (order_code, tenant_slug, member_id, member_name, subtotal, mrp_total, total_amount, commission_pct,
           commission_amount, razorpay_order_id, fulfillment_method, shipping_name, shipping_phone, shipping_address,
-          shipping_city, shipping_state, shipping_pincode, seller_id, seller_fee_pct, seller_fee_amount, seller_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          shipping_city, shipping_state, shipping_pincode, seller_id, seller_fee_pct, seller_fee_amount, seller_amount, vertical)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       code,
       tenantSlug,
       member.id,
@@ -1252,6 +1407,7 @@ export async function createStoreCheckout({ tenantSlug, member, items, shipping,
       sellerFeePct,
       sellerFee,
       sellerAmount,
+      vertical,
     );
     const orderId = Number(info.lastInsertRowid);
     for (const l of lines) {
@@ -1330,9 +1486,10 @@ function notifySellerNewOrder(order) {
   const gym = order.tenant_slug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(order.tenant_slug);
   const gymName = gym?.gym_name || gym?.display_name || order.tenant_slug;
   const lines = order.items.map((i) => `  ${i.quantity} × ${i.brand ? `${i.brand} ` : ''}${i.title}${i.variant_label ? ` (${i.variant_label})` : ''}`);
+  const place = placeOf(order.vertical);
   const where =
     order.fulfillment_method === 'pickup'
-      ? `Pickup at ${gymName} — take it to the gym's front desk.`
+      ? `Pickup at ${gymName} — take it to the ${place.org}'s ${place.desk}.`
       : `Deliver to ${order.shipping_name}, ${[order.shipping_address, order.shipping_city, order.shipping_pincode].filter(Boolean).join(', ')}`;
   sendEmail({
     to: seller.email,
@@ -1340,7 +1497,7 @@ function notifySellerNewOrder(order) {
     text: [
       `Hi ${seller.name},`,
       '',
-      `${order.member_name || 'A member'} of ${gymName} just paid for order ${order.order_code}:`,
+      `${order.member_name || (order.vertical === 'coaching' ? 'A student' : 'A member')} of ${gymName} just paid for order ${order.order_code}:`,
       ...lines,
       '',
       where,
@@ -1374,13 +1531,18 @@ export function listMemberOrders(tenantSlug, memberId) {
 /* ── Operator: orders, commissions, payouts ───────────────────────────── */
 
 /** `sellerId` as in listStoreProducts: undefined every order, a number one
- * partner shop's. Each row names its shop and its gym for the lists. */
-export function listStoreOrders({ status, tenantSlug, sellerId, limit = 200 } = {}) {
+ * partner shop's; `vertical` one store's. Each row names its shop and its gym
+ * for the lists. */
+export function listStoreOrders({ status, tenantSlug, sellerId, vertical, limit = 200 } = {}) {
   const where = ["o.payment_status != 'pending'"];
   const params = [];
   if (status && FULFILLMENT_STATUSES.includes(status)) {
     where.push('o.fulfillment_status = ?');
     params.push(status);
+  }
+  if (vertical && STORE_VERTICALS.includes(vertical)) {
+    where.push('o.vertical = ?');
+    params.push(vertical);
   }
   if (tenantSlug) {
     where.push('o.tenant_slug = ?');
@@ -1414,9 +1576,10 @@ export function listStoreOrders({ status, tenantSlug, sellerId, limit = 200 } = 
 /** The steps a partner shop takes itself. "Ready at the gym" and a pickup's
  * "collected" belong to the gym's desk, which actually has the parcel. */
 function assertShopMayMove(order, next) {
-  if (next === 'ready') throw badRequest('The gym’s front desk marks a pickup as received', { fulfillment_status: 'gym desk only' });
+  const { org, desk } = placeOf(order.vertical);
+  if (next === 'ready') throw badRequest(`The ${org}’s ${desk} marks a pickup as received`, { fulfillment_status: 'gym desk only' });
   if (next === 'delivered' && order.fulfillment_method === 'pickup') {
-    throw badRequest('The gym’s front desk marks a pickup as collected', { fulfillment_status: 'gym desk only' });
+    throw badRequest(`The ${org}’s ${desk} marks a pickup as collected`, { fulfillment_status: 'gym desk only' });
   }
 }
 
@@ -1484,13 +1647,14 @@ export function updateStoreOrder(id, payload, { sellerId } = {}) {
  */
 function notifyOrderUpdate(order) {
   const pickup = order.fulfillment_method === 'pickup';
+  const place = placeOf(order.vertical);
   const gym = order.tenant_slug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(order.tenant_slug);
-  const gymName = gym?.gym_name || gym?.display_name || 'your gym';
+  const gymName = gym?.gym_name || gym?.display_name || `your ${place.org}`;
   const messages = {
     shipped: pickup
-      ? ['Your order is on its way', `${order.order_code} has shipped to ${gymName}. We'll tell you when it reaches the desk.`]
+      ? ['Your order is on its way', `${order.order_code} has shipped to ${gymName}. We'll tell you when it reaches the ${place.counter}.`]
       : ['Your order is on its way', `${order.order_code} has shipped${order.courier_name ? ` with ${order.courier_name}` : ''}.`],
-    ready: ['Ready to collect', `${order.order_code} is waiting at ${gymName}'s front desk.`],
+    ready: ['Ready to collect', `${order.order_code} is waiting at ${gymName}'s ${place.desk}.`],
     delivered: pickup ? null : ['Delivered', `${order.order_code} has been delivered. Enjoy!`],
     cancelled: ['Order cancelled', `${order.order_code} was cancelled. Any payment goes back to your UPI account.`],
   };
@@ -1570,13 +1734,18 @@ function presentBanner(row) {
   return { ...rest, image_url: storeMediaUrl(file) };
 }
 
-export function listBanners({ activeOnly = false } = {}) {
+/** `vertical`: one store's banners — each store has its own strip. */
+export function listBanners({ activeOnly = false, vertical } = {}) {
+  const where = [activeOnly ? 'active = 1' : null, vertical ? 'vertical = ?' : null].filter(Boolean);
   return many(
-    `SELECT * FROM store_banners ${activeOnly ? 'WHERE active = 1' : ''} ORDER BY sort_order, id`,
+    `SELECT * FROM store_banners ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY sort_order, id`,
+    ...(vertical ? [vertical] : []),
   ).map(presentBanner);
 }
 
-function parseBanner(payload, { creating }) {
+/** A banner links into its own store: one of its categories, or a product
+ * on its shelves. */
+function parseBanner(payload, { creating, vertical }) {
   const body = parse(payload, {
     title: { type: 'string', min: 2, max: 60, required: creating },
     subtitle: { type: 'string', max: 120 },
@@ -1588,36 +1757,39 @@ function parseBanner(payload, { creating }) {
     sort_order: { type: 'int', min: 0, max: 1000 },
   });
   if (body.bg_color && !HEX_RE.test(body.bg_color)) throw badRequest('Pick a colour like #0c831f', { bg_color: 'must be a hex colour' });
-  if (body.link_type === 'category' && !STORE_CATEGORIES.includes(body.link_value)) {
+  if (body.link_type === 'category' && !storeCategoriesFor(vertical).includes(body.link_value)) {
     throw badRequest('Pick a category to link to', { link_value: 'unknown category' });
   }
-  if (body.link_type === 'product' && !one('SELECT id FROM store_products WHERE id = ?', Number(body.link_value))) {
+  if (body.link_type === 'product' && !one('SELECT id FROM store_products WHERE id = ? AND vertical = ?', Number(body.link_value), vertical)) {
     throw badRequest('Pick a product to link to', { link_value: 'unknown product' });
   }
   return body;
 }
 
 export function createBanner(payload) {
-  const body = parseBanner(payload, { creating: true });
+  const vertical = cleanVertical(payload?.vertical);
+  const body = parseBanner(payload, { creating: true, vertical });
   const next = one('SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM store_banners').n;
   const info = exec(
-    `INSERT INTO store_banners (title, subtitle, cta_label, bg_color, link_type, link_value, active, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO store_banners (title, subtitle, cta_label, bg_color, link_type, link_value, active, sort_order, vertical)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     body.title,
     body.subtitle ?? null,
     body.cta_label ?? null,
-    body.bg_color ?? '#0c831f',
+    body.bg_color ?? (vertical === 'coaching' ? '#4f46e5' : '#0c831f'),
     body.link_type ?? 'none',
     body.link_type && body.link_type !== 'none' ? body.link_value : null,
     body.active ?? 1,
     body.sort_order ?? next,
+    vertical,
   );
   return presentBanner(one('SELECT * FROM store_banners WHERE id = ?', Number(info.lastInsertRowid)));
 }
 
 export function updateBanner(id, payload) {
-  if (!one('SELECT id FROM store_banners WHERE id = ?', id)) throw notFound('Banner not found');
-  const body = parseBanner(payload, { creating: false });
+  const banner = one('SELECT id, vertical FROM store_banners WHERE id = ?', id);
+  if (!banner) throw notFound('Banner not found');
+  const body = parseBanner(payload, { creating: false, vertical: banner.vertical });
   if (body.link_type === 'none') body.link_value = null;
   const columns = Object.keys(body).filter((k) => body[k] !== null || ['subtitle', 'cta_label', 'link_value'].includes(k));
   if (!columns.length) throw badRequest('Nothing to update');
@@ -1716,28 +1888,30 @@ export function deleteBadge(id) {
 
 /* ── Storefront ───────────────────────────────────────────────────────── */
 
-/** Everything the member's store screen draws from, in one read. */
+/** Everything the member's store screen draws from, in one read — from the
+ * store this tenant's members shop in (the gym store, or the coaching one). */
 export function storefront(tenantSlug) {
-  const settings = monetizationSettings();
-  const live = settings.store_status === 'live';
   const tenant = tenantSlug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(tenantSlug);
-  const { seller, sellerId } = catalogFor(tenantSlug);
-  const products = live ? listStoreProducts({ activeOnly: true, sellerId }) : [];
+  const { seller, sellerId, vertical } = catalogFor(tenantSlug);
+  const settings = storeSettings(vertical);
+  const live = settings.store_status === 'live';
+  const products = live ? listStoreProducts({ activeOnly: true, sellerId, vertical }) : [];
   // A banner pointing at a product this gym's shelf does not carry would open
   // nothing, so it is left out; category and plain banners show everywhere.
   const onShelf = new Set(products.map((p) => String(p.id)));
   return {
     status: settings.store_status,
+    vertical,
     payments_ready: isRazorpayOrdersConfigured(),
     delivery: {
       eta: seller?.delivery_eta || settings.delivery_eta,
       pickup_enabled: Boolean(settings.pickup_enabled),
       pickup_eta: seller?.pickup_eta || settings.pickup_eta,
-      gym_name: tenant?.gym_name || tenant?.display_name || 'your gym',
+      gym_name: tenant?.gym_name || tenant?.display_name || `your ${placeOf(vertical).org}`,
     },
     seller: seller ? { name: seller.name, city: seller.city, area: seller.area } : null,
     banners: live
-      ? listBanners({ activeOnly: true }).filter((b) => b.link_type !== 'product' || onShelf.has(String(b.link_value)))
+      ? listBanners({ activeOnly: true, vertical }).filter((b) => b.link_type !== 'product' || onShelf.has(String(b.link_value)))
       : [],
     products,
   };
@@ -1754,7 +1928,11 @@ export function commissionBalances() {
      FROM gym_commissions GROUP BY tenant_slug ORDER BY payable DESC, tenant_slug`,
   ).map((row) => {
     const tenant = row.tenant_slug === DEFAULT_TENANT_SLUG ? null : findTenantBySlug(row.tenant_slug);
-    return { ...row, gym_name: tenant?.gym_name ?? tenant?.display_name ?? row.tenant_slug };
+    return {
+      ...row,
+      gym_name: tenant?.gym_name ?? tenant?.display_name ?? row.tenant_slug,
+      vertical: storeVerticalOfType(tenant?.business_type),
+    };
   });
 }
 
@@ -1777,14 +1955,19 @@ export function recordPayout(tenantSlug, payload) {
   });
 }
 
-/** Platform-wide totals for the console header. */
+/** Platform-wide totals for the console header; `stores` splits the store
+ * figures between the gym store and the coaching one. */
 export function monetizationSummary() {
-  return {
-    store: one(
+  const storeTotals = (vertical) =>
+    one(
       `SELECT COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS gmv,
               COUNT(CASE WHEN fulfillment_status IN ('placed', 'packed') THEN 1 END) AS to_ship
-       FROM store_orders WHERE payment_status = 'paid' AND fulfillment_status != 'cancelled'`,
-    ),
+       FROM store_orders WHERE payment_status = 'paid' AND fulfillment_status != 'cancelled' ${vertical ? 'AND vertical = ?' : ''}`,
+      ...(vertical ? [vertical] : []),
+    );
+  return {
+    store: storeTotals(),
+    stores: Object.fromEntries(STORE_VERTICALS.map((v) => [v, storeTotals(v)])),
     addon: one("SELECT COUNT(*) AS sales, COALESCE(SUM(amount), 0) AS revenue FROM addon_payments WHERE status = 'paid'"),
     commissions: one(
       `SELECT COALESCE(SUM(CASE WHEN status IN ('pending', 'approved') THEN amount END), 0) AS owed,
@@ -1862,13 +2045,15 @@ export function tenantCommissionSummary(tenantSlug, from) {
     from, from, from, from, from, from, tenantSlug,
   );
   const settings = monetizationSettings();
+  const { seller, vertical } = catalogFor(tenantSlug);
   return {
     ...Object.fromEntries(Object.entries(row).map(([k, v]) => [k, round2(v)])),
     // What this gym actually earns on its shelf — a shop serving it may carry
     // its own rate, or none.
-    store_commission_pct: shopRates(catalogFor(tenantSlug).seller, settings).gym_commission_pct,
+    store_commission_pct: shopRates(seller, settings, vertical).gym_commission_pct,
     addon_commission_pct: settings.addon_commission_pct,
-    store_status: settings.store_status,
+    store_status: storeSettings(vertical, settings).store_status,
+    store_vertical: vertical,
   };
 }
 

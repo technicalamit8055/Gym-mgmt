@@ -34,7 +34,7 @@ import { cropAndResizeImage } from '../photo.js';
 import { openWorkoutShare } from '../shareCards.js';
 import { clearWidgets, refreshWidgets, setWidgetHandler } from '../widgets.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
-import { createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
+import { coachingHeroArt, createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
 import * as sound from '../sound.js';
@@ -5899,9 +5899,12 @@ function openWeightSheet({ latest, onSaved }) {
  * opened the tab since the badge was last edited.
  */
 function buildTabs(storeStatus = 'coming_soon', navBadges = {}) {
-  // CoachBook: Home, Timetable, Tests, Fees, Profile (views/portalCoaching.js).
+  // CoachBook: Home, Timetable, Tests, Fees, Profile (views/portalCoaching.js)
+  // — and, while its store is not switched off, the Store in Fees' slot. Fees
+  // stays a real screen, reached from Home's fee banner and Profile's tile.
+  const store = storeStatus === 'disabled' ? null : { key: 'store', label: 'Store', icon: 'bag', badge: storeStatus === 'live' ? null : 'Soon' };
   const tabs = isCoaching()
-    ? COACHING_PORTAL_TABS.map((tab) => ({ ...tab }))
+    ? COACHING_PORTAL_TABS.map((tab) => (tab.key === 'fees' && store ? store : { ...tab }))
     : isLibrary()
     ? [
         { key: 'home', label: 'Home', icon: 'home' },
@@ -5913,7 +5916,7 @@ function buildTabs(storeStatus = 'coming_soon', navBadges = {}) {
         { key: 'home', label: 'Home', icon: 'home' },
         { key: 'workout', label: 'Workout', icon: 'dumbbell' },
         { key: 'diet', label: 'Diet', icon: 'leaf' },
-        storeStatus === 'disabled' ? null : { key: 'store', label: 'Store', icon: 'bag', badge: storeStatus === 'live' ? null : 'Soon' },
+        store,
         { key: 'profile', label: 'Profile', icon: 'person' },
       ].filter(Boolean);
   for (const tabDef of tabs) {
@@ -5951,7 +5954,8 @@ const seenNavBadges = {
   },
 };
 
-const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile', attendance: 'home', materials: 'home' };
+// CoachBook's Fees is off the bar while its store holds the slot (buildTabs).
+const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile', attendance: 'home', materials: 'home', fees: 'profile' };
 
 /**
  * The tab bar's own icons, apart from the app-wide set in ui.js because each
@@ -7038,10 +7042,13 @@ function renderPortalApp(ctx, initialMe) {
   }
 
   /** Holds the Store's slot until the shop itself ships: what is coming, and
-   * nothing that can be tapped into a dead end (the chevrons are decoration). */
+   * nothing that can be tapped into a dead end (the chevrons are decoration).
+   * An institute's says what the CoachBook store will carry instead. */
   function renderStoreComingSoon() {
+    const coaching = isCoaching();
     /* Product shots are optional files: a missing one takes its whole slot
-       (the halo or blob behind it too) with it, and the card closes up. */
+       (the halo or blob behind it too) with it, and the card closes up. The
+       coaching teasers have none, so their cards start closed up. */
     const art = (name, className, ...backdrop) =>
       h(
         'span',
@@ -7060,10 +7067,10 @@ function renderPortalApp(ctx, initialMe) {
     const teaser = (icon, tone, title, sub, image) =>
       h(
         'div',
-        { class: `portal-store-item tone-${tone}` },
+        { class: `portal-store-item tone-${tone}${image ? '' : ' no-art'}` },
         h('span', { class: 'portal-store-item-icon' }, renderIcon(icon, { size: 26, stroke: 2.2 })),
         h('div', { class: 'portal-store-item-text' }, h('strong', {}, title), h('span', {}, sub)),
-        art(image, 'portal-store-item-art'),
+        image ? art(image, 'portal-store-item-art') : null,
         h('span', { class: 'portal-store-item-chev', 'aria-hidden': 'true' }, renderIcon('chevronRight', { size: 16, stroke: 2.4 })),
       );
     /* The hand-drawn stroke under "is on its way". */
@@ -7077,24 +7084,34 @@ function renderPortalApp(ctx, initialMe) {
       { class: 'portal-tab-body portal-store' },
       h(
         'section',
-        { class: 'portal-store-hero' },
-        art('store-hero', 'portal-store-hero-art', h('span', { class: 'portal-store-blob' })),
+        { class: `portal-store-hero${coaching ? ' cbs-soon' : ''}` },
+        coaching
+          ? h('span', { class: 'portal-store-hero-art', 'aria-hidden': 'true' }, h('span', { class: 'portal-store-blob' }), coachingHeroArt())
+          : art('store-hero', 'portal-store-hero-art', h('span', { class: 'portal-store-blob' })),
         h(
           'div',
           { class: 'portal-store-hero-copy' },
-          h('span', { class: 'portal-store-hero-icon' }, renderIcon('store', { size: 36, stroke: 2 })),
+          h('span', { class: 'portal-store-hero-icon' }, renderIcon(coaching ? 'book' : 'store', { size: 36, stroke: 2 })),
           h('span', { class: 'portal-store-chip' }, 'Coming soon'),
-          h('h2', {}, 'The gym store ', h('span', {}, 'is on its way')),
+          h('h2', {}, coaching ? 'The study store ' : 'The gym store ', h('span', {}, 'is on its way')),
           swash,
-          h('p', {}, 'Soon you can shop supplements, gear and merchandise from your gym — right here in the app.'),
+          h('p', {}, coaching ? 'Soon you can buy books, test prep and stationery for your course — right here in the app.' : 'Soon you can shop supplements, gear and merchandise from your gym — right here in the app.'),
         ),
       ),
       h(
         'div',
         { class: 'portal-store-list' },
-        teaser('zap', 'blue', 'Supplements', 'Protein, pre-workout and more', 'store-supplements'),
-        teaser('shirt', 'purple', 'Gear & apparel', 'Gym wear, shakers and accessories', 'store-apparel'),
-        teaser('cart', 'green', 'Pick up at the desk', 'Order in the app, collect at your gym', 'store-pickup'),
+        ...(coaching
+          ? [
+              teaser('book', 'blue', 'Books & test prep', 'Reference books, guides and PYQs for your exam'),
+              teaser('pencil', 'purple', 'Stationery', 'Notebooks, pens, calculators and more'),
+              teaser('building', 'green', 'Pick up at the office', 'Order in the app, collect at your institute'),
+            ]
+          : [
+              teaser('zap', 'blue', 'Supplements', 'Protein, pre-workout and more', 'store-supplements'),
+              teaser('shirt', 'purple', 'Gear & apparel', 'Gym wear, shakers and accessories', 'store-apparel'),
+              teaser('cart', 'green', 'Pick up at the desk', 'Order in the app, collect at your gym', 'store-pickup'),
+            ]),
       ),
     );
   }
@@ -11291,7 +11308,7 @@ function renderPortalApp(ctx, initialMe) {
       return;
     }
 
-    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials'] : [])]);
+    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials', 'fees'] : [])]);
     clear(list).append(
       ...items.map((item) => {
         const style = NOTIFICATION_STYLE[item.category] ?? NOTIFICATION_STYLE.announcement;
@@ -12302,7 +12319,7 @@ function renderPortalApp(ctx, initialMe) {
   // reload would otherwise reopen the notification's screen forever after.
   const requested = window.location.hash.replace(/^#\/portal\/?/, '').split(/[/?]/)[0];
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
-  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials'] : [])]);
+  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials', 'fees'] : [])]);
   const restored = lastTab.get();
   // The phone's workout notification: its taps routed to this portal instance.
   // Taps that launched the app are handed over right here, before the first

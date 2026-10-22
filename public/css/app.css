@@ -10786,7 +10786,11 @@ body.portal-demo-open { overflow: hidden; }
 .sa-seg-btn.active.green { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--surface)); }
 .sa-seg-btn.active.amber { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, var(--surface)); }
 .sa-seg-btn.active.grey { border-color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, var(--surface)); }
+.sa-seg-btn.active.blue { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, var(--surface)); }
 .sa-seg-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* The gym store / coaching store switch at the top of the section. */
+.sa-store-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sa-store-pick .sa-seg-btn strong { display: inline-flex; align-items: center; gap: 6px; }
 .sa-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 .sa-hint { font-size: 12px; margin-top: 4px; }
 .sa-product { display: flex; align-items: center; gap: 10px; }

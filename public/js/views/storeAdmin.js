@@ -8,8 +8,13 @@ const fill = (el, ...children) => append(clear(el), children);
 
 /**
  * Operator console → Store & monetization: the platform's revenue switches,
- * the one supplement catalogue every gym's members shop from, member delivery
- * orders, and what the platform owes each gym in commission.
+ * the catalogue members shop from, member delivery orders, and what the
+ * platform owes each gym in commission.
+ *
+ * Two stores run on it, picked at the top of the section: the gym store
+ * (GymVym's supplements and gear) and the CoachBook store (books, test prep
+ * and stationery for coaching students). Each has its own switch, cut,
+ * banners, catalogue and orders; the Diet & Workout add-on is the gym's only.
  *
  * Money here is the platform's (INR), not any one gym's currency, so it has
  * its own formatter rather than ui.js's money(), which follows the signed-in
@@ -26,9 +31,9 @@ export const inr = (value) => {
 };
 
 const STORE_STATUS = {
-  coming_soon: { label: 'Coming soon', tone: 'amber', hint: 'Members see the teaser screen' },
-  live: { label: 'Live', tone: 'green', hint: 'Members can browse and buy' },
-  disabled: { label: 'Disabled', tone: 'grey', hint: 'Store tab hidden from members' },
+  coming_soon: { label: 'Coming soon', tone: 'amber', hint: 'Members see the teaser screen', studentHint: 'Students see the teaser screen' },
+  live: { label: 'Live', tone: 'green', hint: 'Members can browse and buy', studentHint: 'Students can browse and buy' },
+  disabled: { label: 'Disabled', tone: 'grey', hint: 'Store tab hidden from members', studentHint: 'Store tab hidden from students' },
 };
 const COLLECTION = {
   online: 'Online only — in-app UPI',
@@ -39,6 +44,70 @@ export const CATEGORY_LABEL = {
   protein: 'Protein', creatine: 'Creatine', preworkout: 'Pre-workout', bcaa: 'BCAA & aminos', vitamins: 'Vitamins',
   snacks: 'Snacks & bars', gear: 'Gear & accessories', other: 'Other',
 };
+export const COACHING_CATEGORY_LABEL = {
+  books: 'Books', test_prep: 'Test prep & guides', pyq: 'PYQs & papers', stationery: 'Stationery', calculators: 'Calculators',
+  desk: 'Study desk', bags: 'Bags & bottles', other: 'Other',
+};
+export const categoryLabels = (vertical) => (vertical === 'coaching' ? COACHING_CATEGORY_LABEL : CATEGORY_LABEL);
+
+/**
+ * What each store calls things. A book's variants use the same two columns
+ * as a supplement's — flavour × size becomes edition/language × format — and
+ * the lab-report link becomes a "Look inside" sample.
+ */
+export const STORE_COPY = {
+  gym: {
+    name: 'Gym store',
+    app: 'GymVym',
+    members: 'Members of every gym',
+    org: 'gym',
+    defaultCategory: 'protein',
+    titlePlaceholder: 'Gold Standard 100% Whey',
+    brandLabel: 'Brand',
+    brandPlaceholder: 'Optimum Nutrition',
+    optionA: 'Flavour',
+    optionB: 'Size',
+    optionAPlaceholder: 'Chocolate',
+    optionBPlaceholder: '1 kg',
+    generateA: 'Chocolate, Vanilla, Mocha',
+    generateB: '1 kg, 2 kg',
+    generateEmpty: 'Type some flavours or sizes first',
+    variantsHeading: 'Flavours & sizes',
+    linkLabel: 'Lab report URL',
+    linkPlaceholder: 'https://…/lab-report.pdf',
+    linkHint: 'Third-party purity / label-claim test, shown to members as a link.',
+    bannerTitle: 'Whey week',
+    bannerSub: 'Up to 25% off top brands',
+    bannerColor: '#0c831f',
+    bannerEmpty: 'No banners yet. A banner with a bold offer (“Whey week — up to 25% off”) linked to a category is the quickest way to drive orders.',
+  },
+  coaching: {
+    name: 'Coaching store',
+    app: 'CoachBook',
+    members: 'Students of every institute',
+    org: 'institute',
+    defaultCategory: 'books',
+    titlePlaceholder: 'Concepts of Physics — Vol. 1',
+    brandLabel: 'Publisher / brand',
+    brandPlaceholder: 'Bharati Bhawan',
+    optionA: 'Edition / language',
+    optionB: 'Format',
+    optionAPlaceholder: 'English',
+    optionBPlaceholder: 'Paperback',
+    generateA: 'English, Hindi',
+    generateB: 'Paperback, Hardcover',
+    generateEmpty: 'Type some editions or formats first',
+    variantsHeading: 'Editions & formats',
+    linkLabel: 'Sample pages URL',
+    linkPlaceholder: 'https://…/sample-chapter.pdf',
+    linkHint: 'A few pages of the book (a PDF) — students see it as “Look inside”.',
+    bannerTitle: 'JEE 2027 starter kit',
+    bannerSub: 'Physics, Chemistry & Maths — up to 20% off',
+    bannerColor: '#4f46e5',
+    bannerEmpty: 'No banners yet. A banner for exam season (“NEET crash kit — up to 20% off”) linked to a category is the quickest way to drive orders.',
+  },
+};
+const copyFor = (vertical) => STORE_COPY[vertical] ?? STORE_COPY.gym;
 export const FULFILLMENT_TONE = { placed: 'blue', packed: 'amber', shipped: 'violet', ready: 'amber', delivered: 'green', cancelled: 'grey' };
 const NUTRITION_FIELDS = [
   ['serving_size', 'Serving size', 'text', '1 scoop (33 g)'],
@@ -51,6 +120,16 @@ const NUTRITION_FIELDS = [
   ['bcaa_g', 'BCAAs (g)', 'number'],
   ['creatine_g', 'Creatine (g)', 'number'],
   ['caffeine_mg', 'Caffeine (mg)', 'number'],
+];
+const BOOK_FIELDS = [
+  ['author', 'Author(s)', 'text', 'H. C. Verma'],
+  ['publisher', 'Publisher', 'text', 'Bharati Bhawan'],
+  ['edition', 'Edition', 'text', '2025–26'],
+  ['year', 'Year', 'number', '2025'],
+  ['language', 'Language', 'text', 'English'],
+  ['pages', 'Pages', 'number', '480'],
+  ['isbn', 'ISBN', 'text', '978…'],
+  ['exam', 'For exam / class', 'text', 'JEE Main & Advanced'],
 ];
 
 export const STATUS_LABEL = {
@@ -113,36 +192,44 @@ const CONSOLE_PRODUCT_OPS = {
 /**
  * The product editor. `badges` is the operator's quality-badge library to
  * pick from, or null to leave the picker out — badges are the operator's to
- * vouch for, so a partner shop's editor has none.
+ * vouch for, so a partner shop's editor has none. `vertical` is the store a
+ * new product goes into; an existing one stays in its own. A coaching
+ * product has book details where a supplement has nutrition facts.
  */
-export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS, { prefill = null, variantId = null } = {}) {
+export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS, { prefill = null, variantId = null, vertical = 'gym' } = {}) {
   const isNew = !product;
   const library = badges ?? [];
+  const store = product?.vertical ?? vertical;
+  const copy = copyFor(store);
+  const books = store === 'coaching';
   // `prefill`: a new product's starting values, from a scanned barcode.
-  const p = product ?? { category: 'protein', active: 1, featured: 0, variants: [], nutrition_facts: null, badges: [], ...prefill };
+  const p = product ?? { category: copy.defaultCategory, active: 1, featured: 0, variants: [], nutrition_facts: null, book_details: null, badges: [], ...prefill };
   const input = (name, value, attrs = {}) => h('input', { name, value: value ?? '', ...attrs });
 
   const inputs = {
-    title: input('title', p.title, { required: true, maxlength: 120, placeholder: 'Gold Standard 100% Whey' }),
-    brand: input('brand', p.brand, { required: true, maxlength: 80, placeholder: 'Optimum Nutrition' }),
+    title: input('title', p.title, { required: true, maxlength: 120, placeholder: copy.titlePlaceholder }),
+    brand: input('brand', p.brand, { required: true, maxlength: 80, placeholder: copy.brandPlaceholder }),
     category: h(
       'select',
       { name: 'category' },
-      ...Object.entries(CATEGORY_LABEL).map(([value, label]) => h('option', { value, selected: value === p.category }, label)),
+      ...Object.entries(categoryLabels(store)).map(([value, label]) => h('option', { value, selected: value === p.category }, label)),
     ),
     mrp: input('mrp', p.mrp, { type: 'number', min: 0, step: '0.01', required: true }),
     price: input('price', p.price, { type: 'number', min: 0, step: '0.01', required: true }),
     image_url: input('image_url', p.image_link, { type: 'url', placeholder: 'https://…/product.webp' }),
-    barcode: input('barcode', p.barcode, { inputmode: 'numeric', maxlength: 20, placeholder: 'Scan or type the pack’s code' }),
-    lab_report_url: input('lab_report_url', p.lab_report_url, { type: 'url', placeholder: 'https://…/lab-report.pdf' }),
+    barcode: input('barcode', p.barcode, { inputmode: 'numeric', maxlength: 20, placeholder: books ? 'Scan the ISBN on the back cover' : 'Scan or type the pack’s code' }),
+    lab_report_url: input('lab_report_url', p.lab_report_url, { type: 'url', placeholder: copy.linkPlaceholder }),
     description: h('textarea', { name: 'description', rows: 3, maxlength: 2000 }, p.description ?? ''),
     featured: h('input', { type: 'checkbox', checked: Boolean(p.featured) }),
     active: h('input', { type: 'checkbox', checked: Boolean(p.active) }),
   };
-  const nutrition = Object.fromEntries(
-    NUTRITION_FIELDS.map(([key, , type, placeholder]) => [
+  // Nutrition facts for a supplement, book details for the coaching store.
+  const factFields = books ? BOOK_FIELDS : NUTRITION_FIELDS;
+  const factValues = (books ? p.book_details : p.nutrition_facts) ?? {};
+  const facts = Object.fromEntries(
+    factFields.map(([key, , type, placeholder]) => [
       key,
-      input(key, p.nutrition_facts?.[key], { type, min: type === 'number' ? 0 : null, step: 'any', placeholder: placeholder ?? '' }),
+      input(key, factValues[key], { type, min: type === 'number' ? 0 : null, step: books ? '1' : 'any', placeholder: placeholder ?? '' }),
     ]),
   );
 
@@ -161,8 +248,8 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
               'tr',
               // The flavour × size a scan just found.
               { class: variantId && v.id === variantId ? 'sa-variant-hit' : null },
-              cell('flavor', { placeholder: 'Chocolate', maxlength: 60 }),
-              cell('weight', { placeholder: '1 kg', maxlength: 40 }),
+              cell('flavor', { placeholder: copy.optionAPlaceholder, maxlength: 60 }),
+              cell('weight', { placeholder: copy.optionBPlaceholder, maxlength: 40 }),
               cell('sku', { placeholder: 'SKU', maxlength: 60 }),
               h(
                 'td',
@@ -184,14 +271,15 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
   }
   drawVariants();
 
-  // Flavours × sizes in one go: the common shape of a supplement listing.
-  const genFlavors = h('input', { placeholder: 'Chocolate, Vanilla, Mocha' });
-  const genWeights = h('input', { placeholder: '1 kg, 2 kg' });
+  // Flavours × sizes in one go: the common shape of a supplement listing (a
+  // book's: languages × formats).
+  const genFlavors = h('input', { placeholder: copy.generateA });
+  const genWeights = h('input', { placeholder: copy.generateB });
   const generate = () => {
     const split = (s) => s.value.split(',').map((x) => x.trim()).filter(Boolean);
     const flavors = split(genFlavors);
     const weights = split(genWeights);
-    if (!flavors.length && !weights.length) return toast('Type some flavours or sizes first', 'error');
+    if (!flavors.length && !weights.length) return toast(copy.generateEmpty, 'error');
     for (const flavor of flavors.length ? flavors : ['']) {
       for (const weight of weights.length ? weights : ['']) {
         if (!variants.some((v) => v.flavor === flavor && v.weight === weight)) {
@@ -296,9 +384,11 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
       class: 'sa-product-form',
       onsubmit: async (event) => {
         event.preventDefault();
-        const facts = {};
-        for (const [key, el] of Object.entries(nutrition)) if (el.value.trim() !== '') facts[key] = el.value.trim();
+        const filled = {};
+        for (const [key, el] of Object.entries(facts)) if (el.value.trim() !== '') filled[key] = el.value.trim();
         const payload = {
+          // The console's own catalogue; a shop's products follow its store.
+          ...(isNew ? { vertical: store } : {}),
           title: inputs.title.value,
           brand: inputs.brand.value,
           category: inputs.category.value,
@@ -311,7 +401,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
           featured: inputs.featured.checked,
           badge_ids: library.filter((b) => picked.has(b.id)).map((b) => b.id),
           active: inputs.active.checked,
-          nutrition_facts: Object.keys(facts).length ? facts : null,
+          [books ? 'book_details' : 'nutrition_facts']: Object.keys(filled).length ? filled : null,
           variants: variants.map((v) => ({
             id: v.id,
             flavor: v.flavor.trim() || null,
@@ -345,29 +435,33 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
       'div',
       { class: 'form-grid' },
       field('Product name *', inputs.title, { full: true }),
-      field('Brand *', inputs.brand),
+      field(`${copy.brandLabel} *`, inputs.brand),
       field('Category', inputs.category),
       field('MRP (₹) *', inputs.mrp),
       field('Selling price (₹) *', inputs.price, { hint: 'Variants can override both.' }),
-      field('Barcode', barcodeInput(inputs.barcode), {
+      field(books ? 'Barcode / ISBN' : 'Barcode', barcodeInput(inputs.barcode), {
         full: true,
-        hint: 'The code printed on the pack — scanning it later finds this product. A flavour or size with its own code takes it in the table below.',
+        hint: books
+          ? 'The ISBN barcode on the back cover — scanning it later finds this book. An edition or format with its own ISBN takes it in the table below.'
+          : 'The code printed on the pack — scanning it later finds this product. A flavour or size with its own code takes it in the table below.',
       }),
       h('div', { class: 'field full' }, h('span', {}, 'Photos'), photosBlock),
       field('…or an image link', inputs.image_url, { full: true, hint: 'Only used while the product has no uploaded photos.' }),
       badges ? h('div', { class: 'field full' }, h('span', {}, 'Quality badges'), badgePicker) : null,
-      field('Lab report URL', inputs.lab_report_url, { full: true, hint: 'Third-party purity / label-claim test, shown to members as a link.' }),
+      field(copy.linkLabel, inputs.lab_report_url, { full: true, hint: copy.linkHint }),
       field('Description', inputs.description, { full: true }),
       h(
         'div',
         { class: 'field full sa-checks' },
-        h('label', {}, inputs.active, ' Active — members can see and buy it'),
+        h('label', {}, inputs.active, books ? ' Active — students can see and buy it' : ' Active — members can see and buy it'),
         h('label', {}, inputs.featured, ' Bestseller — pinned to the top, and leads the badges on its card'),
       ),
     ),
-    h('h4', { class: 'sa-subhead' }, 'Nutrition facts ', h('span', { class: 'muted' }, '(per serving)')),
-    h('div', { class: 'form-grid sa-nutrition' }, ...NUTRITION_FIELDS.map(([key, label]) => field(label, nutrition[key]))),
-    h('h4', { class: 'sa-subhead' }, 'Flavours & sizes'),
+    books
+      ? h('h4', { class: 'sa-subhead' }, 'Book details ', h('span', { class: 'muted' }, '(leave blank for stationery and gear)'))
+      : h('h4', { class: 'sa-subhead' }, 'Nutrition facts ', h('span', { class: 'muted' }, '(per serving)')),
+    h('div', { class: 'form-grid sa-nutrition' }, ...factFields.map(([key, label]) => field(label, facts[key]))),
+    h('h4', { class: 'sa-subhead' }, copy.variantsHeading),
     h(
       'div',
       { class: 'sa-generate' },
@@ -382,7 +476,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
       h(
         'table',
         {},
-        h('thead', {}, h('tr', {}, ...['Flavour', 'Size', 'SKU', 'Barcode', 'MRP', 'Price', 'In stock', ''].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ...[copy.optionA, copy.optionB, 'SKU', books ? 'ISBN / barcode' : 'Barcode', 'MRP', 'Price', 'In stock', ''].map((t) => h('th', {}, t)))),
         variantBody,
       ),
     ),
@@ -407,7 +501,7 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
     ),
   );
 
-  openModal({ title: isNew ? 'New store product' : `Edit · ${product.title}`, wide: true, body: form });
+  openModal({ title: isNew ? (books ? 'New coaching store product' : 'New store product') : `Edit · ${product.title}`, wide: true, body: form });
 }
 
 /* ── Scanning a pack ──────────────────────────────────────────────────── */
@@ -415,18 +509,23 @@ export function openProductModal(product, onSaved, badges = [], ops = CONSOLE_PR
 const SOURCE_NOTE = {
   catalogue: 'Filled in from an existing listing of this pack — check it and set your price',
   openfoodfacts: 'Filled in from Open Food Facts — check it and set your price',
+  openlibrary: 'Filled in from Open Library — check it and set your price',
 };
 
 /**
  * "Scan barcode" on a product list. A pack the list already carries opens for
  * editing (its flavour × size row marked); a new one opens the editor with
  * whatever is known about it, and the barcode, already filled in.
- * `lookup(code)` is the panel's own barcode endpoint.
+ * `lookup(code)` is the panel's own barcode endpoint; `vertical` the store
+ * the list belongs to — on the coaching one a book's ISBN fills in the book.
  */
-export function scanStoreProduct({ lookup, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS }) {
+export function scanStoreProduct({ lookup, onSaved, badges = [], ops = CONSOLE_PRODUCT_OPS, vertical = 'gym' }) {
   openProductScanner({
-    title: 'Scan a product',
-    subtitle: 'Finds it on your list, or starts a new listing from its barcode',
+    title: vertical === 'coaching' ? 'Scan a book or product' : 'Scan a product',
+    subtitle:
+      vertical === 'coaching'
+        ? 'Finds it on your list, or starts a new listing from its ISBN or barcode'
+        : 'Finds it on your list, or starts a new listing from its barcode',
     resolve: lookup,
     onDone: (res) => {
       if (res.existing) {
@@ -443,6 +542,7 @@ export function scanStoreProduct({ lookup, onSaved, badges = [], ops = CONSOLE_P
           category: s.category,
           description: s.description,
           nutrition_facts: s.nutrition_facts,
+          book_details: s.book_details ?? null,
           lab_report_url: s.lab_report_url ?? null,
           image_link: s.image_url,
           mrp: s.mrp ?? '',
@@ -454,7 +554,7 @@ export function scanStoreProduct({ lookup, onSaved, badges = [], ops = CONSOLE_P
         }
       }
       toast(s ? SOURCE_NOTE[res.source] : res.lookup_error ? `${res.lookup_error} — add the details by hand` : `New barcode ${res.barcode} — add its details`);
-      openProductModal(null, onSaved, badges, ops, { prefill });
+      openProductModal(null, onSaved, badges, ops, { prefill, vertical });
     },
   });
 }
@@ -481,7 +581,7 @@ function openOrderModal(order, onSaved) {
       { class: 'sa-order-ship' },
       h('strong', {}, order.shipping_name, ' · ', order.shipping_phone),
       order.fulfillment_method === 'pickup'
-        ? h('p', {}, `Pickup at the gym (${order.tenant_slug}) — ship it to the gym; its desk marks it received and collected.`)
+        ? h('p', {}, `Pickup at the ${copyFor(order.vertical).org} (${order.tenant_slug}) — ship it there; its desk marks it received and collected.`)
         : h('p', {}, [order.shipping_address, order.shipping_city, order.shipping_state, order.shipping_pincode].filter(Boolean).join(', ')),
       h(
         'ul',
@@ -492,7 +592,7 @@ function openOrderModal(order, onSaved) {
     h(
       'div',
       { class: 'form-grid' },
-      field('Status', status, { hint: 'Delivered approves the gym’s commission; cancelled voids it.' }),
+      field('Status', status, { hint: `Delivered approves the ${copyFor(order.vertical).org}’s commission; cancelled voids it.` }),
       field('Courier', courier),
       field('Tracking / AWB', trackingId),
       field('Tracking link', trackingUrl),
@@ -560,11 +660,15 @@ function openPayoutModal(row, onSaved) {
 
 /* ── Banners ──────────────────────────────────────────────────────────── */
 
-function openBannerModal(banner, products, onSaved) {
+/** `vertical`: the store a new banner goes on; an existing one keeps its own. */
+function openBannerModal(banner, products, onSaved, vertical = 'gym') {
   const isNew = !banner;
-  const b = banner ?? { bg_color: '#0c831f', link_type: 'category', link_value: 'protein', active: 1 };
-  const title = h('input', { value: b.title ?? '', maxlength: 60, required: true, placeholder: 'Whey week' });
-  const subtitle = h('input', { value: b.subtitle ?? '', maxlength: 120, placeholder: 'Up to 25% off top brands' });
+  const store = banner?.vertical ?? vertical;
+  const copy = copyFor(store);
+  const labels = categoryLabels(store);
+  const b = banner ?? { bg_color: copy.bannerColor, link_type: 'category', link_value: copy.defaultCategory, active: 1 };
+  const title = h('input', { value: b.title ?? '', maxlength: 60, required: true, placeholder: copy.bannerTitle });
+  const subtitle = h('input', { value: b.subtitle ?? '', maxlength: 120, placeholder: copy.bannerSub });
   const cta = h('input', { value: b.cta_label ?? '', maxlength: 24, placeholder: 'Shop now' });
   const color = h('input', { type: 'color', value: b.bg_color });
   const active = h('input', { type: 'checkbox', checked: Boolean(b.active) });
@@ -577,7 +681,7 @@ function openBannerModal(banner, products, onSaved) {
   let linkValue = h('select', {});
   function drawTarget() {
     if (linkType.value === 'category') {
-      linkValue = h('select', {}, ...Object.entries(CATEGORY_LABEL).map(([v, l]) => h('option', { value: v, selected: v === b.link_value }, l)));
+      linkValue = h('select', {}, ...Object.entries(labels).map(([v, l]) => h('option', { value: v, selected: v === b.link_value }, l)));
     } else if (linkType.value === 'product') {
       linkValue = h('select', {}, ...products.map((p) => h('option', { value: p.id, selected: String(p.id) === String(b.link_value) }, `${p.brand} · ${p.title}`)));
     } else linkValue = null;
@@ -627,7 +731,7 @@ function openBannerModal(banner, products, onSaved) {
       };
       save.disabled = true;
       try {
-        const saved = isNew ? await api.platformCreateBanner(payload) : await api.platformUpdateBanner(banner.id, payload);
+        const saved = isNew ? await api.platformCreateBanner({ ...payload, vertical: store }) : await api.platformUpdateBanner(banner.id, payload);
         closeModal();
         await onSaved();
         if (isNew) {
@@ -661,7 +765,7 @@ function openBannerModal(banner, products, onSaved) {
       }, 'Delete');
 
   openModal({
-    title: isNew ? 'New banner' : `Banner · ${banner.title}`,
+    title: isNew ? `New banner · ${copy.name}` : `Banner · ${banner.title}`,
     wide: true,
     body: h(
       'div',
@@ -807,9 +911,31 @@ function openBadgeModal(badge, onSaved) {
 
 /* ── The section ──────────────────────────────────────────────────────── */
 
+const STORE_PICK_KEY = 'gymbook.console.store';
+
 export function renderStoreAdminSection({ onExpired } = {}) {
   const root = h('div', { class: 'sa' }, h('div', { class: 'empty' }, 'Loading store & monetization…'));
   const orderFilter = { status: '' };
+  // Which store the section shows, remembered for the next visit.
+  let store = 'gym';
+  try {
+    if (localStorage.getItem(STORE_PICK_KEY) === 'coaching') store = 'coaching';
+  } catch {
+    // Storage blocked: start on the gym store.
+  }
+  const pickStore = async (next) => {
+    if (next === store) return;
+    store = next;
+    orderFilter.status = '';
+    try {
+      localStorage.setItem(STORE_PICK_KEY, next);
+    } catch {
+      // Not remembered, which is fine.
+    }
+    await refresh();
+  };
+  /** A store setting's column: the coaching store's carry a prefix. */
+  const col = (key) => (store === 'coaching' ? `coaching_${key}` : key);
 
   async function guard(fn) {
     try {
@@ -833,8 +959,33 @@ export function renderStoreAdminSection({ onExpired } = {}) {
     await refresh();
   }
 
+  /** The two stores, side by side: which one every card below is about. */
+  function storePicker(state) {
+    return h(
+      'div',
+      { class: 'sa-seg sa-store-pick', role: 'tablist', 'aria-label': 'Store' },
+      ...Object.entries(STORE_COPY).map(([key, copy]) => {
+        const status = STORE_STATUS[state.stores[key].store_status];
+        return h(
+          'button',
+          {
+            type: 'button',
+            role: 'tab',
+            'aria-selected': String(store === key),
+            class: `sa-seg-btn${store === key ? ' active blue' : ''}`,
+            onclick: () => pickStore(key),
+          },
+          h('strong', {}, renderIcon(key === 'coaching' ? 'graduation' : 'dumbbell', { size: 15 }), ` ${copy.name}`),
+          h('small', {}, `${copy.app} app · ${status.label}`),
+        );
+      }),
+    );
+  }
+
   function controlsCard(state) {
     const s = state.settings;
+    const own = state.stores[store];
+    const copy = copyFor(store);
     const seg = h(
       'div',
       { class: 'sa-seg', role: 'radiogroup', 'aria-label': 'Store status' },
@@ -844,15 +995,15 @@ export function renderStoreAdminSection({ onExpired } = {}) {
           {
             type: 'button',
             role: 'radio',
-            'aria-checked': String(s.store_status === value),
-            class: `sa-seg-btn${s.store_status === value ? ` active ${meta.tone}` : ''}`,
+            'aria-checked': String(own.store_status === value),
+            class: `sa-seg-btn${own.store_status === value ? ` active ${meta.tone}` : ''}`,
             onclick: () => {
-              if (value === s.store_status) return;
-              const apply = () => save({ store_status: value }, `Store is now ${meta.label.toLowerCase()}`);
+              if (value === own.store_status) return;
+              const apply = () => save({ [col('store_status')]: value }, `${copy.name} is now ${meta.label.toLowerCase()}`);
               if (value === 'live') {
                 confirmDialog({
-                  title: 'Open the store to every member?',
-                  message: 'Members of every gym will see the live catalogue and can pay by UPI straight away.',
+                  title: store === 'coaching' ? 'Open the coaching store to every student?' : 'Open the store to every member?',
+                  message: `${copy.members} will see the live catalogue and can pay by UPI straight away.`,
                   confirmLabel: 'Go live',
                   onConfirm: apply,
                 });
@@ -860,7 +1011,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
             },
           },
           h('strong', {}, meta.label),
-          h('small', {}, meta.hint),
+          h('small', {}, store === 'coaching' ? meta.studentHint : meta.hint),
         ),
       ),
     );
@@ -873,19 +1024,25 @@ export function renderStoreAdminSection({ onExpired } = {}) {
 
     const pct = (name, value) => h('input', { name, type: 'number', min: 0, max: 100, step: '0.1', value });
     const rupees = (name, value) => h('input', { name, type: 'number', min: 1, step: '1', value });
+    const gym = store === 'gym';
+    // The Diet & Workout add-on is a gym thing: its rates only show there.
     const rates = {
-      addon_commission_pct: pct('addon_commission_pct', s.addon_commission_pct),
-      store_commission_pct: pct('store_commission_pct', s.store_commission_pct),
-      addon_price_1m: rupees('addon_price_1m', s.addon_price_1m),
-      addon_price_3m: rupees('addon_price_3m', s.addon_price_3m),
-      addon_price_6m: rupees('addon_price_6m', s.addon_price_6m),
+      [col('store_commission_pct')]: pct('store_commission_pct', own.store_commission_pct),
+      ...(gym
+        ? {
+            addon_commission_pct: pct('addon_commission_pct', s.addon_commission_pct),
+            addon_price_1m: rupees('addon_price_1m', s.addon_price_1m),
+            addon_price_3m: rupees('addon_price_3m', s.addon_price_3m),
+            addon_price_6m: rupees('addon_price_6m', s.addon_price_6m),
+          }
+        : {}),
     };
     const text = (name, value, placeholder) => h('input', { name, value, maxlength: 60, placeholder });
     const delivery = {
-      delivery_eta: text('delivery_eta', s.delivery_eta, 'Delivery in 2–4 days'),
-      pickup_eta: text('pickup_eta', s.pickup_eta, 'Ready at your gym in 3–5 days'),
+      delivery_eta: text('delivery_eta', own.delivery_eta, gym ? 'Delivery in 2–4 days' : 'Delivery in 3–5 days'),
+      pickup_eta: text('pickup_eta', own.pickup_eta, gym ? 'Ready at your gym in 3–5 days' : 'Ready at your institute in 3–5 days'),
     };
-    const pickupOn = h('input', { type: 'checkbox', checked: Boolean(s.pickup_enabled) });
+    const pickupOn = h('input', { type: 'checkbox', checked: Boolean(own.pickup_enabled) });
     const saveRates = h(
       'button',
       {
@@ -894,9 +1051,9 @@ export function renderStoreAdminSection({ onExpired } = {}) {
           save(
             {
               ...Object.fromEntries(Object.entries(rates).map(([k, el]) => [k, Number(el.value)])),
-              delivery_eta: delivery.delivery_eta.value.trim(),
-              pickup_eta: delivery.pickup_eta.value.trim(),
-              pickup_enabled: pickupOn.checked,
+              [col('delivery_eta')]: delivery.delivery_eta.value.trim(),
+              [col('pickup_eta')]: delivery.pickup_eta.value.trim(),
+              [col('pickup_enabled')]: pickupOn.checked,
             },
             'Settings saved',
           ),
@@ -907,26 +1064,39 @@ export function renderStoreAdminSection({ onExpired } = {}) {
     return h(
       'div',
       { class: 'card sa-controls' },
-      h('div', { class: 'card-head' }, h('h3', {}, renderIcon('settings', { size: 17 }), 'Controls')),
-      h('div', { class: 'sa-label' }, 'Member store'),
+      h('div', { class: 'card-head' }, h('h3', {}, renderIcon('settings', { size: 17 }), `Controls · ${copy.name}`)),
+      h('div', { class: 'sa-label' }, gym ? 'Member store' : 'Student store'),
       seg,
       h(
         'div',
         { class: 'form-grid sa-rates' },
-        field('Diet & Workout paywall — how members pay', mode, {
-          full: true,
-          hint: state.razorpay_configured
-            ? 'Online and Both show the in-app UPI tiers; Both also offers the gym’s front desk.'
-            : 'Razorpay keys are not set, so members are shown the front desk whatever is picked here.',
-        }),
-        field('Gym cut of add-on sales (%)', rates.addon_commission_pct),
-        field('Gym cut of store sales (%)', rates.store_commission_pct, { hint: 'Fixed onto each order when it is placed.' }),
-        field('Add-on · 1 month (₹)', rates.addon_price_1m),
-        field('Add-on · 3 months (₹)', rates.addon_price_3m),
-        field('Add-on · 6 months (₹)', rates.addon_price_6m),
+        gym
+          ? field('Diet & Workout paywall — how members pay', mode, {
+              full: true,
+              hint: state.razorpay_configured
+                ? 'Online and Both show the in-app UPI tiers; Both also offers the gym’s front desk.'
+                : 'Razorpay keys are not set, so members are shown the front desk whatever is picked here.',
+            })
+          : null,
+        gym ? field('Gym cut of add-on sales (%)', rates.addon_commission_pct) : null,
+        field(gym ? 'Gym cut of store sales (%)' : 'Institute cut of store sales (%)', rates[col('store_commission_pct')], { hint: 'Fixed onto each order when it is placed.' }),
+        gym ? field('Add-on · 1 month (₹)', rates.addon_price_1m) : null,
+        gym ? field('Add-on · 3 months (₹)', rates.addon_price_3m) : null,
+        gym ? field('Add-on · 6 months (₹)', rates.addon_price_6m) : null,
         field('Delivery promise', delivery.delivery_eta, { hint: 'The big line in the store header, like Blinkit’s “10 minutes”.' }),
-        field('Pickup promise', delivery.pickup_eta, { hint: 'Shown when a member chooses to collect at their gym.' }),
-        h('div', { class: 'field full sa-checks' }, h('label', {}, pickupOn, ' Offer pickup at the member’s gym — orders ship to the gym and its front desk hands them over')),
+        field('Pickup promise', delivery.pickup_eta, { hint: gym ? 'Shown when a member chooses to collect at their gym.' : 'Shown when a student chooses to collect at their institute.' }),
+        h(
+          'div',
+          { class: 'field full sa-checks' },
+          h(
+            'label',
+            {},
+            pickupOn,
+            gym
+              ? ' Offer pickup at the member’s gym — orders ship to the gym and its front desk hands them over'
+              : ' Offer pickup at the student’s institute — orders ship to the institute and its office hands them over',
+          ),
+        ),
       ),
       h('div', { class: 'sa-actions' }, saveRates),
     );
@@ -942,7 +1112,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
         h('h3', {}, renderIcon('image', { size: 17 }), 'Store banners'),
         h('span', { class: 'muted' }, 'The swipeable strip at the top of the store'),
         h('div', { class: 'spacer' }),
-        h('button', { class: 'btn primary sm', onclick: () => openBannerModal(null, products, onChanged) }, renderIcon('plus', { size: 14 }), 'Add banner'),
+        h('button', { class: 'btn primary sm', onclick: () => openBannerModal(null, products, onChanged, store) }, renderIcon('plus', { size: 14 }), 'Add banner'),
       ),
       banners.length
         ? h(
@@ -957,13 +1127,13 @@ export function renderStoreAdminSection({ onExpired } = {}) {
                 h(
                   'div',
                   { class: 'sa-banner-foot' },
-                  h('span', {}, b.active ? 'Live' : 'Hidden', ' · ', b.link_type === 'none' ? 'no link' : b.link_type === 'category' ? CATEGORY_LABEL[b.link_value] : products.find((p) => String(p.id) === String(b.link_value))?.title ?? 'product'),
+                  h('span', {}, b.active ? 'Live' : 'Hidden', ' · ', b.link_type === 'none' ? 'no link' : b.link_type === 'category' ? categoryLabels(store)[b.link_value] : products.find((p) => String(p.id) === String(b.link_value))?.title ?? 'product'),
                   h('button', { type: 'button', class: 'btn sm', onclick: () => openBannerModal(b, products, onChanged) }, 'Edit'),
                 ),
               ),
             ),
           )
-        : h('p', { class: 'muted', style: 'margin:0' }, 'No banners yet. A banner with a bold offer (“Whey week — up to 25% off”) linked to a category is the quickest way to drive orders.'),
+        : h('p', { class: 'muted', style: 'margin:0' }, copyFor(store).bannerEmpty),
     );
   }
 
@@ -1008,11 +1178,20 @@ export function renderStoreAdminSection({ onExpired } = {}) {
       h(
         'div',
         { class: 'card-head' },
-        h('h3', {}, renderIcon('bag', { size: 17 }), 'Central catalogue'),
+        h('h3', {}, renderIcon(store === 'coaching' ? 'book' : 'bag', { size: 17 }), `Central catalogue · ${copyFor(store).name}`),
         h('span', { class: 'muted' }, `${products.filter((p) => p.active).length} active of ${products.length}`),
         h('div', { class: 'spacer' }),
-        h('button', { class: 'btn sm', onclick: () => scanStoreProduct({ lookup: api.platformStoreBarcode, onSaved: onChanged, badges }) }, renderIcon('scan', { size: 14 }), 'Scan barcode'),
-        h('button', { class: 'btn primary sm', onclick: () => openProductModal(null, onChanged, badges) }, renderIcon('plus', { size: 14 }), 'Add product'),
+        h(
+          'button',
+          {
+            class: 'btn sm',
+            onclick: () =>
+              scanStoreProduct({ lookup: (code) => api.platformStoreBarcode(code, { vertical: store }), onSaved: onChanged, badges, vertical: store }),
+          },
+          renderIcon('scan', { size: 14 }),
+          store === 'coaching' ? 'Scan ISBN / barcode' : 'Scan barcode',
+        ),
+        h('button', { class: 'btn primary sm', onclick: () => openProductModal(null, onChanged, badges, undefined, { vertical: store }) }, renderIcon('plus', { size: 14 }), 'Add product'),
       ),
       table(
         [
@@ -1028,7 +1207,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
                 h('div', {}, h('strong', {}, p.title), h('div', { class: 'muted' }, p.brand)),
               ),
           },
-          { label: 'Category', render: (p) => CATEGORY_LABEL[p.category] ?? p.category },
+          { label: 'Category', render: (p) => categoryLabels(p.vertical)[p.category] ?? p.category },
           {
             label: 'Variants',
             render: (p) => (p.variants.length ? `${p.variants.length} · ${p.variants.filter((v) => v.in_stock).length} in stock` : '—'),
@@ -1090,31 +1269,32 @@ export function renderStoreAdminSection({ onExpired } = {}) {
       h('option', { value: '' }, 'All paid orders'),
       ...['placed', 'packed', 'shipped', 'ready', 'delivered', 'cancelled'].map((s) => h('option', { value: s, selected: s === orderFilter.status }, STATUS_LABEL[s])),
     );
+    const gym = store === 'gym';
     return h(
       'div',
       { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, renderIcon('truck', { size: 17 }), 'Member orders'), h('div', { class: 'spacer' }), filter),
+      h('div', { class: 'card-head' }, h('h3', {}, renderIcon('truck', { size: 17 }), gym ? 'Member orders' : 'Student orders'), h('div', { class: 'spacer' }), filter),
       table(
         [
           { label: 'Order', render: (o) => h('div', {}, h('strong', {}, o.order_code), h('div', { class: 'muted' }, date(o.paid_at || o.created_at))) },
-          { label: 'Gym', render: (o) => o.gym_name || o.tenant_slug },
+          { label: gym ? 'Gym' : 'Institute', render: (o) => o.gym_name || o.tenant_slug },
           {
             label: 'Fulfilled by',
             render: (o) => (o.seller_name ? h('span', { class: 'badge violet' }, o.seller_name) : h('span', { class: 'muted' }, 'Central')),
           },
           {
-            label: 'Member',
+            label: gym ? 'Member' : 'Student',
             render: (o) =>
               h(
                 'div',
                 {},
                 o.member_name || '—',
-                h('div', { class: 'muted' }, o.fulfillment_method === 'pickup' ? 'Gym pickup' : `${o.shipping_city ?? ''} ${o.shipping_pincode ?? ''}`),
+                h('div', { class: 'muted' }, o.fulfillment_method === 'pickup' ? (gym ? 'Gym pickup' : 'Institute pickup') : `${o.shipping_city ?? ''} ${o.shipping_pincode ?? ''}`),
               ),
           },
           { label: 'Items', render: (o) => o.items.reduce((n, i) => n + i.quantity, 0) },
           { label: 'Value', align: 'right', render: (o) => inr(o.total_amount) },
-          { label: 'Gym cut', align: 'right', render: (o) => h('span', {}, inr(o.commission_amount), h('div', { class: 'muted' }, `${o.commission_pct}%`)) },
+          { label: gym ? 'Gym cut' : 'Institute cut', align: 'right', render: (o) => h('span', {}, inr(o.commission_amount), h('div', { class: 'muted' }, `${o.commission_pct}%`)) },
           { label: 'Status', render: (o) => badge(FULFILLMENT_TONE[o.fulfillment_status] ?? 'grey', STATUS_LABEL[o.fulfillment_status] ?? o.fulfillment_status) },
         ],
         orders,
@@ -1124,13 +1304,14 @@ export function renderStoreAdminSection({ onExpired } = {}) {
   }
 
   function payoutsCard(rows, onChanged) {
+    const gym = store === 'gym';
     return h(
       'div',
       { class: 'card' },
-      h('div', { class: 'card-head' }, h('h3', {}, renderIcon('wallet', { size: 17 }), 'Gym commissions & payouts')),
+      h('div', { class: 'card-head' }, h('h3', {}, renderIcon('wallet', { size: 17 }), gym ? 'Gym commissions & payouts' : 'Institute commissions & payouts')),
       table(
         [
-          { label: 'Gym', render: (r) => h('div', {}, h('strong', {}, r.gym_name), h('div', { class: 'muted' }, `${r.sales} sale${r.sales === 1 ? '' : 's'}`)) },
+          { label: gym ? 'Gym' : 'Institute', render: (r) => h('div', {}, h('strong', {}, r.gym_name), h('div', { class: 'muted' }, `${r.sales} sale${r.sales === 1 ? '' : 's'}`)) },
           { label: 'Pending delivery', align: 'right', render: (r) => inr(r.pending) },
           { label: 'Payable now', align: 'right', render: (r) => h('strong', {}, inr(r.payable)) },
           { label: 'Paid out', align: 'right', render: (r) => inr(r.paid) },
@@ -1150,10 +1331,10 @@ export function renderStoreAdminSection({ onExpired } = {}) {
     const data = await guard(() =>
       Promise.all([
         api.platformMonetization(),
-        api.platformStoreProducts(),
-        api.platformStoreOrders({ status: orderFilter.status }),
+        api.platformStoreProducts({ vertical: store }),
+        api.platformStoreOrders({ status: orderFilter.status, vertical: store }),
         api.platformCommissions(),
-        api.platformBanners(),
+        api.platformBanners({ vertical: store }),
         api.platformBadges(),
       ]),
     ).catch((err) => {
@@ -1162,17 +1343,23 @@ export function renderStoreAdminSection({ onExpired } = {}) {
     });
     if (!data) return;
     const [state, products, orders, commissions, banners, badges] = data;
-    const { summary, settings } = state;
-    const status = STORE_STATUS[settings.store_status];
+    const { summary } = state;
+    const status = STORE_STATUS[state.stores[store].store_status];
+    const sales = summary.stores?.[store] ?? summary.store;
+    const owedTo = commissions.items.filter((r) => (r.vertical ?? 'gym') === store);
+    const owed = owedTo.reduce((acc, r) => ({ owed: acc.owed + r.pending + r.payable, paid: acc.paid + r.paid }), { owed: 0, paid: 0 });
 
-    fill(root, 
+    fill(root,
+      storePicker(state),
       h(
         'div',
         { class: 'grid cols-4', style: 'gap:12px;margin-bottom:16px' },
-        stat('Store', status.label, status.hint),
-        stat('Store GMV', inr(summary.store.gmv), `${summary.store.orders} paid order${summary.store.orders === 1 ? '' : 's'} · ${summary.store.to_ship} to ship`),
-        stat('Add-on sales', inr(summary.addon.revenue), `${summary.addon.sales} in-app purchase${summary.addon.sales === 1 ? '' : 's'}`),
-        stat('Owed to gyms', inr(summary.commissions.owed), `${inr(summary.commissions.paid)} paid out`),
+        stat(copyFor(store).name, status.label, store === 'coaching' ? status.studentHint : status.hint),
+        stat('Store GMV', inr(sales.gmv), `${sales.orders} paid order${sales.orders === 1 ? '' : 's'} · ${sales.to_ship} to ship`),
+        store === 'gym'
+          ? stat('Add-on sales', inr(summary.addon.revenue), `${summary.addon.sales} in-app purchase${summary.addon.sales === 1 ? '' : 's'}`)
+          : stat('Catalogue', String(products.items.filter((p) => p.active).length), 'active products on the central shelf'),
+        stat(store === 'gym' ? 'Owed to gyms' : 'Owed to institutes', inr(owed.owed), `${inr(owed.paid)} paid out`),
       ),
       !state.razorpay_configured
         ? h(
@@ -1187,7 +1374,7 @@ export function renderStoreAdminSection({ onExpired } = {}) {
       badgesCard(badges.items, refresh),
       catalogCard(products.items, badges.items, refresh),
       ordersCard(orders.items, refresh),
-      payoutsCard(commissions.items, refresh),
+      payoutsCard(owedTo, refresh),
     );
   }
 

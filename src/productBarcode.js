@@ -1,4 +1,6 @@
+import { config } from './config.js';
 import { get } from './db.js';
+import { HttpError } from './errors.js';
 import { barcodeVariants, normaliseBarcode, openFoodFactsRecord } from './foodBarcode.js';
 import { getStoreProduct, shelfProductByBarcode, storeRegistry } from './monetization.js';
 
@@ -16,6 +18,11 @@ import { getStoreProduct, shelfProductByBarcode, storeRegistry } from './monetiz
  *    pack, never anyone's own price), then from Open Food Facts. Null when
  *    neither knows it: the barcode is still kept on the new product, so the
  *    next scan finds it.
+ *
+ * The coaching store's shelves sell books, whose barcode is their ISBN: there
+ * the second source is Open Library instead — title, author, publisher, pages
+ * and the cover — and a code that is not an ISBN (a pen, a calculator) has
+ * none, since Open Food Facts only knows groceries.
  */
 
 const { one } = storeRegistry;
@@ -79,16 +86,17 @@ function fromOpenFoodFacts(product) {
   };
 }
 
-/** The newest listing anywhere on the platform carrying this barcode. */
-function fromCatalogue(code) {
+/** The newest listing anywhere in `vertical`'s store carrying this barcode. */
+function fromCatalogue(code, vertical) {
   const codes = barcodeVariants(code);
   const marks = codes.map(() => '?').join(',');
   const hit = one(
     `SELECT p.id, v.id AS variant_id FROM store_products p
      LEFT JOIN store_product_variants v ON v.product_id = p.id AND v.barcode IN (${marks})
-     WHERE p.barcode IN (${marks}) OR v.id IS NOT NULL
+     WHERE p.vertical = ? AND (p.barcode IN (${marks}) OR v.id IS NOT NULL)
      ORDER BY p.active DESC, p.updated_at DESC, p.id DESC LIMIT 1`,
     ...codes,
+    vertical,
     ...codes,
   );
   if (!hit) return null;
@@ -102,6 +110,7 @@ function fromCatalogue(code) {
     // The cover photo's address: content-addressed, so it can be shared.
     image_url: p.image_url,
     nutrition_facts: p.nutrition_facts,
+    book_details: p.book_details,
     lab_report_url: p.lab_report_url,
     size: variant?.weight ?? null,
     flavor: variant?.flavor ?? null,
@@ -110,10 +119,68 @@ function fromCatalogue(code) {
   };
 }
 
-async function suggest(code) {
-  const listed = fromCatalogue(code);
+/** ISBN-13s are EAN-13s from the 978/979 "Bookland" range. */
+const isIsbn = (code) => /^97[89]\d{10}$/.test(code);
+
+/** A coaching store category from a book's title and subjects. */
+function guessBookCategory(text) {
+  const t = String(text || '').toLowerCase();
+  if (/previous[\s-]years?|\bpyqs?\b|solved papers|chapter[\s-]?wise solutions/.test(t)) return 'pyq';
+  if (/\b(jee|neet|upsc|gate|cat|ssc|clat|cuet|nda|olympiad|ias|banking)\b|objective|practice|mock tests?|question bank|guide/.test(t)) return 'test_prep';
+  return 'books';
+}
+
+const BOOK_LOOKUP_TIMEOUT_MS = 6000;
+
+/** A book's details from Open Library, in the store's suggestion shape —
+ * its publisher stands where a supplement's brand would. */
+async function fromOpenLibrary(isbn) {
+  let res;
+  try {
+    res = await fetch(`${config.bookDbUrl}/api/books?bibkeys=ISBN:${isbn}&jscmd=data&format=json`, {
+      headers: { 'User-Agent': config.foodDbUserAgent, Accept: 'application/json' },
+      signal: AbortSignal.timeout(BOOK_LOOKUP_TIMEOUT_MS),
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach the book database');
+  }
+  if (!res.ok) throw new HttpError(502, 'The book database is having trouble');
+  const book = (await res.json().catch(() => null))?.[`ISBN:${isbn}`];
+  if (!book?.title) return null;
+  const title = [book.title, book.subtitle].filter(Boolean).join(': ').slice(0, 120);
+  const authors = (book.authors ?? []).map((a) => a?.name).filter(Boolean);
+  const publisher = book.publishers?.[0]?.name ? String(book.publishers[0].name).slice(0, 80) : null;
+  const subjects = (book.subjects ?? []).map((s) => s?.name ?? s).join(' ');
+  const cover = book.cover?.large || book.cover?.medium || null;
+  const details = {
+    author: authors.slice(0, 3).join(', ') || undefined,
+    publisher: publisher ?? undefined,
+    year: Number(/\b(1[89]|20)\d\d\b/.exec(book.publish_date ?? '')?.[0]) || undefined,
+    pages: Number.isInteger(book.number_of_pages) ? book.number_of_pages : undefined,
+    isbn,
+  };
+  return {
+    title,
+    brand: publisher ?? authors[0] ?? null,
+    category: guessBookCategory(`${title} ${subjects}`),
+    description: null,
+    image_url: cover && /^https?:\/\//.test(cover) ? cover : null,
+    nutrition_facts: null,
+    book_details: Object.fromEntries(Object.entries(details).filter(([, v]) => v !== undefined)),
+    size: null,
+    mrp: null,
+    beverage: false,
+  };
+}
+
+async function suggest(code, vertical = 'gym') {
+  const listed = fromCatalogue(code, vertical);
   if (listed) return { suggestion: listed, source: 'catalogue' };
   try {
+    if (vertical === 'coaching') {
+      const book = isIsbn(code) ? await fromOpenLibrary(code) : null;
+      return { suggestion: book, source: book ? 'openlibrary' : null };
+    }
     const record = await openFoodFactsRecord(code);
     const suggestion = record ? fromOpenFoodFacts(record) : null;
     return { suggestion, source: suggestion ? 'openfoodfacts' : null };
@@ -125,13 +192,13 @@ async function suggest(code) {
   }
 }
 
-/** A scan on a store shelf: `sellerId` null is the central catalogue, a
- * number a partner shop's shelf. */
-export async function lookupStoreBarcode(raw, { sellerId }) {
+/** A scan on a store shelf: `sellerId` null is the central catalogue of
+ * `vertical`'s store, a number a partner shop's shelf. */
+export async function lookupStoreBarcode(raw, { sellerId, vertical = 'gym' }) {
   const code = normaliseBarcode(raw);
-  const hit = shelfProductByBarcode(code, sellerId);
+  const hit = shelfProductByBarcode(code, sellerId, null, vertical);
   if (hit) return { barcode: code, existing: getStoreProduct(hit.id), variant_id: hit.variant_id ?? null };
-  return { barcode: code, existing: null, ...(await suggest(code)) };
+  return { barcode: code, existing: null, ...(await suggest(code, vertical)) };
 }
 
 const GYM_CATEGORY = { protein: 'supplements', creatine: 'supplements', preworkout: 'supplements', bcaa: 'supplements', vitamins: 'supplements', snacks: 'snacks', gear: 'accessories', other: 'other' };

@@ -563,8 +563,9 @@ export const api = {
   platformStoreProducts: (params) =>
     request('GET', `/platform/admin/store/products${query(params)}`, undefined, { token: platformSession.token }),
   // A scanned pack: the catalogue's own product, or details for a new one.
-  platformStoreBarcode: (code) =>
-    request('GET', `/platform/admin/store/barcode/${encodeURIComponent(code)}`, undefined, { token: platformSession.token }),
+  // `params.vertical` picks the store's catalogue (a book's ISBN for coaching).
+  platformStoreBarcode: (code, params) =>
+    request('GET', `/platform/admin/store/barcode/${encodeURIComponent(code)}${query(params)}`, undefined, { token: platformSession.token }),
   platformCreateStoreProduct: (payload) => request('POST', '/platform/admin/store/products', payload, { token: platformSession.token }),
   platformUpdateStoreProduct: (id, payload) =>
     request('PATCH', `/platform/admin/store/products/${id}`, payload, { token: platformSession.token }),
@@ -578,7 +579,7 @@ export const api = {
     request('DELETE', `/platform/admin/store/products/${id}/images/${imageId}`, undefined, { token: platformSession.token }),
   platformPrimaryProductImage: (id, imageId) =>
     request('POST', `/platform/admin/store/products/${id}/images/${imageId}/primary`, {}, { token: platformSession.token }),
-  platformBanners: () => request('GET', '/platform/admin/store/banners', undefined, { token: platformSession.token }),
+  platformBanners: (params) => request('GET', `/platform/admin/store/banners${query(params)}`, undefined, { token: platformSession.token }),
   platformCreateBanner: (payload) => request('POST', '/platform/admin/store/banners', payload, { token: platformSession.token }),
   platformUpdateBanner: (id, payload) => request('PATCH', `/platform/admin/store/banners/${id}`, payload, { token: platformSession.token }),
   platformBannerImage: (id, file) => uploadFile(`/platform/admin/store/banners/${id}/image`, file, { token: platformSession.token }),

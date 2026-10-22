@@ -1235,7 +1235,7 @@ const SECTIONS = [
     icon: 'store',
     label: 'Store & monetization',
     title: 'Store & monetization',
-    sub: 'The member store, the Diet & Workout add-on and each gym’s revenue share.',
+    sub: 'The gym and coaching stores, the Diet & Workout add-on and each gym’s and institute’s revenue share.',
   },
   {
     id: 'shops',
@@ -1243,7 +1243,7 @@ const SECTIONS = [
     icon: 'package',
     label: 'Partner shops',
     title: 'Partner shops',
-    sub: 'Local supplement shops that sell to their area’s gyms from their own Shop panel — no console access.',
+    sub: 'Local supplement shops and bookshops that sell to their area’s gyms and institutes from their own Shop panel — no console access.',
   },
 ];
 

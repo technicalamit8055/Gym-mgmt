@@ -2,7 +2,15 @@ import crypto from 'node:crypto';
 import { hashPassword, issueSellerToken, verifyPassword } from './auth.js';
 import { DEFAULT_TENANT_SLUG } from './config.js';
 import { badRequest, conflict, forbidden, notFound, unauthorized } from './errors.js';
-import { deleteStoreProduct, monetizationSettings, shopRates, storeRegistry } from './monetization.js';
+import {
+  deleteStoreProduct,
+  monetizationSettings,
+  shopRates,
+  STORE_VERTICALS,
+  storeRegistry,
+  storeVerticalOf,
+  storeVerticalOfType,
+} from './monetization.js';
 import { findTenantBySlug, listTenants } from './tenants.js';
 import { parse } from './validate.js';
 
@@ -20,6 +28,10 @@ import { parse } from './validate.js';
  *
  * A shop sees only its own products, its own orders and its own money — never
  * another shop's, never a gym's members, never the console.
+ *
+ * A shop sells in one store (`vertical`): a supplement shop serves gyms, a
+ * bookshop serves coaching institutes. Its products land in that store, and
+ * it can only be given tenants that shop there.
  */
 
 const { one, many, exec, tx } = storeRegistry;
@@ -39,6 +51,7 @@ const SELLER_FIELDS = {
   gym_commission_pct: { type: 'number', min: 0, max: 50 },
   owned: { type: 'boolean' },
   active: { type: 'boolean' },
+  vertical: { type: 'enum', values: STORE_VERTICALS },
 };
 // What a shop may change about itself. Its name, login, city and fee are the
 // operator's — they decide what members see and what the shop is paid.
@@ -102,8 +115,8 @@ function present(row, stats, settings = monetizationSettings()) {
     ...seller,
     active: Boolean(seller.active),
     owned: Boolean(seller.owned),
-    // The rates its next order will carry, after the platform-wide defaults.
-    rates: shopRates(row, settings),
+    // The rates its next order will carry, after its store's defaults.
+    rates: shopRates(row, settings, row.vertical),
     must_change_password: Boolean(seller.must_change_password),
     gyms: many('SELECT tenant_slug FROM store_seller_gyms WHERE seller_id = ? ORDER BY tenant_slug', row.id).map((g) => gymLabel(g.tenant_slug)),
     products,
@@ -150,6 +163,7 @@ export function sellerGymOptions() {
       city: t.city ?? null,
       pincode: t.pincode ?? null,
       business_type: t.business_type ?? 'gym',
+      vertical: storeVerticalOfType(t.business_type),
       seller: served.get(t.slug) ?? null,
     }));
 }
@@ -157,14 +171,22 @@ export function sellerGymOptions() {
 /**
  * Replaces the set of gyms a shop serves. A gym another shop was serving
  * moves to this one — a gym has one shelf — and the response says which, so
- * the console can tell the operator.
+ * the console can tell the operator. Every one must shop in the shop's own
+ * store: a bookshop cannot be handed a gym, nor a supplement shop an institute.
  */
-function writeSellerGyms(sellerId, raw) {
+function writeSellerGyms(sellerId, raw, vertical) {
   if (!Array.isArray(raw)) throw badRequest('Gyms must be a list', { gyms: 'must be a list' });
   const slugs = [...new Set(raw.map((s) => String(s).trim().toLowerCase()).filter(Boolean))];
   if (slugs.length > 500) throw badRequest('At most 500 gyms per shop', { gyms: 'at most 500' });
   for (const slug of slugs) {
     if (slug !== DEFAULT_TENANT_SLUG && !findTenantBySlug(slug)) throw badRequest(`No gym found for "${slug}"`, { gyms: `unknown gym ${slug}` });
+    if (storeVerticalOf(slug) !== vertical) {
+      const { gym_name: name } = gymLabel(slug);
+      throw badRequest(
+        vertical === 'coaching' ? `${name} is not a coaching institute — a bookshop serves institutes only` : `${name} is a coaching institute — it shops in the coaching store`,
+        { gyms: `${slug} is in the other store` },
+      );
+    }
   }
   const moved = slugs
     .map((slug) => ({ slug, from: one('SELECT seller_id FROM store_seller_gyms WHERE tenant_slug = ? AND seller_id != ?', slug, sellerId) }))
@@ -194,6 +216,7 @@ export function createSeller(payload) {
     city: { ...SELLER_FIELDS.city, required: true },
     platform_fee_pct: { ...SELLER_FIELDS.platform_fee_pct, default: 10 },
     owned: { ...SELLER_FIELDS.owned, default: 0 },
+    vertical: { ...SELLER_FIELDS.vertical, default: 'gym' },
   });
   // Your own dark store starts with nothing taken off its orders: no platform
   // fee (see shopRates), and no gym cut unless one is set explicitly.
@@ -207,8 +230,8 @@ export function createSeller(payload) {
   return tx(() => {
     const info = exec(
       `INSERT INTO store_sellers (name, owner_name, email, phone, city, area, address, gstin, platform_fee_pct, owned,
-                                  gym_commission_pct, password_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                  gym_commission_pct, password_hash, vertical)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       body.name,
       body.owner_name,
       body.email,
@@ -221,9 +244,10 @@ export function createSeller(payload) {
       body.owned,
       gymPct ?? null,
       hashPassword(password),
+      body.vertical,
     );
     const id = Number(info.lastInsertRowid);
-    const moved = payload?.gyms !== undefined ? writeSellerGyms(id, payload.gyms) : [];
+    const moved = payload?.gyms !== undefined ? writeSellerGyms(id, payload.gyms, body.vertical) : [];
     return { seller: getSeller(id), password, moved };
   });
 }
@@ -248,6 +272,17 @@ export function updateSeller(id, payload) {
   if (sets.email && sets.email !== current.email.toLowerCase() && one('SELECT id FROM store_sellers WHERE email = ? AND id != ?', sets.email, id)) {
     throw conflict('A shop already signs in with that email');
   }
+  // Its products and orders belong to the store it sells in, so it can only
+  // move to the other one while it has neither.
+  const vertical = sets.vertical ?? current.vertical;
+  if (vertical !== current.vertical) {
+    if (one('SELECT 1 AS ok FROM store_products WHERE seller_id = ? UNION ALL SELECT 1 FROM store_orders WHERE seller_id = ? LIMIT 1', id, id)) {
+      throw conflict('This shop already has products or orders in its store — it cannot switch stores');
+    }
+    if (payload?.gyms === undefined && one('SELECT 1 AS ok FROM store_seller_gyms WHERE seller_id = ?', id)) {
+      throw conflict('Choose its new gyms or institutes when switching stores');
+    }
+  }
   return tx(() => {
     const columns = Object.keys(sets);
     if (columns.length) {
@@ -260,7 +295,7 @@ export function updateSeller(id, payload) {
         id,
       );
     }
-    const moved = payload?.gyms !== undefined ? writeSellerGyms(id, payload.gyms) : [];
+    const moved = payload?.gyms !== undefined ? writeSellerGyms(id, payload.gyms, vertical) : [];
     return { seller: getSeller(id), moved };
   });
 }

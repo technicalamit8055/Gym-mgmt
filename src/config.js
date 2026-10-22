@@ -54,6 +54,9 @@ export const config = {
   foodDbUrl: (process.env.FOOD_DB_URL || 'https://world.openfoodfacts.org').replace(/\/+$/, ''),
   // Open Food Facts asks every client to identify itself this way.
   foodDbUserAgent: process.env.FOOD_DB_USER_AGENT || 'GymBook/1.0 (gym management software; member food logging)',
+  // Open Library, for filling in a book from its ISBN when the coaching store
+  // scans one (src/productBarcode.js). Overridable for tests, like the above.
+  bookDbUrl: (process.env.BOOK_DB_URL || 'https://openlibrary.org').replace(/\/+$/, ''),
   // USDA FoodData Central (src/foodUsda.js), for whole foods in food search.
   // DEMO_KEY works without signing up but allows only ~30 requests an hour per
   // IP; a free key from https://fdc.nal.usda.gov/api-key-signup allows 1,000.

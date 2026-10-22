@@ -8,6 +8,7 @@ import { renderMaterials } from './materials.js';
 import { renderFees } from './fees.js';
 import { renderAdmissions } from './admissions.js';
 import { renderFaculty } from './faculty.js';
+import { renderCoachingStore } from './store.js';
 
 /**
  * CoachBook's sidebar, phone tabs and routes — the third vertical's share of
@@ -32,6 +33,8 @@ export function coachingNav() {
     // Money, so the API limits the whole fees screen to the billing roles —
     // hidden rather than letting a teacher click into a 403.
     { path: '/fees', label: 'Fees & installments', icon: 'wallet', roles: ['admin', 'manager'] },
+    // The CoachBook store's pickups and the institute's cut — money too.
+    { path: '/store', label: 'Study store', icon: 'bag', roles: ['admin', 'manager'] },
     { path: '/admissions', label: 'Admissions', icon: 'userPlus' },
     { path: '/reports', label: 'Reports', icon: 'reports' },
     { path: '/whatsapp', label: 'WhatsApp', icon: 'whatsapp', roles: ['admin', 'manager'] },
@@ -106,6 +109,14 @@ export function coachingRoutes() {
       iconTone: 'green',
       subtitle: 'Course fees, installment schedules, collections and receipts',
       view: renderFees,
+    },
+    {
+      pattern: /^\/store$/,
+      title: 'Study store',
+      icon: 'bag',
+      iconTone: 'orange',
+      subtitle: 'Books and stationery your students buy in the app — pickups at the office and your earnings',
+      view: renderCoachingStore,
     },
     {
       pattern: /^\/admissions$/,

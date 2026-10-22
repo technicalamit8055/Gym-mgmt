@@ -5,12 +5,15 @@ import { fill, INSTALLMENT_STATUS, MATERIAL_KIND_LABEL, pct, TEST_TYPE_LABEL, to
 
 /**
  * The CoachBook student & parent app — the tabs renderPortalApp() in
- * portal.js draws for an institute instead of the gym's Workout/Diet/Store:
+ * portal.js draws for an institute instead of the gym's Workout/Diet:
  *
  *   Home        digital student ID, today's classes, fee banner, latest result
  *   Timetable   the week's lectures by day, and upcoming tests
  *   Tests       results with rank and percentile, subject averages, trend
- *   Fees        course fee, installments, payments and PDF receipts
+ *   Fees        course fee, installments, payments and PDF receipts — off
+ *               the bar (via Home and Profile) while the Store holds its slot
+ *   Store       books, test prep and stationery: portal.js's Store tab, which
+ *               draws the CoachBook store for an institute (portalStore.js)
  *   Attendance  the month as a calendar (from Home and Profile)
  *   Notes       notes, DPPs, PYQs and assignments to download (from Home)
  *
@@ -76,7 +79,13 @@ export function coachingPortalTabs({ getMe, switchTab }) {
         { class: 'cbp-id-meta' },
         h('div', {}, h('strong', {}, pct(att?.percentage)), 'Attendance'),
         h('div', {}, h('strong', {}, data.next_test ? date(data.next_test.test_date).slice(0, 5) : '—'), 'Next test'),
-        h('div', {}, h('strong', {}, data.fees.balance > 0 ? money(data.fees.balance, { compact: true }) : 'Paid'), 'Fee balance'),
+        // A way into Fees from Home: the Store can hold its tab slot (portal.js buildTabs).
+        h(
+          'div',
+          { role: 'button', tabindex: '0', class: 'cbp-id-link', onclick: () => switchTab('fees'), onkeydown: (e) => e.key === 'Enter' && switchTab('fees') },
+          h('strong', {}, data.fees.balance > 0 ? money(data.fees.balance, { compact: true }) : 'Paid'),
+          'Fee balance',
+        ),
       ),
       h('button', { class: 'cbp-id-btn', type: 'button', onclick: () => switchTab('pass') }, renderIcon('qrCode', { size: 18 }), 'Show my QR ID'),
     );
@@ -142,6 +151,23 @@ export function coachingPortalTabs({ getMe, switchTab }) {
         )
       : null;
 
+    // The CoachBook store, once the platform has opened it (portalStore.js).
+    const shop =
+      me.monetization?.store_status === 'live'
+        ? h(
+            'button',
+            { class: 'cbp-card cbp-row cbp-shop', type: 'button', onclick: () => switchTab('store') },
+            h('span', { class: 'cb-section-icon' }, renderIcon('book', { size: 17 })),
+            h(
+              'div',
+              { class: 'cb-grow' },
+              h('div', { class: 'cb-strong' }, 'Study store'),
+              h('div', { class: 'muted cb-small' }, 'Books, PYQs and stationery — delivered home or picked up here'),
+            ),
+            renderIcon('chevronRight', { size: 18 }),
+          )
+        : null;
+
     const hello = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening';
     return h(
       'div',
@@ -151,6 +177,7 @@ export function coachingPortalTabs({ getMe, switchTab }) {
       banner,
       classes,
       stats,
+      shop,
       nextTest,
       result,
     );

@@ -60,6 +60,9 @@ import {
   MAX_STORE_IMAGE_BYTES,
   STORE_CATEGORIES,
   STORE_STATUSES,
+  STORE_VERTICALS,
+  storeCategoriesFor,
+  storeSettings,
   addProductImage,
   addonTiers,
   clearBannerImage,
@@ -800,6 +803,9 @@ function monetizationState() {
   const settings = monetizationSettings();
   return {
     settings,
+    // Each store's switch, cut and promises under the same names — the gym
+    // store's and the coaching store's (src/monetization.js).
+    stores: Object.fromEntries(STORE_VERTICALS.map((v) => [v, storeSettings(v, settings)])),
     addon_tiers: addonTiers(settings),
     razorpay_configured: isRazorpayOrdersConfigured(),
     summary: monetizationSummary(),
@@ -807,11 +813,16 @@ function monetizationState() {
       store_statuses: STORE_STATUSES,
       collection_modes: COLLECTION_MODES,
       categories: STORE_CATEGORIES,
+      categories_by_store: Object.fromEntries(STORE_VERTICALS.map((v) => [v, storeCategoriesFor(v)])),
+      verticals: STORE_VERTICALS,
       fulfillment_statuses: FULFILLMENT_STATUSES,
       banner_links: BANNER_LINKS,
     },
   };
 }
+
+/** `?vertical=gym|coaching` narrows a store list to one store. */
+const storeQuery = (req) => (STORE_VERTICALS.includes(req.query.vertical) ? req.query.vertical : undefined);
 
 platformAdminRoutes.get('/monetization', (_req, res) => {
   res.json(monetizationState());
@@ -857,18 +868,21 @@ platformAdminRoutes.delete('/nav-badges/:tab/image', (req, res) => {
 
 /** The central catalogue only — partner shops keep their own shelves. */
 platformAdminRoutes.get('/store/products', (req, res) => {
+  const vertical = storeQuery(req);
   const items = listStoreProducts({
     sellerId: Number.isInteger(Number(req.query.seller)) && Number(req.query.seller) > 0 ? Number(req.query.seller) : null,
     q: req.query.q ? String(req.query.q).trim() : undefined,
     category: req.query.category ? String(req.query.category) : undefined,
+    vertical,
   });
-  res.json({ items, total: items.length, categories: STORE_CATEGORIES });
+  res.json({ items, total: items.length, categories: vertical ? storeCategoriesFor(vertical) : STORE_CATEGORIES });
 });
 
 /** A scanned pack: the central catalogue's own product, or details to start
- * a new one from (src/productBarcode.js). */
+ * a new one from (src/productBarcode.js) — a book's from its ISBN when the
+ * scan is for the coaching store. */
 platformAdminRoutes.get('/store/barcode/:code', async (req, res) => {
-  res.json(await lookupStoreBarcode(req.params.code, { sellerId: null }));
+  res.json(await lookupStoreBarcode(req.params.code, { sellerId: null, vertical: storeQuery(req) ?? 'gym' }));
 });
 
 platformAdminRoutes.post('/store/products', (req, res) => {
@@ -900,8 +914,8 @@ platformAdminRoutes.post('/store/products/:id/images/:imageId/primary', (req, re
   res.json(makeProductImagePrimary(Number(req.params.id), Number(req.params.imageId)));
 });
 
-platformAdminRoutes.get('/store/banners', (_req, res) => {
-  res.json({ items: listBanners() });
+platformAdminRoutes.get('/store/banners', (req, res) => {
+  res.json({ items: listBanners({ vertical: storeQuery(req) }) });
 });
 
 platformAdminRoutes.post('/store/banners', (req, res) => {
@@ -951,6 +965,7 @@ platformAdminRoutes.get('/store/orders', (req, res) => {
   const items = listStoreOrders({
     status: req.query.status ? String(req.query.status) : undefined,
     tenantSlug: req.query.tenant ? String(req.query.tenant) : undefined,
+    vertical: storeQuery(req),
   });
   res.json({ items, total: items.length });
 });
@@ -964,7 +979,14 @@ platformAdminRoutes.patch('/store/orders/:id', (req, res) => {
 /** Supplement shops that sell to their area's gyms from their own panel —
  * see src/sellers.js. */
 platformAdminRoutes.get('/sellers', (_req, res) => {
-  res.json({ items: listSellers(), gyms: sellerGymOptions(), gym_commission_pct: monetizationSettings().store_commission_pct });
+  const settings = monetizationSettings();
+  res.json({
+    items: listSellers(),
+    gyms: sellerGymOptions(),
+    gym_commission_pct: settings.store_commission_pct,
+    // The default cut a new shop's tenants get, per store it can sell in.
+    gym_commission_pct_by_store: Object.fromEntries(STORE_VERTICALS.map((v) => [v, storeSettings(v, settings).store_commission_pct])),
+  });
 });
 
 platformAdminRoutes.post('/sellers', (req, res) => {

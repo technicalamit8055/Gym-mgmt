@@ -3,13 +3,25 @@ import { append, clear, closeModal, confirmDialog, h, openModal, renderIcon, tab
 import { inr } from './storeAdmin.js';
 
 /**
- * Operator console → Partner shops: the supplement shops that sell to their
- * area's gyms from their own Shop panel (#/seller), never from this console.
+ * Operator console → Partner shops: the local shops that sell to their area's
+ * gyms (supplement shops) or coaching institutes (bookshops) from their own
+ * Shop panel (#/seller), never from this console.
  *
- * Adding a shop is the whole onboarding: its details, the platform's fee, the
- * gyms it serves (picked by city), and a one-time password to hand over —
- * ready to send on WhatsApp. See src/sellers.js for the rules behind it.
+ * Adding a shop is the whole onboarding: which store it sells in, its
+ * details, the platform's fee, the gyms or institutes it serves (picked by
+ * city), and a one-time password to hand over — ready to send on WhatsApp.
+ * See src/sellers.js for the rules behind it.
  */
+
+/** Who a shop serves, in its store's words. */
+const SERVES = {
+  gym: { one: 'gym', One: 'Gym', many: 'gyms', Many: 'Gyms', people: 'members', title: 'Gym store', blurb: 'Supplements & gear for gyms', icon: 'dumbbell' },
+  coaching: {
+    one: 'institute', One: 'Institute', many: 'institutes', Many: 'Institutes', people: 'students',
+    title: 'Coaching store', blurb: 'Books & stationery for coaching institutes', icon: 'graduation',
+  },
+};
+const servesOf = (vertical) => SERVES[vertical] ?? SERVES.gym;
 
 const fill = (el, ...children) => append(clear(el), children);
 const field = (label, control, { full = false, hint } = {}) =>
@@ -25,7 +37,7 @@ function openCredentials(seller, password) {
     `Email: ${seller.email}`,
     `Temporary password: ${password}`,
     '',
-    'Sign in, set your own password, and add your products — members of your area’s gyms can then order from you.',
+    `Sign in, set your own password, and add your products — ${servesOf(seller.vertical).people} of your area’s ${servesOf(seller.vertical).many} can then order from you.`,
   ].join('\n');
   const digits = String(seller.phone).replace(/\D/g, '');
   const wa = `https://wa.me/${digits.length === 10 ? `91${digits}` : digits}?text=${encodeURIComponent(message)}`;
@@ -56,12 +68,14 @@ function openCredentials(seller, password) {
 /**
  * Gyms grouped by city, each a checkbox, with "all in city" per group — an
  * area is usually a city or a part of one. A gym another shop serves says so;
- * ticking it moves it here.
+ * ticking it moves it here. `gyms` are already the shop's store's tenants
+ * (gyms, or institutes for a bookshop); `serves` names them.
  */
-function gymPicker(gyms, selected, sellerId) {
-  const search = h('input', { type: 'search', placeholder: 'Search gyms, cities or PIN codes', 'aria-label': 'Search gyms' });
+function gymPicker(gyms, selected, sellerId, serves = SERVES.gym) {
+  const search = h('input', { type: 'search', placeholder: `Search ${serves.many}, cities or PIN codes`, 'aria-label': `Search ${serves.many}` });
   const list = h('div', { class: 'shp-gyms' });
   const summary = h('span', { class: 'muted' });
+  const count = () => `${selected.size} ${selected.size === 1 ? serves.one : serves.many} selected`;
 
   function draw() {
     const q = search.value.trim().toLowerCase();
@@ -72,7 +86,7 @@ function gymPicker(gyms, selected, sellerId) {
       if (!byCity.has(city)) byCity.set(city, []);
       byCity.get(city).push(g);
     }
-    summary.textContent = `${selected.size} gym${selected.size === 1 ? '' : 's'} selected`;
+    summary.textContent = count();
     fill(
       list,
       shown.length
@@ -109,7 +123,7 @@ function gymPicker(gyms, selected, sellerId) {
                       onchange: (e) => {
                         if (e.target.checked) selected.add(g.slug);
                         else selected.delete(g.slug);
-                        summary.textContent = `${selected.size} gym${selected.size === 1 ? '' : 's'} selected`;
+                        summary.textContent = count();
                       },
                     }),
                     h('span', {}, g.gym_name, g.pincode ? h('small', {}, ` · ${g.pincode}`) : null),
@@ -118,12 +132,12 @@ function gymPicker(gyms, selected, sellerId) {
                 }),
               ];
             })
-        : h('p', { class: 'muted', style: 'margin:6px 0' }, gyms.length ? 'No gym matches that search.' : 'No gyms on the platform yet.'),
+        : h('p', { class: 'muted', style: 'margin:6px 0' }, gyms.length ? `No ${serves.one} matches that search.` : `No ${serves.many} on the platform yet.`),
     );
   }
   search.oninput = draw;
   draw();
-  return h('div', { class: 'field full' }, h('span', { class: 'row', style: 'justify-content:space-between' }, 'Gyms this shop serves', summary), search, list);
+  return h('div', { class: 'field full' }, h('span', { class: 'row', style: 'justify-content:space-between' }, `${serves.Many} this shop serves`, summary), search, list);
 }
 
 /**
@@ -133,17 +147,17 @@ function gymPicker(gyms, selected, sellerId) {
  * a partner the platform fee. A worked ₹1,000 order underneath shows the
  * result as it is chosen.
  */
-function moneySettings(s, defaultGymPct) {
+function moneySettings(s, defaultGymPct, serves = SERVES.gym) {
   const state = {
     owned: Boolean(s.owned),
     gymMode: s.gym_commission_pct === null || s.gym_commission_pct === undefined ? 'default' : Number(s.gym_commission_pct) === 0 ? 'none' : 'custom',
   };
-  const customPct = h('input', { type: 'number', min: 0, max: 50, step: '0.5', value: state.gymMode === 'custom' ? s.gym_commission_pct : defaultGymPct, 'aria-label': 'Custom gym commission (%)' });
+  const customPct = h('input', { type: 'number', min: 0, max: 50, step: '0.5', value: state.gymMode === 'custom' ? s.gym_commission_pct : defaultGymPct, 'aria-label': `Custom ${serves.one} commission (%)` });
   const feePct = h('input', { type: 'number', min: 0, max: 60, step: '0.5', value: s.platform_fee_pct ?? 10, required: true, 'aria-label': 'Platform fee (%)' });
   const typeSeg = h('div', { class: 'sa-seg two', role: 'radiogroup', 'aria-label': 'Whose store' });
-  const gymSeg = h('div', { class: 'sa-seg', role: 'radiogroup', 'aria-label': 'Gym commission' });
-  const customRow = h('div', { class: 'shp-inline' }, customPct, h('span', { class: 'muted' }, '% of each order goes to the gym'));
-  const feeBlock = h('div', { class: 'field full' }, h('span', {}, 'Platform fee (%)'), h('div', { class: 'shp-inline' }, feePct, h('span', { class: 'muted' }, 'your cut of each order, on top of the gym’s share')));
+  const gymSeg = h('div', { class: 'sa-seg', role: 'radiogroup', 'aria-label': `${serves.one} commission` });
+  const customRow = h('div', { class: 'shp-inline' }, customPct, h('span', { class: 'muted' }, `% of each order goes to the ${serves.one}`));
+  const feeBlock = h('div', { class: 'field full' }, h('span', {}, 'Platform fee (%)'), h('div', { class: 'shp-inline' }, feePct, h('span', { class: 'muted' }, `your cut of each order, on top of the ${serves.one}’s share`)));
   const example = h('div', { class: 'sp-money shp-example' });
 
   const gymPct = () => (state.gymMode === 'default' ? defaultGymPct : state.gymMode === 'none' ? 0 : Number(customPct.value) || 0);
@@ -175,11 +189,11 @@ function moneySettings(s, defaultGymPct) {
         state.gymMode = 'default';
         draw();
       }),
-      segButton('Custom rate', 'A different % for this shop’s gyms', state.gymMode === 'custom', () => {
+      segButton('Custom rate', `A different % for this shop’s ${serves.many}`, state.gymMode === 'custom', () => {
         state.gymMode = 'custom';
         draw();
       }),
-      segButton('No gym commission', 'The gyms earn nothing on these orders', state.gymMode === 'none', () => {
+      segButton(`No ${serves.one} commission`, `The ${serves.many} earn nothing on these orders`, state.gymMode === 'none', () => {
         state.gymMode = 'none';
         draw();
       }),
@@ -194,7 +208,7 @@ function moneySettings(s, defaultGymPct) {
     fill(
       example,
       row(`On a ${inr(order)} order`, ''),
-      row(`Gym’s share (${gymPct()}%)`, gym ? `− ${inr(gym)}` : 'none'),
+      row(`${serves.One}’s share (${gymPct()}%)`, gym ? `− ${inr(gym)}` : 'none'),
       state.owned ? null : row(`Platform fee (${Number(feePct.value) || 0}%)`, `+ ${inr(fee)} to you`),
       row(state.owned ? 'You keep' : 'The shop receives', inr(Math.max(0, order - gym - fee)), true),
     );
@@ -209,7 +223,7 @@ function moneySettings(s, defaultGymPct) {
       { class: 'field full shp-money-settings' },
       h('span', {}, 'Whose store is it?'),
       typeSeg,
-      h('span', { style: 'margin-top:10px' }, 'Gym commission on this shop’s orders'),
+      h('span', { style: 'margin-top:10px' }, `${serves.One} commission on this shop’s orders`),
       gymSeg,
       customRow,
       feeBlock,
@@ -223,10 +237,53 @@ function moneySettings(s, defaultGymPct) {
   };
 }
 
-function openShopModal(seller, gyms, onSaved, defaultGymPct = 0) {
+/** `defaultsByStore`: each store's default cut for the tenants a shop serves. */
+function openShopModal(seller, gyms, onSaved, defaultsByStore = {}) {
   const isNew = !seller;
-  const s = seller ?? { platform_fee_pct: 10, active: true, gyms: [] };
-  const money = moneySettings(s, defaultGymPct);
+  const s = seller ?? { platform_fee_pct: 10, active: true, gyms: [], vertical: 'gym' };
+  let store = s.vertical ?? 'gym';
+  // Its products and orders belong to its store, so a shop that has any
+  // stays there (src/sellers.js says the same).
+  const locked = !isNew && (seller.products.total > 0 || seller.stats.orders > 0);
+  const selected = new Set(s.gyms.map((g) => g.slug));
+
+  /* Which store it sells in decides whom it can serve and the default cut,
+     so the picker and the money settings are redrawn when it changes. */
+  let money = null;
+  const storeSeg = h('div', { class: 'sa-seg sa-store-pick', role: 'radiogroup', 'aria-label': 'Sells in' });
+  const moneyHost = h('div', { style: 'display:contents' });
+  const pickerHost = h('div', { style: 'display:contents' });
+  function drawStore() {
+    const serves = servesOf(store);
+    fill(
+      storeSeg,
+      ...Object.entries(SERVES).map(([key, info]) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'radio',
+            'aria-checked': String(store === key),
+            class: `sa-seg-btn${store === key ? ' active green' : ''}`,
+            disabled: locked && key !== store,
+            onclick: () => {
+              if (key === store) return;
+              store = key;
+              selected.clear();
+              drawStore();
+            },
+          },
+          h('strong', {}, renderIcon(info.icon, { size: 15 }), ` ${info.title}`),
+          h('small', {}, info.blurb),
+        ),
+      ),
+    );
+    money = moneySettings(s, defaultsByStore[store] ?? 0, serves);
+    fill(moneyHost, money.node);
+    fill(pickerHost, gymPicker(gyms.filter((g) => (g.vertical ?? 'gym') === store), selected, seller?.id, serves));
+  }
+  drawStore();
+
   const input = (name, attrs = {}) => h('input', { name, value: s[name] ?? '', ...attrs });
   const inputs = {
     name: input('name', { required: true, maxlength: 80, placeholder: 'Muscle Mart Bandra' }),
@@ -239,7 +296,6 @@ function openShopModal(seller, gyms, onSaved, defaultGymPct = 0) {
     address: h('textarea', { name: 'address', rows: 2, maxlength: 300 }, s.address ?? ''),
     active: h('input', { type: 'checkbox', checked: s.active !== false }),
   };
-  const selected = new Set(s.gyms.map((g) => g.slug));
   const submit = h('button', { class: 'btn primary', type: 'submit' }, isNew ? 'Add shop' : 'Save changes');
 
   const form = h(
@@ -250,6 +306,7 @@ function openShopModal(seller, gyms, onSaved, defaultGymPct = 0) {
         const payload = {
           ...Object.fromEntries(['name', 'owner_name', 'email', 'phone', 'city', 'area', 'gstin'].map((k) => [k, inputs[k].value.trim()])),
           address: inputs.address.value.trim(),
+          vertical: store,
           ...money.values(),
           gyms: [...selected],
           ...(isNew ? {} : { active: inputs.active.checked }),
@@ -259,7 +316,7 @@ function openShopModal(seller, gyms, onSaved, defaultGymPct = 0) {
           const res = isNew ? await api.platformCreateSeller(payload) : await api.platformUpdateSeller(seller.id, payload);
           closeModal();
           await onSaved();
-          if (res.moved?.length) toast(`${res.moved.length} gym${res.moved.length === 1 ? '' : 's'} moved over from another shop`);
+          if (res.moved?.length) toast(`${res.moved.length} ${res.moved.length === 1 ? servesOf(store).one : servesOf(store).many} moved over from another shop`);
           else toast(isNew ? 'Shop added' : 'Shop saved');
           if (isNew) openCredentials(res.seller, res.password);
         } catch (err) {
@@ -273,6 +330,13 @@ function openShopModal(seller, gyms, onSaved, defaultGymPct = 0) {
     h(
       'div',
       { class: 'form-grid' },
+      h(
+        'div',
+        { class: 'field full' },
+        h('span', {}, 'Sells in'),
+        storeSeg,
+        h('div', { class: 'muted sa-hint' }, locked ? 'It already has products or orders in this store, so it stays here.' : 'A supplement shop serves gyms; a bookshop serves coaching institutes.'),
+      ),
       field('Shop name *', inputs.name, { full: true }),
       field('Owner *', inputs.owner_name),
       field('Phone *', inputs.phone, { hint: 'The login can be sent here on WhatsApp.' }),
@@ -280,10 +344,12 @@ function openShopModal(seller, gyms, onSaved, defaultGymPct = 0) {
       field('City *', inputs.city),
       field('Area', inputs.area),
       field('GSTIN', inputs.gstin, { full: true }),
-      money.node,
+      moneyHost,
       field('Shop address', inputs.address, { full: true }),
-      gymPicker(gyms, selected, seller?.id),
-      isNew ? null : h('div', { class: 'field full sa-checks' }, h('label', {}, inputs.active, ' Active — unticking pauses the shop: it is signed out, and its gyms go back to the central catalogue')),
+      pickerHost,
+      isNew
+        ? null
+        : h('div', { class: 'field full sa-checks' }, h('label', {}, inputs.active, ` Active — unticking pauses the shop: it is signed out, and its ${servesOf(store).many} go back to the central catalogue`)),
     ),
     h('div', { class: 'modal-foot', style: 'padding:14px 0 0;border:none' }, h('button', { class: 'btn ghost', type: 'button', onclick: closeModal }, 'Cancel'), submit),
   );
@@ -399,6 +465,7 @@ export function renderShopsSection({ onExpired } = {}) {
       return;
     }
     const { items: shops, gyms } = data;
+    const defaults = data.gym_commission_pct_by_store ?? { gym: data.gym_commission_pct };
     const active = shops.filter((s) => s.active);
     const covered = gyms.filter((g) => g.seller && active.some((s) => s.id === g.seller.id));
     const sum = (key) => shops.reduce((n, s) => n + s.stats[key], 0);
@@ -420,7 +487,7 @@ export function renderShopsSection({ onExpired } = {}) {
         'div',
         { class: 'op-kpis' },
         kpi('Active shops', String(active.length), 'store', 'violet', `${shops.length - active.length} paused`),
-        kpi('Gyms covered', `${covered.length} / ${gyms.length}`, 'building', 'blue', `${uncovered.length} on the central catalogue`),
+        kpi('Gyms & institutes covered', `${covered.length} / ${gyms.length}`, 'building', 'blue', `${uncovered.length} on the central catalogue`),
         kpi('Shop sales', inr(sum('gmv')), 'bag', 'green', `${sum('to_ship')} order${sum('to_ship') === 1 ? '' : 's'} waiting to ship`),
         kpi('Owed to partner shops', inr(owed('payable')), 'wallet', 'amber', `${inr(owed('paid'))} paid out`),
       ),
@@ -433,7 +500,7 @@ export function renderShopsSection({ onExpired } = {}) {
           h('div', { class: 'op-card-title tone-violet' }, h('span', { class: 'head-icon' }, renderIcon('store', { size: 17 })), h('h3', {}, 'Partner shops')),
           h('span', { class: 'muted' }, 'Each signs in at ', h('a', { href: '#/seller' }, '#/seller'), ' with its own login'),
           h('div', { class: 'spacer' }),
-          h('button', { class: 'btn primary sm', onclick: () => openShopModal(null, gyms, refresh, data.gym_commission_pct) }, renderIcon('plus', { size: 14 }), 'Add shop'),
+          h('button', { class: 'btn primary sm', onclick: () => openShopModal(null, gyms, refresh, defaults) }, renderIcon('plus', { size: 14 }), 'Add shop'),
         ),
         table(
           [
@@ -444,11 +511,14 @@ export function renderShopsSection({ onExpired } = {}) {
                   'div',
                   {},
                   h('strong', {}, s.name, s.owned ? h('span', { class: 'badge violet', style: 'margin-left:6px' }, 'Own store') : null),
-                  h('div', { class: 'muted' }, [s.area, s.city].filter(Boolean).join(', ')),
+                  h('div', { class: 'muted' }, [servesOf(s.vertical).title, s.area, s.city].filter(Boolean).join(' · ')),
                 ),
             },
             { label: 'Owner', render: (s) => h('div', {}, s.owner_name, h('div', { class: 'muted' }, s.phone)) },
-            { label: 'Gyms', render: (s) => (s.gyms.length ? `${s.gyms.length}` : h('span', { class: 'op-note-amber' }, 'None yet')) },
+            {
+              label: 'Serves',
+              render: (s) => (s.gyms.length ? `${s.gyms.length} ${s.gyms.length === 1 ? servesOf(s.vertical).one : servesOf(s.vertical).many}` : h('span', { class: 'op-note-amber' }, 'None yet')),
+            },
             { label: 'Products', render: (s) => (s.products.active ? `${s.products.active} on sale` : h('span', { class: 'op-note-amber' }, 'Empty shelf')) },
             { label: 'To ship', align: 'right', render: (s) => s.stats.to_ship },
             { label: 'Sales', align: 'right', render: (s) => inr(s.stats.gmv) },
@@ -458,7 +528,9 @@ export function renderShopsSection({ onExpired } = {}) {
                 h(
                   'div',
                   { style: 'white-space:nowrap' },
-                  s.rates.gym_commission_pct > 0 ? `Gym ${s.rates.gym_commission_pct}%${s.rates.gym_commission_custom ? ' (custom)' : ''}` : 'No gym cut',
+                  s.rates.gym_commission_pct > 0
+                    ? `${servesOf(s.vertical).One} ${s.rates.gym_commission_pct}%${s.rates.gym_commission_custom ? ' (custom)' : ''}`
+                    : `No ${servesOf(s.vertical).one} cut`,
                   h('div', { class: 'muted' }, s.owned ? 'No platform fee' : `Fee ${s.rates.platform_fee_pct}%`),
                 ),
             },
@@ -483,8 +555,8 @@ export function renderShopsSection({ onExpired } = {}) {
           ],
           shops,
           {
-            onRowClick: (s) => openShopModal(s, gyms, refresh, data.gym_commission_pct),
-            empty: 'No partner shops yet. Add a local supplement shop, pick the gyms around it, and send them their login.',
+            onRowClick: (s) => openShopModal(s, gyms, refresh, defaults),
+            empty: 'No partner shops yet. Add a local supplement shop (or a bookshop for coaching institutes), pick the gyms or institutes around it, and send them their login.',
           },
         ),
       ),
@@ -492,8 +564,8 @@ export function renderShopsSection({ onExpired } = {}) {
         ? h(
             'div',
             { class: 'card' },
-            h('div', { class: 'card-head' }, h('div', { class: 'op-card-title tone-blue' }, h('span', { class: 'head-icon' }, renderIcon('building', { size: 17 })), h('h3', {}, 'Gyms without a shop'))),
-            h('p', { class: 'muted', style: 'margin-top:0' }, 'These gyms’ members shop from the central catalogue, fulfilled by you.'),
+            h('div', { class: 'card-head' }, h('div', { class: 'op-card-title tone-blue' }, h('span', { class: 'head-icon' }, renderIcon('building', { size: 17 })), h('h3', {}, 'Gyms & institutes without a shop'))),
+            h('p', { class: 'muted', style: 'margin-top:0' }, 'Their members and students shop from their store’s central catalogue, fulfilled by you.'),
             h('div', { class: 'op-pills' }, ...uncovered.map((g) => h('span', { class: 'op-pill' }, g.gym_name, g.city ? h('span', { class: 'muted' }, ` · ${g.city}`) : null))),
           )
         : null,
