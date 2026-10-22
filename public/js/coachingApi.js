@@ -4,7 +4,7 @@
  * call goes through api.js's own request(), so auth, the 401 sign-out and
  * error details behave exactly like the rest of the app.
  */
-import { ApiError, apiQuery as query, apiRequest as request, memberSession, pathPrefix, serverUrl, session } from './api.js';
+import { ApiError, apiQuery as query, apiRequest as request, memberSession, pathPrefix, saveFile, serverUrl, session } from './api.js';
 
 const C = '/coaching';
 
@@ -21,17 +21,9 @@ async function download(path, fileName, { member = false } = {}) {
     }
     throw new ApiError(res.status, message);
   }
-  const blob = await res.blob();
   const disposition = res.headers.get('content-disposition') || '';
   const named = /filename="([^"]+)"/.exec(disposition)?.[1];
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName || (named ? decodeURIComponent(named) : 'download');
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return saveFile(await res.blob(), fileName || (named ? decodeURIComponent(named) : 'download'));
 }
 
 /** A raw-body upload with its metadata in the query string. */

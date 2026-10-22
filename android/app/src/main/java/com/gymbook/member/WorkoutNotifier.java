@@ -28,7 +28,8 @@ import org.json.JSONObject;
  * countdown) in the header, and a Complete Set button.
  *
  * The web app decides what it says (liveNotificationContent in portal.js) and
- * hands it over through WorkoutNotificationPlugin; this class only draws it.
+ * hands it over through WorkoutNotificationPlugin; this class only draws it,
+ * and has WorkoutWidget draw the same on the home screen.
  * Static and context-based rather than part of the plugin, because a button
  * tapped after the app's activity is gone (WorkoutNotificationReceiver) and the
  * end of a rest both need it without a WebView.
@@ -81,6 +82,7 @@ final class WorkoutNotifier {
         prefs(app).edit().putString(KEY_PAYLOAD, payload.toString()).apply();
         post(app, build(app, payload, false));
         scheduleRestEnd(app, payload);
+        WorkoutWidget.refresh(app);
     }
 
     static void clear(Context context) {
@@ -90,6 +92,7 @@ final class WorkoutNotifier {
         NotificationManagerCompat manager = NotificationManagerCompat.from(app);
         manager.cancel(ID_LIVE);
         manager.cancel(ID_REST);
+        WorkoutWidget.refresh(app);
     }
 
     /** Back in the app: a "Rest over" still showing has done its job. */
@@ -123,13 +126,21 @@ final class WorkoutNotifier {
         if (payload == null) return;
         cancelRestEnd();
         post(app, build(app, payload, true));
+        WorkoutWidget.refresh(app);
+    }
+
+    /** Whether queueAction is holding taps for the app's next start. */
+    static boolean hasPendingActions(Context context) {
+        return !"[]".equals(prefs(context.getApplicationContext()).getString(KEY_PENDING, "[]"));
     }
 
     /** The taps queueAction kept, oldest first, forgotten once read. */
     static JSONArray takePendingActions(Context context) {
-        SharedPreferences prefs = prefs(context.getApplicationContext());
+        Context app = context.getApplicationContext();
+        SharedPreferences prefs = prefs(app);
         String raw = prefs.getString(KEY_PENDING, "[]");
         prefs.edit().remove(KEY_PENDING).apply();
+        WorkoutWidget.refresh(app);
         try {
             return new JSONArray(raw);
         } catch (JSONException e) {
@@ -294,14 +305,14 @@ final class WorkoutNotifier {
         manager.createNotificationChannel(rest);
     }
 
-    private static PendingIntent openIntent(Context context) {
+    static PendingIntent openIntent(Context context) {
         Intent intent = new Intent(context, MainActivity.class)
             .putExtra(EXTRA_OPEN, true)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         return PendingIntent.getActivity(context, ID_LIVE, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private static PendingIntent actionIntent(Context context, String id) {
+    static PendingIntent actionIntent(Context context, String id) {
         // A distinct action string per button, or Android would treat every
         // button's PendingIntent as the same one.
         Intent intent = new Intent(context, WorkoutNotificationReceiver.class)
@@ -310,7 +321,8 @@ final class WorkoutNotifier {
         return PendingIntent.getBroadcast(context, id.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private static Bitmap decodeImage(String base64) {
+    // Synchronized: the widgets decode too, from whichever thread redraws them.
+    static synchronized Bitmap decodeImage(String base64) {
         if (base64 == null || base64.isEmpty()) return null;
         if (base64.equals(lastImage)) return lastBitmap;
         try {
@@ -323,7 +335,7 @@ final class WorkoutNotifier {
         }
     }
 
-    private static JSONObject storedPayload(Context context) {
+    static JSONObject storedPayload(Context context) {
         String raw = prefs(context).getString(KEY_PAYLOAD, null);
         if (raw == null) return null;
         try {

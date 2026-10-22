@@ -329,7 +329,10 @@ export function coachingPortalTabs({ getMe, switchTab }) {
                           class: 'btn sm',
                           type: 'button',
                           'aria-label': `Download ${m.title}`,
-                          onclick: () => coaching.portal.downloadMaterial(m.id).catch((err) => toast(err.message, 'error')),
+                          onclick: () => coaching.portal
+                              .downloadMaterial(m.id)
+                              .then((saved) => saved && toast(saved))
+                              .catch((err) => toast(err.message, 'error')),
                         },
                         renderIcon('download', { size: 15 }),
                       )
@@ -389,7 +392,7 @@ export function coachingPortalTabs({ getMe, switchTab }) {
                   h('div', { class: 'cb-grow' }, h('div', { class: 'cb-strong' }, money(p.amount)), h('div', { class: 'muted cb-small' }, `${p.receipt_no} · ${date(p.paid_on)} · ${String(p.method).toUpperCase()}${p.cheque_status === 'pending' ? ' · cheque clearing' : ''}`)),
                   h(
                     'button',
-                    { class: 'btn sm', type: 'button', 'aria-label': `Download receipt ${p.receipt_no}`, onclick: () => coaching.portal.downloadReceipt(p.id).catch((err) => toast(err.message, 'error')) },
+                    { class: 'btn sm', type: 'button', 'aria-label': `Download receipt ${p.receipt_no}`, onclick: () => coaching.portal.downloadReceipt(p.id).then((saved) => saved && toast(saved)).catch((err) => toast(err.message, 'error')) },
                     renderIcon('download', { size: 15 }),
                     'PDF',
                   ),

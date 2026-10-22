@@ -26,7 +26,8 @@ process.env.PLATFORM_ADMIN_PASSWORD = 'operator-pass-123';
 
 const { createApp } = await import('../src/app.js');
 const { closeDb } = await import('../src/db.js');
-const { closeRegistryDb } = await import('../src/tenants.js');
+const { closeRegistryDb, getRegistryDb } = await import('../src/tenants.js');
+const { memberToken: signInMember } = await import('./helpers/memberAuth.js');
 const { today } = await import('../src/validate.js');
 
 let base;
@@ -391,5 +392,108 @@ describe('business type on the console', () => {
   it('is not reachable without the operator token', async () => {
     const res = await call('POST', '/api/platform/admin/tenants/oops-gym/business-type', { business_type: 'gym' });
     assert.equal(res.status, 401);
+  });
+});
+
+describe('member app after a gym lapses', () => {
+  let staffToken;
+  let memberToken;
+  const ctx = (token) => ({ token, tenant: 'lapsed-gym' });
+  const suspend = () =>
+    call('POST', '/api/platform/admin/tenants/lapsed-gym/status', { status: 'suspended', reason: 'test' }, { token: ops });
+  const setMemberApp = (allowed, token = ops) =>
+    call('POST', '/api/platform/admin/tenants/lapsed-gym/member-app', { allowed }, { token });
+
+  before(async () => {
+    assert.equal((await signup('lapsed-gym', 'Lapsed Gym')).status, 201);
+    staffToken = await loginGym('lapsed-gym');
+    const member = await call('POST', '/api/members', { first_name: 'Ravi', phone: '9990002222' }, ctx(staffToken));
+    assert.equal(member.status, 201);
+    memberToken = await signInMember(call, { staffToken, memberId: member.body.id, tenant: 'lapsed-gym' });
+    assert.equal((await suspend()).status, 200);
+  });
+
+  it('closes the member app with the rest of the gym by default', async () => {
+    const list = await call('GET', '/api/platform/admin/tenants', null, { token: ops });
+    assert.equal(list.body.items.find((t) => t.slug === 'lapsed-gym').member_app_after_lapse, false);
+    assert.equal((await call('GET', '/api/portal/me', null, ctx(memberToken))).status, 402);
+  });
+
+  it('lets members back in, and only members, once the operator keeps the app open', async () => {
+    const res = await setMemberApp(true);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.tenant.member_app_after_lapse, 1);
+    assert.equal(res.body.tenant.logo_bytes, undefined);
+
+    assert.equal((await call('GET', '/api/portal/me', null, ctx(memberToken))).status, 200);
+    assert.equal((await call('GET', '/api/portal/notifications', null, ctx(memberToken))).status, 200);
+    // Staff stay locked out until the gym pays.
+    assert.equal((await call('GET', '/api/members', null, ctx(staffToken))).status, 402);
+    // A path that merely starts with "portal" is not the member app.
+    assert.equal((await call('GET', '/api/portalx', null, ctx(staffToken))).status, 402);
+  });
+
+  it('closes it again when the operator restricts the gym', async () => {
+    assert.equal((await setMemberApp(false)).status, 200);
+    assert.equal((await call('GET', '/api/portal/me', null, ctx(memberToken))).status, 402);
+  });
+
+  it('never reopens a cancelled gym', async () => {
+    await setMemberApp(true);
+    await call('POST', '/api/platform/admin/tenants/lapsed-gym/status', { status: 'cancelled' }, { token: ops });
+    assert.equal((await call('GET', '/api/portal/me', null, ctx(memberToken))).status, 403);
+    await suspend();
+  });
+
+  it('reports what each gym’s members spent on the store and the add-on', async () => {
+    // The list call creates the registry's store tables on first use.
+    const empty = await call('GET', '/api/platform/admin/tenants', null, { token: ops });
+    assert.deepEqual(empty.body.items.find((t) => t.slug === 'ironworks').platform_revenue, {
+      store_orders: 0,
+      store_gmv: 0,
+      store_aov: 0,
+      addon_sales: 0,
+      addon_revenue: 0,
+      last_sale_at: null,
+    });
+
+    const registry = getRegistryDb();
+    const order = registry.prepare(
+      `INSERT INTO store_orders (order_code, tenant_slug, member_id, subtotal, mrp_total, total_amount,
+         commission_pct, commission_amount, payment_status, fulfillment_status, shipping_name, shipping_phone)
+       VALUES (?, 'lapsed-gym', 1, ?, ?, ?, 10, 0, ?, ?, 'Ravi', '9990002222')`,
+    );
+    order.run('LG-1', 1000, 1000, 1000, 'paid', 'placed');
+    order.run('LG-2', 2000, 2000, 2000, 'paid', 'delivered');
+    order.run('LG-3', 9000, 9000, 9000, 'paid', 'cancelled'); // refunded — not a sale
+    order.run('LG-4', 9000, 9000, 9000, 'pending', 'placed'); // never paid
+    registry
+      .prepare(
+        `INSERT INTO addon_payments (tenant_slug, member_id, tier, months, amount, commission_pct, razorpay_order_id, status)
+         VALUES ('lapsed-gym', 1, 'pro', 1, 499, 20, 'order_lg_1', 'paid')`,
+      )
+      .run();
+
+    const list = await call('GET', '/api/platform/admin/tenants', null, { token: ops });
+    const revenue = list.body.items.find((t) => t.slug === 'lapsed-gym').platform_revenue;
+    assert.equal(revenue.store_orders, 2);
+    assert.equal(revenue.store_gmv, 3000);
+    assert.equal(revenue.store_aov, 1500);
+    assert.equal(revenue.addon_sales, 1);
+    assert.equal(revenue.addon_revenue, 499);
+    assert.ok(revenue.last_sale_at);
+
+    const detail = await call('GET', '/api/platform/admin/tenants/lapsed-gym', null, { token: ops });
+    assert.deepEqual(detail.body.platform_revenue, revenue);
+  });
+
+  it('is not reachable without the operator token, or with a gym admin’s', async () => {
+    assert.equal((await setMemberApp(true, null)).status, 401);
+    assert.equal((await setMemberApp(true, await loginGym('ironworks'))).status, 403);
+  });
+
+  it('requires an explicit choice', async () => {
+    assert.equal((await call('POST', '/api/platform/admin/tenants/lapsed-gym/member-app', {}, { token: ops })).status, 400);
+    assert.equal((await call('POST', '/api/platform/admin/tenants/no-such-gym/member-app', { allowed: true }, { token: ops })).status, 404);
   });
 });

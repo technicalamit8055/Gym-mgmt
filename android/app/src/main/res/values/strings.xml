@@ -4,4 +4,8 @@
     <string name="title_activity_main">GymVym</string>
     <string name="package_name">com.gymbook.member</string>
     <string name="custom_url_scheme">com.gymbook.member</string>
+    <string name="widget_diet_label">Diet tracker</string>
+    <string name="widget_diet_description">Calories left, macros and water for today, with + water and + food buttons</string>
+    <string name="widget_workout_label">Workouts</string>
+    <string name="widget_workout_description">This week\'s workouts and streak, and your next workout to start in one tap</string>
 </resources>

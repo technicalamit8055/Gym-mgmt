@@ -129,6 +129,50 @@ export function serverUrl(url) {
  */
 export const serverOrigin = (url) => (serverUrl(url) !== url ? 'anonymous' : null);
 
+const blobBase64 = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+/**
+ * Hands a fetched file (a PDF receipt, a study material) to the user. A
+ * browser downloads it. The app's WebView ignores <a download>, so there the
+ * file is written into Documents/GymVym through the Filesystem plugin, or —
+ * on an Android that keeps Documents behind a storage permission — handed to
+ * the share sheet, whose "Save to…" targets need none. Resolves to a line for
+ * a toast saying where the file went, or null when there is nothing to say.
+ */
+export async function saveFile(blob, filename) {
+  if (!isNativeApp) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return null;
+  }
+  const native = (plugin, method, options) => window.Capacitor.nativePromise(plugin, method, options);
+  const data = await blobBase64(blob);
+  try {
+    await native('Filesystem', 'writeFile', { path: `GymVym/${filename}`, data, directory: 'DOCUMENTS', recursive: true });
+    return `Saved to Documents/GymVym/${filename}`;
+  } catch {
+    const { uri } = await native('Filesystem', 'writeFile', { path: `share/${filename}`, data, directory: 'CACHE', recursive: true });
+    try {
+      await native('Share', 'share', { title: filename, files: [uri], dialogTitle: 'Save or open' });
+    } catch (err) {
+      if (!/cancel/i.test(String(err?.message ?? err))) throw err;
+    }
+    return null;
+  }
+}
+
 /** The gym slug from the path prefix, or null when addressed by subdomain. */
 export const pathSlug = pathPrefix ? pathPrefix.slice(3) : null;
 
@@ -330,8 +374,15 @@ async function request(method, path, body, { token, anonymous = false, member = 
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
   if (!res.ok) throw new ApiError(res.status, payload.error || res.statusText, payload.details);
+  // Food, water, a workout or a target saved: the phone's home-screen
+  // widgets (widgets.js) show those.
+  if (member && method !== 'GET' && FITNESS_PATH.test(path)) {
+    window.dispatchEvent(new CustomEvent('gymbook:fitness-changed'));
+  }
   return payload;
 }
+
+const FITNESS_PATH = /^\/portal\/(diets|workouts|nutrition|activities)(\/|$)/;
 
 /**
  * A member POST answered as Server-Sent Events: every event is handed to
@@ -433,6 +484,8 @@ export const api = {
     request('GET', `/platform/admin/tenants/${slug}`, undefined, { token: platformSession.token }),
   platformSetStatus: (slug, payload) =>
     request('POST', `/platform/admin/tenants/${slug}/status`, payload, { token: platformSession.token }),
+  platformSetMemberApp: (slug, allowed) =>
+    request('POST', `/platform/admin/tenants/${slug}/member-app`, { allowed }, { token: platformSession.token }),
   platformSetBusinessType: (slug, payload) =>
     request('POST', `/platform/admin/tenants/${slug}/business-type`, payload, { token: platformSession.token }),
   platformUpdateTenant: (slug, payload) =>
@@ -922,13 +975,7 @@ export const api = {
         headers: { Authorization: `Bearer ${memberSession.token}` },
       });
       if (!res.ok) throw new ApiError(res.status, 'Could not download the receipt');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `Receipt_PAY-${String(id).padStart(5, '0')}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
+      return saveFile(await res.blob(), `Receipt_PAY-${String(id).padStart(5, '0')}.pdf`);
     },
   },
 };

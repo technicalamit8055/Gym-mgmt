@@ -195,6 +195,10 @@ function enterTenant(req, res, next, tenant) {
   );
 }
 
+/** Every member-app call lives under /api/portal (notifications and CoachBook's
+ * student screens included); paths here are relative to the /api mount. */
+const isMemberAppPath = (path) => path === '/portal' || path.startsWith('/portal/');
+
 /**
  * Gates gym-operational routes behind an active trial/subscription. Mounted
  * on /api only, and after /api/platform and /api/auth in app.js, so signup,
@@ -203,10 +207,17 @@ function enterTenant(req, res, next, tenant) {
  * with no way to reach the page that takes their payment. 'cancelled' tenants
  * never reach here — resolveTenant already hard-blocked them. Dev/single-tenant
  * mode (no registry row, no status field) always passes.
+ *
+ * A suspended gym the operator has chosen to keep the member app open for
+ * (tenants.member_app_after_lapse) lets its members' /portal calls through —
+ * their workouts, diet, store and add-on — while every staff route stays shut.
  */
 export function requireActiveSubscription(req, _res, next) {
   if (req.tenant?.slug === DEFAULT_TENANT_SLUG) return next();
   if (req.tenant?.status === 'trial' || req.tenant?.status === 'active') return next();
+  if (req.tenant?.status === 'suspended' && req.tenant.member_app_after_lapse && isMemberAppPath(req.path)) {
+    return next();
+  }
   return next(
     paymentRequired("This gym's subscription is not active. Sign in and subscribe to restore access.", {
       status: req.tenant?.status ?? null,

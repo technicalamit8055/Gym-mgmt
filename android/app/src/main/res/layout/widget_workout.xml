@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The workout widget (WorkoutWidget), Hevy's: this week's workouts as a
+     Monday-to-Sunday strip with the weekly streak, and the plan's next day
+     with a Start button. While a workout runs it shows that instead — the
+     exercise up next, its set, the session clock and the notification's own
+     buttons (Complete Set; Skip, -15s, +15s while resting). The sample
+     figures are what the widget picker previews. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/workout_message"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:textColor="@color/widget_text"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/workout_week"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/workout_count"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:text="3 workouts this week"
+                android:textColor="@color/widget_text"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/workout_streak"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔥 5 wk streak"
+                android:textColor="@color/widget_brand"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_0" style="@style/WidgetDay" android:background="@drawable/widget_day_done" android:text="M" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_1" style="@style/WidgetDay" android:text="T" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_2" style="@style/WidgetDay" android:background="@drawable/widget_day_done" android:text="W" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_3" style="@style/WidgetDay" android:background="@drawable/widget_day_done" android:text="T" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_4" style="@style/WidgetDay" android:background="@drawable/widget_day_today" android:text="F" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_5" style="@style/WidgetDay" android:text="S" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1">
+                <TextView android:id="@+id/workout_day_6" style="@style/WidgetDay" android:text="S" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/workout_next_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:text="Next up · 6 exercises"
+                    android:textColor="@color/widget_muted"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/workout_next_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:text="Push Day"
+                    android:textColor="@color/widget_text"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/workout_start"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/widget_button"
+                android:gravity="center"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:text="▶  Start"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/workout_live"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/widget_live_dot" />
+
+            <TextView
+                android:id="@+id/workout_live_state"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="Workout in progress"
+                android:textColor="@color/widget_brand"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <Chronometer
+                android:id="@+id/workout_clock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/widget_text"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/workout_live_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/widget_text"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/workout_live_body"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textColor="@color/widget_muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/workout_live_image"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="10dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <TextView android:id="@+id/workout_action_0" style="@style/WidgetAction" android:background="@drawable/widget_button" android:textColor="#FFFFFFFF" />
+            <TextView android:id="@+id/workout_action_1" style="@style/WidgetAction" android:layout_marginStart="6dp" />
+            <TextView android:id="@+id/workout_action_2" style="@style/WidgetAction" android:layout_marginStart="6dp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

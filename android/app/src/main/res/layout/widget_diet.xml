@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The diet widget (DietWidget): today's calorie ring with what is left,
+     protein / carbs / fat against target, water with a +250 ml button, and
+     + Food into the food search. The sample figures are what the widget
+     picker previews; DietWidget replaces every one. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/diet_message"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:textColor="@color/widget_text"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/diet_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <FrameLayout
+                android:layout_width="72dp"
+                android:layout_height="72dp">
+
+                <ImageView
+                    android:id="@+id/diet_ring"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/widget_ring_preview" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/diet_left"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="1,240"
+                        android:textColor="@color/widget_text"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/diet_left_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="kcal left"
+                        android:textColor="@color/widget_muted"
+                        android:textSize="10sp" />
+                </LinearLayout>
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Protein"
+                        android:textColor="@color/widget_text"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/diet_protein_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="82 / 150 g"
+                        android:textColor="@color/widget_muted"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ProgressBar
+                    android:id="@+id/diet_protein_bar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="5dp"
+                    android:layout_marginTop="2dp"
+                    android:max="1000"
+                    android:progress="550"
+                    android:progressDrawable="@drawable/widget_bar_protein" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Carbs"
+                        android:textColor="@color/widget_text"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/diet_carbs_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="140 / 250 g"
+                        android:textColor="@color/widget_muted"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ProgressBar
+                    android:id="@+id/diet_carbs_bar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="5dp"
+                    android:layout_marginTop="2dp"
+                    android:max="1000"
+                    android:progress="560"
+                    android:progressDrawable="@drawable/widget_bar_carbs" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Fat"
+                        android:textColor="@color/widget_text"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/diet_fats_value"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="35 / 70 g"
+                        android:textColor="@color/widget_muted"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <ProgressBar
+                    android:id="@+id/diet_fats_bar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="5dp"
+                    android:layout_marginTop="2dp"
+                    android:max="1000"
+                    android:progress="500"
+                    android:progressDrawable="@drawable/widget_bar_fats" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/diet_water"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Water  1.25 / 3 L"
+                    android:textColor="@color/widget_text"
+                    android:textSize="11sp" />
+
+                <ProgressBar
+                    android:id="@+id/diet_water_bar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="5dp"
+                    android:layout_marginTop="2dp"
+                    android:max="1000"
+                    android:progress="420"
+                    android:progressDrawable="@drawable/widget_bar_water" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/diet_add_water"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/widget_button_soft"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="+ 250 ml"
+                android:textColor="@color/widget_brand"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/diet_log_food"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/widget_button"
+                android:gravity="center"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="+ Food"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -130,6 +130,13 @@ const MIGRATIONS = [
   // is lost and no column list has to be kept in step here. The indexes are
   // read back first, because DROP TABLE takes them with it.
   (db) => widenBusinessTypeCheck(db),
+  // Whether this gym's members keep their member app (workouts, diet, store,
+  // add-on) while the gym itself is suspended for a lapsed trial or payment.
+  // An operator call made gym by gym — usually for a gym whose members still
+  // buy from the store or pay for the add-on — so off unless switched on, which
+  // is also how every gym behaved before this column. Staff stay locked out
+  // either way; see requireActiveSubscription in tenant.js.
+  (db) => ensureColumn(db, 'tenants', 'member_app_after_lapse', 'INTEGER NOT NULL DEFAULT 0'),
 ];
 
 const BUSINESS_TYPE_CHECK = "CHECK (business_type IN ('gym', 'library', 'coaching'))";
@@ -460,6 +467,13 @@ export function setTenantStatus(slug, status, reason) {
        WHERE slug = ?`,
     )
     .run(status, status, reason ?? null, slug);
+}
+
+/** Keeps (or stops keeping) a gym's member app open while the gym is
+ * suspended. Set from the operator console only — never the gym's own. */
+export function setTenantMemberAppAfterLapse(slug, allowed) {
+  getRegistryDb().prepare('UPDATE tenants SET member_app_after_lapse = ? WHERE slug = ?').run(allowed ? 1 : 0, slug);
+  return findTenantBySlug(slug);
 }
 
 /** Moves a trial's end date — the operator console's way of granting an

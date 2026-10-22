@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widgets (DietWidget, WorkoutWidget), light; values-night
+     has the dark set. The macro colours are the portal's (--macro-* in app.css). -->
+<resources>
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_text">#FF111827</color>
+    <color name="widget_muted">#FF6B7280</color>
+    <color name="widget_track">#FFE5E7EB</color>
+    <color name="widget_soft">#FFFFEDD5</color>
+    <color name="widget_brand">#FFF97316</color>
+    <color name="widget_protein">#FF38BDF8</color>
+    <color name="widget_carbs">#FFFBBF24</color>
+    <color name="widget_fats">#FFF87171</color>
+    <color name="widget_water">#FF22D3EE</color>
+</resources>

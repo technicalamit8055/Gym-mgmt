@@ -32,6 +32,7 @@ import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { EFFORTS, suggestNextSet } from '../nextSet.js';
 import { cropAndResizeImage } from '../photo.js';
 import { openWorkoutShare } from '../shareCards.js';
+import { clearWidgets, refreshWidgets, setWidgetHandler } from '../widgets.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
 import { createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
@@ -2164,6 +2165,136 @@ function loggedTypeOf(exercise, sets) {
   if (sets.some((set) => Number(set.duration_seconds) > 0)) return 'duration';
   return logTypeOf(exercise);
 }
+
+/* ── What weight to log ────────────────────────────────────────────────── */
+
+/**
+ * What the weight box counts for an exercise: one dumbbell of a pair, the bar
+ * plus its plates, the pin on the stack. The catalogue's equipment decides it
+ * when it has one; otherwise the name does, since "Incline Dumbbell Press"
+ * says as much as any tag.
+ */
+function weightKindOf(exercise) {
+  const filed = exercise?.equipment;
+  if (filed && filed !== 'other' && filed !== 'bodyweight' && filed !== 'cardio') return filed;
+  const name = String(exercise?.exercise_name ?? exercise?.name ?? '');
+  if (/\bsmith\b/i.test(name)) return 'smith_machine';
+  if (/\b(dumb ?bells?|db)\b/i.test(name)) return 'dumbbell';
+  if (/\b(kettle ?bells?|kb)\b/i.test(name)) return 'kettlebell';
+  if (/\b(barbell|bb|ez[- ]?bar|trap bar|hex bar|deadlift|bench press|back squat|front squat)\b/i.test(name)) return 'barbell';
+  if (/\b(cable|pulldown|pushdown|crossover|face pull)\b/i.test(name)) return 'cable';
+  if (/\b(machine|leg press|leg extension|leg curl|hack squat|pec deck)\b/i.test(name)) return 'machine';
+  if (/\bband(ed|s)?\b/i.test(name)) return 'band';
+  if (/\bplate\b/i.test(name)) return 'plate';
+  if (filed === 'bodyweight' || /\b(weighted|pull-?ups?|chin-?ups?|dips?)\b/i.test(name)) return 'bodyweight';
+  return 'other';
+}
+
+/** The rule, a worked example and the fine print for each kind of load. The
+ * examples use round gym numbers in the member's own unit — a 45 lb bar, not
+ * 44.1 lb. */
+function weightGuideFor(kind) {
+  const lb = weightUnit.get() === 'lb';
+  const n = (kg, pounds) => (lb ? pounds : kg);
+  const w = (kg, pounds) => `${n(kg, pounds)} ${lb ? 'lb' : 'kg'}`;
+  return (
+    {
+      dumbbell: {
+        rule: 'Log the weight of one dumbbell.',
+        example: `Pressing two ${w(20, 45)} dumbbells? Log ${n(20, 45)}, not ${n(40, 90)}.`,
+        tips: [
+          'One-arm moves are the same: log the dumbbell in your hand.',
+          'One dumbbell held in both hands (goblet squat, pullover)? Log that dumbbell.',
+        ],
+      },
+      barbell: {
+        rule: 'Log the total on the bar: the bar itself plus every plate on both sides.',
+        example: `A ${w(20, 45)} bar with a ${w(10, 25)} plate each side = ${n(40, 95)}.`,
+        tips: [
+          `An Olympic bar weighs ${w(20, 45)} and a women’s bar ${w(15, 35)}. EZ-curl and trap bars vary — check the label or ask the floor staff.`,
+          'Pre-loaded fixed bars have their total printed on the end.',
+        ],
+      },
+      smith_machine: {
+        rule: 'Log the plates you load, both sides added together.',
+        example: `A ${w(10, 25)} plate each side = ${n(20, 50)}.`,
+        tips: ['Smith bars are counterbalanced and differ between machines, so most lifters leave the bar out. If you count it, always count it.'],
+      },
+      cable: {
+        rule: 'Log the number where the pin sits on the stack.',
+        example: `Pin at ${w(15, 30)}? Log ${n(15, 30)}.`,
+        tips: [
+          'Working two stacks at once (cable fly, crossover)? Log one side’s stack, as you would one dumbbell.',
+          'Pulleys differ, so the same number can feel lighter on another station — compare on the same one.',
+        ],
+      },
+      machine: {
+        rule: 'Pin-loaded: log the number where the pin sits. Plate-loaded: log the plates you add, both sides together.',
+        example: `Leg press with two ${w(20, 45)} plates each side = ${n(80, 180)}.`,
+        tips: ['Leave out the sled or carriage weight unless the machine is labelled with it.', 'Machines differ, so compare on the same machine.'],
+      },
+      kettlebell: {
+        rule: 'Log the weight of one kettlebell.',
+        example: `Two ${w(16, 35)} bells? Log ${n(16, 35)}.`,
+        tips: [],
+      },
+      plate: {
+        rule: 'Log the plate you are holding.',
+        example: `Holding a ${w(20, 45)} plate? Log ${n(20, 45)}.`,
+        tips: [],
+      },
+      band: {
+        rule: 'Bands have no fixed weight. Log the resistance printed on the band, or leave weight at 0 and track reps.',
+        example: null,
+        tips: ['Use the same band each time so the numbers compare.'],
+      },
+      bodyweight: {
+        rule: 'Log only the weight you add — the plate on the belt or the dumbbell between your feet. Leave your body weight out.',
+        example: `Dips with a ${w(10, 25)} plate on the belt? Log ${n(10, 25)}.`,
+        tips: [],
+      },
+    }[kind] ?? {
+      rule: 'Log the weight you move, leaving your body weight out.',
+      example: null,
+      tips: ['Using a pair of dumbbells or kettlebells? Log one of them.', 'On a bar, count the bar plus every plate.'],
+    }
+  );
+}
+
+/** The sheet behind the weight column's heading: what to count as the weight
+ * for this exercise. */
+function openWeightGuide(exercise) {
+  const guide = weightGuideFor(weightKindOf(exercise));
+  openModal({
+    title: 'What weight to log',
+    icon: 'info',
+    body: h(
+      'div',
+      { class: 'portal-weight-guide' },
+      h('div', { class: 'portal-weight-guide-ex' }, exercise.exercise_name ?? exercise.name),
+      h('p', { class: 'portal-weight-guide-rule' }, guide.rule),
+      guide.example ? h('div', { class: 'portal-weight-guide-example' }, guide.example) : null,
+      guide.tips.length ? h('ul', {}, ...guide.tips.map((tip) => h('li', {}, tip))) : null,
+      h('p', { class: 'muted' }, 'Whatever you count, count it the same way every session — your progress, records and suggestions compare against it.'),
+    ),
+  });
+}
+
+/** The weight column's heading, which opens that guide — the ⓘ says it can be
+ * tapped. */
+const weightHeading = (exercise) =>
+  h(
+    'button',
+    {
+      class: 'portal-set-header-help',
+      type: 'button',
+      title: 'What weight to log',
+      'aria-label': `What weight to log for ${exercise.exercise_name}`,
+      onclick: () => openWeightGuide(exercise),
+    },
+    weightUnit.get(),
+    renderIcon('info', { size: 12, stroke: 2.2 }),
+  );
 
 /** One set as a line of text: "60 kg × 10", "12 reps", "1:00", "5 km · 25:00". */
 function setSummary(set, type = logTypeOfSet(set)) {
@@ -6333,6 +6464,35 @@ function renderPortalApp(ctx, initialMe) {
     switchTab('workout');
   }
 
+  /**
+   * Where a home-screen widget's tap lands: the Diet tab, the food search over
+   * it, the Workout tab, or — for Start — today's workout already logging,
+   * just as Home's own Start button does.
+   */
+  async function openFromWidget(target) {
+    if (target === 'start_workout' && !activeSession.read()) {
+      const current = await api.portal.currentWorkout().catch(() => null);
+      if (current?.today_day) {
+        startWorkoutSession({
+          name: current.today_day.day_name,
+          day: current.today_day,
+          planId: current.plan.id,
+          previous: current.previous,
+          lastSession: current.last_session,
+          loggedWeights: current.logged_weights,
+        });
+        return;
+      }
+    }
+    const tab = target === 'diet' || target === 'food' ? 'diet' : 'workout';
+    // Neither tab exists in a study-hall portal; the widgets ask to unlock there.
+    if (!TABS.some((tabDef) => tabDef.key === tab)) return switchTab('home');
+    await switchTab(tab);
+    if (target === 'food' && active === 'diet' && !screenOpen) {
+      openFoodSearch({ logDate: today(), onAdded: () => refreshTab('diet') });
+    }
+  }
+
   /* -------------------------------------------------------------- Home tab */
 
   /**
@@ -7128,7 +7288,8 @@ function renderPortalApp(ctx, initialMe) {
             const btn = event.currentTarget;
             btn.disabled = true;
             try {
-              await api.portal.downloadReceipt(p.id);
+              const saved = await api.portal.downloadReceipt(p.id);
+              if (saved) toast(saved);
             } catch (err) {
               toast(err.message || 'Could not download receipt', 'error');
             } finally {
@@ -7868,6 +8029,7 @@ function renderPortalApp(ctx, initialMe) {
       actionSheet(exercise.exercise_name, [
         { icon: 'trendUp', label: 'Exercise progress', onClick: () => openExerciseDetail(exercise) },
         { icon: 'info', label: 'How to do it', onClick: () => openExerciseDetail(exercise, { tab: 'howto' }) },
+        logTypeOf(exercise) === 'weight_reps' ? { icon: 'weight', label: 'What weight to log', onClick: () => openWeightGuide(exercise) } : null,
         exIndex > 0 ? { icon: 'arrowUp', label: 'Move up', onClick: () => moveExercise(exIndex, exIndex - 1) } : null,
         exIndex < state.exercises.length - 1
           ? { icon: 'arrowDown', label: 'Move down', onClick: () => moveExercise(exIndex, exIndex + 1) }
@@ -7887,7 +8049,7 @@ function renderPortalApp(ctx, initialMe) {
 
     function exerciseCard(exercise, exIndex) {
       const columns = {
-        weight_reps: [weightUnit.get(), 'Reps'],
+        weight_reps: [weightHeading(exercise), 'Reps'],
         reps: ['Reps'],
         duration: ['Time'],
         distance_duration: ['Km', 'Time'],
@@ -8156,6 +8318,10 @@ function renderPortalApp(ctx, initialMe) {
                 ),
               )
             : null,
+        ),
+        // Pinned under the scrolling stats, so Done stays in reach however
+        // many PRs the session set.
+        footer: [
           h(
             'button',
             {
@@ -8178,7 +8344,7 @@ function renderPortalApp(ctx, initialMe) {
             'Done',
             renderIcon('arrowRight', { size: 20, stroke: 2.2 }),
           ),
-        ),
+        ],
       });
     }
 
@@ -9983,7 +10149,7 @@ function renderPortalApp(ctx, initialMe) {
 
     function exerciseCard(exercise, exIndex) {
       const columns = {
-        weight_reps: [weightUnit.get(), 'Reps'],
+        weight_reps: [weightHeading(exercise), 'Reps'],
         reps: ['Reps'],
         duration: ['Time'],
         distance_duration: ['Km', 'Time'],
@@ -10240,6 +10406,112 @@ function renderPortalApp(ctx, initialMe) {
     });
   }
 
+  /**
+   * Every past day of a month at a glance: a dot on each day food was logged,
+   * coloured by how it landed against that day's budget (within 10% is on
+   * target). Months step back as far as the member likes; a tapped day goes
+   * to `onPick`. Budgets use today's goal, as the insights week does.
+   */
+  function openDietCalendar({ selected, onPick }) {
+    const todayIso = today();
+    const pad = (n) => String(n).padStart(2, '0');
+    let year = Number(selected.slice(0, 4));
+    let month = Number(selected.slice(5, 7)) - 1;
+    // Months can be flipped faster than they load; only the latest may paint.
+    let loadSeq = 0;
+    const host = h('div', { class: 'portal-dcal' });
+
+    const status = (d) => {
+      if (!d?.entry_count) return '';
+      const pct = d.budget > 0 ? d.calories / d.budget : 0;
+      return pct > 1.1 ? ' over' : pct >= 0.9 ? ' on' : ' under';
+    };
+
+    const step = (delta) => {
+      const next = new Date(year, month + delta, 1);
+      year = next.getFullYear();
+      month = next.getMonth();
+      load();
+    };
+
+    function paint(byDate) {
+      const monthKey = `${year}-${pad(month + 1)}`;
+      const isCurrent = monthKey === todayIso.slice(0, 7);
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const startOffset = (new Date(year, month, 1).getDay() + 6) % 7; // week starts Monday
+      const logged = byDate ? [...byDate.values()].filter((d) => d.entry_count) : [];
+      const avg = logged.length ? Math.round(logged.reduce((sum, d) => sum + d.calories, 0) / logged.length) : 0;
+
+      const cells = Array.from({ length: startOffset }, () => h('span', { class: 'portal-dcal-day empty' }));
+      for (let day = 1; day <= daysInMonth; day++) {
+        const iso = `${monthKey}-${pad(day)}`;
+        cells.push(
+          h(
+            'button',
+            {
+              type: 'button',
+              class: `portal-dcal-day${status(byDate?.get(iso))}${iso === selected ? ' selected' : ''}${iso === todayIso ? ' today' : ''}`,
+              disabled: iso > todayIso,
+              'aria-pressed': iso === selected ? 'true' : 'false',
+              onclick: () => {
+                closeModal();
+                onPick(iso);
+              },
+            },
+            h('span', {}, String(day)),
+            h('i'),
+          ),
+        );
+      }
+
+      clear(host).append(
+        h(
+          'div',
+          { class: 'portal-dcal-head' },
+          h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Previous month', onclick: () => step(-1) }, renderIcon('chevronLeft', { size: 18 })),
+          h('strong', {}, new Date(year, month, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })),
+          h(
+            'button',
+            { type: 'button', class: 'icon-btn', 'aria-label': 'Next month', disabled: isCurrent, onclick: () => step(1) },
+            renderIcon('chevronRight', { size: 18 }),
+          ),
+        ),
+        h('div', { class: 'portal-dcal-grid portal-dcal-weekdays' }, ...['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => h('span', {}, d))),
+        h('div', { class: `portal-dcal-grid${byDate ? '' : ' loading'}` }, ...cells),
+        h(
+          'p',
+          { class: 'portal-dcal-summary' },
+          !byDate
+            ? 'Loading…'
+            : logged.length
+              ? `${logged.length} day${logged.length === 1 ? '' : 's'} logged · avg ${avg.toLocaleString()} kcal`
+              : 'Nothing logged this month',
+        ),
+        h(
+          'div',
+          { class: 'portal-dcal-legend' },
+          ...[['on', 'On target'], ['under', 'Under'], ['over', 'Over']].map(([tone, label]) => h('span', { class: tone }, h('i'), label)),
+        ),
+      );
+    }
+
+    async function load() {
+      const seq = ++loadSeq;
+      paint(null);
+      const monthKey = `${year}-${pad(month + 1)}`;
+      const end = monthKey === todayIso.slice(0, 7) ? todayIso : `${monthKey}-${pad(new Date(year, month + 1, 0).getDate())}`;
+      try {
+        const res = await api.portal.dietSummary({ end, days: Number(end.slice(8)) });
+        if (seq === loadSeq) paint(new Map(res.days.map((d) => [d.log_date, d])));
+      } catch (err) {
+        if (seq === loadSeq) toast(err.message || 'Could not load this month', 'error');
+      }
+    }
+
+    openModal({ title: 'Diet history', subtitle: 'Tap a day to see what you ate', className: 'portal-dcal-modal', body: host });
+    load();
+  }
+
   /** One meal's art. Both themes are in the DOM and CSS picks one, because the
    * light/dark switch is a body attribute rather than a media query, and the
    * member can flip it without leaving the tab. Snacks art stands in for the
@@ -10307,8 +10579,16 @@ function renderPortalApp(ctx, initialMe) {
 
     const body = h('div', { class: 'portal-tab-body portal-diet' });
 
-    /* Date carousel: the last week, oldest first, ending today */
-    const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6));
+    const pickDate = (iso) => {
+      logDate = iso;
+      reload();
+    };
+
+    /* Date carousel: a week of pills, oldest first — normally the one ending
+       today. A day picked from the history calendar further back gets a week
+       around it instead, so its pill is still there to show which day this is. */
+    const weekEnd = logDate < addDays(today(), -6) ? addDays(logDate, 3) : today();
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekEnd, i - 6));
     let activePill;
     const strip = h(
       'div',
@@ -10321,10 +10601,7 @@ function renderPortalApp(ctx, initialMe) {
             class: `portal-day-pill${iso === logDate ? ' active' : ''}${iso === today() ? ' is-today' : ''}`,
             type: 'button',
             'aria-pressed': iso === logDate ? 'true' : 'false',
-            onclick: () => {
-              logDate = iso;
-              reload();
-            },
+            onclick: () => pickDate(iso),
           },
           h('span', {}, iso === today() ? 'Today' : lbl.weekday),
           h('strong', {}, String(lbl.day)),
@@ -10333,7 +10610,31 @@ function renderPortalApp(ctx, initialMe) {
         return pill;
       }),
     );
-    body.append(strip);
+    body.append(
+      h(
+        'div',
+        { class: 'portal-diet-dates' },
+        h(
+          'div',
+          { class: 'portal-diet-datebar' },
+          h('strong', {}, new Date(`${logDate}T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })),
+          logDate !== today()
+            ? h('button', { class: 'portal-diet-datebtn', type: 'button', onclick: () => pickDate(today()) }, 'Today')
+            : null,
+          h(
+            'button',
+            {
+              class: 'portal-diet-datebtn',
+              type: 'button',
+              onclick: () => openDietCalendar({ selected: logDate, onPick: pickDate }),
+            },
+            renderIcon('calendar', { size: 15 }),
+            h('span', {}, 'History'),
+          ),
+        ),
+        strip,
+      ),
+    );
     // The week fits a normal phone, but a narrow one overflows and would open
     // on the oldest day. Deferred a frame: no scrollWidth until it is mounted.
     if (activePill) {
@@ -11557,6 +11858,7 @@ function renderPortalApp(ctx, initialMe) {
     detachPushListener = null;
     // The session stays saved to the account; only this phone stops showing it.
     syncLiveWorkout(null);
+    clearWidgets();
     memberSession.clear();
     ctx.navigate('/portal/login');
   }
@@ -12017,14 +12319,33 @@ function renderPortalApp(ctx, initialMe) {
       applyNotificationAction(event.id, { repaint: !mounting });
     }
   });
+  // The home-screen widgets (widgets.js) the same way: a tap that launched
+  // the app picks where it opens instead of the first tab.
+  let widgetTarget = null;
+  setWidgetHandler((event) => {
+    if (mounting) {
+      if (event.type === 'open') widgetTarget = event.target;
+    } else if (!content.isConnected) {
+      // A portal since signed out of.
+    } else if (event.type === 'open') {
+      openFromWidget(event.target);
+    } else if (event.type === 'changed' && !screenOpen && (active === 'diet' || active === 'home')) {
+      refreshTab(active);
+    }
+  });
   mounting = false;
   // Brought up to date, or taken down for a session finished elsewhere.
   syncLiveWorkout(liveNotificationContent(activeSession.read()));
+  refreshWidgets();
   // A reload mid-rest that lands on another tab; the Workout tab disarms it.
   restAlarm.arm();
-  switchTab(
-    openRequested ? 'workout' : reachable.has(requested) ? requested : reachable.has(restored) ? restored : 'home',
-  );
+  if (widgetTarget && !openRequested) {
+    openFromWidget(widgetTarget);
+  } else {
+    switchTab(
+      openRequested ? 'workout' : reachable.has(requested) ? requested : reachable.has(restored) ? restored : 'home',
+    );
+  }
   if (requested === 'notifications') openNotificationCenter();
 
   return h('div', { class: 'portal-frame' }, h('div', { class: 'portal-app' }, topbar, content, tabbar));

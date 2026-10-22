@@ -208,6 +208,70 @@ function openStatusModal(tenant, onSaved) {
   });
 }
 
+/** What the gym's members have spent with the platform — store orders plus the
+ * Diet & Workout add-on. Platform money, so in the store's currency (INR), not
+ * the gym's own. */
+const platformSales = (revenue) => (revenue?.store_gmv || 0) + (revenue?.addon_revenue || 0);
+
+/**
+ * Switches whether a gym's members keep their member app while the gym is
+ * suspended. Asked as a confirm rather than flipped silently: when the gym is
+ * suspended right now, this opens or closes the app for every member at once.
+ */
+function openMemberAppToggle(tenant, onSaved) {
+  const allow = !tenant.member_app_after_lapse;
+  const now = tenant.status === 'suspended';
+  confirmDialog({
+    title: allow ? `Keep ${tenant.gym_name}'s member app open?` : `Close ${tenant.gym_name}'s member app on lapse?`,
+    message: allow
+      ? `${now ? 'This gym is suspended, so its members get the app back straight away' : 'If this gym is ever suspended, its members keep using the app'} — workouts, diet, store and add-on. Staff stay locked out until the gym pays.`
+      : `${now ? 'This gym is suspended, so its members lose the app straight away' : 'If this gym is ever suspended, its members lose the app too'}, until the gym pays again.`,
+    confirmLabel: allow ? 'Keep it open' : 'Close on lapse',
+    danger: !allow && now,
+    onConfirm: async () => {
+      await api.platformSetMemberApp(tenant.slug, allow);
+      toast(allow ? `${tenant.gym_name}'s members keep the app if it lapses` : `${tenant.gym_name}'s member app now closes on lapse`);
+      await onSaved();
+    },
+  });
+}
+
+/** The figures behind the member-app decision, and the switch itself. */
+function memberAppCard(tenant, revenue, onChange) {
+  const on = Boolean(tenant.member_app_after_lapse);
+  const suspended = tenant.status === 'suspended';
+  const state = on
+    ? h('span', { class: 'badge green' }, suspended ? 'Open now — gym suspended' : 'Kept open on lapse')
+    : h('span', { class: `badge ${suspended ? 'red' : 'grey'}` }, suspended ? 'Closed — gym suspended' : 'Closes on lapse');
+
+  return h(
+    'div',
+    { class: 'card' },
+    h('div', { class: 'card-head' }, cardTitle('smartphone', 'Member app after lapse', 'green')),
+    h(
+      'dl',
+      { class: 'kv' },
+      ...kv('Store orders', `${revenue.store_orders}`),
+      ...kv('Store sales', amount(revenue.store_gmv)),
+      ...kv('Average order', revenue.store_orders ? amount(revenue.store_aov) : '—'),
+      ...kv('Add-on', `${amount(revenue.addon_revenue)} · ${revenue.addon_sales} sold`),
+      ...kv('Last sale', revenue.last_sale_at ? date(revenue.last_sale_at) : 'Never'),
+      ...kv('Member app', state),
+    ),
+    h(
+      'p',
+      { class: 'muted', style: 'font-size:12px;margin:10px 0' },
+      'Decides whether members keep workouts, diet, the store and the add-on while this gym is suspended. Staff are locked out either way.',
+    ),
+    h(
+      'button',
+      { class: `btn sm ${on ? '' : 'primary'}`, type: 'button', onclick: () => openMemberAppToggle(tenant, onChange) },
+      renderIcon(on ? 'lock' : 'unlock', { size: 15 }),
+      on ? 'Close on lapse' : 'Keep open on lapse',
+    ),
+  );
+}
+
 /** Edits a gym's identity on its owner's behalf — the support case where a
  * name was typed wrong at signup or a timezone was never set. */
 function openEditModal(tenant, onSaved) {
@@ -671,7 +735,18 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
     return;
   }
 
-  const { tenant, stats, detail, devices, whatsapp, url, platform_url: platformUrl, domains, domain_setup: domainSetup } = data;
+  const {
+    tenant,
+    stats,
+    platform_revenue: platformRevenue,
+    detail,
+    devices,
+    whatsapp,
+    url,
+    platform_url: platformUrl,
+    domains,
+    domain_setup: domainSetup,
+  } = data;
   const currency = tenant.currency || 'INR';
 
   const waTone = whatsapp.connected ? 'green' : whatsapp.has_credentials ? 'amber' : 'grey';
@@ -739,6 +814,8 @@ async function drawDetail(row, bodyNode, { onChanged, refresh }) {
           ...kv('Last visit', stats?.last_visit_at ? date(stats.last_visit_at, { withTime: true }) : 'Never'),
         ),
       ),
+
+      memberAppCard(tenant, platformRevenue, refresh),
 
       h(
         'div',
@@ -1409,6 +1486,8 @@ export async function renderPlatformConsole({ context, rerender }) {
     'members:desc': (a, b) => (b.stats?.members ?? -1) - (a.stats?.members ?? -1),
     'revenue:desc': (a, b) => (b.stats?.revenue_month ?? -1) - (a.stats?.revenue_month ?? -1),
     'visits:desc': (a, b) => (b.stats?.visits_30d ?? -1) - (a.stats?.visits_30d ?? -1),
+    'aov:desc': (a, b) => b.platform_revenue.store_aov - a.platform_revenue.store_aov,
+    'sales:desc': (a, b) => platformSales(b.platform_revenue) - platformSales(a.platform_revenue),
   };
 
   const rowAction = (icon, title, run) =>
@@ -1459,7 +1538,20 @@ export async function renderPlatformConsole({ context, rerender }) {
     },
     {
       label: 'Status',
-      render: (row) => h('div', { class: 'op-status-cell' }, statusBadge(row.status), statusNote(row)),
+      render: (row) =>
+        h(
+          'div',
+          { class: 'op-status-cell' },
+          statusBadge(row.status),
+          statusNote(row),
+          row.member_app_after_lapse
+            ? h(
+              'span',
+              { class: 'badge green', title: 'Members keep the member app while this gym is suspended' },
+              'Member app kept',
+            )
+            : null,
+        ),
     },
     {
       label: 'Members',
@@ -1472,6 +1564,24 @@ export async function renderPlatformConsole({ context, rerender }) {
       render: (row) => (row.stats ? h('strong', {}, amount(row.stats.revenue_month, row.currency)) : '—'),
     },
     { label: 'Visits 30d', align: 'right', render: (row) => row.stats?.visits_30d ?? '—' },
+    {
+      label: 'Store & add-on',
+      align: 'right',
+      render: (row) => {
+        const revenue = row.platform_revenue;
+        if (!platformSales(revenue)) return h('span', { class: 'muted' }, '—');
+        return h(
+          'div',
+          {},
+          h('strong', {}, amount(platformSales(revenue))),
+          h(
+            'div',
+            { class: 'muted op-nowrap', style: 'font-size:12px' },
+            revenue.store_orders ? `AOV ${amount(revenue.store_aov)} · ${revenue.store_orders} orders` : `${revenue.addon_sales} add-on`,
+          ),
+        );
+      },
+    },
     { label: 'Joined', render: (row) => h('span', { class: 'muted op-nowrap' }, date(row.created_at)) },
     {
       label: '',
@@ -1482,6 +1592,11 @@ export async function renderPlatformConsole({ context, rerender }) {
           { class: 'op-row-actions' },
           rowAction('shield', 'Change status', () => openStatusModal(row, rerender)),
           rowAction('key', 'Issue a password reset link', () => openPasswordResetModal(row)),
+          rowAction(
+            row.member_app_after_lapse ? 'lock' : 'smartphone',
+            row.member_app_after_lapse ? 'Close the member app if this gym lapses' : 'Keep the member app open if this gym lapses',
+            () => openMemberAppToggle(row, rerender),
+          ),
           renderIcon('chevronRight', { size: 16, class: 'op-row-chevron' }),
         ),
     },
@@ -1574,6 +1689,8 @@ export async function renderPlatformConsole({ context, rerender }) {
     h('option', { value: 'members:desc' }, 'Most members'),
     h('option', { value: 'revenue:desc' }, 'Highest revenue'),
     h('option', { value: 'visits:desc' }, 'Most visits'),
+    h('option', { value: 'aov:desc' }, 'Highest store AOV'),
+    h('option', { value: 'sales:desc' }, 'Most store & add-on sales'),
   );
 
   drawTabs();

@@ -1795,6 +1795,54 @@ export function monetizationSummary() {
   };
 }
 
+/**
+ * What each gym's members have spent with the platform — store orders and the
+ * Diet & Workout add-on — keyed by tenant slug. The operator weighs this when
+ * deciding whether a lapsed gym's members keep their app (see
+ * tenants.member_app_after_lapse). Registry-only, so it is cheap enough to ride
+ * along on every console list load. Gyms with no sales are absent — read them
+ * as emptyPlatformRevenue().
+ */
+export const emptyPlatformRevenue = () => ({
+  store_orders: 0,
+  store_gmv: 0,
+  store_aov: 0,
+  addon_sales: 0,
+  addon_revenue: 0,
+  last_sale_at: null,
+});
+
+export function platformRevenueByTenant() {
+  const bySlug = new Map();
+  const entry = (slug) => {
+    if (!bySlug.has(slug)) bySlug.set(slug, emptyPlatformRevenue());
+    return bySlug.get(slug);
+  };
+  const later = (a, b) => (!a || (b && b > a) ? b : a);
+
+  for (const row of many(
+    `SELECT tenant_slug, COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS gmv, MAX(created_at) AS last_at
+     FROM store_orders WHERE payment_status = 'paid' AND fulfillment_status != 'cancelled'
+     GROUP BY tenant_slug`,
+  )) {
+    const e = entry(row.tenant_slug);
+    e.store_orders = row.orders;
+    e.store_gmv = round2(row.gmv);
+    e.store_aov = row.orders ? round2(row.gmv / row.orders) : 0;
+    e.last_sale_at = later(e.last_sale_at, row.last_at);
+  }
+  for (const row of many(
+    `SELECT tenant_slug, COUNT(*) AS sales, COALESCE(SUM(amount), 0) AS revenue, MAX(COALESCE(paid_at, created_at)) AS last_at
+     FROM addon_payments WHERE status = 'paid' GROUP BY tenant_slug`,
+  )) {
+    const e = entry(row.tenant_slug);
+    e.addon_sales = row.sales;
+    e.addon_revenue = round2(row.revenue);
+    e.last_sale_at = later(e.last_sale_at, row.last_at);
+  }
+  return bySlug;
+}
+
 /* ── Gym owner: earnings from the platform ────────────────────────────── */
 
 /** One gym's commission totals since `from` (a gym-local YYYY-MM-DD). */

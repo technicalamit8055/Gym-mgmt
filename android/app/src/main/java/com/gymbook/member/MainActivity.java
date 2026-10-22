@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // The app's own plugins, which Capacitor does not find by itself.
         registerPlugin(WorkoutNotificationPlugin.class);
+        registerPlugin(WidgetsPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Without a handler, Android's back closes the app from any screen.

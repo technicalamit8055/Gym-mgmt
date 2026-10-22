@@ -71,6 +71,7 @@ import {
   deleteBanner,
   deleteProductImage,
   deleteStoreProduct,
+  emptyPlatformRevenue,
   listBadges,
   listBanners,
   makeProductImagePrimary,
@@ -82,6 +83,7 @@ import {
   listStoreProducts,
   monetizationSettings,
   monetizationSummary,
+  platformRevenueByTenant,
   recordPayout,
   updateMonetizationSettings,
   updateStoreOrder,
@@ -111,6 +113,7 @@ import {
   listDevicesForTenant,
   listTenants,
   setTenantBusinessType,
+  setTenantMemberAppAfterLapse,
   setTenantStatus,
   setTenantTrialEnd,
   tenantDbPath,
@@ -289,6 +292,7 @@ platformAdminRoutes.get('/tenants', (req, res) => {
     if (!domainsBySlug.has(domain.tenant_slug)) domainsBySlug.set(domain.tenant_slug, []);
     domainsBySlug.get(domain.tenant_slug).push({ id: domain.id, hostname: domain.hostname, status: domain.status });
   }
+  const revenueBySlug = platformRevenueByTenant();
   const items = listTenants()
     .filter((tenant) => !businessTypeFilter || (tenant.business_type || 'gym') === businessTypeFilter)
     .map((tenant) => ({
@@ -303,6 +307,8 @@ platformAdminRoutes.get('/tenants', (req, res) => {
       suspended_at: tenant.suspended_at ?? null,
       suspended_reason: tenant.suspended_reason ?? null,
       razorpay_subscription_id: tenant.razorpay_subscription_id ?? null,
+      member_app_after_lapse: Boolean(tenant.member_app_after_lapse),
+      platform_revenue: revenueBySlug.get(tenant.slug) ?? emptyPlatformRevenue(),
       custom_domains: domainsBySlug.get(tenant.slug) ?? [],
       stats: withStats ? tenantStats(tenant) : undefined,
     }));
@@ -352,6 +358,7 @@ platformAdminRoutes.get('/tenants/:slug', (req, res) => {
     // byte-per-array-entry JSON object — megabytes of noise nobody reads.
     tenant: withoutLogoBytes(tenant),
     stats: tenantStats(tenant),
+    platform_revenue: platformRevenueByTenant().get(tenant.slug) ?? emptyPlatformRevenue(),
     detail: tenantDetail(tenant),
     devices: listDevicesForTenant(tenant.slug),
     whatsapp: whatsappSummary(tenant.slug),
@@ -545,6 +552,27 @@ platformAdminRoutes.post('/tenants/:slug/status', (req, res) => {
   if (body.trial_ends_on) setTenantTrialEnd(tenant.slug, body.trial_ends_on);
 
   res.json({ tenant: findTenantBySlug(tenant.slug) });
+});
+
+/**
+ * Whether a gym's members keep their member app while the gym is suspended —
+ * kept open for a gym whose members still buy from the store or pay for the
+ * add-on, closed for one that brings nothing in. Settable whatever the current
+ * status, so it can be decided before a trial runs out; it only takes effect
+ * while the gym is suspended. Its own route for the same reason as status: a
+ * profile edit should never change who can get in.
+ */
+platformAdminRoutes.post('/tenants/:slug/member-app', (req, res) => {
+  const tenant = findTenantBySlug(req.params.slug);
+  if (!tenant) throw notFound('No gym with that address');
+
+  const body = parse(req.body, { allowed: { type: 'boolean', required: true } });
+
+  const updated = setTenantMemberAppAfterLapse(tenant.slug, body.allowed);
+  console.warn(
+    `[platform] member app after lapse ${body.allowed ? 'allowed' : 'restricted'} for gym "${tenant.slug}" by ${req.platformAdmin.email}`,
+  );
+  res.json({ tenant: withoutLogoBytes(updated) });
 });
 
 /**

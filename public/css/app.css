@@ -3352,9 +3352,16 @@ body[data-mode='light'] .login {
    splash's illustration, smaller. Held back a beat like the splash, so a tab
    that loads quickly swaps straight in without the scene flashing up. */
 .portal-loader {
-  display: grid; justify-items: center; gap: 14px; padding: 9vh 0 40px;
+  display: grid; justify-items: center; align-content: center; gap: 14px; padding: 24px 0;
   animation: splash-in 0.4s var(--ease) 0.25s backwards;
 }
+/* While it waits, the loader (and a pushed screen holding it) stretches to the
+   content area's full height so the scene sits in the middle of the page. */
+.portal-content:has(> .portal-loader),
+.portal-content:has(> .portal-screen > .portal-loader) { display: flex; flex-direction: column; }
+.portal-content > .portal-loader,
+.portal-content > .portal-screen:has(> .portal-loader),
+.portal-screen > .portal-loader { flex: 1; }
 .portal-loader .splash-art { display: block; width: min(200px, 56vw); height: auto; overflow: visible; }
 .portal-loader .splash-beads { display: flex; }
 .portal-loader-text { margin: 4px 0 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
@@ -6717,6 +6724,23 @@ body[data-mode='light'] .portal-pr-feature-art > img { mix-blend-mode: multiply;
   color: var(--muted); font-weight: 650; padding: 0 0 1px;
 }
 .portal-set-header span { text-align: center; }
+/* The weight heading opens what to count as the weight; it reads as a heading. */
+.portal-set-header-help {
+  display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; margin: -2px 0;
+  border: none; background: none; border-radius: 6px; cursor: pointer;
+  font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit;
+}
+.portal-set-header-help svg { color: var(--brand); }
+.portal-weight-guide { display: flex; flex-direction: column; gap: 10px; }
+.portal-weight-guide p { margin: 0; font-size: 14px; line-height: 1.45; }
+.portal-weight-guide .muted { font-size: 12.5px; }
+.portal-weight-guide-ex { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.portal-weight-guide .portal-weight-guide-rule { font-size: 16px; font-weight: 650; }
+.portal-weight-guide-example {
+  padding: 10px 12px; border-radius: 10px; font-size: 14px; font-weight: 600;
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--text);
+}
+.portal-weight-guide ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.45; }
 /* Reps-only and timed exercises log one value, which takes both input columns. */
 .portal-set-row.is-single { grid-template-columns: 30px minmax(0, 1.15fr) minmax(0, 2fr) 32px; }
 
@@ -9105,11 +9129,26 @@ body:not([data-mode='light']) .coach-plan-extras .pc-sug { background: var(--sur
 
 /* ------------------------------------------------- finish summary and PRs */
 
-.portal-summary-modal { width: min(520px, 100%); overflow: hidden; }
-.portal-summary-modal .modal-head { border-bottom: none; padding: 20px 22px 0; }
+/* Capped to the screen with only the stats scrolling, so a session with a
+   long PR list still shows Share and Done above the phone's gesture bar. */
+.portal-summary-modal {
+  width: min(520px, 100%); overflow: hidden;
+  display: flex; flex-direction: column;
+  max-height: calc(100vh - 96px); max-height: calc(100dvh - 96px);
+}
+.portal-summary-modal .modal-head { flex: none; border-bottom: none; padding: 20px 22px 0; }
 .portal-summary-modal .modal-head h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .portal-summary-modal .modal-head .icon-btn svg { width: 22px; height: 22px; }
-.portal-summary-modal .modal-body { padding-top: 6px; }
+.portal-summary-modal .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 6px; }
+.modal.portal-summary-modal > .modal-foot {
+  flex: none; flex-direction: column; align-items: stretch; gap: 10px;
+  padding: 12px 22px 22px; border-top: 1px solid var(--border); background: none;
+}
+.modal.portal-summary-modal .modal-foot .btn { flex: none; margin-top: 0; }
+@media (max-width: 560px) {
+  .portal-summary-modal { max-height: 100%; }
+  .modal.portal-summary-modal > .modal-foot { padding: 12px 18px 18px; }
+}
 
 .portal-summary { text-align: center; display: flex; flex-direction: column; gap: 14px; }
 .portal-summary h3 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
@@ -9367,6 +9406,47 @@ body:not([data-mode='light']) .portal-diet {
   border-color: var(--brand);
   box-shadow: 0 8px 20px -6px color-mix(in srgb, var(--brand) 70%, transparent);
 }
+
+/* Month label, a way back to today, and the history calendar's button. */
+.portal-diet-dates { display: flex; flex-direction: column; gap: 6px; }
+.portal-diet-datebar { display: flex; align-items: center; gap: 8px; }
+.portal-diet-datebar strong { flex: 1; font-size: 14px; font-weight: 700; }
+.portal-diet-datebtn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--d-card-border); background: var(--d-card); color: var(--text);
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.portal-diet-datebtn:active { transform: scale(0.95); }
+
+/* History calendar: a dot under each logged day, coloured by its budget. */
+.portal-dcal { --dcal-on: var(--green); --dcal-under: var(--amber); --dcal-over: var(--red); }
+.portal-dcal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.portal-dcal-head strong { font-size: 15px; }
+.portal-dcal-head .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.portal-dcal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.portal-dcal-grid.loading { opacity: 0.55; }
+.portal-dcal-weekdays { margin-bottom: 4px; font-size: 11px; color: var(--muted); text-align: center; }
+.portal-dcal-day {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  height: 44px; min-width: 0; padding: 0; border-radius: 12px; border: 1px solid transparent;
+  background: none; color: var(--text); font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.portal-dcal-day i { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.portal-dcal-day.on i { background: var(--dcal-on); }
+.portal-dcal-day.under i { background: var(--dcal-under); }
+.portal-dcal-day.over i { background: var(--dcal-over); }
+.portal-dcal-day.today { border-color: var(--brand); color: var(--brand); font-weight: 700; }
+.portal-dcal-day.selected { background: var(--brand); border-color: var(--brand); color: #1a1005; font-weight: 700; }
+.portal-dcal-day.selected i { box-shadow: 0 0 0 1.5px #fff; }
+.portal-dcal-day.empty { cursor: default; }
+.portal-dcal-day:disabled { opacity: 0.3; cursor: not-allowed; }
+.portal-dcal-summary { margin: 12px 0 8px; text-align: center; font-size: 13px; color: var(--muted); }
+.portal-dcal-legend { display: flex; justify-content: center; gap: 14px; font-size: 12px; color: var(--muted); }
+.portal-dcal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.portal-dcal-legend i { width: 8px; height: 8px; border-radius: 50%; }
+.portal-dcal-legend .on i { background: var(--dcal-on); }
+.portal-dcal-legend .under i { background: var(--dcal-under); }
+.portal-dcal-legend .over i { background: var(--dcal-over); }
 
 /* ---------------------------------------------------------------- hero */
 
