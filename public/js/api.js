@@ -401,7 +401,7 @@ async function request(method, path, body, { token, anonymous = false, member = 
   return payload;
 }
 
-const FITNESS_PATH = /^\/portal\/(diets|workouts|nutrition|activities)(\/|$)/;
+const FITNESS_PATH = /^\/portal\/(diets|workouts|nutrition|activities|wearables)(\/|$)/;
 
 /**
  * A member POST answered as Server-Sent Events: every event is handed to
@@ -971,6 +971,12 @@ export const api = {
     activityTypes: () => request('GET', '/portal/activities/types', undefined, { member: true }),
     logActivity: (payload) => request('POST', '/portal/activities', payload, { member: true }),
     deleteActivity: (id) => request('DELETE', `/portal/activities/${id}`, undefined, { member: true }),
+    // Wearables (healthConnect.js does the phone side). Each answers with the
+    // whole summary: connections and the last week's days.
+    wearables: () => request('GET', '/portal/wearables', undefined, { member: true }),
+    connectWearable: (provider) => request('POST', `/portal/wearables/${provider}/connect`, undefined, { member: true }),
+    syncWearable: (provider, days) => request('POST', `/portal/wearables/${provider}/sync`, { days }, { member: true }),
+    disconnectWearable: (provider) => request('DELETE', `/portal/wearables/${provider}`, undefined, { member: true }),
 
     // In-app payments: the add-on's online tiers and the store. Each checkout
     // returns the Razorpay order to open; each verify hands back what

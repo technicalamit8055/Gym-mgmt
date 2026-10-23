@@ -112,6 +112,15 @@ import {
 } from '../monetization.js';
 import { portalNavBadges } from '../navBadges.js';
 import { verifyPaymentSignature } from '../razorpay.js';
+import {
+  WEARABLE_PROVIDERS,
+  cleanSyncDays,
+  connectWearable,
+  connectionFor,
+  disconnectWearable,
+  saveDailyActivity,
+  wearableSummary,
+} from '../wearables.js';
 
 /**
  * Member self-service portal: the app a member/student signs into directly,
@@ -2581,4 +2590,36 @@ portalRoutes.delete('/activities/:id', ...fitnessGate, (req, res) => {
   const info = run('DELETE FROM activity_logs WHERE id = ? AND member_id = ?', [Number(req.params.id), req.member.id]);
   if (!info.changes) throw notFound('That activity is not in your log');
   res.json({ ok: true });
+});
+
+/* ── Wearables (see src/wearables.js) ─────────────────────────────────── */
+
+function wearableProvider(req) {
+  if (!WEARABLE_PROVIDERS.includes(req.params.provider)) throw notFound('That app cannot be connected');
+  return req.params.provider;
+}
+
+portalRoutes.get('/wearables', ...fitnessGate, (req, res) => {
+  res.json(wearableSummary(req.member.id));
+});
+
+/** Health Connect's permission screen runs on the phone, so by the time this
+ * is called the member has already said yes; all that is left is to record it. */
+portalRoutes.post('/wearables/:provider/connect', ...fitnessGate, (req, res) => {
+  connectWearable(req.member.id, wearableProvider(req));
+  res.status(201).json(wearableSummary(req.member.id));
+});
+
+portalRoutes.post('/wearables/:provider/sync', ...fitnessGate, (req, res) => {
+  const provider = wearableProvider(req);
+  if (!connectionFor(req.member.id, provider)) throw conflict('Connect the app before syncing it');
+  const days = cleanSyncDays(req.body?.days);
+  if (!days) throw badRequest('Some fields need attention', { days: 'must be a list of daily totals' });
+  saveDailyActivity(req.member.id, provider, days);
+  res.json(wearableSummary(req.member.id));
+});
+
+portalRoutes.delete('/wearables/:provider', ...fitnessGate, (req, res) => {
+  if (!disconnectWearable(req.member.id, wearableProvider(req))) throw notFound('That app is not connected');
+  res.json(wearableSummary(req.member.id));
 });

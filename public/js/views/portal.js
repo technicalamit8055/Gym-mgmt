@@ -28,6 +28,15 @@ import {
 import { cameraProblem, startBarcodeScan } from '../barcodeScanner.js';
 import { coachStatus, openCoachSheet, openPlanGenerator, resetCoachThread } from '../coach.js';
 import { askLiveWorkoutPermission, setLiveWorkoutHandler, syncLiveWorkout } from '../liveWorkout.js';
+import {
+  HEALTH_CONNECT,
+  healthConnectStatus,
+  healthConnectSupported,
+  openHealthConnect,
+  requestHealthConnectAccess,
+  startHealthConnectSync,
+  syncHealthConnect,
+} from '../healthConnect.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { EFFORTS, suggestNextSet } from '../nextSet.js';
 import { cropAndResizeImage } from '../photo.js';
@@ -6799,7 +6808,11 @@ function renderPortalApp(ctx, initialMe) {
       miniStat('trendUp', me.stats.total_visits, 'Total visits', 'orange'),
     );
 
-    const [todaysFocus, todaySection] = await Promise.all([renderTodaysFocus(), renderTodaySection()]);
+    const [todaysFocus, activityCard, todaySection] = await Promise.all([
+      renderTodaysFocus(),
+      renderActivityCard(),
+      renderTodaySection(),
+    ]);
 
     return h(
       'div',
@@ -6819,8 +6832,55 @@ function renderPortalApp(ctx, initialMe) {
       installPrimerSlot(),
       quickActions,
       todaysFocus,
+      activityCard,
       statsRow,
       todaySection,
+    );
+  }
+
+  /**
+   * Today's steps against the goal, with active calories, distance and
+   * exercise minutes — for a member who connected a watch (Connected apps).
+   * Nothing for anyone else, or without the add-on.
+   */
+  async function renderActivityCard() {
+    if (isLibrary()) return null;
+    const summary = await api.portal.wearables().catch(() => null);
+    if (!summary?.connections.length) return null;
+
+    const day = summary.days.find((d) => d.log_date === today());
+    const steps = day?.steps ?? 0;
+    const lastSync = summary.connections.map((c) => c.last_synced_at).filter(Boolean).sort().at(-1);
+    const stat = (icon, value, label) =>
+      h('div', { class: 'portal-activity-stat' }, renderIcon(icon, { size: 16 }), h('strong', {}, value), h('small', {}, label));
+
+    return h(
+      'div',
+      { class: 'portal-section' },
+      sectionHead("Today's activity", 'Details', openConnectedAppsScreen),
+      h(
+        'button',
+        { class: 'portal-focus-card portal-activity-card', type: 'button', onclick: openConnectedAppsScreen },
+        h(
+          'div',
+          { style: 'position:relative' },
+          progressRing(steps / summary.step_goal, { size: 96, stroke: 8 }),
+          h(
+            'div',
+            { class: 'portal-hero-ring-text' },
+            h('strong', { class: 'portal-activity-steps' }, steps.toLocaleString()),
+            h('span', {}, `of ${summary.step_goal.toLocaleString()}`),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'portal-activity-stats' },
+          stat('flame', day?.active_calories != null ? `${day.active_calories.toLocaleString()} kcal` : '—', 'Active burn'),
+          stat('mapPin', day?.distance_m != null ? `${(day.distance_m / 1000).toFixed(1)} km` : '—', 'Distance'),
+          stat('timer', day?.active_minutes != null ? `${day.active_minutes} min` : '—', 'Exercise'),
+          h('small', { class: 'portal-activity-sync muted' }, lastSync ? `Synced ${relativeTime(lastSync).toLowerCase()}` : 'Not synced yet'),
+        ),
+      ),
     );
   }
 
@@ -10754,7 +10814,8 @@ function renderPortalApp(ctx, initialMe) {
     };
 
     function openExerciseSheet() {
-      const exRow = ({ icon, name, meta, kcal, onRemove }) =>
+      const { wearable } = ex;
+      const exRow =({ icon, name, meta, kcal, onRemove }) =>
         h(
           'div',
           { class: 'portal-ex-row' },
@@ -10803,7 +10864,25 @@ function renderPortalApp(ctx, initialMe) {
           ...ex.activities.map((a) =>
             exRow({ icon: 'activity', name: a.name, meta: `${a.duration_minutes} min`, kcal: a.calories, onRemove: () => api.portal.deleteActivity(a.id) }),
           ),
-          ex.workouts.length || ex.activities.length
+          wearable
+            ? exRow({
+                icon: 'heartPulse',
+                name: 'Watch & phone',
+                meta: [
+                  wearable.steps !== null ? `${wearable.steps.toLocaleString()} steps` : null,
+                  wearable.active_calories !== null ? `${wearable.active_calories.toLocaleString()} kcal active` : null,
+                ].filter(Boolean).join(' · '),
+                kcal: wearable.extra,
+              })
+            : null,
+          wearable?.active_calories != null
+            ? h(
+                'small',
+                { class: 'portal-ex-note' },
+                `Only what your watch counted beyond the ~${wearable.daily_life_allowance.toLocaleString()} kcal of everyday movement your goal already includes, and never on top of workouts logged here.`,
+              )
+            : null,
+          ex.workouts.length || ex.activities.length || wearable?.extra
             ? h('small', { class: 'portal-ex-note' }, addbackNote)
             : h('div', { class: 'portal-ex-empty' }, 'Nothing yet. Workouts you finish in the app appear here on their own.'),
           h(
@@ -11967,6 +12046,165 @@ function renderPortalApp(ctx, initialMe) {
     });
   }
 
+  /**
+   * Profile → Connected apps: Health Connect, which brings in the steps and
+   * calories a watch or phone already counted (healthConnect.js). It lives on
+   * the phone, so only the Android app can connect it; the web says where to.
+   */
+  function openConnectedAppsScreen() {
+    const wrap = h('div', { class: 'portal-prof portal-prof-screen' });
+
+    const busy = async (button, fn) => {
+      button.disabled = true;
+      try {
+        await fn();
+      } catch (err) {
+        toast(err.message || 'Something went wrong', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    const connect = (event) =>
+      busy(event.currentTarget, async () => {
+        const { status } = await healthConnectStatus();
+        if (status === 'not_installed' || status === 'update_required') {
+          toast(`${status === 'not_installed' ? 'Install' : 'Update'} Health Connect, then come back here to connect`);
+          await openHealthConnect();
+          return;
+        }
+        if (status !== 'available') throw new Error('Health Connect is not available on this phone');
+        const { granted } = await requestHealthConnectAccess();
+        if (!granted.length) {
+          toast('Nothing was shared. Allow GymVym in Health Connect settings, then connect again.', 'error');
+          return;
+        }
+        await api.portal.connectWearable(HEALTH_CONNECT);
+        await syncHealthConnect();
+        toast('Health Connect connected');
+        await paint();
+      });
+
+    const syncNow = (event) =>
+      busy(event.currentTarget, async () => {
+        await syncHealthConnect();
+        toast('Synced');
+        await paint();
+      });
+
+    const disconnect = () =>
+      confirmDialog({
+        title: 'Disconnect Health Connect?',
+        message: 'Your synced steps and activity are deleted from the app, and stop counting towards your diet. Health Connect itself keeps everything.',
+        confirmLabel: 'Disconnect',
+        danger: true,
+        onConfirm: async () => {
+          await api.portal.disconnectWearable(HEALTH_CONNECT);
+          toast('Health Connect disconnected');
+          await paint();
+        },
+      });
+
+    const dayRow = (day) =>
+      profileRow({
+        icon: 'activity',
+        tone: 'green',
+        title: day.log_date === today()
+          ? 'Today'
+          : new Date(`${day.log_date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }),
+        // All in the one line: on a phone a row's value hides its sub line.
+        sub: [
+          day.steps !== null ? `${day.steps.toLocaleString()} steps` : null,
+          day.distance_m ? `${(day.distance_m / 1000).toFixed(1)} km` : null,
+          day.active_minutes ? `${day.active_minutes} min` : null,
+          day.active_calories !== null ? `${day.active_calories.toLocaleString()} kcal` : null,
+        ].filter(Boolean).join(' · ') || 'Nothing recorded',
+      });
+
+    async function paint() {
+      const [summary, hc] = await Promise.all([api.portal.wearables(), healthConnectStatus()]);
+      const connection = summary.connections.find((c) => c.provider === HEALTH_CONNECT);
+
+      let row;
+      if (!healthConnectSupported) {
+        row = profileRow({
+          icon: 'heartPulse', tone: 'rose', title: 'Health Connect',
+          sub: isIos() ? 'Not available on iPhone yet' : 'Connect it from the GymVym app on your Android phone',
+        });
+      } else if (hc.status === 'unsupported') {
+        row = profileRow({ icon: 'heartPulse', tone: 'rose', title: 'Health Connect', sub: 'Needs Android 9 or newer' });
+      } else if (connection) {
+        row = profileRow({
+          icon: 'heartPulse', tone: 'rose', title: 'Health Connect',
+          sub: connection.last_synced_at ? `Synced ${relativeTime(connection.last_synced_at).toLowerCase()}` : 'Not synced yet',
+          control: h('span', { class: 'portal-device-current' }, 'Connected'),
+        });
+      } else {
+        row = profileRow({
+          icon: 'heartPulse', tone: 'rose', title: 'Health Connect', sub: 'Steps, calories and exercise from your watch or phone',
+          control: h('button', { class: 'btn sm primary', type: 'button', onclick: connect }, 'Connect'),
+        });
+      }
+
+      // Connected, but access was since turned off in Health Connect.
+      const accessOff = connection && hc.status === 'available' && !hc.granted.length;
+      const manageRow = healthConnectSupported && hc.status !== 'unsupported'
+        ? profileRow({
+            icon: accessOff ? 'alert' : 'settings', tone: accessOff ? 'orange' : 'blue',
+            title: accessOff ? 'Access is off' : 'Health Connect settings',
+            sub: accessOff ? 'Allow GymVym in Health Connect to keep syncing' : 'Choose what GymVym can read',
+            onclick: () => openHealthConnect().catch((err) => toast(err.message || 'Could not open Health Connect', 'error')),
+          })
+        : null;
+      const syncRow = connection && healthConnectSupported && !accessOff
+        ? profileRow({
+            icon: 'refreshCw', tone: 'green', title: 'Sync now', sub: 'Brings in the last 7 days',
+            control: h('button', { class: 'btn sm', type: 'button', onclick: syncNow }, 'Sync'),
+          })
+        : null;
+
+      const days = [...summary.days].reverse();
+      const parts = [
+        h('div', { class: 'portal-prof-card' }, row, syncRow, manageRow),
+        h(
+          'p',
+          { class: 'portal-devices-note muted' },
+          'Brings in steps, active calories, distance and exercise minutes from apps that share with Health Connect — Fitbit, Samsung Health, Google Fit, Garmin, Strava and more. Your steps are shown only to you. Calories beyond your everyday activity count as exercise in your diet, which your trainer can see.',
+        ),
+        days.length ? h('h3', { class: 'portal-prof-label' }, 'Last 7 days') : null,
+        days.length ? h('div', { class: 'portal-prof-card' }, ...days.map(dayRow)) : null,
+        connection
+          ? h(
+              'button',
+              { class: 'portal-prof-signout', type: 'button', onclick: disconnect },
+              renderIcon('close', { size: 20 }),
+              'Disconnect Health Connect',
+            )
+          : null,
+      ];
+      wrap.replaceChildren(...parts.filter(Boolean));
+    }
+
+    openScreen({
+      title: 'Connected apps',
+      subtitle: 'Your watch and phone activity',
+      render: async () => {
+        try {
+          await paint();
+        } catch (err) {
+          if (err.details?.code !== 'fitness_addon_required') throw err;
+          return h(
+            'div',
+            { class: 'portal-error' },
+            h('p', {}, 'Connecting your watch is part of Diet & Workout tracking.'),
+            h('button', { class: 'btn primary', type: 'button', onclick: () => switchTab('diet') }, 'See how to get it'),
+          );
+        }
+        return wrap;
+      },
+    });
+  }
+
   function openEditProfileModal() {
     const m = me.member;
     openModal({
@@ -12229,6 +12467,12 @@ function renderPortalApp(ctx, initialMe) {
               onclick: openDietSettings,
             })
           : null,
+        TABS.some((tabDef) => tabDef.key === 'diet')
+          ? profileRow({
+              icon: 'heartPulse', tone: 'rose', title: 'Connected apps', sub: 'Steps and calories from your watch via Health Connect',
+              onclick: openConnectedAppsScreen,
+            })
+          : null,
         profileRow({ icon: 'key', tone: 'rose', title: 'Change password', sub: 'Update your app password for security', onclick: openChangePasswordModal }),
         profileRow({
           icon: 'smartphone', tone: 'blue', title: 'Devices', sub: 'See where you are signed in and sign devices out',
@@ -12354,6 +12598,15 @@ function renderPortalApp(ctx, initialMe) {
   // Brought up to date, or taken down for a session finished elsewhere.
   syncLiveWorkout(liveNotificationContent(activeSession.read()));
   refreshWidgets();
+  // Today's steps from Health Connect; Home repaints once they land.
+  startHealthConnectSync();
+  window.addEventListener('gymbook:wearables-synced', function onWearablesSynced() {
+    if (!content.isConnected) {
+      window.removeEventListener('gymbook:wearables-synced', onWearablesSynced);
+    } else if (!screenOpen && (active === 'home' || active === 'diet')) {
+      refreshTab(active);
+    }
+  });
   // A reload mid-rest that lands on another tab; the Workout tab disarms it.
   restAlarm.arm();
   if (widgetTarget && !openRequested) {

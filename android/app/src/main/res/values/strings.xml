@@ -7,5 +7,7 @@
     <string name="widget_diet_label">Diet tracker</string>
     <string name="widget_diet_description">Calories left, macros and water for today, with + water and + food buttons</string>
     <string name="widget_workout_label">Workouts</string>
+    <string name="health_rationale_title">Health Connect access</string>
+    <string name="health_rationale">The app reads your daily steps, active calories, distance and exercise minutes from Health Connect. It never writes anything there.\n\nYour daily totals are sent to your gym\'s account in the app, so the Home screen can show your activity and your diet can count the calories your watch or phone measured beyond your everyday movement. Your steps are shown only to you; your trainer sees the calories added to your diet.\n\nThe app reads Health Connect only while it is open, and only the last 7 days at a time. Health Connect data is never sold, shared with advertisers, sent to the AI coach, or used to train AI.\n\nTo stop, go to Profile → Connected apps → Disconnect Health Connect, which also deletes what was synced. You can also turn off access at any time in Health Connect\'s settings.</string>
     <string name="widget_workout_description">This week\'s workouts and streak, and your next workout to start in one tap</string>
 </resources>

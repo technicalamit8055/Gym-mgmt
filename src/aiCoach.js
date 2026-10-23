@@ -304,7 +304,10 @@ export function buildCoachContext(memberId, { screen, session, unit, planId, lib
      WHERE d.member_id = ? AND d.log_date = ?`,
     [memberId, on],
   ) ?? { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0, items: 0 };
-  const burned = exerciseForDay(memberId, on).total_burned;
+  // Logged exercise only: what a wearable counted came from Health Connect,
+  // and that is not sent to an outside AI (see src/wearables.js).
+  const exercise = exerciseForDay(memberId, on);
+  const burned = exercise.total_burned - (exercise.wearable?.extra ?? 0);
   // So "a meal plan for the rest of today" can skip the meals already eaten.
   const mealsLogged = all(
     `SELECT DISTINCT e.meal_type FROM diet_logs d JOIN diet_log_entries e ON e.diet_log_id = d.id

@@ -1523,6 +1523,40 @@ const MIGRATIONS = [
     ensureColumn(db, 'gym_products', 'barcode', 'TEXT');
     db.exec('CREATE INDEX IF NOT EXISTS idx_gym_products_barcode ON gym_products(barcode)');
   },
+
+  // Wearables — see src/wearables.js. A connection is a member's link to one
+  // source; `credentials` stays NULL for Health Connect, which the phone
+  // reads itself, and is for a cloud provider's (encrypted) tokens. Daily
+  // totals are one row per member, day and source, replaced on every sync;
+  // NULL means the source does not share that metric, 0 means it counted none.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_wearable_connections (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id        INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        provider         TEXT NOT NULL,
+        external_user_id TEXT,
+        credentials      TEXT,
+        connected_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        last_synced_at   TEXT,
+        UNIQUE (member_id, provider)
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_daily_activity (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id       INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        log_date        TEXT NOT NULL,
+        provider        TEXT NOT NULL,
+        steps           INTEGER CHECK (steps >= 0),
+        active_calories INTEGER CHECK (active_calories >= 0),
+        distance_m      INTEGER CHECK (distance_m >= 0),
+        active_minutes  INTEGER CHECK (active_minutes >= 0),
+        synced_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (member_id, log_date, provider)
+      )
+    `);
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

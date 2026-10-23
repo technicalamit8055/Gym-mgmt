@@ -15,6 +15,7 @@
 import { all, get } from './db.js';
 import { DEFAULT_DIET_TARGETS } from './fitness.js';
 import { today } from './validate.js';
+import { activityOn } from './wearables.js';
 
 export const SEXES = ['male', 'female', 'other'];
 
@@ -99,6 +100,12 @@ export function fiberSugarFor(calories) {
 
 /* ── Calculator ───────────────────────────────────────────────────────── */
 
+/** Mifflin-St Jeor, with the midpoint of the two sex offsets when it is unknown. */
+function bmrOf({ weight_kg, height_cm, age, sex }) {
+  const sexOffset = sex === 'male' ? 5 : sex === 'female' ? -161 : -78;
+  return 10 * weight_kg + 6.25 * height_cm - 5 * age + sexOffset;
+}
+
 /**
  * Suggested daily targets from body stats.
  *
@@ -129,8 +136,7 @@ export function suggestTargets({
   goal_rate_kg = 0.5,
   exercise_addback_pct = 0,
 }) {
-  const sexOffset = sex === 'male' ? 5 : sex === 'female' ? -161 : -78;
-  const bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + sexOffset;
+  const bmr = bmrOf({ weight_kg, height_cm, age, sex });
   const base = bmr * (ACTIVITY_LEVELS[activity_level] ?? ACTIVITY_LEVELS.light);
 
   const sessionMet = TRAINING_INTENSITIES[training_intensity] ?? TRAINING_INTENSITIES.moderate;
@@ -294,9 +300,33 @@ export function effectiveDietTargets(memberId) {
 }
 
 /**
+ * The active calories a member's daily-life factor already budgets for —
+ * BMR × (factor − 1) — which a watch's count has to beat before any of it is
+ * new. Stats the member never entered fall back to an average adult's, which
+ * errs towards crediting too little rather than too much.
+ */
+export function dailyLifeAllowance(memberId, logDate) {
+  const profile = nutritionProfile(memberId);
+  const bmr = bmrOf({
+    weight_kg: weightOn(memberId, logDate) ?? DEFAULT_WEIGHT_KG,
+    height_cm: profile.height_cm ?? 170,
+    age: ageOn(profile.birth_date, logDate) ?? 30,
+    sex: profile.sex,
+  });
+  const factor = ACTIVITY_LEVELS[profile.activity_level] ?? ACTIVITY_LEVELS.light;
+  return Math.round(bmr * (factor - 1));
+}
+
+/**
  * Everything a member burned on `logDate`: logged workouts (costed at save
- * time; older sessions from before costing existed are estimated now) and
- * the activities they added by hand.
+ * time; older sessions from before costing existed are estimated now), the
+ * activities they added by hand, and what a connected wearable counted
+ * beyond that.
+ *
+ * A watch's active calories already include any workout it was worn for, and
+ * the walking the member's daily-life factor budgets for — so it is never
+ * added on top. The day's burn is the larger of what was logged and what the
+ * watch counted beyond that allowance; `wearable.extra` is the difference.
  */
 export function exerciseForDay(memberId, logDate) {
   const weightKg = weightOn(memberId, logDate);
@@ -320,6 +350,15 @@ export function exerciseForDay(memberId, logDate) {
     [memberId, logDate],
   );
 
-  const total = workouts.reduce((s, w) => s + w.calories, 0) + activities.reduce((s, a) => s + a.calories, 0);
-  return { workouts, activities, total_burned: total, weight_kg: weightKg };
+  const logged = workouts.reduce((s, w) => s + w.calories, 0) + activities.reduce((s, a) => s + a.calories, 0);
+
+  const day = activityOn(memberId, logDate);
+  let wearable = null;
+  if (day) {
+    const allowance = dailyLifeAllowance(memberId, logDate);
+    const extra = day.active_calories === null ? 0 : Math.max(0, day.active_calories - allowance - logged);
+    wearable = { ...day, daily_life_allowance: allowance, extra };
+  }
+
+  return { workouts, activities, wearable, total_burned: logged + (wearable?.extra ?? 0), weight_kg: weightKg };
 }

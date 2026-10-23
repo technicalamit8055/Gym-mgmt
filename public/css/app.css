@@ -4627,6 +4627,17 @@ body[data-mode='light'] .portal-focus-art { mix-blend-mode: multiply; }
 .portal-focus-diet { flex-direction: row; align-items: center; gap: 18px; }
 .portal-focus-diet .portal-macro-stack { min-width: 0; gap: 14px; }
 
+/* Home → Today's activity (Health Connect): the step ring beside three stats. */
+.portal-activity-card { flex-direction: row; align-items: center; gap: 18px; cursor: pointer; }
+.portal-activity-card .portal-hero-ring-text strong.portal-activity-steps { font-size: 19px; }
+.portal-activity-stats { display: flex; flex-direction: column; gap: 9px; min-width: 0; flex: 1; }
+.portal-activity-stat {
+  display: grid; grid-template-columns: 16px auto 1fr; align-items: center; gap: 8px; color: var(--brand);
+}
+.portal-activity-stat strong { color: var(--text); font-size: 15px; font-weight: 750; white-space: nowrap; }
+.portal-activity-stat small { color: var(--muted); font-size: 12px; text-align: right; }
+.portal-activity-sync { font-size: 11.5px; }
+
 /* ---------------------------------------------------------------- sections */
 
 .portal-section { display: flex; flex-direction: column; gap: 12px; }
