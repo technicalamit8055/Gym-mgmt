@@ -95,6 +95,15 @@ import {
 import { lookupStoreBarcode } from '../productBarcode.js';
 import { isRazorpayOrdersConfigured } from '../razorpay.js';
 import {
+  adjustSubscription as adjustReceptionistSubscription,
+  billingSettings as receptionistBillingSettings,
+  listReceptionistAccounts,
+  receptionistSummary,
+  recentReceptionistPayments,
+  recordManualPayment as recordManualReceptionistPayment,
+  updateBillingSettings as updateReceptionistBillingSettings,
+} from '../coaching/receptionistBilling.js';
+import {
   createSeller,
   deleteSeller,
   listSellers,
@@ -831,6 +840,61 @@ platformAdminRoutes.get('/monetization', (_req, res) => {
 platformAdminRoutes.put('/monetization', (req, res) => {
   updateMonetizationSettings(req.body);
   res.json(monetizationState());
+});
+
+/* ── CoachBook's AI receptionist: what institutes pay ─────────────────── */
+
+/** Usage numbers from each institute's own database: whether the assistant
+ * is switched on, and its replies and captured leads over 30 days — what
+ * the operator weighs a renewal or a custom price against. */
+function receptionistUsage(slug) {
+  try {
+    const tenant = findTenantBySlug(slug);
+    return inTenant(tenant, () => ({
+      switched_on: Boolean(get('SELECT ai_receptionist FROM coaching_settings WHERE id = 1')?.ai_receptionist),
+      replies_30d: get("SELECT COUNT(*) AS n FROM wa_messages WHERE author = 'ai' AND created_at >= datetime('now', '-30 days')").n,
+      leads_30d: get("SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND created_at >= datetime('now', '-30 days')").n,
+      demos_30d: get(
+        "SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND demo_slot_id IS NOT NULL AND updated_at >= datetime('now', '-30 days')",
+      ).n,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+function receptionistState() {
+  return {
+    settings: receptionistBillingSettings(),
+    summary: receptionistSummary(),
+    institutes: listReceptionistAccounts().map((row) => ({ ...row, usage: receptionistUsage(row.slug) })),
+    payments: recentReceptionistPayments(),
+    razorpay_configured: isRazorpayOrdersConfigured(),
+  };
+}
+
+platformAdminRoutes.get('/receptionist', (_req, res) => {
+  res.json(receptionistState());
+});
+
+platformAdminRoutes.put('/receptionist/settings', (req, res) => {
+  updateReceptionistBillingSettings(req.body);
+  console.warn(`[platform] AI receptionist pricing changed by ${req.platformAdmin.email}`);
+  res.json(receptionistState());
+});
+
+/** A UPI/cash/bank payment taken outside the app, or months given free. */
+platformAdminRoutes.post('/receptionist/:slug/payments', (req, res) => {
+  recordManualReceptionistPayment(req.params.slug, req.body, { by: req.platformAdmin.email });
+  console.warn(`[platform] AI receptionist payment recorded for "${req.params.slug}" by ${req.platformAdmin.email}`);
+  res.status(201).json(receptionistState());
+});
+
+/** One institute's own price, a longer trial, or ending its access. */
+platformAdminRoutes.patch('/receptionist/:slug', (req, res) => {
+  adjustReceptionistSubscription(req.params.slug, req.body);
+  console.warn(`[platform] AI receptionist plan for "${req.params.slug}" adjusted by ${req.platformAdmin.email}`);
+  res.json(receptionistState());
 });
 
 /* ── Member app menu badges ────────────────────────────────────────────── */

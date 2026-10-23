@@ -19,6 +19,7 @@ import { checkSummary, dnsRecordsTable, domainStatusBadge } from './customDomain
 import { renderCatalogSection } from './exerciseCatalog.js';
 import { renderFoodCatalogSection } from './foodCatalog.js';
 import { renderNavBadgesSection } from './navBadgesAdmin.js';
+import { renderReceptionistSection } from './receptionistAdmin.js';
 import { renderShopsSection } from './shopsAdmin.js';
 import { renderStoreAdminSection } from './storeAdmin.js';
 
@@ -1238,6 +1239,14 @@ const SECTIONS = [
     sub: 'The gym and coaching stores, the Diet & Workout add-on and each gym’s and institute’s revenue share.',
   },
   {
+    id: 'receptionist',
+    group: 'Revenue',
+    icon: 'sparkle',
+    label: 'AI receptionist',
+    title: 'AI admissions receptionist',
+    sub: 'What CoachBook institutes pay for the WhatsApp assistant — your price and trial, each institute’s plan, and what it is collecting.',
+  },
+  {
     id: 'shops',
     group: 'Revenue',
     icon: 'package',
@@ -1414,6 +1423,7 @@ export async function renderPlatformConsole({ context, rerender }) {
   if (consoleSection === 'store') return consoleShell(rerender, renderStoreAdminSection({ onExpired }));
   if (consoleSection === 'shops') return consoleShell(rerender, renderShopsSection({ onExpired }));
   if (consoleSection === 'navbadges') return consoleShell(rerender, renderNavBadgesSection({ onExpired }));
+  if (consoleSection === 'receptionist') return consoleShell(rerender, renderReceptionistSection({ onExpired }));
 
   if (consoleSection === 'domains') {
     let section;

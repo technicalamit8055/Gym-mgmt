@@ -2,9 +2,11 @@ import { Router } from 'express';
 import { coachConfigured } from '../../aiCoach.js';
 import { MANAGES_BILLING, requireRole } from '../../auth.js';
 import { inquiryTranscript, setAssistantPaused, staffReply } from '../../coaching/receptionist.js';
+import { createReceptionistCheckout, ensureEntitledOrStartTrial, planState, verifyReceptionistPayment } from '../../coaching/receptionistBilling.js';
 import { listDemoSlots } from '../../coaching/receptionistData.js';
-import { all, get, run, tx } from '../../db.js';
-import { badRequest, conflict, notFound } from '../../errors.js';
+import { DEFAULT_TENANT_SLUG } from '../../config.js';
+import { all, get, run, tenantStorage, tx } from '../../db.js';
+import { badRequest, conflict, notFound, paymentRequired } from '../../errors.js';
 import { parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { formatPhoneNumber, whatsappReady } from '../../whatsapp.js';
@@ -110,6 +112,7 @@ admissionRoutes.get('/inquiries', (req, res) => {
     counts,
     ai: {
       on: Boolean(get('SELECT ai_receptionist FROM coaching_settings WHERE id = 1')?.ai_receptionist),
+      plan: currentPlan(),
       captured_this_month: get('SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND created_at >= ?', [`${today().slice(0, 7)}-01`]).n,
       needs_reply: get(
         `SELECT COUNT(*) AS n FROM student_inquiries i
@@ -305,8 +308,16 @@ export function coordinatesFromMapsUrl(url) {
   return null;
 }
 
-function assistantPayload() {
+const currentSlug = () => tenantStorage.getStore()?.slug ?? DEFAULT_TENANT_SLUG;
+
+/** The institute's AI receptionist plan (src/coaching/receptionistBilling.js),
+ * or null on a single-gym install, which has no registry to bill from. */
+const currentPlan = () => (currentSlug() === DEFAULT_TENANT_SLUG ? null : planState(currentSlug(), today()));
+
+function assistantPayload(extra = {}) {
   return {
+    ...extra,
+    plan: currentPlan(),
     settings: get(`SELECT ${ASSISTANT_COLUMNS.join(', ')} FROM coaching_settings WHERE id = 1`),
     slots: listDemoSlots(),
     faculty: all("SELECT id, name, qualification FROM users WHERE active = 1 AND role IN ('trainer', 'manager', 'admin') ORDER BY role = 'trainer' DESC, name"),
@@ -339,11 +350,36 @@ admissionRoutes.patch('/admissions/assistant', requireRole(...MANAGES_BILLING), 
   }
   const columns = Object.keys(body).filter((c) => body[c] !== null || CLEARABLE.has(c));
   if (!columns.length) throw badRequest('Nothing to update');
+  // Switching it on needs a plan: the first time, that starts the free
+  // trial; after a lapse it is a 402 telling the owner to renew.
+  let trialStarted = false;
+  if (body.ai_receptionist === 1) {
+    if (currentSlug() === DEFAULT_TENANT_SLUG) throw paymentRequired('The AI receptionist needs a CoachBook account');
+    trialStarted = ensureEntitledOrStartTrial(currentSlug(), today()).trial_started;
+  }
   run(
     `UPDATE coaching_settings SET ${columns.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = 1`,
     columns.map((c) => (body[c] === '' && CLEARABLE.has(c) ? null : body[c])),
   );
-  res.json(assistantPayload());
+  res.json(assistantPayload({ trial_started: trialStarted }));
+});
+
+/* ── Paying for the assistant ────────────────────────────────────────── */
+
+/** Opens Razorpay Checkout for 1, 3, 6 or 12 months at the operator's price. */
+admissionRoutes.post('/admissions/assistant/checkout', requireRole(...MANAGES_BILLING), async (req, res, next) => {
+  try {
+    const body = parse(req.body, { months: { type: 'int', required: true, min: 1, max: 12 } });
+    res.status(201).json(await createReceptionistCheckout({ slug: currentSlug(), months: body.months, user: req.user }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Checkout's answer, verified before any day is added. */
+admissionRoutes.post('/admissions/assistant/verify', requireRole(...MANAGES_BILLING), (req, res) => {
+  const { settled } = verifyReceptionistPayment({ slug: currentSlug(), body: req.body, now: today() });
+  res.json(assistantPayload({ settled }));
 });
 
 const SLOT_FIELDS = {

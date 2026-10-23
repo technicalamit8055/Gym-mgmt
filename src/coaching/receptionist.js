@@ -11,6 +11,7 @@ import { formatPhoneNumber, markChatRead, onInboundMessage, sendChatMessage, wha
 import { coachingSettings } from './notify.js';
 import * as data from './receptionistData.js';
 import { FALLBACK_REPLY, promisesFollowUp, runReceptionist } from './receptionistAi.js';
+import { receptionistEntitled } from './receptionistBilling.js';
 
 /**
  * CoachBook's 24/7 WhatsApp admissions assistant.
@@ -134,6 +135,9 @@ function accept(event, tenant) {
   if (!moduleEnabled('admissions')) return { handled: false, reason: 'module_off' };
   const settings = coachingSettings();
   if (!settings.ai_receptionist) return { handled: false, reason: 'off' };
+  // Paid for (or on its free trial) — see receptionistBilling.js. A lapsed
+  // plan stores nothing, the same as switched off.
+  if (!receptionistEntitled(tenant.store.slug, today())) return { handled: false, reason: 'not_subscribed' };
   // The director testing from their own phone, or a teacher: not a lead.
   if (data.isInsiderPhone(event.phone)) return { handled: false, reason: 'insider' };
   const text = String(event.text || '').trim();
@@ -250,7 +254,7 @@ async function respond(buffer, messages) {
   const instituteName = buffer.tenant.instituteName;
   const conv = get('SELECT * FROM wa_conversations WHERE id = ?', [buffer.conversationId]);
   const settings = coachingSettings();
-  if (!conv || !settings.ai_receptionist || isPaused(conv)) return;
+  if (!conv || !settings.ai_receptionist || isPaused(conv) || !receptionistEntitled(slug, today())) return;
   const { chatHourlyLimit, dailyLimit } = config.aiReceptionist;
 
   const lastHour = get("SELECT COUNT(*) AS n FROM wa_messages WHERE conversation_id = ? AND author = 'ai' AND created_at >= ?", [conv.id, utcTimestamp(-3_600_000)]).n;

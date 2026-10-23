@@ -1,5 +1,5 @@
 import { coaching } from '../../coachingApi.js';
-import { buildForm, closeModal, confirmDialog, emptyState, h, openModal, renderIcon, time, toast } from '../../ui.js';
+import { buildForm, closeModal, confirmDialog, date, emptyState, h, openModal, renderIcon, time, toast } from '../../ui.js';
 import { fill, WEEKDAYS_LONG } from './common.js';
 
 /**
@@ -371,6 +371,103 @@ function slotEditor(payload, { onChanged }) {
   return h('div', { class: 'cb-demo-slot-add' }, weekday, start, capacity, h('span', { class: 'muted cb-small' }, 'seats'), faculty, course, add);
 }
 
+/* ── The plan ────────────────────────────────────────────────────────── */
+
+const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+
+/** One line on where the institute's plan stands, for the banner and the
+ * settings modal. Null on an install with no plans (single gym). */
+export function planLine(plan) {
+  if (!plan) return null;
+  const left = `${plan.days_left} day${plan.days_left === 1 ? '' : 's'} left`;
+  switch (plan.status) {
+    case 'trial':
+      return { tone: plan.days_left <= 3 ? 'amber' : 'blue', text: `Free trial · ${left} (until ${date(plan.ends_on)})` };
+    case 'active':
+      return { tone: plan.days_left <= 5 ? 'amber' : 'green', text: `Paid until ${date(plan.ends_on)} · ${left}` };
+    case 'expired':
+      return { tone: 'red', text: `Plan ended on ${date(plan.paid_until && plan.paid_until > (plan.trial_ends_on || '') ? plan.paid_until : plan.trial_ends_on)} — the assistant is not answering` };
+    default:
+      return plan.trial_available
+        ? { tone: 'blue', text: `Free for ${plan.trial_days} days, then ${rupees(plan.price_monthly)}/month` }
+        : { tone: 'grey', text: `${rupees(plan.price_monthly)}/month` };
+  }
+}
+
+/**
+ * The plan card at the top of the settings: where it stands, and — for
+ * anyone past or near the end of a trial — the prepaid periods to buy, paid
+ * through Razorpay (UPI first) at the price the platform set.
+ */
+function planCard(plan, { onPaid }) {
+  const line = planLine(plan);
+  const offers = plan.offers || [];
+  let picked = offers.find((o) => o.months === 3) || offers[0];
+  const options = h('div', { class: 'cb-plan-offers', role: 'radiogroup', 'aria-label': 'Plan length' });
+  const pay = h('button', { class: 'btn primary', type: 'button' });
+  const paint = () => {
+    fill(
+      options,
+      ...offers.map((o) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'radio',
+            'aria-checked': String(o === picked),
+            class: `cb-plan-offer${o === picked ? ' is-picked' : ''}`,
+            onclick: () => {
+              picked = o;
+              paint();
+            },
+          },
+          h('strong', {}, `${o.months} month${o.months === 1 ? '' : 's'}`),
+          h('span', {}, rupees(o.price)),
+          h('small', { class: 'muted' }, o.months === 1 ? 'per month' : `${rupees(o.per_month)}/month`),
+          o.save_pct ? h('em', {}, `Save ${o.save_pct}%`) : null,
+        ),
+      ),
+    );
+    fill(pay, renderIcon('zap', { size: 15 }), `Pay ${rupees(picked?.price)}`);
+  };
+  pay.onclick = async () => {
+    pay.disabled = true;
+    try {
+      const { checkout } = await coaching.assistantCheckout(picked.months);
+      const { payWithRazorpay } = await import('../../razorpayCheckout.js');
+      const payment = await payWithRazorpay(checkout);
+      const fresh = await coaching.assistantVerify(payment);
+      toast(`Paid — the assistant is covered until ${date(fresh.plan.ends_on)}`);
+      await onPaid?.(fresh);
+    } catch (err) {
+      if (!err.cancelled) toast(err.message, 'error');
+    } finally {
+      pay.disabled = false;
+    }
+  };
+  paint();
+
+  const canBuy = plan.sales_open && plan.online_payments && offers.length;
+  return h(
+    'div',
+    { class: `cb-plan is-${plan.status}` },
+    h(
+      'div',
+      { class: 'cb-plan-head' },
+      h('div', { class: 'cb-grow' }, h('div', { class: 'cb-strong' }, 'AI receptionist plan'), h('span', { class: `badge dot ${line.tone}` }, line.text)),
+      plan.custom_price ? h('span', { class: 'muted cb-small' }, 'Your special price') : null,
+    ),
+    plan.status === 'none' && plan.trial_available
+      ? h('p', { class: 'muted cb-small' }, `Switch the assistant on below to start your ${plan.trial_days}-day free trial. No payment needed to try it.`)
+      : null,
+    plan.status !== 'none' || !plan.trial_available
+      ? canBuy
+        ? h('div', {}, options, h('div', { class: 'cb-plan-pay' }, pay, h('span', { class: 'muted cb-small' }, plan.status === 'trial' ? 'Paid months start after your trial ends.' : 'Prepaid. Paid months add on to any time you have left.')))
+        : h('p', { class: 'muted cb-small' }, plan.sales_open ? 'To pay by UPI or bank transfer, contact CoachBook support.' : 'Not available for purchase right now — contact CoachBook support.')
+      : null,
+  );
+}
+
 /**
  * The assistant's settings and its demo slots, in one modal from the
  * admissions page. The slots save as they are added or removed; the rest
@@ -381,7 +478,22 @@ export async function openAssistantSettings({ onSaved } = {}) {
   const s = payload.settings;
 
   const statusHost = h('div', { class: 'cb-assist-status' });
+  const planHost = h('div', {});
   const slotsHost = h('div', { class: 'cb-demo-slots' });
+  const renderPlan = () =>
+    fill(
+      planHost,
+      payload.plan
+        ? planCard(payload.plan, {
+            onPaid: async (fresh) => {
+              payload = fresh;
+              renderPlan();
+              await onSaved?.();
+            },
+          })
+        : null,
+    );
+  renderPlan();
   const renderStatus = () =>
     fill(
       statusHost,
@@ -478,7 +590,13 @@ export async function openAssistantSettings({ onSaved } = {}) {
         }
         const saved = await coaching.updateAssistant(body);
         closeModal();
-        toast(saved.settings.ai_receptionist ? 'Saved — the assistant is answering parents' : 'Assistant settings saved');
+        toast(
+          saved.trial_started
+            ? `Your ${saved.plan.trial_days}-day free trial has started — the assistant is answering parents`
+            : saved.settings.ai_receptionist
+              ? 'Saved — the assistant is answering parents'
+              : 'Assistant settings saved',
+        );
         await onSaved?.();
       },
     },
@@ -492,6 +610,7 @@ export async function openAssistantSettings({ onSaved } = {}) {
     body: h(
       'div',
       { class: 'cb-assist' },
+      planHost,
       statusHost,
       h('div', { class: 'cb-assist-slots' }, h('h3', {}, 'Free demo slots'), h('p', { class: 'muted cb-small' }, 'Weekly classes a parent can be booked into. Seats left are counted from the bookings.'), slotsHost),
       form,

@@ -575,6 +575,13 @@ export const api = {
   // delivery orders and what each gym is owed.
   platformMonetization: () => request('GET', '/platform/admin/monetization', undefined, { token: platformSession.token }),
   platformUpdateMonetization: (payload) => request('PUT', '/platform/admin/monetization', payload, { token: platformSession.token }),
+  // CoachBook's AI receptionist: its price, and each institute's plan
+  platformReceptionist: () => request('GET', '/platform/admin/receptionist', undefined, { token: platformSession.token }),
+  platformUpdateReceptionistPricing: (payload) => request('PUT', '/platform/admin/receptionist/settings', payload, { token: platformSession.token }),
+  platformRecordReceptionistPayment: (slug, payload) =>
+    request('POST', `/platform/admin/receptionist/${encodeURIComponent(slug)}/payments`, payload, { token: platformSession.token }),
+  platformAdjustReceptionist: (slug, payload) =>
+    request('PATCH', `/platform/admin/receptionist/${encodeURIComponent(slug)}`, payload, { token: platformSession.token }),
   platformStoreProducts: (params) =>
     request('GET', `/platform/admin/store/products${query(params)}`, undefined, { token: platformSession.token }),
   // A scanned pack: the catalogue's own product, or details for a new one.

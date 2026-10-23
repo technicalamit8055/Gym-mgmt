@@ -12863,3 +12863,16 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .pscan-field .btn { flex-shrink: 0; }
 .sa-variants td .pscan-field input { min-width: 120px; }
 .sa-variant-hit td { background: color-mix(in srgb, var(--brand) 12%, transparent); }
+
+/* Console → AI receptionist (views/receptionistAdmin.js). */
+.op-rc { display: flex; flex-direction: column; gap: 16px; }
+.op-rc-preview { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.op-rc-preview > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 12px; }
+.op-rc-preview strong { font-size: 17px; }
+.op-rc-warn {
+  display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
+  background: color-mix(in srgb, var(--amber) 12%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+}
+.op-rc-warn .svg-icon { flex: none; color: var(--amber); margin-top: 1px; }
+.op-rc .form-grid { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
+.op-rc-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }

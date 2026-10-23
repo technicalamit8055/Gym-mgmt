@@ -1,6 +1,6 @@
 import { coaching } from '../../coachingApi.js';
 import { buildForm, clear, closeModal, confirmDialog, date, emptyState, h, openModal, renderIcon, stat, time, toast, today } from '../../ui.js';
-import { confirmAssistantOff, openAssistantSettings, openChatDrawer } from './admissionsChat.js';
+import { confirmAssistantOff, openAssistantSettings, openChatDrawer, planLine } from './admissionsChat.js';
 import { fill, INQUIRY_SOURCE, INQUIRY_STATUS, pillTabs, tone } from './common.js';
 import { openEnrollModal } from './enrollForm.js';
 
@@ -219,18 +219,27 @@ export async function renderAdmissions({ setActions, navigate }) {
    * it handed to the team, and the way into its settings. */
   function assistantBanner(ai) {
     const settings = () => openAssistantSettings({ onSaved: repaint });
-    if (!ai.on) {
+    const plan = planLine(ai.plan);
+    const lapsed = ai.plan?.status === 'expired';
+    if (!ai.on || lapsed) {
       return h(
         'div',
-        { class: 'card cb-assist-banner is-off' },
-        h('span', { class: 'cb-assist-icon' }, renderIcon('sparkle', { size: 20 })),
+        { class: `card cb-assist-banner is-off${lapsed ? ' is-lapsed' : ''}` },
+        h('span', { class: 'cb-assist-icon' }, renderIcon(lapsed ? 'alert' : 'sparkle', { size: 20 })),
         h(
           'div',
           { class: 'cb-grow' },
-          h('div', { class: 'cb-strong' }, 'Answer parents on WhatsApp 24/7'),
-          h('div', { class: 'muted cb-small' }, 'An AI admissions assistant replies in seconds from your live fees, batches and teachers — at 9 PM and on Sundays too — and books free demos.'),
+          h('div', { class: 'cb-strong' }, lapsed ? 'Your AI receptionist has stopped answering parents' : 'Answer parents on WhatsApp 24/7'),
+          h(
+            'div',
+            { class: 'muted cb-small' },
+            lapsed
+              ? 'The plan ended, so WhatsApp inquiries are waiting for your team again. Renew to switch it back on.'
+              : 'An AI admissions assistant replies in seconds from your live fees, batches and teachers — at 9 PM and on Sundays too — and books free demos.',
+          ),
+          plan && !lapsed ? h('span', { class: `badge dot ${plan.tone} cb-assist-plan` }, plan.text) : null,
         ),
-        h('button', { class: 'btn primary', type: 'button', onclick: settings }, 'Set it up'),
+        h('button', { class: 'btn primary', type: 'button', onclick: settings }, lapsed ? 'Renew' : ai.plan?.trial_available ? 'Start free trial' : 'Set it up'),
       );
     }
     return h(
@@ -241,6 +250,7 @@ export async function renderAdmissions({ setActions, navigate }) {
         'div',
         { class: 'cb-grow' },
         h('div', { class: 'cb-strong' }, 'AI admissions assistant is answering on WhatsApp'),
+        plan ? h('span', { class: `badge dot ${plan.tone} cb-assist-plan` }, plan.text) : null,
         h(
           'div',
           { class: 'muted cb-small' },

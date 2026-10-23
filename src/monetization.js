@@ -9,6 +9,7 @@ import { activateFitnessAddon } from './fitness.js';
 import { barcodeVariants, normaliseBarcode } from './foodBarcode.js';
 import { emailEnabled, sendEmail } from './mailer.js';
 import { notifyMember } from './notifications.js';
+import { findReceptionistPayment, settleReceptionistPayment } from './coaching/receptionistBilling.js';
 import { createOrder, isRazorpayOrdersConfigured } from './razorpay.js';
 import { findTenantBySlug, getRegistryDb, tenantDbPath } from './tenants.js';
 import { parse, today } from './validate.js';
@@ -1516,6 +1517,8 @@ function notifySellerNewOrder(order) {
 export function settleRazorpayOrder(razorpayOrderId, paymentId) {
   if (findAddonPayment(razorpayOrderId)) return settleAddonPayment({ razorpayOrderId, paymentId });
   if (findStoreOrderByRazorpayId(razorpayOrderId)) return settleStorePayment({ razorpayOrderId, paymentId });
+  // An institute's AI receptionist plan (src/coaching/receptionistBilling.js).
+  if (findReceptionistPayment(razorpayOrderId)) return settleReceptionistPayment({ razorpayOrderId, paymentId });
   return null;
 }
 
