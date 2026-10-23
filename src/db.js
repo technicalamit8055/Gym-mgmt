@@ -1557,6 +1557,9 @@ const MIGRATIONS = [
       )
     `);
   },
+  // When the day's water was last changed: the end of the hydration record
+  // the app writes to Health Connect. NULL on rows from before it was kept.
+  (db) => ensureColumn(db, 'diet_logs', 'water_updated_at', 'TEXT'),
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

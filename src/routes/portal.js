@@ -2150,11 +2150,14 @@ portalRoutes.post('/diets/water', requireMemberAuth, requireModule('fitness'), r
 
   const log = ensureDietLog(req.member.id, body.log_date);
   if (body.water_ml !== undefined && body.water_ml !== null) {
-    run('UPDATE diet_logs SET water_ml = ? WHERE id = ?', [body.water_ml, log.id]);
+    run("UPDATE diet_logs SET water_ml = ?, water_updated_at = datetime('now') WHERE id = ?", [body.water_ml, log.id]);
   } else {
     // MAX(0, …) so tapping undo past zero cannot drive the column negative and
     // trip its CHECK constraint.
-    run('UPDATE diet_logs SET water_ml = MAX(0, water_ml + ?) WHERE id = ?', [body.add_ml, log.id]);
+    run("UPDATE diet_logs SET water_ml = MAX(0, water_ml + ?), water_updated_at = datetime('now') WHERE id = ?", [
+      body.add_ml,
+      log.id,
+    ]);
   }
 
   res.json(get('SELECT log_date, water_ml FROM diet_logs WHERE id = ?', [log.id]));
@@ -2620,7 +2623,8 @@ portalRoutes.post('/wearables/:provider/sync', ...fitnessGate, (req, res) => {
   res.json(wearableSummary(req.member.id));
 });
 
-/** What the phone writes to Health Connect: recent workouts and meals. */
+/** What the phone writes to Health Connect: recent workouts, meals, weigh-ins
+ * and water. */
 portalRoutes.get('/wearables/health_connect/export', ...fitnessGate, (req, res) => {
   if (!connectionFor(req.member.id, 'health_connect')) throw conflict('Connect Health Connect first');
   res.json(healthConnectExport(req.member.id, req.tenant.slug));

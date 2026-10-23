@@ -393,15 +393,16 @@ async function request(method, path, body, { token, anonymous = false, member = 
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
   if (!res.ok) throw new ApiError(res.status, payload.error || res.statusText, payload.details);
-  // Food, water, a workout or a target saved: the phone's home-screen
-  // widgets (widgets.js) show those.
+  // Food, water, a weigh-in, a workout or a target saved: the phone's
+  // home-screen widgets (widgets.js) show those, and Health Connect gets
+  // them (healthConnect.js).
   if (member && method !== 'GET' && FITNESS_PATH.test(path)) {
     window.dispatchEvent(new CustomEvent('gymbook:fitness-changed'));
   }
   return payload;
 }
 
-const FITNESS_PATH = /^\/portal\/(diets|workouts|nutrition|activities|wearables)(\/|$)/;
+const FITNESS_PATH = /^\/portal\/(diets|workouts|nutrition|activities|weight|wearables)(\/|$)/;
 
 /**
  * A member POST answered as Server-Sent Events: every event is handed to

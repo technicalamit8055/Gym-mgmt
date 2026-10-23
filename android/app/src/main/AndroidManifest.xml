@@ -120,9 +120,11 @@
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
-    <!-- ...and workouts and meals logged in the app, written back to it. -->
+    <!-- ...and workouts, meals, weigh-ins and water logged in the app, written back to it. -->
     <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
     <uses-permission android:name="android.permission.health.WRITE_NUTRITION" />
+    <uses-permission android:name="android.permission.health.WRITE_WEIGHT" />
+    <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
 
     <!-- Lets the app see whether the Health Connect app is installed (Android 9–13). -->
     <queries>

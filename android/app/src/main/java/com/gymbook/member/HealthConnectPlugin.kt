@@ -12,10 +12,12 @@ import androidx.health.connect.client.aggregate.AggregationResult
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.HydrationRecord
 import androidx.health.connect.client.records.MealType
 import androidx.health.connect.client.records.NutritionRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
@@ -23,6 +25,7 @@ import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Length
 import androidx.health.connect.client.units.Mass
+import androidx.health.connect.client.units.Volume
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -36,6 +39,7 @@ import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
 import java.time.ZoneOffset
+import kotlin.reflect.KClass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,8 +50,8 @@ import org.json.JSONObject
 /**
  * Health Connect for public/js/healthConnect.js: whether it is on the phone,
  * its permission screen, daily totals for the last few days, and writing the
- * member's workouts and meals so Google Fit, Samsung Health and the rest show
- * them (the way Hevy's workouts do).
+ * member's workouts, meals, weigh-ins and water so Google Fit, Samsung Health
+ * and the rest show them (the way Hevy's workouts and weigh-ins do).
  *
  * Reads are aggregates only: Health Connect de-duplicates what several apps
  * wrote about the same walk, so these are the numbers its own dashboard
@@ -87,10 +91,18 @@ class HealthConnectPlugin : Plugin() {
                 (it as Duration).toMinutes().toDouble()
             },
         )
-        /** What the app writes: workouts finished in the logger, and meals. */
+        /** What the app writes: workouts finished in the logger, meals,
+         * weigh-ins and water. */
         private const val WRITE_WORKOUTS = "android.permission.health.WRITE_EXERCISE"
         private const val WRITE_MEALS = "android.permission.health.WRITE_NUTRITION"
-        private val WRITES = mapOf("write_workouts" to WRITE_WORKOUTS, "write_meals" to WRITE_MEALS)
+        private const val WRITE_WEIGHT = "android.permission.health.WRITE_WEIGHT"
+        private const val WRITE_WATER = "android.permission.health.WRITE_HYDRATION"
+        private val WRITES = mapOf(
+            "write_workouts" to WRITE_WORKOUTS,
+            "write_meals" to WRITE_MEALS,
+            "write_weight" to WRITE_WEIGHT,
+            "write_water" to WRITE_WATER,
+        )
         private val ALL_PERMISSIONS = METRICS.map { it.permission }.toSet() + WRITES.values
         private val MEAL_TYPES = mapOf(
             "breakfast" to MealType.MEAL_TYPE_BREAKFAST,
@@ -126,7 +138,8 @@ class HealthConnectPlugin : Plugin() {
     }
 
     /** `{ status, granted }`: the metric names it may read, plus
-     * write_workouts / write_meals for what it may write. */
+     * write_workouts, write_meals, write_weight and write_water for what it
+     * may write. */
     @PluginMethod
     fun status(call: PluginCall) = resolveStatus(call)
 
@@ -222,18 +235,37 @@ class HealthConnectPlugin : Plugin() {
         }
     }
 
+    /** One kind of record the app writes: its key in writeRecords' payload,
+     * the permission it needs, its record class, and how to build one. */
+    private class WriteKind(
+        val key: String,
+        val permission: String,
+        val type: KClass<out Record>,
+        val build: (JSONObject, Long) -> Record,
+    )
+
+    private fun writeKinds() = listOf(
+        WriteKind("workouts", WRITE_WORKOUTS, ExerciseSessionRecord::class, ::workoutRecord),
+        WriteKind("meals", WRITE_MEALS, NutritionRecord::class, ::mealRecord),
+        WriteKind("weights", WRITE_WEIGHT, WeightRecord::class, ::weightRecord),
+        WriteKind("water", WRITE_WATER, HydrationRecord::class, ::waterRecord),
+    )
+
     /**
-     * Writes workouts and meals the app logged (src/wearables.js's
-     * healthConnectExport), and deletes ones since removed from the app:
+     * Writes what the app logged (src/wearables.js's healthConnectExport),
+     * and deletes what has since been removed from the app:
      *
      *   { version, workouts: [{ id, title, start, end }],
      *     meals: [{ id, name, meal_type, time, calories, protein_g, … }],
-     *     delete_workouts: [id], delete_meals: [id] }
+     *     weights: [{ id, time, weight_kg }],
+     *     water: [{ id, start, end, volume_ml }],
+     *     delete_workouts: [id], delete_meals, delete_weights, delete_water }
      *
      * `id` is the record's clientRecordId, so writing one again replaces it —
      * as long as `version` is higher than last time, which is why the page
      * sends the time. A kind the member did not allow is skipped, and
-     * reported false in `{ workouts, meals }` so the page tries it again later.
+     * reported false in `{ workouts, meals, weights, water }` so the page
+     * tries it again later.
      */
     @PluginMethod
     fun writeRecords(call: PluginCall) {
@@ -242,30 +274,26 @@ class HealthConnectPlugin : Plugin() {
             return
         }
         val version = call.getLong("version") ?: System.currentTimeMillis()
-        val workouts = call.getArray("workouts") ?: JSArray()
-        val meals = call.getArray("meals") ?: JSArray()
-        val deleteWorkouts = (call.getArray("delete_workouts") ?: JSArray()).toList<String>()
-        val deleteMeals = (call.getArray("delete_meals") ?: JSArray()).toList<String>()
+        val kinds = writeKinds()
+        val writes = kinds.associateWith { call.getArray(it.key) ?: JSArray() }
+        val deletes = kinds.associateWith { (call.getArray("delete_${it.key}") ?: JSArray()).toList<String>() }
         scope.launch {
             try {
                 val granted = client.permissionController.getGrantedPermissions()
-                val canWorkouts = WRITE_WORKOUTS in granted
-                val canMeals = WRITE_MEALS in granted
+                val allowed = kinds.filter { it.permission in granted }
                 val records = mutableListOf<Record>()
-                if (canWorkouts) {
-                    for (i in 0 until workouts.length()) records.add(workoutRecord(workouts.getJSONObject(i), version))
-                }
-                if (canMeals) {
-                    for (i in 0 until meals.length()) records.add(mealRecord(meals.getJSONObject(i), version))
+                for (kind in allowed) {
+                    val items = writes.getValue(kind)
+                    for (i in 0 until items.length()) records.add(kind.build(items.getJSONObject(i), version))
                 }
                 if (records.isNotEmpty()) client.insertRecords(records)
-                if (canWorkouts && deleteWorkouts.isNotEmpty()) {
-                    client.deleteRecords(ExerciseSessionRecord::class, emptyList(), deleteWorkouts)
+                for (kind in allowed) {
+                    val ids = deletes.getValue(kind)
+                    if (ids.isNotEmpty()) client.deleteRecords(kind.type, emptyList(), ids)
                 }
-                if (canMeals && deleteMeals.isNotEmpty()) {
-                    client.deleteRecords(NutritionRecord::class, emptyList(), deleteMeals)
-                }
-                call.resolve(JSObject().put("workouts", canWorkouts).put("meals", canMeals))
+                val done = JSObject()
+                kinds.forEach { done.put(it.key, it in allowed) }
+                call.resolve(done)
             } catch (e: Exception) {
                 call.reject(e.message ?: "Could not write to Health Connect", e)
             }
@@ -312,6 +340,30 @@ class HealthConnectPlugin : Plugin() {
             totalFat = grams("fats_g"),
             dietaryFiber = grams("fiber_g"),
             sugar = grams("sugar_g"),
+        )
+    }
+
+    private fun weightRecord(json: JSONObject, version: Long): WeightRecord {
+        val time = Instant.parse(json.getString("time"))
+        return WeightRecord(
+            time = time,
+            zoneOffset = offsetAt(time),
+            weight = Mass.kilograms(json.getDouble("weight_kg")),
+            metadata = Metadata.manualEntry(clientRecordId = json.getString("id"), clientRecordVersion = version),
+        )
+    }
+
+    /** A day's water, the only way the app keeps it: midnight to the last glass. */
+    private fun waterRecord(json: JSONObject, version: Long): HydrationRecord {
+        val start = Instant.parse(json.getString("start"))
+        val end = Instant.parse(json.getString("end"))
+        return HydrationRecord(
+            startTime = start,
+            startZoneOffset = offsetAt(start),
+            endTime = end,
+            endZoneOffset = offsetAt(end),
+            volume = Volume.milliliters(json.getDouble("volume_ml")),
+            metadata = Metadata.manualEntry(clientRecordId = json.getString("id"), clientRecordVersion = version),
         )
     }
 

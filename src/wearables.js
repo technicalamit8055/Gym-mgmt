@@ -8,8 +8,8 @@
  *                   Google Fit, Garmin, Pixel Watch and Strava all write to.
  *                   The GymVym app reads it (HealthConnectPlugin.kt) and posts
  *                   daily totals here; the server never talks to Google. The
- *                   phone also writes the member's workouts and meals back
- *                   into it, from healthConnectExport() below.
+ *                   phone also writes the member's workouts, meals, weigh-ins
+ *                   and water back into it, from healthConnectExport() below.
  *
  * A cloud provider (Strava, say) slots in as another provider whose tokens go
  * in member_wearable_connections.credentials and whose sync runs here instead
@@ -132,7 +132,7 @@ export function activityOn(memberId, logDate) {
   return dailyActivity(memberId, logDate, logDate)[0] ?? null;
 }
 
-/* ── Sending the other way: workouts and meals out to Health Connect ──── */
+/* ── Sending the other way: the app's logs out to Health Connect ──────── */
 
 /** How many days back the phone keeps Health Connect in step with the app. */
 export const EXPORT_DAYS = 7;
@@ -151,10 +151,13 @@ const MEAL_TIMES = {
 const MINUTE = 60_000;
 const utcMs = (sqlUtc) => Date.parse(`${sqlUtc.replace(' ', 'T')}Z`);
 
+/** When a weigh-in "happened" if it was entered on a later day. */
+const WEIGH_IN_TIME = '08:00';
+
 /**
  * What the phone writes to Health Connect so Google Fit, Samsung Health and
- * the rest show it: the workouts finished in the logger, and every food entry,
- * for the last EXPORT_DAYS days. Hand-logged activities (a run, a walk) are
+ * the rest show it: the workouts finished in the logger, every food entry,
+ * weigh-ins and each day's water, for the last EXPORT_DAYS days. Hand-logged activities (a run, a walk) are
  * left out — the watch that counted them has usually written them already.
  *
  * Each item's `id` is its Health Connect clientRecordId, stable for the
@@ -201,6 +204,9 @@ export function healthConnectExport(memberId, tenantSlug) {
   });
 
   const offsetMs = gymOffsetMinutes() * MINUTE;
+  /** A gym-local wall time on a gym-local date, as a UTC instant. */
+  const gymTime = (date, hhmm) => Date.parse(`${date}T${hhmm}:00Z`) - offsetMs;
+
   const meals = all(
     `SELECT e.id, e.meal_type, e.food_name, e.calories, e.protein_g, e.carbs_g, e.fats_g, e.fiber_g, e.sugar_g,
             e.logged_at, d.log_date, ${gymDateOf('e.logged_at')} = d.log_date AS on_day
@@ -208,7 +214,7 @@ export function healthConnectExport(memberId, tenantSlug) {
      WHERE d.member_id = ? AND d.log_date BETWEEN ? AND ? ORDER BY e.logged_at, e.id`,
     [memberId, from, to],
   ).flatMap((e) => {
-    const at = e.on_day ? utcMs(e.logged_at) : Date.parse(`${e.log_date}T${MEAL_TIMES[e.meal_type]}:00Z`) - offsetMs;
+    const at = e.on_day ? utcMs(e.logged_at) : gymTime(e.log_date, MEAL_TIMES[e.meal_type]);
     if (at > now) return []; // Planned ahead: sent once its mealtime has passed.
     return {
       id: `${prefix}.meal.${e.id}`,
@@ -225,9 +231,41 @@ export function healthConnectExport(memberId, tenantSlug) {
     };
   });
 
+  // One a day; weighing again replaces it in place, keeping its id.
+  const weights = all(
+    `SELECT id, log_date, weight_kg, created_at, ${gymDateOf('created_at')} = log_date AS on_day
+     FROM body_weight_logs WHERE member_id = ? AND log_date BETWEEN ? AND ? ORDER BY log_date`,
+    [memberId, from, to],
+  ).flatMap((w) => {
+    const at = w.on_day ? utcMs(w.created_at) : gymTime(w.log_date, WEIGH_IN_TIME);
+    if (at > now) return [];
+    return { id: `${prefix}.weight.${w.id}`, date: w.log_date, time: new Date(at).toISOString(), weight_kg: w.weight_kg };
+  });
+
+  // The app keeps only a day's total, so each day is one record from
+  // midnight to the last change. A day changed later than itself — or before
+  // the app kept when — runs to 23:59 instead. Set back to 0, the day is left
+  // out, so the phone deletes its record.
+  const water = all(
+    `SELECT id, log_date, water_ml, water_updated_at, ${gymDateOf('water_updated_at')} = log_date AS on_day
+     FROM diet_logs WHERE member_id = ? AND log_date BETWEEN ? AND ? AND water_ml > 0 ORDER BY log_date`,
+    [memberId, from, to],
+  ).flatMap((d) => {
+    const end = d.on_day ? utcMs(d.water_updated_at) : gymTime(d.log_date, '23:59');
+    if (end > now) return [];
+    const start = Math.min(gymTime(d.log_date, '00:00'), end - MINUTE);
+    return {
+      id: `${prefix}.water.${d.id}`,
+      date: d.log_date,
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      volume_ml: d.water_ml,
+    };
+  });
+
   // scope: whose records these are, so a phone two members share keeps
   // track of what it wrote for each apart.
-  return { scope: `${tenantSlug}.${memberId}`, from, to, workouts, meals };
+  return { scope: `${tenantSlug}.${memberId}`, from, to, workouts, meals, weights, water };
 }
 
 /** The Connected apps screen and the Home card: what is linked, and the

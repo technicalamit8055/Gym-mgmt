@@ -6,11 +6,12 @@
  *
  * The phone reads daily totals and posts them to the server, which keeps them
  * for the Home card and the diet budget (src/wearables.js). The other way, it
- * writes the workouts and meals logged in the app into Health Connect, so
- * Google Fit and Samsung Health show them the way they show Hevy's. Health
- * Connect only lets an app in front read and write, so syncs happen when the
- * portal opens, when the app comes back to the foreground (at most every 15
- * minutes), on Sync now, and a few seconds after a workout or meal is saved.
+ * writes the workouts, meals, weigh-ins and water logged in the app into
+ * Health Connect, so Google Fit and Samsung Health show them the way they
+ * show Hevy's. Health Connect only lets an app in front read and write, so
+ * syncs happen when the portal opens, when the app comes back to the
+ * foreground (at most every 15 minutes), on Sync now, and a few seconds after
+ * anything is logged.
  * On the web — and in an app build without the plugin —
  * `healthConnectSupported` is false and nothing here calls out.
  *
@@ -26,6 +27,15 @@ const call = (method, options = {}) => window.Capacitor.nativePromise(PLUGIN, me
 /** The read permissions, as status() names them; the rest are writes. */
 const READS = ['steps', 'active_calories', 'distance', 'exercise'];
 
+/** What the app writes: each kind's key in the export and in writeRecords,
+ * and the permission status() reports for it. */
+const WRITE_KINDS = {
+  workouts: 'write_workouts',
+  meals: 'write_meals',
+  weights: 'write_weight',
+  water: 'write_water',
+};
+
 /** How many days each sync rewrites: late watch uploads still land. */
 const SYNC_DAYS = 7;
 const AUTO_SYNC_EVERY_MS = 15 * 60_000;
@@ -34,7 +44,7 @@ const AUTO_SYNC_EVERY_MS = 15 * 60_000;
  * `{ status, granted }`: status is available | not_installed |
  * update_required | unsupported, granted lists which of steps,
  * active_calories, distance, exercise (reads) and write_workouts,
- * write_meals (writes) the member allowed.
+ * write_meals, write_weight, write_water (writes) the member allowed.
  */
 export async function healthConnectStatus() {
   if (!healthConnectSupported) return { status: 'unsupported', granted: [] };
@@ -51,8 +61,8 @@ export const openHealthConnect = () => call('openSettings');
 
 let inFlight = null;
 
-/** Reads the last week and sends it up, then writes the app's workouts and
- * meals into Health Connect; resolves with the server's summary. */
+/** Reads the last week and sends it up, then writes the app's logs into
+ * Health Connect; resolves with the server's summary. */
 export function syncHealthConnect() {
   inFlight ??= (async () => {
     try {
@@ -73,18 +83,18 @@ export function syncHealthConnect() {
   return inFlight;
 }
 
-/* ------------------------------------------------- workouts & meals out */
+/* ------------------------------------------------------------ logs out */
 
 // What this phone last wrote, per member: { workouts: { id: { hash, date } },
-// meals: {...} }. Only what changed is written again, and an id the app no
-// longer lists — a workout or meal deleted here — is deleted there too.
+// meals, weights, water }. Only what changed is written again, and an id the
+// app no longer lists — a workout or meal deleted here — is deleted there too.
 const SENT_KEY = 'gymbook.healthConnect.sent.';
 
 function readSent(scope) {
   try {
-    return JSON.parse(localStorage.getItem(SENT_KEY + scope)) ?? { workouts: {}, meals: {} };
+    return JSON.parse(localStorage.getItem(SENT_KEY + scope)) ?? {};
   } catch {
-    return { workouts: {}, meals: {} };
+    return {};
   }
 }
 
@@ -115,31 +125,32 @@ function diffKind(items, previous, { from, to }) {
 
 let writing = null;
 
-/** Brings Health Connect up to date with the last week's workouts and meals
- * from the app, for a member who allowed either. */
+/** Brings Health Connect up to date with the last week of the app's logs,
+ * for a member who allowed any of them to be written. */
 export function writeToHealthConnect() {
   writing ??= (async () => {
     try {
       const { granted } = await healthConnectStatus();
-      if (!granted.includes('write_workouts') && !granted.includes('write_meals')) return;
+      const kinds = Object.keys(WRITE_KINDS).filter((kind) => granted.includes(WRITE_KINDS[kind]));
+      if (!kinds.length) return;
       const exported = await api.portal.wearableExport(HEALTH_CONNECT);
       const sent = readSent(exported.scope);
-      const workouts = diffKind(exported.workouts, sent.workouts, exported);
-      const meals = diffKind(exported.meals, sent.meals, exported);
-      if (!workouts.write.length && !meals.write.length && !workouts.remove.length && !meals.remove.length) return;
-      const done = await call('writeRecords', {
-        version: Date.now(),
-        workouts: workouts.write,
-        meals: meals.write,
-        delete_workouts: workouts.remove,
-        delete_meals: meals.remove,
-      });
-      // A kind the member has not allowed keeps its old bookkeeping, so
-      // allowing it later sends the whole week.
-      saveSent(exported.scope, {
-        workouts: done.workouts ? workouts.next : sent.workouts,
-        meals: done.meals ? meals.next : sent.meals,
-      });
+      const changes = Object.fromEntries(
+        kinds.map((kind) => [kind, diffKind(exported[kind] ?? [], sent[kind] ?? {}, exported)]),
+      );
+      if (Object.values(changes).every(({ write, remove }) => !write.length && !remove.length)) return;
+      const payload = { version: Date.now() };
+      for (const [kind, { write, remove }] of Object.entries(changes)) {
+        payload[kind] = write;
+        payload[`delete_${kind}`] = remove;
+      }
+      const done = await call('writeRecords', payload);
+      // A kind that did not go through — access withdrawn meanwhile, or an
+      // app build that cannot write it yet — keeps its old bookkeeping, so
+      // it is sent in full once it can be.
+      const next = { ...sent };
+      for (const [kind, change] of Object.entries(changes)) if (done[kind]) next[kind] = change.next;
+      saveSent(exported.scope, next);
     } finally {
       writing = null;
     }
@@ -149,8 +160,8 @@ export function writeToHealthConnect() {
 
 let writeTimer = null;
 
-/** A workout saved or a meal logged: written a few seconds later, so a burst
- * of edits goes out as one write. */
+/** A workout, meal, weigh-in or glass of water saved: written a few seconds
+ * later, so a burst of edits goes out as one write. */
 function scheduleWrite() {
   if (!memberSession.token) return;
   clearTimeout(writeTimer);

@@ -36,6 +36,7 @@ import {
   requestHealthConnectAccess,
   startHealthConnectSync,
   syncHealthConnect,
+  writeToHealthConnect,
 } from '../healthConnect.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
 import { EFFORTS, suggestNextSet } from '../nextSet.js';
@@ -12163,13 +12164,24 @@ function renderPortalApp(ctx, initialMe) {
           })
         : null;
 
-      // The other way: what the app writes into Health Connect.
+      // The other way: what the app writes into Health Connect. An "Off" row
+      // asks again — how a member who connected before a kind was added
+      // allows it — or, once Android stops showing the permission screen,
+      // opens Health Connect's settings instead.
+      const allowSending = (event) =>
+        busy(event.currentTarget, async () => {
+          const { granted } = await requestHealthConnectAccess();
+          if (granted.length === hc.granted.length) await openHealthConnect();
+          else await writeToHealthConnect().catch(() => {});
+          await paint();
+        });
       const sendRow = (icon, title, permission, what) => {
         const on = hc.granted.includes(permission);
         return profileRow({
           icon, tone: on ? 'green' : 'blue', title,
-          sub: on ? `${what} show in Google Fit, Samsung Health and other apps` : 'Off — allow it in Health Connect settings',
+          sub: on ? `${what} show in Google Fit, Samsung Health and other apps` : 'Off — tap to allow it',
           control: on ? h('span', { class: 'portal-device-current' }, 'On') : null,
+          onclick: on ? null : allowSending,
         });
       };
       const sending = connection && healthConnectSupported && hc.status === 'available'
@@ -12180,6 +12192,8 @@ function renderPortalApp(ctx, initialMe) {
               { class: 'portal-prof-card' },
               sendRow('dumbbell', 'Workouts', 'write_workouts', 'Workouts you finish here'),
               sendRow('utensils', 'Meals', 'write_meals', 'Meals and their calories and macros'),
+              sendRow('weight', 'Weight', 'write_weight', 'Your weigh-ins'),
+              sendRow('droplet', 'Water', 'write_water', 'How much water you drink each day'),
             ),
           ]
         : [];
@@ -12190,7 +12204,7 @@ function renderPortalApp(ctx, initialMe) {
         h(
           'p',
           { class: 'portal-devices-note muted' },
-          'Brings in steps, active calories, distance and exercise minutes from apps that share with Health Connect — Fitbit, Samsung Health, Google Fit, Garmin, Strava and more — and sends the workouts and meals you log here back to it. Your steps are shown only to you. Calories beyond your everyday activity count as exercise in your diet, which your trainer can see.',
+          'Brings in steps, active calories, distance and exercise minutes from apps that share with Health Connect — Fitbit, Samsung Health, Google Fit, Garmin, Strava and more — and sends the workouts, meals, weight and water you log here back to it. Your steps are shown only to you. Calories beyond your everyday activity count as exercise in your diet, which your trainer can see.',
         ),
         ...sending,
         days.length ? h('h3', { class: 'portal-prof-label' }, 'Last 7 days') : null,

@@ -273,6 +273,54 @@ describe('wearable calories in the diet budget', () => {
     assert.deepEqual(again.body, res.body);
   });
 
+  it('sends weigh-ins and each day\'s water out for Health Connect', async () => {
+    const yesterday = addDays(todayIso, -1);
+    const twoDaysAgo = addDays(todayIso, -2);
+    const weighIn = await call('POST', '/api/portal/weight', { weight_kg: 72.4 }, { token: memberToken });
+    assert.equal(weighIn.status, 201);
+    // Entered a day late: placed at 08:00 on its own day.
+    const late = await call('POST', '/api/portal/weight', { weight_kg: 72.9, log_date: yesterday }, { token: memberToken });
+    assert.equal(late.status, 201);
+
+    await call('POST', '/api/portal/diets/water', { add_ml: 250 }, { token: memberToken });
+    const water = await call('POST', '/api/portal/diets/water', { add_ml: 500 }, { token: memberToken });
+    assert.equal(water.body.water_ml, 750);
+    await call('POST', '/api/portal/diets/water', { water_ml: 2000, log_date: yesterday }, { token: memberToken });
+    // Set back to nothing: left out, so the phone deletes its record.
+    await call('POST', '/api/portal/diets/water', { water_ml: 400, log_date: twoDaysAgo }, { token: memberToken });
+    await call('POST', '/api/portal/diets/water', { water_ml: 0, log_date: twoDaysAgo }, { token: memberToken });
+
+    const res = await call('GET', '/api/portal/wearables/health_connect/export', undefined, { token: memberToken });
+    assert.equal(res.status, 200);
+    const now = Date.now();
+
+    const todays = res.body.weights.find((w) => w.date === todayIso);
+    assert.deepEqual(
+      { id: todays.id, weight_kg: todays.weight_kg },
+      { id: `gymvym.${TENANT}.weight.${weighIn.body.id}`, weight_kg: 72.4 },
+    );
+    assert.ok(now - Date.parse(todays.time) < 5 * 60_000, 'weighed on its own day: the time it was entered');
+    const byDate = Object.fromEntries(res.body.water.map((d) => [d.date, d]));
+    const HOUR = 3600_000;
+    // The gym's midnight, whatever its time zone.
+    const midnight = (date) => Date.parse(byDate[date].start);
+    const lateOne = res.body.weights.find((w) => w.date === yesterday);
+    assert.equal(Date.parse(lateOne.time) - midnight(yesterday), 8 * HOUR);
+
+    assert.equal(byDate[todayIso].volume_ml, 750);
+    assert.match(byDate[todayIso].id, new RegExp(`^gymvym\\.${TENANT}\\.water\\.\\d+$`));
+    assert.equal(midnight(todayIso) - midnight(yesterday), 24 * HOUR);
+    assert.ok(now - Date.parse(byDate[todayIso].end) < 5 * 60_000, 'today runs to the last glass');
+    // Changed a day later: the whole of its own day.
+    assert.equal(byDate[yesterday].volume_ml, 2000);
+    assert.equal(Date.parse(byDate[yesterday].end) - midnight(yesterday), 24 * HOUR - 60_000);
+    assert.equal(byDate[twoDaysAgo], undefined);
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const again = await call('GET', '/api/portal/wearables/health_connect/export', undefined, { token: memberToken });
+    assert.deepEqual(again.body, res.body);
+  });
+
   it('forgets the synced days when the member disconnects', async () => {
     const res = await call('DELETE', '/api/portal/wearables/health_connect', undefined, { token: memberToken });
     assert.equal(res.status, 200);
