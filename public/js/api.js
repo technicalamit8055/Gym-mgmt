@@ -977,6 +977,7 @@ export const api = {
     connectWearable: (provider) => request('POST', `/portal/wearables/${provider}/connect`, undefined, { member: true }),
     syncWearable: (provider, days) => request('POST', `/portal/wearables/${provider}/sync`, { days }, { member: true }),
     disconnectWearable: (provider) => request('DELETE', `/portal/wearables/${provider}`, undefined, { member: true }),
+    wearableExport: (provider) => request('GET', `/portal/wearables/${provider}/export`, undefined, { member: true }),
 
     // In-app payments: the add-on's online tiers and the store. Each checkout
     // returns the Razorpay order to open; each verify hands back what

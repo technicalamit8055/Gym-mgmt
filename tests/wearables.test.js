@@ -225,6 +225,54 @@ describe('wearable calories in the diet budget', () => {
     await call('DELETE', `/api/portal/activities/${logged.body.id}`, undefined, { token: memberToken });
   });
 
+  it('sends recent workouts and meals out for Health Connect, with stable ids', async () => {
+    const other = await call('GET', '/api/portal/wearables/health_connect/export', undefined, { token: otherToken });
+    assert.equal(other.status, 409);
+
+    const workout = await call('POST', '/api/portal/workouts/logs', {
+      workout_name: 'Push Day',
+      duration_seconds: 1800,
+      sets: [{ exercise_name: 'Bench Press', muscle_group: 'chest', weight_kg: 60, reps: 8 }],
+    }, { token: memberToken });
+    assert.equal(workout.status, 201);
+    const lunch = await call('POST', '/api/portal/diets/entries', {
+      meal_type: 'lunch', food_name: 'Dal rice', calories: 450, protein_g: 15, carbs_g: 70, fats_g: 10,
+    }, { token: memberToken });
+    assert.equal(lunch.status, 201);
+    // Filled in a day late: it is placed at breakfast time on its own day.
+    const yesterday = addDays(todayIso, -1);
+    await call('POST', '/api/portal/diets/entries', {
+      meal_type: 'breakfast', food_name: 'Poha', calories: 250, log_date: yesterday,
+    }, { token: memberToken });
+
+    const res = await call('GET', '/api/portal/wearables/health_connect/export', undefined, { token: memberToken });
+    assert.equal(res.status, 200);
+    const { workouts, meals } = res.body;
+    const now = Date.now();
+
+    const push = workouts.find((w) => w.title === 'Push Day');
+    assert.equal(push.id, `gymvym.${TENANT}.workout.${workout.body.log.id}`);
+    assert.ok(Date.parse(push.end) - Date.parse(push.start) >= 60_000);
+    assert.ok(Date.parse(push.end) <= now);
+
+    const dal = meals.find((m) => m.name === 'Dal rice');
+    assert.deepEqual(
+      { id: dal.id, date: dal.date, meal_type: dal.meal_type, calories: dal.calories, protein_g: dal.protein_g },
+      { id: `gymvym.${TENANT}.meal.${lunch.body.id}`, date: todayIso, meal_type: 'lunch', calories: 450, protein_g: 15 },
+    );
+    assert.ok(now - Date.parse(dal.time) < 5 * 60_000, 'logged on its own day: the time it was logged');
+
+    const poha = meals.find((m) => m.name === 'Poha');
+    assert.equal(poha.date, yesterday);
+    assert.ok(Date.parse(poha.time) < Date.parse(dal.time) - 6 * 3600_000);
+
+    // Nothing in it depends on when it was asked for, or the phone would
+    // rewrite every record on every sync.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const again = await call('GET', '/api/portal/wearables/health_connect/export', undefined, { token: memberToken });
+    assert.deepEqual(again.body, res.body);
+  });
+
   it('forgets the synced days when the member disconnects', async () => {
     const res = await call('DELETE', '/api/portal/wearables/health_connect', undefined, { token: memberToken });
     assert.equal(res.status, 200);

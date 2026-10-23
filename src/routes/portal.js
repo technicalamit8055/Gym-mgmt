@@ -118,6 +118,7 @@ import {
   connectWearable,
   connectionFor,
   disconnectWearable,
+  healthConnectExport,
   saveDailyActivity,
   wearableSummary,
 } from '../wearables.js';
@@ -2617,6 +2618,12 @@ portalRoutes.post('/wearables/:provider/sync', ...fitnessGate, (req, res) => {
   if (!days) throw badRequest('Some fields need attention', { days: 'must be a list of daily totals' });
   saveDailyActivity(req.member.id, provider, days);
   res.json(wearableSummary(req.member.id));
+});
+
+/** What the phone writes to Health Connect: recent workouts and meals. */
+portalRoutes.get('/wearables/health_connect/export', ...fitnessGate, (req, res) => {
+  if (!connectionFor(req.member.id, 'health_connect')) throw conflict('Connect Health Connect first');
+  res.json(healthConnectExport(req.member.id, req.tenant.slug));
 });
 
 portalRoutes.delete('/wearables/:provider', ...fitnessGate, (req, res) => {

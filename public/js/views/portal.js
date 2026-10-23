@@ -12152,7 +12152,7 @@ function renderPortalApp(ctx, initialMe) {
         ? profileRow({
             icon: accessOff ? 'alert' : 'settings', tone: accessOff ? 'orange' : 'blue',
             title: accessOff ? 'Access is off' : 'Health Connect settings',
-            sub: accessOff ? 'Allow GymVym in Health Connect to keep syncing' : 'Choose what GymVym can read',
+            sub: accessOff ? 'Allow GymVym in Health Connect to keep syncing' : 'Choose what GymVym reads and sends',
             onclick: () => openHealthConnect().catch((err) => toast(err.message || 'Could not open Health Connect', 'error')),
           })
         : null;
@@ -12163,14 +12163,36 @@ function renderPortalApp(ctx, initialMe) {
           })
         : null;
 
+      // The other way: what the app writes into Health Connect.
+      const sendRow = (icon, title, permission, what) => {
+        const on = hc.granted.includes(permission);
+        return profileRow({
+          icon, tone: on ? 'green' : 'blue', title,
+          sub: on ? `${what} show in Google Fit, Samsung Health and other apps` : 'Off — allow it in Health Connect settings',
+          control: on ? h('span', { class: 'portal-device-current' }, 'On') : null,
+        });
+      };
+      const sending = connection && healthConnectSupported && hc.status === 'available'
+        ? [
+            h('h3', { class: 'portal-prof-label' }, 'Sent to Health Connect'),
+            h(
+              'div',
+              { class: 'portal-prof-card' },
+              sendRow('dumbbell', 'Workouts', 'write_workouts', 'Workouts you finish here'),
+              sendRow('utensils', 'Meals', 'write_meals', 'Meals and their calories and macros'),
+            ),
+          ]
+        : [];
+
       const days = [...summary.days].reverse();
       const parts = [
         h('div', { class: 'portal-prof-card' }, row, syncRow, manageRow),
         h(
           'p',
           { class: 'portal-devices-note muted' },
-          'Brings in steps, active calories, distance and exercise minutes from apps that share with Health Connect — Fitbit, Samsung Health, Google Fit, Garmin, Strava and more. Your steps are shown only to you. Calories beyond your everyday activity count as exercise in your diet, which your trainer can see.',
+          'Brings in steps, active calories, distance and exercise minutes from apps that share with Health Connect — Fitbit, Samsung Health, Google Fit, Garmin, Strava and more — and sends the workouts and meals you log here back to it. Your steps are shown only to you. Calories beyond your everyday activity count as exercise in your diet, which your trainer can see.',
         ),
+        ...sending,
         days.length ? h('h3', { class: 'portal-prof-label' }, 'Last 7 days') : null,
         days.length ? h('div', { class: 'portal-prof-card' }, ...days.map(dayRow)) : null,
         connection
@@ -12469,7 +12491,7 @@ function renderPortalApp(ctx, initialMe) {
           : null,
         TABS.some((tabDef) => tabDef.key === 'diet')
           ? profileRow({
-              icon: 'heartPulse', tone: 'rose', title: 'Connected apps', sub: 'Steps and calories from your watch via Health Connect',
+              icon: 'heartPulse', tone: 'rose', title: 'Connected apps', sub: 'Sync steps, workouts and meals with Health Connect',
               onclick: openConnectedAppsScreen,
             })
           : null,
