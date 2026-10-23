@@ -3206,10 +3206,27 @@ function fillSetFromPrevious(exercise, set) {
   }
 }
 
-/** The set the member is on: the first not yet ticked, in the first exercise
- * that still has one. Null once every set is done. */
+/** The set the member is on: the first not yet ticked in the exercise they
+ * last ticked a set of, or — that one done — in the next exercise down that
+ * still has one, coming back round to any they skipped. Plan order alone would
+ * pin an exercise the member skipped to the notification. Null once every set
+ * is done. */
 function currentSetOf(state) {
-  const exercise = state.exercises.find((ex) => ex.sets.some((set) => !set.completed));
+  const { exercises } = state;
+  const open = (ex) => ex.sets.some((set) => !set.completed);
+  let lastAt = 0;
+  let last = -1;
+  exercises.forEach((ex, i) => {
+    for (const set of ex.sets) {
+      if (set.completed && Number(set.completed_at) > lastAt) {
+        lastAt = Number(set.completed_at);
+        last = i;
+      }
+    }
+  });
+  const from = Math.max(last, 0);
+  const order = [...exercises.slice(from), ...exercises.slice(0, from)];
+  const exercise = order.find(open);
   if (!exercise) return null;
   const index = exercise.sets.findIndex((set) => !set.completed);
   return { exercise, set: exercise.sets[index], index };
@@ -6169,6 +6186,7 @@ function renderPortalApp(ctx, initialMe) {
         set.timer_started_at = null;
       }
       set.completed = true;
+      set.completed_at = Date.now();
       fillSetFromPrevious(exercise, set);
       const restFor = exercise.rest_seconds ?? 90;
       state.rest = restFor > 0 ? { ends_at: Date.now() + restFor * 1000, total: restFor } : null;
@@ -7764,6 +7782,9 @@ function renderPortalApp(ctx, initialMe) {
       // Ticking a hold mid-count is the member saying "that's it".
       stopHold(set);
       set.completed = !set.completed;
+      // Where the member is in the workout, for the notification (currentSetOf).
+      if (set.completed) set.completed_at = Date.now();
+      else delete set.completed_at;
       justTicked = set.completed ? set : null;
       // Ask how it felt — the one thing the next suggestion can't read
       // off the numbers. Only for counted sets: a plank's effort is its time.
