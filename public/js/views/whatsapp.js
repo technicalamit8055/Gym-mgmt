@@ -7,7 +7,9 @@ import { buildForm, confirmDialog, date, h, renderIcon, table, toast } from '../
  * Pairing is asynchronous — the QR appears here, the owner scans it on their
  * phone, and the server only learns it worked seconds later. So while a QR is
  * on screen this view polls the status and re-renders itself once the state
- * moves.
+ * moves. An owner with one phone cannot scan that phone's own screen, so the
+ * page also offers WhatsApp's other way in: an 8-character pairing code typed
+ * in under Linked devices → Link with phone number instead.
  */
 
 /** Strips the modal Cancel button off a form rendered inline on a page. */
@@ -40,6 +42,98 @@ function pollUntilStateChanges(anchor, fromState, reload) {
   }, 4000);
 }
 
+/** The 8-character code WhatsApp issued, and where on the phone it goes. */
+function pairingCodePanel(code) {
+  return h(
+    'div',
+    { style: 'text-align:center;padding:12px' },
+    h('p', { style: 'font-weight:600;margin:0 0 10px' }, 'Enter this code in WhatsApp on the gym’s phone:'),
+    h(
+      'div',
+      {
+        style:
+          'display:inline-block;font:600 30px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:4px;padding:10px 18px;border:1px solid var(--line);border-radius:8px',
+      },
+      code,
+    ),
+    h(
+      'div',
+      { style: 'margin-top:8px' },
+      h(
+        'button',
+        {
+          class: 'btn sm',
+          type: 'button',
+          onclick: async () => {
+            try {
+              await navigator.clipboard.writeText(code.replace(/-/g, ''));
+              toast('Code copied');
+            } catch {
+              toast('Could not copy — type the code in instead', 'error');
+            }
+          },
+        },
+        'Copy code',
+      ),
+    ),
+    h(
+      'ol',
+      { class: 'muted', style: 'display:inline-block;text-align:left;font-size:13px;margin:12px 0 0;padding-left:18px' },
+      h('li', {}, 'Open WhatsApp → tap ⋮ (or Settings) → Linked devices → Link a device.'),
+      h('li', {}, 'Tap “Link with phone number instead” at the bottom.'),
+      h('li', {}, 'Enter the code above. WhatsApp may also show a notification that takes you straight there.'),
+    ),
+    h(
+      'p',
+      { class: 'muted', style: 'font-size:12px;margin-top:8px' },
+      'The code lasts about two minutes. This page updates itself once it is entered.',
+    ),
+  );
+}
+
+/** Asks for a pairing code for the number typed in — linking without a QR. */
+function pairingCodeForm(reload) {
+  const form = inlineForm(
+    buildForm(
+      [
+        {
+          name: 'phone',
+          label: 'Gym’s WhatsApp number',
+          type: 'tel',
+          required: true,
+          placeholder: '91 98765 43210',
+          hint: 'Include the country code.',
+        },
+      ],
+      {
+        submitLabel: 'Get pairing code',
+        onSubmit: async (values) => {
+          if (!values.phone.trim()) {
+            toast('Enter the gym’s WhatsApp number', 'error');
+            return;
+          }
+          const next = await api.whatsappPairingCode(values.phone.trim());
+          if (next.state === 'CONNECTING') toast('Waiting for WhatsApp to issue the code…');
+          else if (next.state !== 'CODE_READY' && next.error) toast(next.error, 'error');
+          reload();
+        },
+      },
+    ),
+    'Get pairing code',
+  );
+  return h(
+    'div',
+    { style: 'border-top:1px solid var(--line);margin-top:12px;padding-top:12px' },
+    h('p', { style: 'font-weight:600;margin:0 0 4px' }, 'Only have this one phone?'),
+    h(
+      'p',
+      { class: 'muted', style: 'font-size:13px;margin:0 0 8px' },
+      'A phone can’t scan its own screen. Link with an 8-character code instead — no QR or second screen needed.',
+    ),
+    form,
+  );
+}
+
 export async function renderWhatsApp({ setActions, reload }) {
   const isAdmin = session.can('admin');
 
@@ -51,7 +145,8 @@ export async function renderWhatsApp({ setActions, reload }) {
 
   const isConnected = status.connected;
   const hasQr = status.state === 'QR_READY' && Boolean(status.qr);
-  const isPairing = status.state === 'QR_READY' || status.state === 'CONNECTING';
+  const hasCode = status.state === 'CODE_READY' && Boolean(status.pairingCode);
+  const isPairing = ['QR_READY', 'CODE_READY', 'CONNECTING'].includes(status.state);
 
   setActions(
     isAdmin
@@ -85,7 +180,7 @@ export async function renderWhatsApp({ setActions, reload }) {
                     confirmDialog({
                       title: 'Unlink WhatsApp?',
                       message:
-                        'Automated receipts and reminders stop until someone scans a new QR code from this gym’s phone.',
+                        'Automated receipts and reminders stop until this gym’s phone is linked again.',
                       confirmLabel: 'Unlink',
                       danger: true,
                       onConfirm: async () => {
@@ -106,9 +201,11 @@ export async function renderWhatsApp({ setActions, reload }) {
     ? h('span', { class: 'badge green' }, '● Connected')
     : status.state === 'QR_READY'
       ? h('span', { class: 'badge amber' }, 'Waiting for a scan')
-      : status.state === 'CONNECTING'
-        ? h('span', { class: 'badge blue' }, 'Connecting…')
-        : h('span', { class: 'badge grey' }, 'Not connected');
+      : status.state === 'CODE_READY'
+        ? h('span', { class: 'badge amber' }, 'Waiting for the code')
+        : status.state === 'CONNECTING'
+          ? h('span', { class: 'badge blue' }, 'Connecting…')
+          : h('span', { class: 'badge grey' }, 'Not connected');
 
   const connectionCard = h(
     'div',
@@ -144,16 +241,20 @@ export async function renderWhatsApp({ setActions, reload }) {
         )
       : null,
 
-    !isConnected && !hasQr
+    hasCode ? pairingCodePanel(status.pairingCode) : null,
+
+    !isConnected && !hasQr && !hasCode
       ? h(
           'p',
           { class: 'muted', style: 'margin:0' },
           status.error ||
             (isAdmin
-              ? 'Not linked yet — use “Get a QR code” above, then scan it from the gym’s phone.'
-              : 'Not linked yet. An admin needs to scan the QR code from the gym’s phone.'),
+              ? 'Not linked yet — use “Get a QR code” above and scan it from the gym’s phone, or link with a pairing code below.'
+              : 'Not linked yet. An admin needs to link the gym’s phone with a QR code or a pairing code.'),
         )
       : null,
+
+    isAdmin && !isConnected && !hasCode ? pairingCodeForm(reload) : null,
   );
 
   if (isPairing) pollUntilStateChanges(connectionCard, status.state, reload);

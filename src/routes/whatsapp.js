@@ -54,8 +54,12 @@ function settingsFor() {
 whatsappRoutes.get('/status', (req, res) => {
   const status = getWhatsAppStatus();
   // The QR *is* the pairing credential — anyone who scans it links their own
-  // phone to this gym's number. Only the owner ever needs to see it.
-  if (req.user.role !== 'admin') status.qr = null;
+  // phone to this gym's number — and so is a pairing code. Only the owner
+  // ever needs to see either.
+  if (req.user.role !== 'admin') {
+    status.qr = null;
+    status.pairingCode = null;
+  }
   res.json(status);
 });
 
@@ -63,6 +67,17 @@ whatsappRoutes.get('/status', (req, res) => {
 whatsappRoutes.post('/connect', requireRole('admin'), async (_req, res, next) => {
   try {
     res.json(await connectWhatsApp({ force: true }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/whatsapp/pairing-code — link by phone number instead of a QR,
+ * for an owner whose only phone is the one GymBook is open on. */
+whatsappRoutes.post('/pairing-code', requireRole('admin'), async (req, res, next) => {
+  try {
+    const body = parse(req.body, { phone: { type: 'string', max: 20, required: true } });
+    res.json(await connectWhatsApp({ force: true, phone: body.phone }));
   } catch (err) {
     next(err);
   }

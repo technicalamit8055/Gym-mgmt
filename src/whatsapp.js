@@ -66,8 +66,12 @@ function sessionFor(slug) {
     session = {
       slug,
       sock: null,
-      state: 'DISCONNECTED', // DISCONNECTED | CONNECTING | QR_READY | CONNECTED
+      state: 'DISCONNECTED', // DISCONNECTED | CONNECTING | QR_READY | CODE_READY | CONNECTED
       qr: null,
+      /** Linking by phone number instead of a QR: the number being linked,
+       * and the 8-character code WhatsApp issued for it ("ABCD-1234"). */
+      pairingPhone: null,
+      pairingCode: null,
       lastError: null,
       /** In-flight init. Guarding on this rather than on `state === 'CONNECTING'`
        * matters: the old code set the state to CONNECTING before scheduling a
@@ -97,14 +101,27 @@ function publicStatus(session) {
   return {
     state: session.state,
     qr: session.qr,
+    pairingCode: session.pairingCode,
     connected: session.state === 'CONNECTED',
     error: session.lastError,
   };
 }
 
+/** A link by phone number that was started but never finished: the creds
+ * already name the account (requestPairingCode writes `me`), so a later
+ * connect would try to log in as a device WhatsApp never accepted. */
+function isAbandonedPairing(creds) {
+  return Boolean(creds?.pairingCode && !creds.registered);
+}
+
 /** True when this gym has previously paired and creds are still on disk. */
 export function hasStoredCredentials(slug) {
-  return fs.existsSync(path.join(authFolderFor(slug), 'creds.json'));
+  try {
+    const creds = JSON.parse(fs.readFileSync(path.join(authFolderFor(slug), 'creds.json'), 'utf8'));
+    return !isAbandonedPairing(creds);
+  } catch {
+    return false;
+  }
 }
 
 export function getWhatsAppStatus(slug = currentSlug()) {
@@ -146,6 +163,7 @@ function scheduleReconnect(session) {
   if (session.attempts >= MAX_RECONNECT_ATTEMPTS) {
     session.state = 'DISCONNECTED';
     session.qr = null;
+    session.pairingCode = null;
     session.lastError = 'Lost the WhatsApp connection. Reconnect from the WhatsApp page.';
     console.warn(`[whatsapp:${session.slug}] giving up after ${session.attempts} reconnect attempts`);
     return;
@@ -161,35 +179,68 @@ function scheduleReconnect(session) {
   session.reconnectTimer.unref?.();
 }
 
+/** How long a link by phone number waits for WhatsApp to issue its code
+ * before handing back and leaving the page's poll to pick it up. */
+const PAIRING_CODE_WAIT_MS = 15000;
+
 /**
  * Brings a gym's WhatsApp session up, returning as soon as the socket exists —
  * pairing finishes asynchronously when the owner scans the QR, which the
  * front end polls for via getWhatsAppStatus().
  *
+ * With `phone`, the gym links by phone number instead of a QR: WhatsApp issues
+ * an 8-character code that the owner types in under Linked devices → Link a
+ * device → Link with phone number instead. It is the only way in for an owner
+ * whose one phone is also the screen GymBook is open on — a camera cannot scan
+ * its own screen. The call waits briefly for the code so it can be shown at once.
+ *
  * @param {object}  [opts]
  * @param {string}  [opts.slug]  Gym to connect; defaults to the request's tenant.
  * @param {boolean} [opts.force] Tear down a live socket and start fresh.
+ * @param {string}  [opts.phone] Link this number with a pairing code instead of a QR.
  */
-export async function connectWhatsApp({ slug = currentSlug(), force = false } = {}) {
+export async function connectWhatsApp({ slug = currentSlug(), force = false, phone = null } = {}) {
   const session = sessionFor(slug);
+
+  let pairingPhone = null;
+  if (phone !== null) {
+    const jid = formatPhoneNumber(phone);
+    if (!jid) throw badRequest(`"${phone}" is not a valid phone number`);
+    if (session.state === 'CONNECTED') {
+      throw badRequest('WhatsApp is already linked. Unlink it first to link a different number.');
+    }
+    pairingPhone = jid.split('@')[0];
+  }
 
   if (session.state === 'CONNECTED' && !force) return publicStatus(session);
   // Coalesce concurrent callers onto one in-flight attempt rather than
-  // refusing them, so a second click never wedges the session.
-  if (session.starting) {
+  // refusing them, so a second click never wedges the session. A request for
+  // a pairing code still needs its own attempt once that one settles.
+  while (session.starting) {
     await session.starting.catch(() => {});
-    return publicStatus(session);
+    if (!pairingPhone) return publicStatus(session);
   }
 
   session.starting = (async () => {
     teardown(session);
     session.state = 'CONNECTING';
     session.qr = null;
+    session.pairingPhone = pairingPhone;
+    session.pairingCode = null;
     session.lastError = null;
 
     const folder = authFolderFor(slug);
+    // A new link by phone number starts from fresh keys, and so does any
+    // connect that finds an abandoned one on disk.
+    if (pairingPhone) clearAuthFolder(slug);
     fs.mkdirSync(folder, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(folder);
+    let { state, saveCreds } = await useMultiFileAuthState(folder);
+    if (isAbandonedPairing(state.creds)) {
+      clearAuthFolder(slug);
+      fs.mkdirSync(folder, { recursive: true });
+      ({ state, saveCreds } = await useMultiFileAuthState(folder));
+    }
+    let codeRequested = false;
 
     const sock = makeWASocket({
       auth: state,
@@ -214,7 +265,28 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false } = 
       if (session.sock !== sock) return;
       const { connection, lastDisconnect, qr } = update;
 
-      if (qr) {
+      if (qr && session.pairingPhone) {
+        // A QR arriving means WhatsApp is ready to pair, so ask for a code in
+        // its place. Only once: the QR keeps rotating for the same attempt,
+        // and a second code would void the one already on the owner's screen.
+        if (!codeRequested) {
+          codeRequested = true;
+          try {
+            const code = await sock.requestPairingCode(session.pairingPhone);
+            if (session.sock !== sock) return;
+            session.pairingCode = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+            session.state = 'CODE_READY';
+          } catch (err) {
+            if (session.sock !== sock) return;
+            console.error(`[whatsapp:${slug}] could not get a pairing code:`, err.message);
+            teardown(session);
+            session.state = 'DISCONNECTED';
+            session.pairingPhone = null;
+            session.lastError = 'WhatsApp did not issue a pairing code. Try again, or link with the QR code instead.';
+            clearAuthFolder(slug);
+          }
+        }
+      } else if (qr) {
         try {
           session.qr = await QRCode.toDataURL(qr);
           session.state = 'QR_READY';
@@ -226,6 +298,8 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false } = 
       if (connection === 'open') {
         session.state = 'CONNECTED';
         session.qr = null;
+        session.pairingPhone = null;
+        session.pairingCode = null;
         session.lastError = null;
         session.attempts = 0;
         console.log(`[whatsapp:${slug}] connected`);
@@ -235,6 +309,23 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false } = 
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         session.sock = null;
 
+        if (session.pairingPhone) {
+          // Once the code is entered WhatsApp restarts the connection, and the
+          // reconnect below logs in with the new creds. Closing before that
+          // means the code ran out unused; retrying would only issue codes
+          // nobody is looking at.
+          session.pairingPhone = null;
+          session.pairingCode = null;
+          if (!state.creds.registered) {
+            session.state = 'DISCONNECTED';
+            session.attempts = 0;
+            session.lastError = 'The pairing code expired before it was entered on the phone. Get a new code to try again.';
+            clearAuthFolder(slug);
+            console.log(`[whatsapp:${slug}] pairing code expired unused (status ${statusCode})`);
+            return;
+          }
+        }
+
         if (statusCode === DisconnectReason.loggedOut) {
           // The owner unlinked the device from their phone. The creds on disk
           // are dead — keeping them would retry forever against a session
@@ -242,7 +333,7 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false } = 
           session.state = 'DISCONNECTED';
           session.qr = null;
           session.attempts = 0;
-          session.lastError = 'This gym was unlinked from WhatsApp. Scan the QR code again to reconnect.';
+          session.lastError = 'This gym was unlinked from WhatsApp. Link it again with a QR code or a pairing code.';
           clearAuthFolder(slug);
           console.log(`[whatsapp:${slug}] logged out from the phone; credentials cleared`);
           return;
@@ -258,16 +349,23 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false } = 
   })();
 
   try {
-    return await session.starting;
+    await session.starting;
   } catch (err) {
     session.state = 'DISCONNECTED';
     session.qr = null;
+    session.pairingPhone = null;
     session.lastError = err.message || 'Could not start the WhatsApp connection';
     console.error(`[whatsapp:${slug}] init failed:`, err.message);
     return publicStatus(session);
   } finally {
     session.starting = null;
   }
+
+  if (pairingPhone) {
+    const deadline = Date.now() + PAIRING_CODE_WAIT_MS;
+    while (session.state === 'CONNECTING' && Date.now() < deadline) await sleep(250);
+  }
+  return publicStatus(session);
 }
 
 function clearAuthFolder(slug) {
@@ -289,6 +387,8 @@ export async function logoutWhatsApp(slug = currentSlug()) {
   teardown(session);
   session.state = 'DISCONNECTED';
   session.qr = null;
+  session.pairingPhone = null;
+  session.pairingCode = null;
   session.attempts = 0;
   session.lastError = null;
   clearAuthFolder(slug);
@@ -371,7 +471,7 @@ export async function sendWhatsAppMessage({ phone, message, logMessage = message
     return { ok: true };
   }
   if (session.state !== 'CONNECTED' || !session.sock) {
-    fail('WhatsApp is not connected. Scan the QR code on the WhatsApp page first.');
+    fail('WhatsApp is not connected. Link it on the WhatsApp page first.');
   }
 
   const send = async () => {
@@ -621,7 +721,7 @@ export async function sendChatMessage({ slug = currentSlug(), jid = null, phone 
 
   const session = sessionFor(slug);
   if (session.state !== 'CONNECTED' || !session.sock) {
-    throw badRequest('WhatsApp is not connected. Scan the QR code on the WhatsApp page first.');
+    throw badRequest('WhatsApp is not connected. Link it on the WhatsApp page first.');
   }
 
   const send = async () => {

@@ -826,6 +826,7 @@ export const api = {
 
   whatsappStatus: () => request('GET', '/whatsapp/status'),
   whatsappConnect: () => request('POST', '/whatsapp/connect'),
+  whatsappPairingCode: (phone) => request('POST', '/whatsapp/pairing-code', { phone }),
   whatsappLogout: () => request('POST', '/whatsapp/logout'),
   whatsappSettings: () => request('GET', '/whatsapp/settings'),
   updateWhatsAppSettings: (payload) => request('PUT', '/whatsapp/settings', payload),

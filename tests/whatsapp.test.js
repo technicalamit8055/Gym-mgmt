@@ -143,6 +143,7 @@ describe('WhatsApp API access control', () => {
       ['GET', '/api/whatsapp/settings'],
       ['GET', '/api/whatsapp/logs'],
       ['POST', '/api/whatsapp/connect'],
+      ['POST', '/api/whatsapp/pairing-code'],
       ['POST', '/api/whatsapp/send-test'],
     ]) {
       const res = await call(method, url, method === 'POST' ? {} : null, {
@@ -165,6 +166,7 @@ describe('WhatsApp API access control', () => {
     const res = await call('GET', '/api/whatsapp/status', null, { token: managerToken, tenant: 'wagym' });
     assert.equal(res.status, 200);
     assert.equal(res.body.qr, null);
+    assert.equal(res.body.pairingCode, null);
 
     // Pairing and unlinking stay with the owner.
     assert.equal(
@@ -172,9 +174,23 @@ describe('WhatsApp API access control', () => {
       403,
     );
     assert.equal(
+      (await call('POST', '/api/whatsapp/pairing-code', { phone: '919876543210' }, { token: managerToken, tenant: 'wagym' }))
+        .status,
+      403,
+    );
+    assert.equal(
       (await call('POST', '/api/whatsapp/logout', {}, { token: managerToken, tenant: 'wagym' })).status,
       403,
     );
+  });
+
+  it('refuses a pairing code for a missing or malformed number before touching WhatsApp', async () => {
+    for (const body of [{}, { phone: '' }, { phone: 'not a number' }, { phone: '12' }]) {
+      const res = await call('POST', '/api/whatsapp/pairing-code', body, { token: adminToken, tenant: 'wagym' });
+      assert.equal(res.status, 400, JSON.stringify(body));
+    }
+    const status = await call('GET', '/api/whatsapp/status', null, { token: adminToken, tenant: 'wagym' });
+    assert.equal(status.body.state, 'DISCONNECTED');
   });
 });
 
