@@ -731,3 +731,26 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 .cb-store-note { display: flex; align-items: flex-start; gap: 12px; }
 .cb-store-note p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
 .cb-store-items { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+
+/* ------------------------------------- GymBook trials (views/trials.js) --- */
+/* The lead cards, banner and chat drawer above are shared with the gym's
+   trials desk; these are the free trial pass's own pieces. */
+.trial-pass-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; width: 100%;
+  padding: 8px 10px; border-radius: 8px; border: 1px dashed color-mix(in srgb, var(--brand) 45%, var(--border));
+  background: var(--brand-soft); color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.trial-pass-strip strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; }
+.trial-pass-strip span:not(.badge) { color: var(--muted); }
+.trial-pass-strip:hover { border-style: solid; }
+.trial-pass-card { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+.trial-pass-qr { width: 200px; height: 200px; padding: 8px; border-radius: 12px; background: #fff; flex: none; }
+.trial-pass-qr svg { width: 100%; height: 100%; display: block; }
+.trial-pass-info { display: grid; gap: 6px; min-width: 0; flex: 1 1 180px; }
+.trial-pass-info > .cb-small { display: flex; align-items: center; gap: 6px; }
+.trial-pass-info .svg-icon { flex: none; color: var(--muted); }
+.trial-pass-code { font: 700 22px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; }
+.trial-avatar { display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+@media (max-width: 480px) {
+  .trial-pass-qr { width: 100%; max-width: 240px; height: auto; aspect-ratio: 1; margin: 0 auto; }
+}

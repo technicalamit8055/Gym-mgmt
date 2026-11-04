@@ -1243,8 +1243,8 @@ const SECTIONS = [
     group: 'Revenue',
     icon: 'sparkle',
     label: 'AI receptionist',
-    title: 'AI admissions receptionist',
-    sub: 'What CoachBook institutes pay for the WhatsApp assistant — your price and trial, each institute’s plan, and what it is collecting.',
+    title: 'AI WhatsApp receptionist',
+    sub: 'What CoachBook institutes and GymBook gyms pay for the WhatsApp assistant — your price and trial, each account’s plan, and what it is collecting.',
   },
   {
     id: 'shops',

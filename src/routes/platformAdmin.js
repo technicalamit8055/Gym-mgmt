@@ -842,21 +842,25 @@ platformAdminRoutes.put('/monetization', (req, res) => {
   res.json(monetizationState());
 });
 
-/* ── CoachBook's AI receptionist: what institutes pay ─────────────────── */
+/* ── The AI receptionist: what institutes and gyms pay ────────────────── */
 
-/** Usage numbers from each institute's own database: whether the assistant
- * is switched on, and its replies and captured leads over 30 days — what
- * the operator weighs a renewal or a custom price against. */
+/** Usage numbers from each account's own database: whether the assistant
+ * is switched on, and its replies, captured leads and bookings (demos for
+ * an institute, free trials for a gym) over 30 days — what the operator
+ * weighs a renewal or a custom price against. */
 function receptionistUsage(slug) {
   try {
     const tenant = findTenantBySlug(slug);
+    const coaching = tenant.business_type === 'coaching';
     return inTenant(tenant, () => ({
-      switched_on: Boolean(get('SELECT ai_receptionist FROM coaching_settings WHERE id = 1')?.ai_receptionist),
+      switched_on: Boolean(get(`SELECT ai_receptionist FROM ${coaching ? 'coaching_settings' : 'gym_receptionist_settings'} WHERE id = 1`)?.ai_receptionist),
       replies_30d: get("SELECT COUNT(*) AS n FROM wa_messages WHERE author = 'ai' AND created_at >= datetime('now', '-30 days')").n,
-      leads_30d: get("SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND created_at >= datetime('now', '-30 days')").n,
-      demos_30d: get(
-        "SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND demo_slot_id IS NOT NULL AND updated_at >= datetime('now', '-30 days')",
-      ).n,
+      leads_30d: coaching
+        ? get("SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND created_at >= datetime('now', '-30 days')").n
+        : get("SELECT COUNT(*) AS n FROM gym_leads WHERE ai_captured = 1 AND created_at >= datetime('now', '-30 days')").n,
+      demos_30d: coaching
+        ? get("SELECT COUNT(*) AS n FROM student_inquiries WHERE ai_captured = 1 AND demo_slot_id IS NOT NULL AND updated_at >= datetime('now', '-30 days')").n
+        : get("SELECT COUNT(*) AS n FROM trial_passes WHERE issued_by = 'ai' AND created_at >= datetime('now', '-30 days')").n,
     }));
   } catch {
     return null;

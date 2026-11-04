@@ -58,6 +58,7 @@ import { renderDevices } from './views/devices.js';
 import { renderSessions } from './views/sessions.js';
 import { renderReports } from './views/reports.js';
 import { renderWhatsApp } from './views/whatsapp.js';
+import { renderTrials } from './views/trials.js';
 import { renderNotifications } from './views/notifications.js';
 import { renderSeats } from './views/seats.js';
 import { renderLockers } from './views/lockers.js';
@@ -110,6 +111,8 @@ function buildNav() {
     { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
     { path: '/check-in', label: 'Check-in desk', icon: 'checkin' },
     { path: '/members', label: 'Members', icon: 'members' },
+    // Leads and free trial passes; the WhatsApp front desk books into it.
+    { path: '/trials', label: 'Trials & leads', icon: 'userPlus' },
     { section: 'Business' },
     { path: '/billing', label: 'Memberships & billing', icon: 'billing' },
     { path: '/plans', label: 'Plans', icon: 'plans' },
@@ -189,6 +192,14 @@ function buildRoutes() {
   }
   return [
     ...shared,
+    {
+      pattern: /^\/trials$/,
+      title: 'Trials & leads',
+      icon: 'ticket',
+      iconTone: 'blue',
+      subtitle: 'Free trial passes, WhatsApp enquiries and follow-ups — until they join',
+      view: renderTrials,
+    },
     {
       pattern: /^\/classes$/,
       title: 'Classes & timetable',

@@ -52,7 +52,9 @@ export const VERTICALS = {
       shifts: 'Gym sessions',
       emergencyContact: 'Emergency contact',
     },
-    modules: new Set(['classes', 'bookings', 'equipment', 'fitness']),
+    // 'trials': leads, free trial passes and the WhatsApp front-desk
+    // assistant (src/trialPasses.js, src/gymReceptionist.js).
+    modules: new Set(['classes', 'bookings', 'equipment', 'fitness', 'trials']),
     starterPrices: {
       INR: [1500, 4000, 14000],
       USD: [40, 105, 360],

@@ -33,6 +33,7 @@ import { sessionRoutes } from './routes/sessions.js';
 import { storeHubRoutes } from './routes/storeHub.js';
 import { storeMediaRoutes } from './routes/storeMedia.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
+import { trialRoutes } from './routes/trials.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { workoutRoutes } from './routes/workouts.js';
 import { biometricRoutes } from './routes/biometric.js';
@@ -40,12 +41,13 @@ import { handleRazorpayWebhook } from './routes/billing.js';
 import { deviceAttendanceRoutes } from './routes/deviceAttendance.js';
 import { deviceRoutes } from './routes/devices.js';
 import { requireActiveSubscription, resolveTenant } from './tenant.js';
-import { startReceptionist } from './coaching/receptionist.js';
+import { startReceptionists } from './receptionists.js';
 
 export function createApp() {
-  // CoachBook's WhatsApp admissions assistant listens on every gym's socket;
-  // it ignores all but CoachBook accounts that have switched it on.
-  startReceptionist();
+  // The WhatsApp receptionists (CoachBook's admissions assistant, GymBook's
+  // front desk) listen on every tenant's socket; each ignores all but its own
+  // vertical's accounts that have switched it on.
+  startReceptionists();
   const app = express();
   app.disable('x-powered-by');
   // Opt-in (config.trustProxy, TRUST_PROXY env var): only correct once a real
@@ -79,8 +81,9 @@ export function createApp() {
     res.vary('Origin');
     if (!origin || !corsOrigins.has(origin)) return next();
     res.set('Access-Control-Allow-Origin', origin);
-    // Receipts and exports name their download in Content-Disposition.
-    res.set('Access-Control-Expose-Headers', 'Content-Disposition');
+    // Receipts and exports name their download in Content-Disposition; the
+    // app picks up a renewed session token from X-Renewed-Token.
+    res.set('Access-Control-Expose-Headers', 'Content-Disposition, X-Renewed-Token');
     if (req.method !== 'OPTIONS') return next();
     res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE');
     res.set('Access-Control-Allow-Headers', req.get('access-control-request-headers') || 'Content-Type, Authorization');
@@ -177,6 +180,8 @@ export function createApp() {
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/whatsapp', whatsappRoutes);
+  // Leads, free trial passes and the WhatsApp front-desk assistant (GymBook).
+  app.use('/api/trials', trialRoutes);
   // Gated inside each router itself (requireModule(...)), not here — see
   // verticals.js for why the mount list stays a plain map of paths to routers.
   app.use('/api/seats', seatRoutes);

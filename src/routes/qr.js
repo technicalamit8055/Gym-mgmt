@@ -18,6 +18,7 @@ import {
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { tenantLogoUrl } from './platform.js';
 import { tenantUrl } from '../tenant.js';
+import { checkInTrialPass, trialLookup, trialPassForScan } from '../trialPasses.js';
 import { parse, today, toInt } from '../validate.js';
 
 /**
@@ -136,7 +137,12 @@ qrRoutes.post('/lookup', (req, res) => {
   expireOverdueSubscriptions();
   autoCloseFinishedVisits();
   const scanned = findMemberByScan(body.code);
-  if (!scanned) throw notFound('That card is not recognised — it may have been reissued');
+  if (!scanned) {
+    // A free trial pass (GBT1:…) — a visitor, not a member: its own panel.
+    const pass = trialPassForScan(body.code);
+    if (pass) return res.json({ trial: trialLookup(pass) });
+    throw notFound('That card is not recognised — it may have been reissued');
+  }
 
   const member = publicMember(get(`${MEMBER_SELECT} WHERE m.id = ?`, [scanned.id]));
   // Both borrowed from the check-in path rather than re-derived, so the panel
@@ -167,7 +173,12 @@ qrRoutes.post('/check-in', (req, res) => {
   const body = parse(req.body, { code: { type: 'string', required: true, max: 200 } });
 
   const member = findMemberByScan(body.code);
-  if (!member) throw notFound('That card is not recognised — it may have been reissued');
+  if (!member) {
+    const pass = trialPassForScan(body.code);
+    if (!pass) throw notFound('That card is not recognised — it may have been reissued');
+    const result = checkInTrialPass(pass, 'qr');
+    return res.status(result.action === 'trial_checked_in' ? 201 : 200).json(result);
+  }
 
   const result = performCheckIn(member, 'qr');
   res.status(result.action === 'checked_in' ? 201 : 200).json(result);

@@ -21,6 +21,7 @@ import {
 } from '../ui.js';
 import { t } from '../vertical.js';
 import { loadQrDecoder } from '../barcodeScanner.js';
+import { trialResult } from './trials.js';
 
 /* ── WebAuthn browser helpers (base64url ↔ ArrayBuffer) ────────────── */
 
@@ -49,8 +50,11 @@ function supportsWebAuthn() {
 /** Marks a value as coming off a printed GymBook card rather than being typed;
  * must match QR_PREFIX in src/qr.js. */
 const QR_PREFIX = 'GB1:';
+/** A free trial pass's QR — TRIAL_QR_PREFIX in src/trialPasses.js. */
+const TRIAL_QR_PREFIX = 'GBT1:';
 
-const looksLikeCard = (value) => value.slice(0, QR_PREFIX.length).toUpperCase() === QR_PREFIX;
+const looksLikeCard = (value) =>
+  [QR_PREFIX, TRIAL_QR_PREFIX].some((prefix) => value.slice(0, prefix.length).toUpperCase() === prefix);
 
 /**
  * Can this device open a camera at all? getUserMedia is only exposed in a
@@ -254,6 +258,12 @@ export async function renderCheckIn({ setActions }) {
   }
 
   function showResult(result) {
+    // A free trial visitor (views/trials.js): not a member, no visit row.
+    if (result.trial) {
+      clear(feedback).append(trialResult(result.trial, { action: result.action }));
+      toast(result.action === 'trial_already_in' ? `${result.trial.name} is already in today` : `Welcome, ${result.trial.name} — trial visit ${result.trial.visits_used} of ${result.trial.visits_allowed}`);
+      return;
+    }
     const visit = result.visit;
     const membership = result.membership;
     const checkedOut = result.action === 'checked_out';
@@ -343,6 +353,7 @@ export async function renderCheckIn({ setActions }) {
    * they press the button, so an expiry or an unpaid balance can be spotted
    * before the member is waved through. */
   function showScanned(code, info) {
+    if (info.trial) return showScannedTrial(code, info.trial);
     const member = info.member;
 
     const admit = h(
@@ -400,6 +411,36 @@ export async function renderCheckIn({ setActions }) {
           admit,
           h('a', { class: 'btn ghost sm', href: `#/members/${member.id}` }, 'Open profile'),
         ),
+      ),
+    );
+  }
+
+  /** A scanned trial pass: who it is and how many visits are left, and a
+   * button to let them in when the pass allows it. */
+  function showScannedTrial(code, trial) {
+    const admit = h(
+      'button',
+      {
+        class: 'btn primary',
+        onclick: async () => {
+          admit.disabled = true;
+          try {
+            clear(scanPanel);
+            showResult(await api.qrCheckIn(code));
+          } catch (err) {
+            showError(err);
+          }
+        },
+      },
+      `Check in ${trial.name}`,
+    );
+    clear(scanPanel).append(
+      trialResult(trial),
+      h(
+        'div',
+        { class: 'row', style: 'gap:8px;margin-top:12px' },
+        trial.can_check_in && !trial.visited_today ? admit : null,
+        h('a', { class: 'btn ghost sm', href: '#/trials' }, 'Open trials'),
       ),
     );
   }

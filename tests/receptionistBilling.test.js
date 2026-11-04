@@ -65,6 +65,7 @@ setAiClientForTests({
 const APEX = 'apex-academy';
 const ZENITH = 'zenith-academy';
 const GYM = 'iron-den';
+const HALL = 'quiet-hall';
 
 let base;
 let server;
@@ -107,6 +108,7 @@ before(async () => {
   apexAdmin = await signup(APEX, 'Apex Academy', 'owner@apex.test', 'coaching');
   zenithAdmin = await signup(ZENITH, 'Zenith Academy', 'owner@zenith.test', 'coaching');
   await signup(GYM, 'Iron Den', 'owner@iron.test', 'gym');
+  await signup(HALL, 'Quiet Hall', 'owner@hall.test', 'library');
   assert.equal((await call('POST', '/api/staff', { name: 'Er. Verma', email: 'v@apex.test', password: 'teacherpass1', role: 'trainer' }, { token: apexAdmin, tenant: APEX })).status, 201);
   apexTeacher = (await call('POST', '/api/auth/login', { email: 'v@apex.test', password: 'teacherpass1' }, { tenant: APEX })).body.token;
   ops = (await call('POST', '/api/platform/admin/login', { email: 'ops@gymbook.test', password: 'operator-pass-123' })).body.token;
@@ -142,7 +144,8 @@ describe('the operator’s price', () => {
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.settings.price_monthly, 2499);
     assert.ok(res.body.institutes.some((i) => i.slug === APEX));
-    assert.ok(!res.body.institutes.some((i) => i.slug === GYM), 'gyms are not sold the receptionist');
+    assert.equal(res.body.institutes.find((i) => i.slug === GYM)?.business_type, 'gym', 'gyms are sold it too');
+    assert.ok(!res.body.institutes.some((i) => i.slug === HALL), 'study halls are not sold the receptionist');
 
     const { plan } = (await apex('GET', '/admissions/assistant')).body;
     assert.equal(plan.trial_days, 14);
@@ -157,7 +160,7 @@ describe('the operator’s price', () => {
     assert.equal(zenith.price_monthly, 1499);
     assert.equal(zenith.custom_price, true);
     assert.equal((await apex('GET', '/admissions/assistant')).body.plan.price_monthly, 2499, 'others keep the default');
-    assert.equal((await opsCall('PATCH', `/receptionist/${GYM}`, { price_monthly: 999 })).status, 404);
+    assert.equal((await opsCall('PATCH', `/receptionist/${HALL}`, { price_monthly: 999 })).status, 404);
   });
 });
 

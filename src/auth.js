@@ -80,6 +80,16 @@ export function issueSellerToken(seller) {
   return `${payload}.${sign(payload)}`;
 }
 
+/**
+ * Sliding sessions: a token past half its life comes back renewed in this
+ * header on any request it authorises, and the app swaps it in (api.js). So
+ * someone who opens the app at least once per tokenTtlSeconds stays signed in
+ * for good, and only a device left unused that long has to sign in again.
+ */
+export const RENEWED_TOKEN_HEADER = 'X-Renewed-Token';
+
+const needsRenewal = (claims) => claims.exp - Math.floor(Date.now() / 1000) < config.tokenTtlSeconds / 2;
+
 export function readToken(token) {
   const [payload, signature] = String(token || '').split('.');
   if (!payload || !signature) return null;
@@ -119,6 +129,10 @@ export function issueMemberToken(member, tenantSlug, { userAgent = null } = {}) 
      VALUES (?, ?, ?, datetime(?, 'unixepoch'))`,
     [sid, member.id, userAgent ? String(userAgent).slice(0, 400) : null, exp],
   );
+  return memberToken(member, tenantSlug, sid, exp);
+}
+
+function memberToken(member, tenantSlug, sid, exp) {
   const payload = b64url(
     JSON.stringify({
       scope: 'member',
@@ -133,7 +147,15 @@ export function issueMemberToken(member, tenantSlug, { userAgent = null } = {}) 
   return `${payload}.${sign(payload)}`;
 }
 
-export function requireMemberAuth(req, _res, next) {
+/** The same device's session, with its expiry pushed out a full
+ * tokenTtlSeconds — same `sid`, so the Devices screen still shows one row. */
+function renewMemberToken(member, tenantSlug, sid) {
+  const exp = Math.floor(Date.now() / 1000) + config.tokenTtlSeconds;
+  run("UPDATE member_sessions SET expires_at = datetime(?, 'unixepoch') WHERE id = ?", [exp, sid]);
+  return memberToken(member, tenantSlug, sid, exp);
+}
+
+export function requireMemberAuth(req, res, next) {
   const header = req.get('authorization') || '';
   const claims = readToken(header.startsWith('Bearer ') ? header.slice(7) : header);
   if (!claims || claims.scope !== 'member') {
@@ -160,13 +182,14 @@ export function requireMemberAuth(req, _res, next) {
      WHERE id = ? AND last_seen_at < datetime('now', '-60 seconds')`,
     [req.get('user-agent')?.slice(0, 400) ?? null, session.id],
   );
+  if (needsRenewal(claims)) res.set(RENEWED_TOKEN_HEADER, renewMemberToken(member, claims.tenant, session.id));
 
   req.member = member;
   req.memberSessionId = session.id;
   return next();
 }
 
-export function requireAuth(req, _res, next) {
+export function requireAuth(req, res, next) {
   const header = req.get('authorization') || '';
   const claims = readToken(header.startsWith('Bearer ') ? header.slice(7) : header);
   // A staff token carries no `scope` at all — only a member token (`'member'`)
@@ -182,6 +205,7 @@ export function requireAuth(req, _res, next) {
 
   const user = get('SELECT id, name, email, role, active FROM users WHERE id = ?', [claims.sub]);
   if (!user || !user.active) return next(unauthorized('This account is no longer active'));
+  if (needsRenewal(claims)) res.set(RENEWED_TOKEN_HEADER, issueToken(user, claims.tenant));
 
   req.user = user;
   return next();

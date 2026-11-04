@@ -1560,6 +1560,131 @@ const MIGRATIONS = [
   // When the day's water was last changed: the end of the hydration record
   // the app writes to Health Connect. NULL on rows from before it was kept.
   (db) => ensureColumn(db, 'diet_logs', 'water_updated_at', 'TEXT'),
+
+  /* ------------------------- GymBook's WhatsApp receptionist & trials --- */
+  // Leads, free trial passes and the desk's trial visits — see
+  // src/trialPasses.js — and the front-desk assistant that answers on
+  // WhatsApp and books them (src/gymReceptionist.js). The assistant is off
+  // by default; trial passes work without it, issued by the desk.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gym_receptionist_settings (
+        id                  INTEGER PRIMARY KEY CHECK (id = 1),
+        ai_receptionist     INTEGER NOT NULL DEFAULT 0,
+        -- Shown to the contact as the assistant's name; NULL means "the front desk".
+        ai_persona_name     TEXT,
+        -- The owner's own words the assistant may repeat: facilities, offers,
+        -- trainers' credentials. Its only source of claims beyond the tables.
+        ai_persona_notes    TEXT,
+        -- "Mon–Sat 5:30 AM – 10:30 PM, Sun 7 AM – 12 PM", as the owner writes it.
+        opening_hours       TEXT,
+        ai_reply_mode       TEXT NOT NULL DEFAULT 'always' CHECK (ai_reply_mode IN ('always', 'after_hours')),
+        -- When the desk is staffed, for 'after_hours'.
+        office_open         TEXT NOT NULL DEFAULT '09:00',
+        office_close        TEXT NOT NULL DEFAULT '21:00',
+        office_days         TEXT NOT NULL DEFAULT '1,2,3,4,5,6',
+        ai_pause_minutes    INTEGER NOT NULL DEFAULT 720,
+        gym_phone           TEXT,
+        gym_address         TEXT,
+        landmark_directions TEXT,
+        latitude            REAL,
+        longitude           REAL,
+        maps_url            TEXT,
+        -- The owner's own phone, for the "hot lead" alert when a trial is booked.
+        owner_phone         TEXT,
+        hot_lead_alerts     INTEGER NOT NULL DEFAULT 1,
+        -- Whether the assistant may offer and book free trials. The desk can
+        -- always issue one by hand.
+        trial_enabled       INTEGER NOT NULL DEFAULT 1,
+        trial_days          INTEGER NOT NULL DEFAULT 3 CHECK (trial_days BETWEEN 1 AND 30),
+        trial_visits        INTEGER NOT NULL DEFAULT 3 CHECK (trial_visits BETWEEN 1 AND 30),
+        -- One trial per phone number in this many days.
+        trial_cooldown_days INTEGER NOT NULL DEFAULT 180 CHECK (trial_cooldown_days BETWEEN 0 AND 3650),
+        -- Most trial passes starting on one day; 0 = no limit.
+        trial_daily_cap     INTEGER NOT NULL DEFAULT 0 CHECK (trial_daily_cap BETWEEN 0 AND 500),
+        -- How far ahead a trial may be booked to start.
+        trial_booking_days  INTEGER NOT NULL DEFAULT 7 CHECK (trial_booking_days BETWEEN 0 AND 30),
+        trial_followups     INTEGER NOT NULL DEFAULT 1,
+        noshow_template     TEXT NOT NULL DEFAULT 'Hi {{first_name}}, your free trial pass at {{gym_name}} is waiting for you — it is valid until {{valid_until}}. Just show the QR at the front desk when you come in. See you soon! 💪',
+        visited_template    TEXT NOT NULL DEFAULT 'Hi {{first_name}}, thanks for training with us at {{gym_name}}! How did you find the workout? Reply here if you have any questions about joining — we are happy to help you pick a plan.',
+        expiry_template     TEXT NOT NULL DEFAULT 'Hi {{first_name}}, your free trial at {{gym_name}} ends on {{valid_until}}. Join now to keep your momentum going — reply here and we will help you get started.',
+        updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('INSERT OR IGNORE INTO gym_receptionist_settings (id) VALUES (1)');
+
+    // Someone who might join: from a WhatsApp chat, a walk-in, a call. `name`
+    // stays NULL until they share it. `member_id` is set on conversion.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gym_leads (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        name           TEXT,
+        phone          TEXT NOT NULL,
+        goal           TEXT,
+        preferred_time TEXT,
+        plan_id        INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+        status         TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'trial', 'converted', 'lost')),
+        source         TEXT NOT NULL DEFAULT 'whatsapp'
+                       CHECK (source IN ('whatsapp', 'walk_in', 'phone', 'referral', 'social', 'other')),
+        ai_captured    INTEGER NOT NULL DEFAULT 0,
+        follow_up_on   TEXT,
+        notes          TEXT,
+        member_id      INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        converted_on   TEXT,
+        created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_gym_leads_phone ON gym_leads(phone)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_gym_leads_status ON gym_leads(status)');
+
+    // A free trial pass. `code` is the random secret both printed in the QR
+    // (GBT1:<code>) and typed at the desk; `phone_key` (the number's last ten
+    // digits) is what the one-trial-per-number rule counts. valid_from and
+    // valid_until are the gym's calendar days, inclusive. Used and expired
+    // are derived from the visits and the date, never stored.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS trial_passes (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id                INTEGER NOT NULL REFERENCES gym_leads(id) ON DELETE CASCADE,
+        code                   TEXT NOT NULL UNIQUE,
+        phone_key              TEXT NOT NULL,
+        valid_from             TEXT NOT NULL,
+        valid_until            TEXT NOT NULL,
+        visits_allowed         INTEGER NOT NULL CHECK (visits_allowed > 0),
+        arrival_time           TEXT,
+        status                 TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+        issued_by              TEXT NOT NULL DEFAULT 'staff' CHECK (issued_by IN ('ai', 'staff')),
+        issued_by_user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        sent_at                TEXT,
+        noshow_sent_at         TEXT,
+        visited_sent_at        TEXT,
+        expiry_sent_at         TEXT,
+        created_at             TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trial_passes_lead ON trial_passes(lead_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trial_passes_phone ON trial_passes(phone_key, created_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trial_passes_from ON trial_passes(valid_from)');
+
+    // One row per day a pass was used. The unique pair is what makes a second
+    // scan the same day a no-op rather than a second visit used up.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS trial_visits (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        pass_id    INTEGER NOT NULL REFERENCES trial_passes(id) ON DELETE CASCADE,
+        visit_date TEXT NOT NULL,
+        check_in   TEXT NOT NULL DEFAULT (datetime('now')),
+        source     TEXT NOT NULL DEFAULT 'desk',
+        UNIQUE (pass_id, visit_date)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trial_visits_date ON trial_visits(visit_date)');
+
+    // The chat behind a gym lead, as inquiry_id is for a CoachBook one.
+    ensureColumn(db, 'wa_conversations', 'lead_id', 'INTEGER REFERENCES gym_leads(id) ON DELETE SET NULL');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_wa_conv_lead ON wa_conversations(lead_id)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

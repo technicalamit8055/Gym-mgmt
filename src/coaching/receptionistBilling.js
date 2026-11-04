@@ -7,7 +7,9 @@ import { addDays, addMonths, parse } from '../validate.js';
 /**
  * What an institute pays the platform for the WhatsApp admissions assistant
  * (src/coaching/receptionist.js) — the platform's own product, sold to the
- * institute rather than to its students.
+ * institute rather than to its students. A gym buys the same plan, at the
+ * same price, for its front-desk assistant (src/gymReceptionist.js); "the
+ * institute" below means either.
  *
  * Prepaid passes, not a recurring mandate: the owner pays for 1, 3, 6 or 12
  * months through Razorpay Checkout (UPI first) and the assistant answers
@@ -226,9 +228,14 @@ function extendPaid(slug, months, now) {
 
 /* ── Paying online ───────────────────────────────────────────────────── */
 
-const requireCoaching = (slug) => {
+/** The verticals that have a WhatsApp receptionist to sell. */
+export const RECEPTIONIST_VERTICALS = ['coaching', 'gym'];
+
+const sellsReceptionist = (tenant) => RECEPTIONIST_VERTICALS.includes(tenant.business_type || 'gym');
+
+const requireReceptionistAccount = (slug) => {
   const tenant = slug && slug !== DEFAULT_TENANT_SLUG ? findTenantBySlug(slug) : null;
-  if (!tenant || tenant.business_type !== 'coaching') throw notFound('The AI receptionist is part of CoachBook accounts');
+  if (!tenant || !sellsReceptionist(tenant)) throw notFound('The AI receptionist is part of GymBook and CoachBook accounts');
   return tenant;
 };
 
@@ -237,7 +244,7 @@ const requireCoaching = (slug) => {
  * operator's price, never the request — the owner only picks the months.
  */
 export async function createReceptionistCheckout({ slug, months, user }) {
-  const tenant = requireCoaching(slug);
+  const tenant = requireReceptionistAccount(slug);
   if (!isRazorpayOrdersConfigured()) throw new HttpError(503, 'Online payments are not set up yet. Contact support to pay by UPI or bank transfer.');
   const settings = billingSettings();
   if (!settings.sales_open) throw badRequest('The AI receptionist is not open for purchase right now. Contact support.');
@@ -264,8 +271,8 @@ export async function createReceptionistCheckout({ slug, months, user }) {
       order_id: order.id,
       amount: order.amount,
       currency: order.currency || 'INR',
-      name: 'CoachBook',
-      description: `AI admissions receptionist · ${offer.months} month${offer.months === 1 ? '' : 's'} · ${tenant.gym_name || slug}`,
+      name: tenant.business_type === 'coaching' ? 'CoachBook' : 'GymBook',
+      description: `AI ${tenant.business_type === 'coaching' ? 'admissions' : 'WhatsApp'} receptionist · ${offer.months} month${offer.months === 1 ? '' : 's'} · ${tenant.gym_name || slug}`,
       prefill: { name: user?.name || undefined, email: user?.email || undefined },
     },
   };
@@ -313,7 +320,7 @@ export function verifyReceptionistPayment({ slug, body, now }) {
 /** A payment made outside the app (UPI to the operator, cash, bank
  * transfer), or months given free ('comp', amount 0). */
 export function recordManualPayment(slug, payload, { by }) {
-  requireCoaching(slug);
+  requireReceptionistAccount(slug);
   const body = parse(payload, {
     months: { type: 'int', required: true, min: 1, max: 36 },
     amount: { type: 'number', min: 0, max: 10000000 },
@@ -341,7 +348,7 @@ export function recordManualPayment(slug, payload, { by }) {
 /** The operator's per-institute levers: its own price (null for the
  * default), more trial days, or ending access today. */
 export function adjustSubscription(slug, payload) {
-  requireCoaching(slug);
+  requireReceptionistAccount(slug);
   const body = parse(payload, {
     price_monthly: { type: 'number', min: 1, max: 1000000 },
     extend_trial_days: { type: 'int', min: 1, max: 90 },
@@ -366,7 +373,7 @@ export function adjustSubscription(slug, payload) {
   return planState(slug, now);
 }
 
-/** Every CoachBook institute with where its plan stands and what it paid. */
+/** Every institute and gym with where its plan stands and what it paid. */
 export function listReceptionistAccounts() {
   const revenue = new Map(
     many("SELECT tenant_slug, SUM(amount) AS total, MAX(paid_at) AS last_paid_at FROM receptionist_payments WHERE status = 'paid' GROUP BY tenant_slug").map((r) => [
@@ -375,10 +382,11 @@ export function listReceptionistAccounts() {
     ]),
   );
   return listTenants()
-    .filter((t) => t.business_type === 'coaching' && t.status !== 'cancelled')
+    .filter((t) => sellsReceptionist(t) && t.status !== 'cancelled')
     .map((t) => ({
       slug: t.slug,
       name: t.gym_name || t.display_name || t.slug,
+      business_type: t.business_type || 'gym',
       account_status: t.status,
       plan: planState(t.slug),
       revenue: revenue.get(t.slug)?.total ?? 0,

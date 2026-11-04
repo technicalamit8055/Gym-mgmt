@@ -5,6 +5,7 @@ import { gymDateOf } from '../clock.js';
 import { all, get, run } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { autoCloseFinishedVisits } from '../maintenance.js';
+import { checkInTrialPass, trialPassForScan } from '../trialPasses.js';
 import { parse, toInt } from '../validate.js';
 
 export const attendanceRoutes = Router();
@@ -95,7 +96,13 @@ attendanceRoutes.post('/check-in', (req, res) => {
   const member = body.member_id
     ? get('SELECT * FROM members WHERE id = ?', [body.member_id])
     : get('SELECT * FROM members WHERE code = ? COLLATE NOCASE', [body.code]);
-  if (!member) throw notFound('No member matches that id or code');
+  if (!member) {
+    // A free trial pass's code, typed off the visitor's phone.
+    const pass = body.code ? trialPassForScan(body.code) : undefined;
+    if (!pass) throw notFound('No member matches that id or code');
+    const result = checkInTrialPass(pass, body.source);
+    return res.status(result.action === 'trial_checked_in' ? 201 : 200).json(result);
+  }
 
   const result = performCheckIn(member, body.source);
   return res.status(result.action === 'checked_in' ? 201 : 200).json(result);

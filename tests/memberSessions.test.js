@@ -30,7 +30,7 @@ const call = async (method, urlPath, body, { token, tenant = 'sessgym', ua } = {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  return { status: res.status, body: text ? JSON.parse(text) : null };
+  return { status: res.status, body: text ? JSON.parse(text) : null, renewed: res.headers.get('x-renewed-token') };
 };
 
 before(async () => {
@@ -50,7 +50,15 @@ const PHONE = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTM
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const LAPTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 Edg/129.0';
 
-const sidOf = (token) => JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8')).sid;
+const claimsOf = (token) => JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+const sidOf = (token) => claimsOf(token).sid;
+
+/** The same token signed again with an expiry an hour away — past half its life. */
+const nearlyExpired = async (token) => {
+  const crypto = await import('node:crypto');
+  const payload = Buffer.from(JSON.stringify({ ...claimsOf(token), exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+  return `${payload}.${crypto.createHmac('sha256', 'test-secret').update(payload).digest('base64url')}`;
+};
 
 const inGym = (fn) =>
   tenantStorage.run({ slug: 'sessgym', dbFile: tenantDbPath('sessgym'), timezone: 'UTC', businessType: 'gym' }, fn);
@@ -164,5 +172,62 @@ describe('member devices', () => {
     ).toString('base64url');
     const sig = crypto.createHmac('sha256', 'test-secret').update(payload).digest('base64url');
     assert.equal((await call('GET', '/api/portal/me', undefined, { token: `${payload}.${sig}` })).status, 401);
+  });
+});
+
+describe('sliding sessions', () => {
+  const DAY = 24 * 60 * 60;
+  const now = () => Math.floor(Date.now() / 1000);
+  let staffToken;
+  let memberCode;
+  const memberSignIn = async () =>
+    (await call('POST', '/api/portal/login', { identifier: memberCode, password: 'member-pass-123' }, { ua: PHONE, tenant: 'renewgym' })).body.token;
+
+  it('sets up a gym with a member', async () => {
+    await call('POST', '/api/platform/signup', {
+      slug: 'renewgym',
+      gym_name: 'Renew Gym',
+      admin_name: 'Owner',
+      admin_email: 'owner@renewgym.test',
+      admin_password: 'ownerpass123',
+    }, { tenant: null });
+    staffToken = (await call('POST', '/api/auth/login', { email: 'owner@renewgym.test', password: 'ownerpass123' }, { tenant: 'renewgym' })).body.token;
+    const member = await call('POST', '/api/members', { first_name: 'Asha', phone: '9000000001' }, { token: staffToken, tenant: 'renewgym' });
+    memberCode = member.body.code;
+    await giveMemberPassword(call, { staffToken, memberId: member.body.id, tenant: 'renewgym' });
+  });
+
+  it('signs in for 30 days and leaves a fresh token alone', async () => {
+    assert.ok(Math.abs(claimsOf(staffToken).exp - (now() + 30 * DAY)) < 60);
+    assert.equal((await call('GET', '/api/auth/me', undefined, { token: staffToken, tenant: 'renewgym' })).renewed, null);
+    const member = await memberSignIn();
+    assert.equal((await call('GET', '/api/portal/me', undefined, { token: member, tenant: 'renewgym' })).renewed, null);
+  });
+
+  it('renews a staff token past half its life', async () => {
+    const res = await call('GET', '/api/auth/me', undefined, { token: await nearlyExpired(staffToken), tenant: 'renewgym' });
+    assert.equal(res.status, 200);
+    assert.ok(res.renewed);
+    assert.ok(claimsOf(res.renewed).exp > now() + 29 * DAY);
+    assert.equal((await call('GET', '/api/auth/me', undefined, { token: res.renewed, tenant: 'renewgym' })).status, 200);
+  });
+
+  it('renews a member token past half its life, as the same device', async () => {
+    const member = await memberSignIn();
+    const res = await call('GET', '/api/portal/me', undefined, { token: await nearlyExpired(member), tenant: 'renewgym' });
+    assert.equal(res.status, 200);
+    assert.ok(res.renewed);
+    assert.equal(sidOf(res.renewed), sidOf(member));
+    assert.ok(claimsOf(res.renewed).exp > now() + 29 * DAY);
+    assert.equal((await call('GET', '/api/portal/me', undefined, { token: res.renewed, tenant: 'renewgym' })).status, 200);
+  });
+
+  it('does not renew a device that was signed out', async () => {
+    const member = await memberSignIn();
+    const old = await nearlyExpired(member);
+    await call('DELETE', '/api/portal/sessions/current', undefined, { token: member, tenant: 'renewgym' });
+    const res = await call('GET', '/api/portal/me', undefined, { token: old, tenant: 'renewgym' });
+    assert.equal(res.status, 401);
+    assert.equal(res.renewed, null);
   });
 });

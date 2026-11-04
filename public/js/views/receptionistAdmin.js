@@ -2,9 +2,9 @@ import { api } from '../api.js';
 import { append, buildForm, clear, closeModal, confirmDialog, date, h, openModal, renderIcon, table, toast } from '../ui.js';
 
 /**
- * Operator console → AI receptionist: what CoachBook institutes pay for the
- * WhatsApp admissions assistant. The price, free trial and longer-plan
- * discounts are set here once for every institute; each institute's row
+ * Operator console → AI receptionist: what CoachBook institutes and GymBook
+ * gyms pay for their WhatsApp assistant. The price, free trial and longer-plan
+ * discounts are set here once for every account; each account's row
  * shows where its plan stands, what it has paid and how much the assistant
  * is actually doing for it, with the levers for the support cases — a UPI
  * payment taken outside the app, free months, a special price, a longer
@@ -214,13 +214,13 @@ function planCell(plan) {
   return h('div', {}, h('span', { class: `badge ${status.tone}` }, status.label), when ? h('div', { class: 'muted', style: 'font-size:12px;margin-top:3px' }, when) : null);
 }
 
-function usageCell(usage) {
+function usageCell(usage, { gym = false } = {}) {
   if (!usage) return h('span', { class: 'muted' }, '—');
   return h(
     'div',
     { style: 'font-size:12.5px' },
-    h('div', {}, `${usage.replies_30d} replies · ${usage.leads_30d} leads · ${usage.demos_30d} demos`),
-    h('div', { class: 'muted', style: 'font-size:12px' }, usage.switched_on ? 'Switched on' : 'Switched off by the institute'),
+    h('div', {}, `${usage.replies_30d} replies · ${usage.leads_30d} leads · ${usage.demos_30d} ${gym ? 'trials' : 'demos'}`),
+    h('div', { class: 'muted', style: 'font-size:12px' }, usage.switched_on ? 'Switched on' : `Switched off by the ${gym ? 'gym' : 'institute'}`),
   );
 }
 
@@ -231,16 +231,20 @@ function institutesCard(state, refresh) {
   return h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-head' }, cardTitle('graduation', `Institutes (${rows.length})`, 'purple')),
+    h('div', { class: 'card-head' }, cardTitle('graduation', `Accounts (${rows.length})`, 'purple')),
     table(
       [
-        { label: 'Institute', render: (r) => h('div', {}, h('strong', {}, r.name), h('div', { class: 'muted', style: 'font-size:12px' }, r.slug)) },
+        {
+          label: 'Account',
+          render: (r) =>
+            h('div', {}, h('strong', {}, r.name), h('div', { class: 'muted', style: 'font-size:12px' }, `${r.business_type === 'gym' ? 'GymBook' : 'CoachBook'} · ${r.slug}`)),
+        },
         { label: 'Plan', render: (r) => planCell(r.plan) },
         {
           label: 'Price',
           render: (r) => h('div', {}, `${rupees(r.plan.price_monthly)}/mo`, r.plan.custom_price ? h('div', { class: 'muted', style: 'font-size:12px' }, 'special price') : null),
         },
-        { label: 'Last 30 days', render: (r) => usageCell(r.usage) },
+        { label: 'Last 30 days', render: (r) => usageCell(r.usage, { gym: r.business_type === 'gym' }) },
         { label: 'Collected', align: 'right', render: (r) => h('div', {}, rupees(r.revenue), r.last_paid_at ? h('div', { class: 'muted', style: 'font-size:12px' }, date(r.last_paid_at)) : null) },
         {
           label: '',
@@ -257,7 +261,7 @@ function institutesCard(state, refresh) {
         },
       ],
       rows,
-      { empty: 'No CoachBook institutes yet' },
+      { empty: 'No CoachBook institutes or GymBook gyms yet' },
     ),
   );
 }

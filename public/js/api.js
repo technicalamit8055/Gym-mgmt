@@ -342,6 +342,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A token past half its life comes back renewed in X-Renewed-Token (see
+ * src/auth.js); saving it is what keeps a device in use signed in. Only when
+ * the session still holds the token this request was sent with — a sign-out
+ * or another account's sign-in meanwhile must not be undone by a late reply.
+ */
+function keepRenewed(res, store, sentWith) {
+  const renewed = res.headers.get('X-Renewed-Token');
+  if (!renewed || !sentWith || store.token !== sentWith) return;
+  localStorage.setItem(store === memberSession ? MEMBER_TOKEN_KEY : TOKEN_KEY, renewed);
+}
+
 /** Uploads a file as the raw request body — no JSON/base64 wrapping, so a
  * multi-megabyte GIF costs what it weighs. */
 async function uploadFile(path, file, { token, method = 'PUT' } = {}) {
@@ -389,6 +401,8 @@ async function request(method, path, body, { token, anonymous = false, member = 
     window.dispatchEvent(new CustomEvent('gymbook:member-signed-out'));
     throw new ApiError(401, 'Your session expired — please sign in again');
   }
+  if (ownsGymSession) keepRenewed(res, session, bearer);
+  if (ownsMemberSession) keepRenewed(res, memberSession, bearer);
 
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
@@ -422,6 +436,7 @@ async function streamRequest(path, body, onEvent, { signal } = {}) {
     window.dispatchEvent(new CustomEvent('gymbook:member-signed-out'));
     throw new ApiError(401, 'Your session expired — please sign in again');
   }
+  keepRenewed(res, memberSession, headers.Authorization?.slice(7));
   if (!res.body || !String(res.headers.get('Content-Type')).startsWith('text/event-stream')) {
     const text = await res.text();
     const payload = text ? JSON.parse(text) : {};
@@ -703,6 +718,26 @@ export const api = {
   // The desk poster that opens the member app — see routes/qr.js.
   appQr: () => request('GET', '/qr/app'),
   qrCheckIn: (code) => request('POST', '/qr/check-in', { code }),
+
+  // Leads, free trial passes and the WhatsApp front desk (src/routes/trials.js)
+  trials: (params) => request('GET', `/trials${query(params)}`),
+  trialLead: (id) => request('GET', `/trials/leads/${id}`),
+  createTrialLead: (payload) => request('POST', '/trials/leads', payload),
+  updateTrialLead: (id, payload) => request('PATCH', `/trials/leads/${id}`, payload),
+  deleteTrialLead: (id) => request('DELETE', `/trials/leads/${id}`),
+  convertTrialLead: (id, payload) => request('POST', `/trials/leads/${id}/convert`, payload),
+  trialLookupPhone: (phone) => request('GET', `/trials/lookup${query({ phone })}`),
+  issueTrialPass: (leadId, payload) => request('POST', `/trials/leads/${leadId}/pass`, payload),
+  trialPass: (id) => request('GET', `/trials/passes/${id}`),
+  sendTrialPass: (id) => request('POST', `/trials/passes/${id}/send`),
+  revokeTrialPass: (id) => request('POST', `/trials/passes/${id}/revoke`),
+  trialLeadChat: (id, params) => request('GET', `/trials/leads/${id}/whatsapp${query(params)}`),
+  replyTrialLeadChat: (id, text) => request('POST', `/trials/leads/${id}/whatsapp/reply`, { text }),
+  pauseTrialLeadAssistant: (id, paused) => request('POST', `/trials/leads/${id}/whatsapp/assistant`, { paused }),
+  trialSettings: () => request('GET', '/trials/settings'),
+  updateTrialSettings: (payload) => request('PATCH', '/trials/settings', payload),
+  trialAssistantCheckout: (months) => request('POST', '/trials/settings/checkout', { months }),
+  trialAssistantVerify: (payment) => request('POST', '/trials/settings/verify', payment),
 
   classes: (params) => request('GET', `/classes${query(params)}`),
   schedule: (params) => request('GET', `/classes/schedule${query(params)}`),

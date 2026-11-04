@@ -8,6 +8,7 @@ import { closeRegistryDb, listTenants, tenantDbPath } from './tenants.js';
 import { sendAutomatedBirthdayWishes, sendAutomatedRenewalReminders } from './maintenance.js';
 import { sendCoachingFeeReminders } from './coaching/sweep.js';
 import { sweepPushNotifications } from './notifications.js';
+import { sendTrialFollowUps } from './trialPasses.js';
 import { vapidKeys } from './webPush.js';
 import { closeAllWhatsAppSessions, connectWhatsApp, hasStoredCredentials } from './whatsapp.js';
 
@@ -80,6 +81,8 @@ function sweepAutomatedMessages() {
           sendAutomatedBirthdayWishes({ gymName: tenant.gymName });
           // CoachBook installment reminders; a no-op outside that vertical.
           sendCoachingFeeReminders({ gymName: tenant.gymName, currency: tenant.currency });
+          // GymBook free-trial follow-ups; a no-op outside that vertical.
+          sendTrialFollowUps({ gymName: tenant.gymName });
         },
       );
     } catch (err) {

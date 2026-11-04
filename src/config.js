@@ -29,7 +29,9 @@ export const config = {
   // A stable secret keeps sessions alive across restarts. Generated per-process
   // when unset, which is fine for local development.
   secret: process.env.AUTH_SECRET || 'dev-only-secret-change-me',
-  tokenTtlSeconds: Number(process.env.TOKEN_TTL || 60 * 60 * 12),
+  // How long a device may go unused before it has to sign in again. Staff and
+  // member tokens renew themselves while in use (see auth.js).
+  tokenTtlSeconds: Number(process.env.TOKEN_TTL || 60 * 60 * 24 * 30),
   currency: process.env.CURRENCY || 'INR',
   gymName: process.env.GYM_NAME || 'GymBook',
   // Multi-tenant platform registry (which gyms exist) and where their

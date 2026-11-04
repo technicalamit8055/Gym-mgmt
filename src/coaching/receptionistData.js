@@ -1,6 +1,7 @@
 import { all, get, run, tx } from '../db.js';
 import { gymNowTime } from '../clock.js';
 import { addDays, today } from '../validate.js';
+import { dateLabel, daysLabel, flagForStaff, phoneKey, timeLabel, weekdayOf } from '../waChat.js';
 import { buildSchedule } from './fees.js';
 import { coachingSettings } from './notify.js';
 
@@ -17,43 +18,12 @@ import { coachingSettings } from './notify.js';
  */
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** 0 (Sunday) – 6 for a YYYY-MM-DD calendar date. */
-export const weekdayOf = (iso) => new Date(`${iso}T00:00:00Z`).getUTCDay();
-
-/** "4:00 PM" from "16:00". */
-export function timeLabel(hhmm) {
-  if (!hhmm) return '';
-  const [h, m] = String(hhmm).split(':').map(Number);
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
-}
-
-/** "Wed, 22 Oct" from "2026-10-22". */
-export function dateLabel(iso) {
-  if (!iso) return '';
-  const d = new Date(`${iso}T00:00:00Z`);
-  return `${DAY_NAMES[d.getUTCDay()].slice(0, 3)}, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
-}
-
-const daysLabel = (weekdays) =>
-  String(weekdays || '')
-    .split(',')
-    .filter((d) => d !== '')
-    .map((d) => DAY_NAMES[Number(d)]?.slice(0, 3))
-    .filter(Boolean)
-    .join(', ');
+export { dateLabel, phoneKey, timeLabel, weekdayOf };
 
 const minutesOf = (hhmm) => {
   const [h, m] = String(hhmm || '0:0').split(':').map(Number);
   return h * 60 + (m || 0);
-};
-
-/** The last ten digits — how an Indian number typed any way at the desk
- * ("098765 43210", "+91 98765-43210") compares to WhatsApp's 919876543210. */
-export const phoneKey = (phone) => {
-  const digits = String(phone ?? '').replace(/\D/g, '');
-  return digits.length >= 10 ? digits.slice(-10) : digits || null;
 };
 
 const parseComponents = (json) => {
@@ -431,7 +401,7 @@ export function bookDemo(conversation, args = {}) {
 export function handoff(conversation, reason) {
   const why = cleanText(reason, 300) || 'Parent needs a reply from the team';
   return tx(() => {
-    run("UPDATE wa_conversations SET needs_staff = 1, handoff_reason = ?, updated_at = datetime('now') WHERE id = ?", [why, conversation.id]);
+    flagForStaff(conversation, why);
     const { id } = writeLead(conversation, { note: `Needs the team: ${why}`, follow_up_on: today() });
     return { ok: true, inquiry_id: id };
   });

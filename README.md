@@ -166,6 +166,45 @@ similar placeholders. Sessions and message templates are per-tenant, and a
 send queue paces messages a few seconds apart so a reminder sweep across a
 full roster doesn't read as a spam blast to WhatsApp's abuse detection.
 
+**Free trial passes & the AI WhatsApp front desk (GymBook)** — *Trials &
+leads* tracks everyone who might join: a walk-in, a call, or someone who
+wrote to the gym's WhatsApp. The desk issues a free trial pass in one click.
+The pass is a QR (`GBT1:<code>`) and a typeable code (`TR7K4Q2M`), sent on
+WhatsApp as a picture with the dates, visits and address, and it is scanned
+or typed at the ordinary check-in desk. The rules live in
+[src/trialPasses.js](src/trialPasses.js):
+- One trial per phone number every `trial_cooldown_days`, counted by the last
+  ten digits, so a number typed two ways is still one person.
+- Never for an existing member.
+- Bookable up to `trial_booking_days` ahead, with an optional cap on trials
+  starting each day.
+- At most one visit a day, enforced by a unique index rather than a check.
+
+The desk can override the member, cooldown, cap and booking-window rules
+after a confirmation. A trial visitor is not a member, so trial visits stay
+out of the roster and the attendance reports. An hourly sweep follows up
+between 9 AM and 8 PM, gym time: a no-show nudge, "how was it?" two hours
+after the first visit, and a last-day message. Each goes once per pass,
+never into a chat a person is handling, and uses the owner's own template.
+*Join as member* turns a lead into a member with the next member code.
+
+With the AI front desk switched on, a Gemini assistant answers enquiries
+24/7 from the gym's live plans and prices, gym sessions, class timetable,
+trainers, opening hours and the owner's notes. It replies in English,
+Hinglish or Hindi, saves the lead, and books the free trial. The QR pass,
+the map pin and the owner's "🔥 HOT LEAD" alert follow automatically. It is
+the same engine as CoachBook's admissions assistant
+([src/waChat.js](src/waChat.js), [src/assistantModel.js](src/assistantModel.js)):
+- A price that appears nowhere in the gym's data is never sent. The model
+  gets one chance to correct it; after that the contact gets a holding
+  message and the chat goes to the desk.
+- A reply typed by staff, from the phone or the desk's chat drawer, pauses
+  the assistant in that chat.
+- Replies are capped per chat per hour and per gym per day.
+
+It is sold as the same prepaid AI-receptionist plan CoachBook institutes buy,
+with the same price, free trial and operator console.
+
 **Reports** — revenue by month or day, split by payment method and by plan;
 check-ins per day, per hour and per weekday; most regular members; members at
 risk (no visit in 14 days); new members per month; memberships sold versus
@@ -296,7 +335,7 @@ All optional — sensible defaults apply.
 | `HOST` | `0.0.0.0` | Interface to bind — the default accepts connections from other devices on your network, not just localhost |
 | `DB_FILE` | `data/gym.db` | SQLite database location |
 | `AUTH_SECRET` | dev value | Token signing key — **set this in production** |
-| `TOKEN_TTL` | `43200` | Session length in seconds |
+| `TOKEN_TTL` | `2592000` | Seconds a device can go unused before it must sign in again (30 days). Staff and member sessions renew themselves while in use |
 | `CURRENCY` | `INR` | Currency for all money formatting |
 | `GYM_NAME` | `GymBook` | Name shown in the UI |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | — | First-run admin account |
@@ -569,12 +608,19 @@ src/
   verticals.js     GymBook vs SeatBook: vocabulary, modules, starter data
   seats.js         seat allocation lifecycle (SeatBook)
   whatsapp.js      per-tenant WhatsApp Web sessions (Baileys)
+  waChat.js        WhatsApp conversations both AI receptionists share:
+                   transcript, staff takeover, ceilings, sending
+  assistantModel.js  the receptionists' Gemini tool loop and price guard
+  receptionists.js routes each incoming chat to its vertical's assistant
+  trialPasses.js   GymBook free trial passes: rules, desk scan, follow-ups
+  gymReceptionist*.js  GymBook's AI WhatsApp front desk
   webPush.js       Web Push: VAPID signing and payload encryption
   notifications.js member reminders, announcements, notification center
   receiptPdf.js    PDF payment receipts
   routes/          auth, members, plans, subscriptions, payments,
                    attendance, classes, equipment, seats, lockers,
                    expenses, memberDocuments, whatsapp, dashboard, reports,
+                   trials (leads, passes, the front desk's settings),
                    pwa (the per-gym web app manifest)
 public/
   index.html       single page app shell

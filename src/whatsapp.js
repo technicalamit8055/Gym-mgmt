@@ -449,8 +449,9 @@ const MAX_INBOUND_AGE_S = Number(process.env.WHATSAPP_MAX_INBOUND_AGE_S || 6 * 6
 let inboundHandler = null;
 
 /**
- * Registers the one consumer of incoming chat messages (CoachBook's
- * admissions assistant). Called with a plain event — never the raw socket —
+ * Registers the one consumer of incoming chat messages (src/receptionists.js,
+ * which hands each to its vertical's assistant). Called with a plain event —
+ * never the raw socket —
  * carrying the gym's slug, which is the only tenant identity it may trust:
  * it comes from which gym's socket heard the message, not from the message.
  */
@@ -575,20 +576,21 @@ const MAX_TYPING_MS = 4000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Sends a message into a conversation: a text, or a native location pin
- * (`location: { latitude, longitude, name, address }`). `jid` addresses the
- * chat as it arrived (it may be an @lid); `phone` is accepted instead for a
- * number typed into settings.
+ * Sends a message into a conversation: a text, a native location pin
+ * (`location: { latitude, longitude, name, address }`) or a picture with a
+ * caption (`image: { buffer, mimetype, caption }`, a trial pass's QR). `jid`
+ * addresses the chat as it arrived (it may be an @lid); `phone` is accepted
+ * instead for a number typed into settings.
  *
  * `typingMs` shows "typing…" first, the way a person's reply arrives.
  * Resolves to `{ id }` once WhatsApp has the message, and throws a 400 with
  * a readable reason otherwise. Never writes the delivery log — conversations
  * keep their own transcript.
  */
-export async function sendChatMessage({ slug = currentSlug(), jid = null, phone = null, text = null, location = null, typingMs = 0 }) {
+export async function sendChatMessage({ slug = currentSlug(), jid = null, phone = null, text = null, location = null, image = null, typingMs = 0 }) {
   const target = jid || formatPhoneNumber(phone);
   if (!target) throw badRequest(phone ? `"${phone}" is not a valid phone number` : 'No chat to send to');
-  if (!text && !location) throw badRequest('Message is empty');
+  if (!text && !location && !image?.buffer) throw badRequest('Message is empty');
   const content = location
     ? {
         location: {
@@ -598,11 +600,22 @@ export async function sendChatMessage({ slug = currentSlug(), jid = null, phone 
           address: location.address || undefined,
         },
       }
-    : { text };
+    : image?.buffer
+      ? { image: image.buffer, mimetype: image.mimetype || 'image/png', caption: image.caption || text || '' }
+      : { text };
 
   if (memoryMode()) {
     const id = `MEM${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
-    sentInMemory.push({ phone: phone ? String(phone) : digitsOf(target), jid: target, message: text, location, type: 'chat', slug, id });
+    sentInMemory.push({
+      phone: phone ? String(phone) : digitsOf(target),
+      jid: target,
+      message: image?.buffer ? content.caption : text,
+      location,
+      image: image?.buffer ? { mimetype: content.mimetype, bytes: image.buffer.length } : undefined,
+      type: 'chat',
+      slug,
+      id,
+    });
     return { id };
   }
 
