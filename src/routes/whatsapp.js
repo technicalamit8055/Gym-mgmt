@@ -59,6 +59,7 @@ whatsappRoutes.get('/status', (req, res) => {
   if (req.user.role !== 'admin') {
     status.qr = null;
     status.pairingCode = null;
+    status.pairingPhone = null;
   }
   res.json(status);
 });

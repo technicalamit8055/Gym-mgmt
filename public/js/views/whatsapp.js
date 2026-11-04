@@ -43,11 +43,18 @@ function pollUntilStateChanges(anchor, fromState, reload) {
 }
 
 /** The 8-character code WhatsApp issued, and where on the phone it goes. */
-function pairingCodePanel(code) {
+function pairingCodePanel(code, phone) {
   return h(
     'div',
     { style: 'text-align:center;padding:12px' },
     h('p', { style: 'font-weight:600;margin:0 0 10px' }, 'Enter this code in WhatsApp on the gym’s phone:'),
+    phone
+      ? h(
+          'p',
+          { class: 'muted', style: 'font-size:13px;margin:0 0 10px' },
+          `For +${phone} — it only works on the phone with this exact WhatsApp number. Wrong number? Get a new code below.`,
+        )
+      : null,
     h(
       'div',
       {
@@ -241,7 +248,7 @@ export async function renderWhatsApp({ setActions, reload }) {
         )
       : null,
 
-    hasCode ? pairingCodePanel(status.pairingCode) : null,
+    hasCode ? pairingCodePanel(status.pairingCode, status.pairingPhone) : null,
 
     !isConnected && !hasQr && !hasCode
       ? h(
@@ -254,7 +261,7 @@ export async function renderWhatsApp({ setActions, reload }) {
         )
       : null,
 
-    isAdmin && !isConnected && !hasCode ? pairingCodeForm(reload) : null,
+    isAdmin && !isConnected ? pairingCodeForm(reload) : null,
   );
 
   if (isPairing) pollUntilStateChanges(connectionCard, status.state, reload);

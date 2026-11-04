@@ -1,4 +1,5 @@
 import {
+  Browsers,
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
@@ -102,6 +103,7 @@ function publicStatus(session) {
     state: session.state,
     qr: session.qr,
     pairingCode: session.pairingCode,
+    pairingPhone: session.pairingCode ? session.pairingPhone : null,
     connected: session.state === 'CONNECTED',
     error: session.lastError,
   };
@@ -245,7 +247,11 @@ export async function connectWhatsApp({ slug = currentSlug(), force = false, pho
     const sock = makeWASocket({
       auth: state,
       logger,
-      browser: ['GymBook', 'Chrome', '1.0.0'],
+      // The first entry is the operating system the phone is told it is
+      // linking. A QR link takes any name, so it says GymBook; a pairing-code
+      // link is refused on the phone ("Couldn't link device") unless it is a
+      // real one, so that uses Baileys' own default.
+      browser: pairingPhone ? Browsers.macOS('Chrome') : ['GymBook', 'Chrome', '1.0.0'],
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
     });
