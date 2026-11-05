@@ -863,7 +863,7 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
   pointer-events: auto;
   position: absolute;
   left: 50%;
-  bottom: 58px;
+  bottom: 100px; /* over the seek bar and the controls */
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
@@ -1194,9 +1194,10 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 .cb-board .cb-grow { min-width: 200px; }
 
 /* ------------------------------------------------ recorded lectures */
-/* The class player as a recorded lecture (classPlayer.js `vod`): a seek
-   bar over the controls, the time, ±10s, and a double-tap flash. */
-.cbp.is-vod .cbp-bar { flex-wrap: wrap; row-gap: 0; gap: 2px; padding-top: 28px; }
+/* The class player's seek bar over the controls — a recorded lecture's
+   length, or live, what the stream keeps behind the edge — the time, ±10s,
+   and a double-tap flash. */
+.cbp .cbp-bar { flex-wrap: wrap; row-gap: 0; gap: 2px; padding-top: 28px; }
 .cbp.is-vod .cbp-btn { width: 36px; }
 .cbp-seekrow { flex: 1 0 100%; display: flex; padding: 0 6px 2px; }
 .cbp-seek {
@@ -1208,10 +1209,10 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 .cbp-seek:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.5); }
 .cbp-seek::-webkit-slider-runnable-track {
   height: 4px; border-radius: 999px;
-  background: linear-gradient(to right, var(--brand) var(--p), rgba(255, 255, 255, 0.3) var(--p));
+  background: linear-gradient(to right, var(--fill, var(--brand)) var(--p), rgba(255, 255, 255, 0.3) var(--p));
 }
 .cbp-seek::-moz-range-track { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.3); }
-.cbp-seek::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--brand); }
+.cbp-seek::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--fill, var(--brand)); }
 .cbp-seek::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; border: 0;
   background: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent);
@@ -1232,8 +1233,9 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 .cbp-menu-at { display: inline-block; min-width: 46px; margin-right: 6px; color: #a3a8c8; font-variant-numeric: tabular-nums; }
 .cbp-skip { width: 38px; font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
 /* The sound level beside the mute button, live or recorded. A phone has its
-   own volume keys, so there it gives its room to the other controls. */
-.cbp-seek.cbp-volume { flex: 0 1 76px; min-width: 48px; margin-right: 4px; }
+   own volume keys, so there it gives its room to the other controls.
+   White, not the brand colour, so it is not taken for the seek bar. */
+.cbp-seek.cbp-volume { --fill: #fff; flex: 0 1 76px; min-width: 48px; margin-right: 4px; }
 @media (max-width: 480px) {
   .cbp-seek.cbp-volume { display: none; }
   .cbp-btn, .cbp.is-vod .cbp-btn, .cbp-skip { width: 34px; }
@@ -1252,6 +1254,27 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
   border: 0; border-radius: 999px; background: #fff; color: #11142a; font: inherit; font-weight: 750; cursor: pointer;
 }
 .cbp.is-vod:fullscreen { background: #000; }
+/* Full screen (the lecture's player, or a live class's whole stage): the
+   controls grow with the picture, and the seek bar is easy to catch with a
+   thumb — the window it fills is wider than any phone in portrait. */
+@media (min-width: 640px) {
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-bar { gap: 6px; padding: 40px 16px 12px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) :is(.cbp-btn, .cbp-skip) { width: 46px; height: 46px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) :is(.cbp-skip, .cbp-time) { font-size: 14px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) :is(.cbp-quality, .cbp-live, .cbp-chapter) { height: 38px; font-size: 13.5px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek { height: 30px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek::-webkit-slider-runnable-track { height: 6px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -7px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek::-moz-range-track { height: 6px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek::-moz-range-progress { height: 6px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek::-moz-range-thumb { width: 20px; height: 20px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-seek.cbp-volume { flex-basis: 110px; }
+  /* Inset by the seek row's padding plus the bigger thumb's half-width. */
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-ticks { inset: 0 16px 2px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-tick { height: 10px; margin-top: -5px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-menu { bottom: 64px; }
+  :is(.cbp:fullscreen, .cbl-stage:fullscreen .cbp) .cbp-unmute { bottom: 120px; }
+}
 .cbp-spinner.is-small { width: 18px; height: 18px; border-width: 2px; }
 @media (max-width: 380px) {
   .cbp.is-vod .cbp-time { font-size: 11.5px; padding: 0 2px; }

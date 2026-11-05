@@ -16,6 +16,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(OrientationPlugin.class);
         super.onCreate(savedInstanceState);
 
+        // A class played full screen fills the screen (FullscreenChromeClient).
+        FullscreenChromeClient chromeClient = bridge == null ? null : new FullscreenChromeClient(bridge);
+        if (chromeClient != null) bridge.getWebView().setWebChromeClient(chromeClient);
+
         // Without a handler, Android's back closes the app from any screen.
         // The page decides instead (window.gymvymBack in app.js): it closes the
         // top sheet, screen or tab the way its own back arrows do, and answers
@@ -24,6 +28,8 @@ public class MainActivity extends BridgeActivity {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
+                // Back out of a full-screen class first, as a video app does.
+                if (chromeClient != null && chromeClient.exitFullscreen()) return;
                 WebView webView = bridge == null ? null : bridge.getWebView();
                 if (webView == null) {
                     moveTaskToBack(true);

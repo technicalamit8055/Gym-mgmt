@@ -11,7 +11,8 @@ import { landscape, unlockOrientation } from './orientation.js';
  * after a few seconds of playing untouched.
  *
  * Live, "back" goes into what the stream keeps behind the edge (YouTube's
- * DVR, the HLS playlist's window), and "forward" stops at live.
+ * DVR, the HLS playlist's window), and "forward" stops at live. The seek bar
+ * is that window, live at its right end, with how far behind live it is.
  *
  *   hls      a private class (Cloudflare Stream, src/coaching/privateStream.js),
  *            through hls.js where the browser has Media Source Extensions,
@@ -157,8 +158,8 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
   let remountTimer = null;
   let resumeAt = vod ? Math.max(0, Math.floor(startAt || 0)) : 0;
 
-  // A recorded lecture's seek bar and clock, kept across repaints so a drag
-  // is not cut short by the next one.
+  // The seek bar and clock, kept across repaints so a drag is not cut short
+  // by the next one.
   const seek = h('input', { class: 'cbp-seek', type: 'range', min: '0', max: '0', step: '1', value: '0', 'aria-label': 'Seek' });
   const clockLabel = h('span', { class: 'cbp-time' });
   let dragging = false;
@@ -265,16 +266,20 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
   for (const type of ['click', 'pointerdown']) seek.addEventListener(type, (event) => event.stopPropagation());
   seek.addEventListener('input', () => {
     dragging = true;
-    clockLabel.textContent = `${clockTime(Number(seek.value))} / ${clockTime(Number(seek.max))}`;
-    seek.style.setProperty('--p', `${seek.max > 0 ? (seek.value / seek.max) * 100 : 0}%`);
+    const [at, min, max] = [Number(seek.value), Number(seek.min), Number(seek.max)];
+    clockLabel.textContent = vod ? `${clockTime(at)} / ${clockTime(max)}` : behindLabel(max - at);
+    seek.style.setProperty('--p', `${max > min ? ((at - min) / (max - min)) * 100 : 0}%`);
     // Dragging names the topic it would land in.
-    showChapter(Number(seek.value));
+    showChapter(at);
     wake();
   });
   seek.addEventListener('change', () => {
     dragging = false;
-    engine?.seek(Number(seek.value));
+    // Live, the right end is live itself, not a second short of it.
+    if (!vod && Number(seek.value) >= Number(seek.max) - 1) engine?.goLive();
+    else engine?.seek(Number(seek.value));
     if (st.ended) set({ ended: false });
+    showTime();
     wake();
   });
 
@@ -412,13 +417,16 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
       showTime();
     } else {
       append(bar, [
+        h('div', { class: 'cbp-seekrow' }, seek),
         ...transport,
+        clockLabel,
         st.behind
           ? h('button', { class: 'cbp-live', type: 'button', onclick: (event) => { event.stopPropagation(); engine?.goLive(); wake(); } }, h('span', { class: 'cbp-live-dot' }), 'Go live')
           : null,
         h('span', { class: 'cb-grow' }),
         settings,
       ]);
+      showTime();
     }
 
     menu.hidden = !st.menu;
@@ -473,9 +481,13 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
     ]);
   }
 
+  /** How far behind live a spot on the bar is: −1:05, or Live at the end. */
+  const behindLabel = (seconds) => (seconds >= 1 ? `−${clockTime(seconds)}` : 'Live');
+
   /** The seek bar and clock, from where the engine is. */
   function showTime() {
-    if (!vod || !engine || dragging) return;
+    if (!engine || dragging) return;
+    if (!vod) return showWindow();
     const position = engine.position();
     const duration = engine.duration();
     seek.max = String(Math.max(0, Math.floor(duration)));
@@ -485,6 +497,26 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
     clockLabel.textContent = duration > 0 ? `${clockTime(position)} / ${clockTime(duration)}` : clockTime(position);
     if (duration > 0) layTicks(duration);
     showChapter(position);
+  }
+
+  /** Live, the bar is what the stream keeps behind the edge, live at its right end. */
+  function showWindow() {
+    const [from, to] = engine.span();
+    const usable = Number.isFinite(to) && to - from > SKIP_S;
+    if (!usable) {
+      // Nothing kept behind live (or not known yet): a full, still bar.
+      seek.disabled = true;
+      seek.style.setProperty('--p', '100%');
+      clockLabel.textContent = '';
+      return;
+    }
+    const position = Math.max(from, Math.min(to, engine.position()));
+    seek.disabled = false;
+    seek.min = String(Math.floor(from));
+    seek.max = String(Math.ceil(to));
+    seek.value = String(Math.floor(position));
+    seek.style.setProperty('--p', `${((position - from) / (to - from)) * 100}%`);
+    clockLabel.textContent = st.behind ? behindLabel(to - position) : '';
   }
 
   /* — where the student is, for "Continue watching" — */
@@ -777,7 +809,10 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
     if (vod) {
       showTime();
       if (st.playing) report();
-    } else set({ behind: Boolean(engine.behind()) });
+    } else {
+      set({ behind: Boolean(engine.behind()) });
+      showTime();
+    }
   }, 1000);
 
   mount();
