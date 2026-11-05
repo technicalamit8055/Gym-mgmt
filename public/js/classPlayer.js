@@ -1,10 +1,17 @@
 import { append, clear, h, renderIcon } from './ui.js';
+import { landscape, unlockOrientation } from './orientation.js';
 
 /**
  * The class's own player, for the student's live classroom
  * (views/coaching/liveClass.js) and for rewatching a recorded lecture
  * (views/coaching/myBatches.js): one look and one set of controls — play,
- * sound, back to live, quality — whatever carries the class.
+ * 10 seconds back and forward (or a double tap on either half of the
+ * picture), sound and its level, back to live, quality — whatever carries
+ * the class. A tap anywhere on the picture brings the controls up; they fade
+ * after a few seconds of playing untouched.
+ *
+ * Live, "back" goes into what the stream keeps behind the edge (YouTube's
+ * DVR, the HLS playlist's window), and "forward" stops at live.
  *
  *   hls      a private class (Cloudflare Stream, src/coaching/privateStream.js),
  *            through hls.js where the browser has Media Source Extensions,
@@ -30,8 +37,11 @@ import { append, clear, h, renderIcon } from './ui.js';
  * menu and full screen, and no "Go live". It starts at `startAt` seconds,
  * and `onProgress(position, duration)` hears where the student is every few
  * seconds while it plays, when it pauses or ends, and when it is closed.
+ * `chapters` ([{ offset_sec, label }], the topics its teacher marked on the
+ * board) are ticks on the seek bar, the current one's name beside the time,
+ * and a menu to jump between them.
  *
- * @returns {{ el: HTMLElement, destroy(): void }}
+ * @returns {{ el: HTMLElement, seekTo(seconds: number): void, destroy(): void }}
  */
 
 const IDLE_MS = 3000;
@@ -107,7 +117,17 @@ export function clockTime(totalSeconds) {
   return `${hours ? `${hours}:` : ''}${mm}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function classPlayer(source, { title = 'Live class', refreshSrc = null, vod = false, startAt = 0, onProgress = null } = {}) {
+/** The chapter playing at `seconds`: the last one started by then. */
+export function chapterAt(chapters, seconds) {
+  let current = null;
+  for (const c of chapters) {
+    if (c.offset_sec > seconds + 0.5) break;
+    current = c;
+  }
+  return current;
+}
+
+export function classPlayer(source, { title = 'Live class', refreshSrc = null, vod = false, startAt = 0, onProgress = null, chapters = [] } = {}) {
   const savedSpeed = Number(remembered(SPEED_KEY));
   const st = {
     playing: false,
@@ -121,7 +141,7 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
     quality: -1, // -1 is Auto
     autoLabel: null,
     rate: vod && SPEEDS.includes(savedSpeed) ? savedSpeed : 1,
-    menu: false,
+    menu: false, // false, true (settings) or 'chapters'
     idle: false,
   };
   const media = h('div', { class: 'cbp-media' });
@@ -142,6 +162,34 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
   const seek = h('input', { class: 'cbp-seek', type: 'range', min: '0', max: '0', step: '1', value: '0', 'aria-label': 'Seek' });
   const clockLabel = h('span', { class: 'cbp-time' });
   let dragging = false;
+  // Ticks over the seek bar, where each topic starts; laid out once the length is known.
+  const marks = vod ? [...chapters].filter((c) => c.offset_sec >= 0 && c.label).sort((a, b) => a.offset_sec - b.offset_sec) : [];
+  const ticks = h('div', { class: 'cbp-ticks', 'aria-hidden': 'true' });
+  const chapterLabel = h('span', { class: 'cbp-chapter-name' });
+  let ticksFor = 0;
+
+  function showChapter(seconds) {
+    if (marks.length) chapterLabel.textContent = chapterAt(marks, seconds)?.label ?? 'Start';
+  }
+
+  function layTicks(duration) {
+    if (!marks.length || Math.floor(duration) === ticksFor) return;
+    ticksFor = Math.floor(duration);
+    clear(ticks);
+    for (const c of marks) {
+      if (c.offset_sec <= 0 || c.offset_sec >= duration) continue;
+      ticks.append(h('span', { class: 'cbp-tick', style: `left:${(c.offset_sec / duration) * 100}%` }));
+    }
+  }
+
+  function jumpTo(seconds) {
+    if (!engine) return;
+    engine.seek(seconds);
+    if (st.ended) set({ ended: false });
+    engine.play();
+    showTime();
+    wake();
+  }
 
   function set(patch) {
     if (Object.entries(patch).every(([k, v]) => st[k] === v)) return;
@@ -159,9 +207,9 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
 
   function skip(by) {
     if (!engine) return;
-    const duration = engine.duration();
-    const to = Math.max(0, Math.min(duration > 0 ? duration - 1 : Infinity, engine.position() + by));
-    engine.seek(to);
+    const [from, to] = engine.span();
+    engine.seek(Math.max(from, Math.min(to, engine.position() + by)));
+    if (st.ended) set({ ended: false });
     showTime();
     flash.textContent = by < 0 ? `« ${SKIP_S}s` : `${SKIP_S}s »`;
     flash.className = `cbp-flash is-on ${by < 0 ? 'is-left' : 'is-right'}`;
@@ -171,21 +219,46 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
   let lastTap = { at: 0, side: null };
   shield.addEventListener('click', (event) => {
     if (st.menu) return set({ menu: false });
-    // A double tap on either half of a recorded lecture skips, as phone players do.
-    if (vod) {
-      const box = shield.getBoundingClientRect();
-      const side = event.clientX - box.left < box.width / 2 ? 'left' : 'right';
-      const now = Date.now();
-      if (now - lastTap.at < DOUBLE_TAP_MS && lastTap.side === side) {
-        lastTap = { at: 0, side: null };
-        skip(side === 'left' ? -SKIP_S : SKIP_S);
-        return wake();
-      }
-      lastTap = { at: now, side };
-    }
-    return st.idle ? wake() : st.playing ? set({ idle: true }) : wake();
+    // A double tap on either half of the picture skips, as phone players do.
+    const box = shield.getBoundingClientRect();
+    const side = event.clientX - box.left < box.width / 2 ? 'left' : 'right';
+    const now = Date.now();
+    if (now - lastTap.at < DOUBLE_TAP_MS && lastTap.side === side) {
+      lastTap = { at: 0, side: null };
+      skip(side === 'left' ? -SKIP_S : SKIP_S);
+    } else lastTap = { at: now, side };
+    // Any tap brings every control up; they fade again by themselves.
+    return wake();
   });
-  el.addEventListener('mousemove', wake);
+  // A real mouse only: a tap on a phone also fires a mousemove.
+  el.addEventListener('pointermove', (event) => event.pointerType === 'mouse' && wake());
+
+  // The sound level, kept across repaints like the seek bar.
+  let volume = 1;
+  const volumeBar = h('input', { class: 'cbp-seek cbp-volume', type: 'range', min: '0', max: '100', step: '1', value: '100', 'aria-label': 'Volume' });
+  function showVolume() {
+    const level = st.muted ? 0 : Math.round(volume * 100);
+    volumeBar.value = String(level);
+    volumeBar.style.setProperty('--p', `${level}%`);
+  }
+  for (const type of ['click', 'pointerdown']) volumeBar.addEventListener(type, (event) => event.stopPropagation());
+  volumeBar.addEventListener('input', () => {
+    volume = Number(volumeBar.value) / 100;
+    engine?.setVolume(volume);
+    engine?.mute(volume === 0);
+    set({ soundBlocked: false });
+    showVolume();
+    wake();
+  });
+  function toggleMute() {
+    // Sound back on at no volume would still be silent.
+    if (st.muted && volume === 0) {
+      volume = 0.5;
+      engine?.setVolume(volume);
+    }
+    engine?.mute(!st.muted);
+    set({ soundBlocked: false });
+  }
   // No "Copy video URL", "Save video as" or YouTube's own menu.
   el.addEventListener('contextmenu', (event) => event.preventDefault());
 
@@ -194,6 +267,8 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
     dragging = true;
     clockLabel.textContent = `${clockTime(Number(seek.value))} / ${clockTime(Number(seek.max))}`;
     seek.style.setProperty('--p', `${seek.max > 0 ? (seek.value / seek.max) * 100 : 0}%`);
+    // Dragging names the topic it would land in.
+    showChapter(Number(seek.value));
     wake();
   });
   seek.addEventListener('change', () => {
@@ -229,13 +304,13 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
 
   async function toggleFullscreen() {
     if (document.fullscreenElement) {
-      screen.orientation?.unlock?.();
+      unlockOrientation();
       return document.exitFullscreen().catch(() => {});
     }
     if (el.requestFullscreen) {
       await el.requestFullscreen().catch(() => {});
-      // A lecture is wide: turn the phone with it, where the browser allows.
-      return screen.orientation?.lock?.('landscape').catch(() => {});
+      // A lecture is wide: turn the phone with it.
+      return landscape();
     }
     // iOS only lets the video itself go full screen.
     return el.querySelector('video')?.webkitEnterFullscreen?.();
@@ -297,22 +372,39 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
         'aria-label': 'Playback settings',
         onclick: (event) => {
           event.stopPropagation();
-          set({ menu: !st.menu });
+          set({ menu: st.menu === true ? false : true });
           wake();
         },
       }, renderIcon('settings', { size: 18 }), settingsLabel() || null)
       : null;
+    // Play, ±10s and the sound, the same live or recorded.
+    showVolume();
+    const transport = [
+      button(st.playing ? 'Pause' : 'Play', st.playing ? 'pause' : 'play', () => (st.playing ? engine?.pause() : engine?.play())),
+      skipButton(-SKIP_S),
+      skipButton(SKIP_S),
+      button(st.muted ? 'Sound on' : 'Mute', st.muted ? 'volumeX' : 'volume', toggleMute),
+      volumeBar,
+    ];
     if (vod) {
       append(bar, [
-        h('div', { class: 'cbp-seekrow' }, seek),
-        button(st.playing ? 'Pause' : 'Play', st.playing ? 'pause' : 'play', () => (st.playing ? engine?.pause() : engine?.play())),
-        skipButton(-SKIP_S),
-        skipButton(SKIP_S),
-        button(st.muted ? 'Sound on' : 'Mute', st.muted ? 'volumeX' : 'volume', () => {
-          engine?.mute(!st.muted);
-          set({ soundBlocked: false });
-        }),
+        h('div', { class: 'cbp-seekrow' }, seek, ticks),
+        ...transport,
         clockLabel,
+        marks.length
+          ? h('button', {
+            class: `cbp-chapter${st.menu === 'chapters' ? ' is-on' : ''}`,
+            type: 'button',
+            'aria-haspopup': 'menu',
+            'aria-expanded': String(st.menu === 'chapters'),
+            'aria-label': 'Topics in this lecture',
+            onclick: (event) => {
+              event.stopPropagation();
+              set({ menu: st.menu === 'chapters' ? false : 'chapters' });
+              wake();
+            },
+          }, renderIcon('list', { size: 16 }), chapterLabel)
+          : null,
         h('span', { class: 'cb-grow' }),
         settings,
         button(document.fullscreenElement ? 'Exit full screen' : 'Full screen', document.fullscreenElement ? 'minimize' : 'maximize', toggleFullscreen),
@@ -320,11 +412,7 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
       showTime();
     } else {
       append(bar, [
-        button(st.playing ? 'Pause' : 'Play', st.playing ? 'pause' : 'play', () => (st.playing ? engine?.pause() : engine?.play())),
-        button(st.muted ? 'Sound on' : 'Mute', st.muted ? 'volumeX' : 'volume', () => {
-          engine?.mute(!st.muted);
-          set({ soundBlocked: false });
-        }),
+        ...transport,
         st.behind
           ? h('button', { class: 'cbp-live', type: 'button', onclick: (event) => { event.stopPropagation(); engine?.goLive(); wake(); } }, h('span', { class: 'cbp-live-dot' }), 'Go live')
           : null,
@@ -356,6 +444,14 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
       st.quality = index;
     });
     clear(menu);
+    if (st.menu === 'chapters') {
+      const current = chapterAt(marks, engine?.position() ?? 0);
+      append(menu, [
+        h('div', { class: 'cbp-menu-head' }, 'Topics'),
+        ...marks.map((c) => item(c === current, h('span', {}, h('span', { class: 'cbp-menu-at' }, clockTime(c.offset_sec)), c.label), () => jumpTo(c.offset_sec))),
+      ]);
+      return;
+    }
     append(menu, [
       ...(vod
         ? [
@@ -387,6 +483,8 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
     seek.disabled = !(duration > 0);
     seek.style.setProperty('--p', `${duration > 0 ? Math.min(100, (position / duration) * 100) : 0}%`);
     clockLabel.textContent = duration > 0 ? `${clockTime(position)} / ${clockTime(duration)}` : clockTime(position);
+    if (duration > 0) layTicks(duration);
+    showChapter(position);
   }
 
   /* — where the student is, for "Continue watching" — */
@@ -420,7 +518,10 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
       report(true);
     });
     video.addEventListener('waiting', () => set({ buffering: true }));
-    video.addEventListener('volumechange', () => set({ muted: video.muted }));
+    video.addEventListener('volumechange', () => {
+      volume = video.volume;
+      set({ muted: video.muted });
+    });
     video.addEventListener('ended', () => {
       set({ playing: false, ended: true });
       report(true);
@@ -504,11 +605,19 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
       play: () => start(),
       pause: () => video.pause(),
       mute: (on) => { video.muted = on; },
+      setVolume: (level) => { video.volume = level; },
       setQuality: (index) => { if (hls) hls.currentLevel = index; },
       setRate: (rate) => { video.playbackRate = rate; },
       seek: (to) => { video.currentTime = to; },
       position: () => video.currentTime || 0,
       duration: () => (Number.isFinite(video.duration) ? video.duration : 0),
+      /** [earliest, latest] a skip may land on: live, the stream's window up to the live edge. */
+      span() {
+        const s = video.seekable;
+        if (!s.length) return [0, vod ? Infinity : video.currentTime || 0];
+        const end = s.end(s.length - 1);
+        return [s.start(0), (isLive() && hls?.liveSyncPosition) || end - 1];
+      },
       goLive() {
         if (hls?.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
         else if (video.seekable.length) video.currentTime = video.seekable.end(video.seekable.length - 1) - 1;
@@ -569,7 +678,9 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
       player = new YT.Player(frame, {
         events: {
           onReady() {
+            volume = (player.getVolume?.() ?? 100) / 100;
             set({ muted: player.isMuted() });
+            showVolume();
             if (vod && st.rate !== 1) player.setPlaybackRate(st.rate);
             player.playVideo();
             // Sound needs the browser's say-so; refused, YouTube sits unstarted
@@ -614,11 +725,18 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
         else player.unMute();
         set({ muted: on });
       },
+      setVolume: (level) => player?.setVolume?.(Math.round(level * 100)),
       setQuality() {},
       setRate: (rate) => player?.setPlaybackRate?.(rate),
       seek: (to) => player?.seekTo?.(to, true),
       position: () => player?.getCurrentTime?.() || 0,
       duration: () => player?.getDuration?.() || 0,
+      /** Live, YouTube's duration is the live edge, and it keeps what its DVR holds behind it. */
+      span() {
+        const duration = player?.getDuration?.() || 0;
+        if (!(duration > 0)) return [0, Infinity];
+        return [0, vod ? duration - 1 : duration];
+      },
       goLive() {
         player?.seekTo(player.getDuration(), true);
         player?.playVideo();
@@ -667,6 +785,7 @@ export function classPlayer(source, { title = 'Live class', refreshSrc = null, v
 
   return {
     el,
+    seekTo: jumpTo,
     destroy() {
       if (destroyed) return;
       report(true);

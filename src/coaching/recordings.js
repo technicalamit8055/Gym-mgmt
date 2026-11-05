@@ -205,6 +205,15 @@ export function playUrl(id, { viewerId = 0, base = null } = {}) {
   return r.video_ref;
 }
 
+/**
+ * The chapters on a lecture's seek bar: the markers its teacher put down on
+ * the board during the class, in order. None for a lecture added as a link.
+ */
+export function lectureChapters(liveSessionId) {
+  if (!liveSessionId) return [];
+  return all('SELECT offset_sec, label FROM live_markers WHERE session_id = ? ORDER BY offset_sec, id', [liveSessionId]);
+}
+
 /** Whether the app has to ask for a fresh link now and then: the signed ones run out. */
 export const signedSource = (source) => source === 'cloudflare' || source === 'server';
 

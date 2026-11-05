@@ -1,6 +1,7 @@
 import { coaching, liveSocketUrl } from '../../coachingApi.js';
 import { classPlayer } from '../../classPlayer.js';
 import { streamSource } from '../../liveStream.js';
+import { landscape, unlockOrientation } from '../../orientation.js';
 import { append, clear, h, renderIcon, svg, toast } from '../../ui.js';
 
 /**
@@ -365,9 +366,15 @@ function mountClassroom(root, session, { registerCleanup, switchTab }) {
       h('a', { class: 'btn primary', href, target: '_blank', rel: 'noopener' }, renderIcon('link', { size: 16 }), 'Open the class'));
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) return document.exitFullscreen().catch(() => {});
-    if (stage.requestFullscreen) return stage.requestFullscreen().catch(() => {});
+  async function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      unlockOrientation();
+      return document.exitFullscreen().catch(() => {});
+    }
+    if (stage.requestFullscreen) {
+      await stage.requestFullscreen().catch(() => {});
+      return landscape();
+    }
     // iOS only lets the video itself go full screen.
     return stage.querySelector('video')?.webkitEnterFullscreen?.();
   }
@@ -591,8 +598,15 @@ function mountClassroom(root, session, { registerCleanup, switchTab }) {
   const ring = h('div', { class: 'cbl-ring' }, svg('svg', { viewBox: '0 0 64 64', width: 72, height: 72 }, svg('circle', { class: 'cbl-ring-track', cx: 32, cy: 32, r: RING_R }), ringArc), ringText);
   const votesText = h('span', { class: 'muted cb-small' });
 
+  /** Full screen shows only the stage: the sheet has to be inside it, or a poll goes unseen. */
+  function placeSheet() {
+    const full = document.fullscreenElement;
+    const host = full && (full === stage || stage.contains(full)) ? full : document.body;
+    if (sheet.parentNode !== host) host.append(scrim, sheet);
+  }
+
   function openSheet() {
-    if (!sheet.isConnected) document.body.append(scrim, sheet);
+    placeSheet();
     // Next frame, so the slide-up animates from off-screen.
     requestAnimationFrame(() => {
       sheet.classList.add('is-open');
@@ -606,6 +620,9 @@ function mountClassroom(root, session, { registerCleanup, switchTab }) {
     scrim.classList.remove('is-open');
   }
   scrim.addEventListener('click', () => st.results && closeSheet());
+  // Only once a poll has been opened: until then the sheet stays off the page.
+  const onFullscreen = () => sheet.isConnected && placeSheet();
+  document.addEventListener('fullscreenchange', onFullscreen);
 
   function openPoll(data) {
     clearTimeout(resultsTimer);
@@ -764,6 +781,7 @@ function mountClassroom(root, session, { registerCleanup, switchTab }) {
     clearTimeout(notesTimer);
     clearTimeout(resultsTimer);
     document.removeEventListener('fullscreenchange', paintStage);
+    document.removeEventListener('fullscreenchange', onFullscreen);
     playerHandle?.destroy();
     if (document.fullscreenElement === stage) document.exitFullscreen().catch(() => {});
     const socket = ws;

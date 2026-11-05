@@ -820,6 +820,25 @@ export const COACHING_MIGRATIONS = [
     // after the rebuild, which copies only the columns it names.
     if (table) ensureColumn(db, 'class_recordings', 'size_bytes', 'INTEGER');
   },
+
+  /* ---------------------------------------------- Chapter markers --- */
+  // "Next topic" on the board, mid-class: a label and where it falls in the
+  // class's recording, in seconds from its first frame — the board counts
+  // its own time on air, so a late or restarted stream does not throw the
+  // markers out. They hang off the class, so the recording it files, and
+  // only that, shows them as chapters on its seek bar.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS live_markers (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+        offset_sec INTEGER NOT NULL CHECK (offset_sec >= 0),
+        label      TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_live_markers_session ON live_markers(session_id, offset_sec)');
+  },
 ];
 
 /** Widens class_recordings.source to allow 'server' — see the migration above. */

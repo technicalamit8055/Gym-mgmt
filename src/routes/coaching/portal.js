@@ -11,7 +11,7 @@ import { doubtsForStudent } from '../../coaching/liveDoubts.js';
 import { issueSocketTicket } from '../../coaching/liveGateway.js';
 import { feeReceiptPdf } from '../../coaching/notify.js';
 import { forStudent } from '../../coaching/privateStream.js';
-import { checkProcessing, numbered, playUrl, RECORDING_SELECT, saveProgress, signedSource } from '../../coaching/recordings.js';
+import { checkProcessing, lectureChapters, numbered, playUrl, RECORDING_SELECT, saveProgress, signedSource } from '../../coaching/recordings.js';
 import { SLOT_SELECT } from '../../coaching/timetable.js';
 import { LIVE_SELECT } from './live.js';
 import { MATERIAL_SELECT, sendMaterialFile } from './materials.js';
@@ -337,6 +337,7 @@ coachingPortalRoutes.get('/recordings/:id', requireModule('live'), (req, res) =>
     number,
     play_url: playUrl(recording.id, { viewerId: memberId, base: `${req.protocol}://${req.get('host')}${req.tenantPathPrefix || ''}/api/recording-hls` }),
     private_stream: signedSource(recording.source),
+    chapters: lectureChapters(recording.live_session_id),
     notes: recording.live_session_id
       ? all(`${MATERIAL_SELECT} WHERE ma.live_session_id = ? ORDER BY ma.id`, [recording.live_session_id])
       : [],

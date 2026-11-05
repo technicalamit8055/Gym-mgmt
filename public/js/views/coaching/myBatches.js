@@ -270,6 +270,7 @@ export function myBatchesScreens({ openScreen, switchTab, registerCleanup }) {
           handle = classPlayer(src, {
             title: r.title,
             vod: true,
+            chapters: r.chapters,
             // A finished lecture starts again from the top.
             startAt: r.completed ? 0 : r.position_sec,
             refreshSrc: r.private_stream ? async () => (await coaching.portal.recording(id)).play_url : null,
@@ -310,6 +311,18 @@ export function myBatchesScreens({ openScreen, switchTab, registerCleanup }) {
             h('div', { class: 'cbb-eyebrow' }, [`Lecture ${r.number}`, r.subject_name, r.chapter].filter(Boolean).join(' · ')),
             h('h2', { class: 'cbb-lecture-title' }, r.title),
             h('div', { class: 'muted cb-small' }, [r.faculty_name, shortDay(r.recorded_on), minutes(r.duration_sec), r.batch_name].filter(Boolean).join(' · '))),
+          handle && r.chapters.length
+            ? h('div', { class: 'cbp-card' },
+              h('h3', { class: 'cbp-title', style: 'margin-bottom:6px' }, 'Topics'),
+              ...r.chapters.map((c) => h('button', {
+                class: 'cbb-topic',
+                type: 'button',
+                onclick: () => {
+                  handle.seekTo(c.offset_sec);
+                  stage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                },
+              }, h('span', { class: 'cbb-topic-at' }, clockTime(c.offset_sec)), h('span', { class: 'cb-grow' }, c.label), renderIcon('play', { size: 14 }))))
+            : null,
           r.notes.length
             ? h('div', { class: 'cbp-card' },
               h('h3', { class: 'cbp-title', style: 'margin-bottom:6px' }, 'Class notes'),

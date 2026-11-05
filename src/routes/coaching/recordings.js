@@ -5,7 +5,7 @@ import { all, get, run } from '../../db.js';
 import { badRequest, notFound } from '../../errors.js';
 import { parse } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
-import { checkProcessing, checkRecording, deleteRecording, playUrl, RECORDING_SELECT, signedSource, youtubeVideoId } from '../../coaching/recordings.js';
+import { checkProcessing, checkRecording, deleteRecording, lectureChapters, playUrl, RECORDING_SELECT, signedSource, youtubeVideoId } from '../../coaching/recordings.js';
 import { idParam, idQuery, optional, updateSql } from './shared.js';
 
 /**
@@ -135,7 +135,9 @@ recordingRoutes.get('/recordings/:id/play', (req, res) => {
   const recording = get(`${RECORDING_SELECT} WHERE r.id = ?`, [id]);
   if (!recording) throw notFound('Recording not found');
   const base = `${req.protocol}://${req.get('host')}${req.tenantPathPrefix || ''}/api/recording-hls`;
-  res.json({ ...recording, play_url: playUrl(id, { viewerId: 0, base }), private_stream: signedSource(recording.source) });
+  res.json({
+    ...recording, play_url: playUrl(id, { viewerId: 0, base }), private_stream: signedSource(recording.source), chapters: lectureChapters(recording.live_session_id),
+  });
 });
 
 /** Asks Cloudflare again, now, about a recording still processing. */

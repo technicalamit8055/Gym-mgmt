@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(WorkoutNotificationPlugin.class);
         registerPlugin(WidgetsPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
+        registerPlugin(OrientationPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Without a handler, Android's back closes the app from any screen.

@@ -10,7 +10,7 @@ const METHODS = [
   'status', 'pair', 'unpair', 'chooseNotesDir', 'lectures', 'goLive', 'session', 'socketUrl',
   'endClass', 'findNotes', 'pickNotesFile', 'publishNotes', 'resize', 'quit',
   'streamSettings', 'saveStreamSettings', 'streamStart', 'streamStop', 'attachStream',
-  'setStartAtLogin',
+  'setStartAtLogin', 'addMarker', 'markers', 'removeMarker',
 ];
 
 contextBridge.exposeInMainWorld('studio', {
@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('studio', {
   // The broadcast: the recorder's chunks out to ffmpeg, and how it is going back.
   streamChunk: (chunk) => ipcRenderer.send('studio:stream-chunk', chunk),
   onUnfold: (callback) => ipcRenderer.on('studio:unfold', () => callback()),
+  // The "next topic" hotkey, pressed while Note 3 has the keyboard.
+  onMarkHotkey: (callback) => ipcRenderer.on('studio:mark', () => callback()),
   onStreamStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('studio:stream-status', listener);

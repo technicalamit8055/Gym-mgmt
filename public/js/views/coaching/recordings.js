@@ -101,12 +101,12 @@ function openEdit(r, { batches, courses, chapters, onSaved }) {
 }
 
 async function openPlayer(r) {
-  const { play_url: url } = await coaching.playRecording(r.id);
+  const { play_url: url, chapters } = await coaching.playRecording(r.id);
   const src = streamSource(url);
   const stage = h('div', { class: 'cbl-stage' });
   let handle = null;
   if (src.kind === 'youtube' || src.kind === 'hls' || src.kind === 'video') {
-    handle = classPlayer(src, { title: r.title, vod: true });
+    handle = classPlayer(src, { title: r.title, vod: true, chapters });
     stage.append(handle.el);
   } else if (src.kind === 'vimeo') {
     stage.append(h('iframe', { class: 'cbl-player', src: src.src, title: r.title, allow: 'autoplay; encrypted-media; fullscreen', allowfullscreen: true, referrerpolicy: 'strict-origin-when-cross-origin' }));

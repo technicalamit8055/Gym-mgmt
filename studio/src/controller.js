@@ -235,6 +235,13 @@ export function createController(deps) {
       return { ok: true, data: { url: `${socketOrigin}${res.data.path}?ticket=${encodeURIComponent(res.data.ticket)}` } };
     }),
 
+    addMarker: withApi(({ sessionId, offsetSec, label }) => {
+      const offset = Math.max(0, Math.floor(Number(offsetSec) || 0));
+      return api.addMarker(positiveId(sessionId), offset, label ? String(label).slice(0, 80) : null);
+    }),
+    markers: withApi(({ sessionId }) => api.markers(positiveId(sessionId))),
+    removeMarker: withApi(({ sessionId, markerId }) => api.removeMarker(positiveId(sessionId), positiveId(markerId))),
+
     endClass: withApi(async ({ sessionId }) => {
       const res = await api.endClass(positiveId(sessionId));
       // Ended already (from a phone, or a second tap): over is over.

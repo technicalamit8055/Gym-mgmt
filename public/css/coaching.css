@@ -1117,6 +1117,12 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 .cbl-option-lock { position: absolute; top: 8px; right: 8px; color: var(--brand); }
 .cbl-sheet-foot { color: var(--muted); font-size: 13px; text-align: center; }
 .cbl-sheet-foot.is-error { color: var(--red); }
+/* A poll over a full-screen class, phone sideways: the answers in one row, so it fits the short screen. */
+@media (orientation: landscape) {
+  .cbl-stage:fullscreen .cbl-sheet { gap: 10px; }
+  .cbl-stage:fullscreen .cbl-options { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+  .cbl-stage:fullscreen .cbl-option { min-height: 72px; }
+}
 .cbl-verdict { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-weight: 700; text-align: center; }
 .cbl-verdict.is-right { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
 .cbl-verdict.is-wrong { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
@@ -1212,7 +1218,26 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 }
 .cbp-seek::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; border: 0; background: #fff; }
 .cbp-seek:disabled { opacity: 0.4; cursor: default; }
+/* Where each topic the teacher marked starts: a notch across the track.
+   Inset by the thumb's half-width, as the browser lays the track out. */
+.cbp-seekrow { position: relative; }
+.cbp-ticks { position: absolute; inset: 0 13px 2px; pointer-events: none; }
+.cbp-tick { position: absolute; top: 50%; width: 3px; height: 8px; margin: -4px 0 0 -1.5px; border-radius: 1px; background: rgba(0, 0, 0, 0.75); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); }
+.cbp-chapter {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 40%; height: 32px; padding: 0 8px;
+  border: 0; border-radius: 8px; background: transparent; color: #fff; font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer;
+}
+.cbp-chapter:hover, .cbp-chapter.is-on { background: rgba(255, 255, 255, 0.14); }
+.cbp-chapter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cbp-menu-at { display: inline-block; min-width: 46px; margin-right: 6px; color: #a3a8c8; font-variant-numeric: tabular-nums; }
 .cbp-skip { width: 38px; font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+/* The sound level beside the mute button, live or recorded. A phone has its
+   own volume keys, so there it gives its room to the other controls. */
+.cbp-seek.cbp-volume { flex: 0 1 76px; min-width: 48px; margin-right: 4px; }
+@media (max-width: 480px) {
+  .cbp-seek.cbp-volume { display: none; }
+  .cbp-btn, .cbp.is-vod .cbp-btn, .cbp-skip { width: 34px; }
+}
 .cbp-time { padding: 0 6px; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cbp-flash {
   position: absolute; top: 50%; z-index: 2; transform: translateY(-50%); padding: 10px 14px; border-radius: 999px;
@@ -1237,6 +1262,14 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 .cbb-section { margin: 4px 2px 8px; font-size: 15px; font-weight: 750; }
 .cbb-eyebrow { font-size: 11px; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; color: var(--brand); }
 .cbb-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A lecture's topics, under its player: tap one to jump there. */
+.cbb-topic {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 0; border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.cbb-topic:last-child { border-bottom: 0; }
+.cbb-topic-at { min-width: 48px; color: var(--brand); font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .cbb-progress { height: 6px; margin-top: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .cbb-progress.is-thin { height: 4px; margin-top: 6px; }
 .cbb-progress span { display: block; height: 100%; border-radius: inherit; background: var(--brand); }

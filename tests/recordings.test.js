@@ -178,6 +178,7 @@ describe('My Batches', () => {
     assert.equal(lecture.position_sec, 0);
     assert.equal(lecture.next, null);
     assert.deepEqual(lecture.notes, []);
+    assert.deepEqual(lecture.chapters, [], 'no topics were marked in that class');
 
     const part = await call('PUT', `/api/portal/coaching/recordings/${lectureId}/progress`, { position_sec: 120, duration_sec: 3000 }, as(aarav));
     assert.equal(part.status, 200, JSON.stringify(part.body));

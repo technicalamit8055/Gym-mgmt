@@ -15,7 +15,7 @@ import {
   toast,
   today,
 } from '../../ui.js';
-import { fill, fullName, pillTabs, section, timeRange, WEEK_ORDER, weekdayList, WEEKDAYS } from './common.js';
+import { classroomList, fill, fullName, pillTabs, section, timeRange, WEEK_ORDER, weekdayList, WEEKDAYS } from './common.js';
 import { openEnrollModal } from './enrollForm.js';
 
 /**
@@ -328,7 +328,7 @@ export function openBatchForm({ batch, courses, onSaved }) {
       { name: 'code', label: 'Batch code', required: true, value: batch?.code, placeholder: 'B12A', hint: 'Prefixes roll numbers (B12A-07)' },
       { name: 'start_time', label: 'Starts at', type: 'time', value: batch?.start_time },
       { name: 'end_time', label: 'Ends at', type: 'time', value: batch?.end_time },
-      { name: 'room', label: 'Room / hall', value: batch?.room, placeholder: 'Room 101' },
+      { name: 'room', label: 'Room / hall', value: batch?.room, placeholder: 'Room 101', list: 'cb-rooms' },
       { name: 'capacity', label: 'Seats', type: 'number', min: 1, value: batch?.capacity ?? 40 },
       { name: 'start_date', label: 'Batch starts', type: 'date', required: true, value: batch?.start_date || today() },
       { name: 'end_date', label: 'Batch ends', type: 'date', value: batch?.end_date },
@@ -346,6 +346,7 @@ export function openBatchForm({ batch, courses, onSaved }) {
     },
   );
   form.querySelector('.form-grid').append(h('div', { class: 'field full' }, h('span', {}, 'Days'), dayPicker));
+  form.append(classroomList());
   openModal({ title: editing ? `Edit ${batch.name}` : 'New batch', icon: 'members', wide: true, body: form });
 }
 

@@ -107,6 +107,18 @@ export function roomLectures(device) {
   );
 }
 
+/**
+ * Lectures a week in the board's room. Zero usually means the timetable
+ * spells the room differently from the classroom, so the board lists nothing.
+ */
+export function roomLectureCount(device) {
+  return get(
+    `SELECT COUNT(*) AS n FROM academic_timetable t JOIN academic_batches b ON b.id = t.batch_id AND b.active = 1
+     WHERE t.active = 1 AND ${IN_ROOM}`,
+    [device.classroom_name],
+  ).n;
+}
+
 /** One of today's lectures in the board's room, or 404. */
 export function roomLecture(device, slotId) {
   const lecture = roomLectures(device).find((l) => l.slot_id === slotId);

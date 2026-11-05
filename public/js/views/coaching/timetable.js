@@ -1,7 +1,7 @@
 import { session } from '../../api.js';
 import { coaching } from '../../coachingApi.js';
 import { buildForm, clear, closeModal, confirmDialog, date, emptyState, h, openModal, renderIcon, time, toast, today } from '../../ui.js';
-import { batchOptions, fill, pillTabs, section, selectControl, WEEK_ORDER, WEEKDAYS, WEEKDAYS_LONG } from './common.js';
+import { batchOptions, classroomList, fill, pillTabs, section, selectControl, WEEK_ORDER, WEEKDAYS, WEEKDAYS_LONG } from './common.js';
 
 /**
  * The weekly master timetable: Monday-to-Sunday columns of lectures, filtered
@@ -23,7 +23,7 @@ function slotForm({ slot, batches, courses, faculty, onSaved }) {
       { name: 'subject_id', label: 'Subject', type: 'select', required: true, value: slot?.subject_id, options: subjectsFor(firstBatch).map((s) => ({ value: s.id, label: s.name })) },
       { name: 'faculty_id', label: 'Teacher', type: 'select', value: slot?.faculty_id ?? '', options: [{ value: '', label: 'Not assigned' }, ...faculty.map((f) => ({ value: f.id, label: f.name }))] },
       { name: 'weekday', label: 'Day', type: 'select', required: true, value: slot?.weekday ?? 1, options: WEEK_ORDER.map((d) => ({ value: d, label: WEEKDAYS_LONG[d] })) },
-      { name: 'room', label: 'Room', value: slot?.room ?? '', placeholder: 'Defaults to the batch’s room' },
+      { name: 'room', label: 'Room', value: slot?.room ?? '', placeholder: 'Defaults to the batch’s room', list: 'cb-rooms', hint: 'The smartboard in this classroom shows the lecture' },
       { name: 'start_time', label: 'Starts', type: 'time', required: true, value: slot?.start_time ?? '16:00' },
       { name: 'end_time', label: 'Ends', type: 'time', required: true, value: slot?.end_time ?? '17:30' },
     ],
@@ -34,6 +34,7 @@ function slotForm({ slot, batches, courses, faculty, onSaved }) {
   );
   const warnings = h('div', { class: 'cb-slot-check' });
   form.insertBefore(warnings, form.querySelector('.modal-foot'));
+  form.append(classroomList());
 
   const field = (name) => form.querySelector(`[name="${name}"]`);
   const values = () => Object.fromEntries(['batch_id', 'subject_id', 'faculty_id', 'weekday', 'start_time', 'end_time', 'room'].map((n) => [n, field(n).value]));

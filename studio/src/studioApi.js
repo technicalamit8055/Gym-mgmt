@@ -73,6 +73,10 @@ export function createStudioApi({ base, getToken, fetchImpl = globalThis.fetch }
     session: (id) => call('GET', `/sessions/${id}`),
     socketTicket: (id) => call('POST', `/sessions/${id}/socket-ticket`),
     endClass: (id) => call('PATCH', `/sessions/${id}/end`),
+    // "Next topic": a chapter on the class's recording, `offsetSec` into it.
+    addMarker: (id, offsetSec, label = null) => call('POST', `/sessions/${id}/markers`, { json: { offset_sec: offsetSec, label } }),
+    markers: (id) => call('GET', `/sessions/${id}/markers`),
+    removeMarker: (id, markerId) => call('DELETE', `/sessions/${id}/markers/${markerId}`),
     // A big export over classroom Wi-Fi takes its time.
     publishNotes: (id, bytes) => call('POST', `/sessions/${id}/publish-notes`, { bytes, timeoutMs: 120_000 }),
   };

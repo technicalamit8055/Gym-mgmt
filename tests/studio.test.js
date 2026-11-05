@@ -135,6 +135,7 @@ describe('the classroom smartboard', () => {
     assert.equal(device.paired, 0);
     const list = await call('GET', '/api/coaching/studio-devices');
     assert.equal(list.body.items[0].pairing_code_hash, undefined);
+    assert.equal(list.body.items[0].weekly_lectures, 3, 'every day’s lectures in Room 101, the batch’s room matched loosely');
     const stored = inTenant(() => get('SELECT pairing_code_hash FROM studio_devices WHERE id = ?', [device.id]));
     assert.equal(stored.pairing_code_hash, sha256(pairingCode.replace('-', '')), 'only a hash of the code is kept');
   });
@@ -214,6 +215,21 @@ describe('the classroom smartboard', () => {
     socket.close();
   });
 
+  it('marks the next topic, for chapters on the class’s recording', async () => {
+    // A broadcast YouTube keeps as a video, so the class files a recording when it ends.
+    assert.equal((await board('PATCH', `/sessions/${session.id}/stream`, { stream_url: 'https://youtu.be/abcDEF12345' })).status, 200);
+    const first = await board('POST', `/sessions/${session.id}/markers`, { offset_sec: 0, label: '  Torque  ' });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.equal(first.body.marker.label, 'Torque');
+    const oops = await board('POST', `/sessions/${session.id}/markers`, { offset_sec: 300 });
+    assert.equal(oops.body.marker.label, 'Topic 2', 'unnamed: the next topic number');
+    await board('POST', `/sessions/${session.id}/markers`, { offset_sec: 1250, label: 'Moment of inertia' });
+    assert.equal((await board('DELETE', `/sessions/${session.id}/markers/${oops.body.marker.id}`)).status, 200);
+    const list = await board('GET', `/sessions/${session.id}/markers`);
+    assert.deepEqual(list.body.items.map((m) => [m.offset_sec, m.label]), [[0, 'Torque'], [1250, 'Moment of inertia']]);
+    assert.equal((await board('POST', `/sessions/${session.id}/markers`, { offset_sec: -5 })).status, 400);
+  });
+
   it('ends the class and publishes Note 3’s export as its notes', async () => {
     const ended = await board('PATCH', `/sessions/${session.id}/end`);
     assert.equal(ended.status, 200);
@@ -223,6 +239,11 @@ describe('the classroom smartboard', () => {
     assert.equal(published.body.material.uploaded_by, verma.id);
     assert.equal(published.body.material.live_session_id, session.id);
     assert.equal((await board('POST', `/sessions/${session.id}/socket-ticket`)).status, 409, 'no socket for a class that is over');
+    assert.equal((await board('POST', `/sessions/${session.id}/markers`, { offset_sec: 10 })).status, 409, 'no markers once it is over');
+
+    const filed = inTenant(() => get('SELECT id FROM class_recordings WHERE live_session_id = ?', [session.id]));
+    const played = await call('GET', `/api/coaching/recordings/${filed.id}/play`);
+    assert.deepEqual(played.body.chapters, [{ offset_sec: 0, label: 'Torque' }, { offset_sec: 1250, label: 'Moment of inertia' }]);
   });
 
   it('can take over a class its room’s teacher started from their phone — and nothing from another room', async () => {

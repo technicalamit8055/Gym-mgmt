@@ -53,6 +53,17 @@ describe('calls to CoachBook', () => {
     assert.equal(fetchImpl.calls[1].init.headers['Content-Type'], 'application/pdf');
   });
 
+  it('marks the next topic at a point in the recording, and takes a marker back', async () => {
+    const fetchImpl = fakeFetch(() => json(201, {}));
+    const api = createStudioApi({ base: 'https://x.in', getToken: () => 'cbs_t', fetchImpl });
+    await api.addMarker(7, 754, 'Torque');
+    assert.equal(fetchImpl.calls[0].url, 'https://x.in/api/studio/sessions/7/markers');
+    assert.equal(fetchImpl.calls[0].init.body, JSON.stringify({ offset_sec: 754, label: 'Torque' }));
+    await api.removeMarker(7, 3);
+    assert.equal(fetchImpl.calls[1].init.method, 'DELETE');
+    assert.equal(fetchImpl.calls[1].url, 'https://x.in/api/studio/sessions/7/markers/3');
+  });
+
   it('turns failures into results, not exceptions', async () => {
     const refused = createStudioApi({ base: 'https://x.in', getToken: () => 't', fetchImpl: fakeFetch(() => json(409, { error: 'Batch 12-A is already live', details: { code: 'batch_already_live', session_id: 4 } })) });
     assert.deepEqual(await refused.goLive(3), { ok: false, status: 409, error: 'Batch 12-A is already live', details: { code: 'batch_already_live', session_id: 4 } });

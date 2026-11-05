@@ -179,6 +179,10 @@ function boardRow(board, reload) {
         ' · ',
         board.paired ? `Last seen ${date(fromUtc(board.last_seen_at), { withTime: true })}` : `Added ${date(fromUtc(board.created_at))}`,
       ),
+      board.weekly_lectures === 0
+        ? h('div', { class: 'cb-small', style: 'color:var(--amber);margin-top:2px' },
+          `No lectures are timetabled in “${board.classroom_name}”, so the board lists none. Set the lecture’s or batch’s room to exactly this name.`)
+        : null,
     ),
     h(
       'div',

@@ -16,6 +16,11 @@ import { listDevices, startBroadcast } from './broadcast.js';
  * launches A–D with a timer, and only once the voting is over taps the right
  * answer to reveal it — choosing it first would put it on the board.
  *
+ * "Next topic" (the Topic button, or Ctrl+Alt+M over Note 3) puts a chapter
+ * marker on the class's recording. Its time is the board's own count of
+ * time on air, not of the class: the recording starts when the stream does,
+ * and a stream that drops and comes back leaves the gap out of the video.
+ *
  * Rendering is plain DOM. Text from students (doubts, names) only ever goes
  * in as text nodes, never as HTML. The clocks update their own elements in
  * place rather than re-rendering, so a finger mid-tap (or mid-drag on the
@@ -45,7 +50,7 @@ const state = {
   startedAt: 0,
   conn: 'connecting',
   collapsed: false,
-  panel: null, // poll | poll-live | reveal | results | doubts | end | stream
+  panel: null, // poll | poll-live | reveal | results | doubts | markers | end | stream
   poll: null,
   results: null,
   doubts: [],
@@ -55,6 +60,9 @@ const state = {
   streamForm: null,
   devices: null,
   notes: null,
+  markers: [],
+  markLabel: '',
+  marked: null, // the label just marked, shown on the Topic button for a moment
 };
 
 /* ── DOM ─────────────────────────────────────────────────────────────── */
@@ -243,7 +251,8 @@ function lecturesView() {
               disabled: state.busy || (!lecture.faculty_id && !lecture.live_session_id),
               onclick: () => goLive(lecture),
             }, lecture.live_session_id ? 'Join live' : 'Go live')))
-          : h('p', { class: 'empty' }, `No lectures are timetabled in ${room || 'this room'} today.`)),
+          : h('p', { class: 'empty' },
+            `No lectures are timetabled in ${room || 'this room'} today. A lecture shows here on its day when its room — or its batch’s room — is “${room}”, spelt the same as the classroom.`)),
     h('div', { class: 'setting' },
       h('div', { class: 'spacer' },
         h('strong', null, yt.private ? 'Live stream' : 'YouTube Live'),
@@ -390,6 +399,7 @@ async function startStreaming() {
 
 function stopStreaming() {
   clearTimeout(streamRetryTimer);
+  onAirPause();
   broadcast?.stop();
   broadcast = null;
   streamRun = null;
@@ -411,10 +421,58 @@ studio.onStreamStatus?.((status) => {
   // Statuses from a run already replaced (a restart) are history.
   if (status.run !== streamRun) return;
   if (status.state === 'failed') return streamFailed(status.error);
-  if (status.state === 'live') streamAttempts = 0;
+  if (status.state === 'live') {
+    streamAttempts = 0;
+    onAirStart();
+  }
   state.stream = status;
   return update();
 });
+
+/* ── Time on air: where a marker falls in the recording ──────────────── */
+
+/**
+ * Seconds of video so far. Kept on the board for the class (localStorage),
+ * so Studio restarted mid-class carries on from where its count was. With
+ * no stream on this board, the class's own clock is the best there is.
+ */
+const onAir = { sessionId: null, ms: 0, since: 0 };
+const onAirKey = (sessionId) => `studio-on-air-${sessionId}`;
+
+function onAirLoad(sessionId) {
+  let ms = 0;
+  try {
+    ms = Number(localStorage.getItem(onAirKey(sessionId))) || 0;
+  } catch {
+    // no storage: the count starts again
+  }
+  Object.assign(onAir, { sessionId, ms, since: 0 });
+}
+
+const onAirMs = () => onAir.ms + (onAir.since ? Date.now() - onAir.since : 0);
+
+function onAirSave() {
+  if (!onAir.sessionId) return;
+  try {
+    localStorage.setItem(onAirKey(onAir.sessionId), String(Math.round(onAirMs())));
+  } catch {
+    // as above
+  }
+}
+
+function onAirStart() {
+  if (!onAir.since) onAir.since = Date.now();
+}
+
+function onAirPause() {
+  if (!onAir.since) return;
+  onAir.ms = onAirMs();
+  onAir.since = 0;
+  onAirSave();
+}
+setInterval(() => onAir.since && onAirSave(), 5000);
+
+const videoSeconds = () => Math.floor((state.status?.streaming?.ready ? onAirMs() : Date.now() - state.startedAt) / 1000);
 
 /* ── The class socket ────────────────────────────────────────────────── */
 
@@ -563,8 +621,17 @@ async function enterClass(session) {
     view: 'live', panel: null, collapsed: false, poll: null, results: null, doubts: [], pinnedId: null, unread: 0, error: null, stream: null,
   });
   streamAttempts = 0;
+  onAirLoad(session.id);
+  state.markers = [];
+  state.markLabel = '';
   await update();
   connect();
+  studio.markers({ sessionId: session.id }).then((res) => {
+    if (res.ok && state.session?.id === session.id) {
+      state.markers = res.data.items;
+      update();
+    }
+  });
   if (state.status?.streaming?.ready) {
     // Joined a class the teacher started elsewhere: point it at this board's stream.
     // (Private or unlisted, streamStart asks CoachBook for the class's stream, which points the class at it.)
@@ -640,6 +707,15 @@ function dock() {
     h('span', { class: 'icon' }, '❓'),
     'Doubts',
     state.unread > 0 && h('span', { class: 'badge' }, state.unread > 99 ? '99+' : state.unread)),
+    h('button', {
+      class: `dock-btn${state.panel === 'markers' ? ' active' : ''}${state.marked ? ' marked' : ''}`,
+      title: 'Next topic — Ctrl+Alt+M',
+      'aria-label': `Topics${state.markers.length ? `, ${state.markers.length} marked` : ''}`,
+      onclick: () => togglePanel('markers'),
+    },
+    h('span', { class: 'icon' }, state.marked ? '✓' : '🔖'),
+    'Topic',
+    state.markers.length > 0 && h('span', { class: 'badge quiet' }, state.markers.length)),
     h('button', { class: `dock-btn end${state.panel === 'end' ? ' active' : ''}`, 'aria-label': 'End class', onclick: () => togglePanel('end') },
       h('span', { class: 'icon' }, '⏹'),
       'End'),
@@ -680,7 +756,7 @@ function mini() {
 
 function liveView() {
   const panels = {
-    poll: pollPanel, 'poll-live': pollLivePanel, reveal: revealPanel, results: resultsPanel, doubts: doubtsPanel, end: endPanel, stream: streamPanel,
+    poll: pollPanel, 'poll-live': pollLivePanel, reveal: revealPanel, results: resultsPanel, doubts: doubtsPanel, markers: markersPanel, end: endPanel, stream: streamPanel,
   };
   return [dock(), state.panel && panels[state.panel]?.()];
 }
@@ -814,6 +890,66 @@ function doubtsPanel() {
               : h('button', { class: 'btn small primary', onclick: () => doubtAction('teacher:pin_doubt', d.id) }, '📌 Pin'),
             h('button', { class: 'btn small', onclick: () => doubtAction('teacher:resolve_doubt', d.id) }, '✓ Answered')));
       })));
+}
+
+/* ── Topics: chapter markers on the recording ────────────────────────── */
+
+let markedTimer = null;
+
+/** Marks the next topic here, now; unnamed, CoachBook numbers it. */
+async function markTopic(label = '') {
+  if (state.view !== 'live' || state.busy) return undefined;
+  const sessionId = state.session.id;
+  state.busy = true;
+  update();
+  const res = await studio.addMarker({ sessionId, offsetSec: videoSeconds(), label: label.trim() || null });
+  state.busy = false;
+  if (state.session?.id !== sessionId) return undefined;
+  if (!res.ok) {
+    // From the hotkey, with no panel open: open one to say why.
+    state.error = res.error;
+    openPanel('markers');
+    return update();
+  }
+  state.error = null;
+  state.markers = res.data.items;
+  state.markLabel = '';
+  state.marked = res.data.marker.label;
+  clearTimeout(markedTimer);
+  markedTimer = setTimeout(() => { state.marked = null; update(); }, 2500);
+  return update();
+}
+
+async function unmark(markerId) {
+  const res = await studio.removeMarker({ sessionId: state.session.id, markerId });
+  if (res.ok) state.markers = res.data.items;
+  state.error = res.ok ? null : res.error;
+  return update();
+}
+
+studio.onMarkHotkey?.(() => markTopic());
+
+function markersPanel() {
+  const label = h('input', {
+    type: 'text',
+    value: state.markLabel,
+    maxlength: '80',
+    placeholder: `Topic ${state.markers.length + 1}`,
+    'aria-label': 'Topic name (optional)',
+    oninput: (event) => { state.markLabel = event.target.value; },
+    onkeydown: (event) => { if (event.key === 'Enter') markTopic(state.markLabel); },
+  });
+  return panel('Topics',
+    h('p', null, 'Mark where each topic starts. Students see them as chapters on the recording’s seek bar. Ctrl+Alt+M marks one without leaving Note 3.'),
+    h('div', { class: 'mark-row' },
+      label,
+      h('button', { class: 'btn primary', disabled: state.busy, onclick: () => markTopic(state.markLabel) }, state.marked ? '✓ Marked' : 'Mark now')),
+    h('div', { class: 'scroll' },
+      state.markers.length === 0 && h('p', { class: 'empty' }, 'No topics marked yet.'),
+      state.markers.map((m) => h('div', { class: 'marker' },
+        h('span', { class: 'at' }, mmss(m.offset_sec * 1000)),
+        h('span', { class: 'label' }, m.label),
+        h('button', { class: 'icon-btn', title: 'Remove', 'aria-label': `Remove ${m.label}`, onclick: () => unmark(m.id) }, '✕')))));
 }
 
 /* ── The stream's state ──────────────────────────────────────────────── */

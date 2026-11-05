@@ -1,4 +1,4 @@
-import { BrowserWindow, app, desktopCapturer, dialog, ipcMain, safeStorage, screen, session } from 'electron';
+import { BrowserWindow, app, desktopCapturer, dialog, globalShortcut, ipcMain, safeStorage, screen, session } from 'electron';
 import ffmpegStatic from 'ffmpeg-static';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +25,8 @@ if (process.env.STUDIO_USER_DATA) app.setPath('userData', process.env.STUDIO_USE
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const DOCK = { width: 92, height: 380 };
+// "Next topic", from anywhere: Note 3 has the keyboard while the teacher writes.
+const MARK_HOTKEY = 'CommandOrControl+Alt+M';
 const MARGIN = 24;
 
 let win = null;
@@ -271,4 +273,7 @@ app.whenReady().then(() => {
   allowCapture();
   wireIpc(controller, streamer);
   createWindow();
+  // Taken by another app: the dock's Topic button still works.
+  if (!globalShortcut.register(MARK_HOTKEY, () => win?.webContents.send('studio:mark'))) console.warn(`[studio] ${MARK_HOTKEY} is taken`);
+  app.on('will-quit', () => globalShortcut.unregisterAll());
 });

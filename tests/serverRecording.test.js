@@ -326,8 +326,9 @@ describe('the class_recordings rebuild that allows server recordings', () => {
     db.exec("INSERT INTO class_recordings (id, batch_id, title, source, video_ref, recorded_at) VALUES (5, 1, 'Lecture 1', 'youtube', 'abcdefghijk', '2026-11-01 09:00:00')");
     db.exec('INSERT INTO recording_progress (recording_id, member_id, position_sec) VALUES (5, 7, 600)');
 
-    COACHING_MIGRATIONS.at(-1)(db);
-    COACHING_MIGRATIONS.at(-1)(db); // and again, as every start does: a no-op
+    const migration = COACHING_MIGRATIONS.find((m) => String(m).includes('rebuildRecordingsForServer'));
+    migration(db);
+    migration(db); // and again, as every start does: a no-op
 
     assert.deepEqual({ ...db.prepare('SELECT recording_id, member_id, position_sec FROM recording_progress').get() }, { recording_id: 5, member_id: 7, position_sec: 600 });
     assert.equal(db.prepare('SELECT title FROM class_recordings WHERE id = 5').get().title, 'Lecture 1');

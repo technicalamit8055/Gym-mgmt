@@ -9,7 +9,7 @@ import { requireModule } from '../../verticals.js';
 import { LIVE_SOCKET_PATH, issueSocketTicket } from '../../coaching/liveGateway.js';
 import { broadcastToSession } from '../../coaching/liveRooms.js';
 import {
-  DEVICE_SELECT, deviceById, issuePairingCode, redeemPairingCode, requireStudioDevice, roomLecture, roomLectures, roomSession,
+  DEVICE_SELECT, deviceById, issuePairingCode, redeemPairingCode, requireStudioDevice, roomLecture, roomLectureCount, roomLectures, roomSession,
 } from '../../coaching/studio.js';
 import { PrivateStreamError, privateStreamForClass, privateStreamReady } from '../../coaching/privateStream.js';
 import { closeStream, deleteFile, putFile } from '../../coaching/selfHostedStream.js';
@@ -28,7 +28,8 @@ export const studioDeviceRoutes = Router();
 studioDeviceRoutes.use('/studio-devices', requireModule('live'), requireRole(...MANAGES_BILLING));
 
 studioDeviceRoutes.get('/studio-devices', (_req, res) => {
-  res.json({ items: all(`${DEVICE_SELECT} ORDER BY c.name, d.name`) });
+  const items = all(`${DEVICE_SELECT} ORDER BY c.name, d.name`);
+  res.json({ items: items.map((d) => ({ ...d, weekly_lectures: roomLectureCount(d) })) });
 });
 
 /** Registers a board for a classroom; the pairing code is shown this once. */
@@ -220,6 +221,41 @@ studioRoutes.post('/sessions/:id/socket-ticket', (req, res) => {
 studioRoutes.patch('/sessions/:id/end', (req, res) => {
   const session = roomSession(req.studioDevice, idParam(req));
   res.json(endLiveSession(session.id));
+});
+
+/** Plenty for a lecture; enough to stop a stuck key filling the seek bar. */
+const MAX_MARKERS = 100;
+const sessionMarkers = (sessionId) => all('SELECT id, offset_sec, label FROM live_markers WHERE session_id = ? ORDER BY offset_sec, id', [sessionId]);
+
+/**
+ * "Next topic": a chapter marker on the class's recording, `offset_sec`
+ * into it by the board's own count of its time on air. Unnamed, it is the
+ * next "Topic N".
+ */
+studioRoutes.post('/sessions/:id/markers', (req, res) => {
+  const session = roomSession(req.studioDevice, idParam(req));
+  if (session.status !== 'live') throw conflict('This class is not live', { code: 'session_not_live' });
+  const body = parse(req.body, {
+    offset_sec: { type: 'int', required: true, min: 0, max: 24 * 3600 },
+    label: { type: 'string', max: 80 },
+  });
+  const count = get('SELECT COUNT(*) AS n FROM live_markers WHERE session_id = ?', [session.id]).n;
+  if (count >= MAX_MARKERS) throw conflict(`A class can have ${MAX_MARKERS} markers at most`, { code: 'too_many_markers' });
+  const label = body.label?.trim() || `Topic ${count + 1}`;
+  const id = Number(run('INSERT INTO live_markers (session_id, offset_sec, label) VALUES (?, ?, ?)', [session.id, body.offset_sec, label]).lastInsertRowid);
+  res.status(201).json({ marker: { id, offset_sec: body.offset_sec, label }, items: sessionMarkers(session.id) });
+});
+
+studioRoutes.get('/sessions/:id/markers', (req, res) => {
+  res.json({ items: sessionMarkers(roomSession(req.studioDevice, idParam(req)).id) });
+});
+
+/** A marker tapped by mistake. */
+studioRoutes.delete('/sessions/:id/markers/:markerId', (req, res) => {
+  const session = roomSession(req.studioDevice, idParam(req));
+  const info = run('DELETE FROM live_markers WHERE id = ? AND session_id = ?', [Number(req.params.markerId) || 0, session.id]);
+  if (!info.changes) throw notFound('Marker not found');
+  res.json({ items: sessionMarkers(session.id) });
 });
 
 /** Note 3's export, published as the class's notes, uploaded by its teacher. */

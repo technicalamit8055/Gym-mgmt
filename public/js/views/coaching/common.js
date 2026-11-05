@@ -16,6 +16,17 @@ export const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thurs
 /** Monday first, the way an Indian timetable is printed. */
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
+/**
+ * Suggestions for a free-text room field (`list: 'cb-rooms'`): the
+ * classrooms on record. A smartboard finds its lectures by its classroom's
+ * name, so a lecture typed as "101" never shows on the board in "Room 101".
+ */
+export function classroomList() {
+  const list = h('datalist', { id: 'cb-rooms' });
+  coaching.classrooms().then(({ items }) => fill(list, ...items.map((r) => h('option', { value: r.name })))).catch(() => {});
+  return list;
+}
+
 export const TEST_TYPE_LABEL = { weekly: 'Weekly test', monthly: 'Monthly test', mock: 'Full mock', dpp: 'DPP quiz', other: 'Test' };
 export const MATERIAL_KIND_LABEL = {
   notes: 'Notes',
