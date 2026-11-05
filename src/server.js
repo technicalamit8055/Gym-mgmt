@@ -6,6 +6,9 @@ import { assertProductionReady, config, DEFAULT_TENANT_SLUG } from './config.js'
 import { closeDb, tenantStorage } from './db.js';
 import { closeRegistryDb, listTenants, tenantDbPath } from './tenants.js';
 import { sendAutomatedBirthdayWishes, sendAutomatedRenewalReminders } from './maintenance.js';
+import { attachLiveGateway } from './coaching/liveGateway.js';
+import { pruneServerRecordings } from './coaching/recordings.js';
+import { warnOperatorIfLow } from './recordingStorage.js';
 import { sendCoachingFeeReminders } from './coaching/sweep.js';
 import { sweepPushNotifications } from './notifications.js';
 import { sendTrialFollowUps } from './trialPasses.js';
@@ -83,12 +86,20 @@ function sweepAutomatedMessages() {
           sendCoachingFeeReminders({ gymName: tenant.gymName, currency: tenant.currency });
           // GymBook free-trial follow-ups; a no-op outside that vertical.
           sendTrialFollowUps({ gymName: tenant.gymName });
+          // CoachBook class recordings on this server, past the institute's keep-for days.
+          try {
+            pruneServerRecordings();
+          } catch (err) {
+            console.error(`[recordings:${tenant.slug}] could not delete old recordings:`, err.message);
+          }
         },
       );
     } catch (err) {
       console.error(`[whatsapp:${tenant.slug}] message sweep failed:`, err.message);
     }
   }
+  // After the old recordings went: the operator hears if the disk is still filling up.
+  warnOperatorIfLow().catch((err) => console.error('[recordings] could not warn the operator:', err.message));
 }
 
 /** Re-links gyms that had already paired, so a restart does not make every
@@ -142,6 +153,8 @@ const server = app.listen(config.port, host, () => {
   console.log(`${config.gymName} is running at http://localhost:${config.port}`);
   restoreWhatsAppSessions();
 });
+// CoachBook's live-class polls ride the same port (src/coaching/liveGateway.js).
+const liveGateway = attachLiveGateway(server);
 
 // Delayed so the first sweep does not compete with startup, and so a crash-loop
 // cannot fire reminders/wishes on every restart.
@@ -160,6 +173,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     clearTimeout(firstPushSweep);
     clearInterval(pushSweepTimer);
     closeAllWhatsAppSessions();
+    // Saves any running poll, and drops the sockets server.close() would wait on.
+    liveGateway.close();
     server.close(() => {
       closeDb();
       closeRegistryDb();

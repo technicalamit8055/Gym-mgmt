@@ -1,0 +1,310 @@
+/*
+ * CoachBook Studio. Small on purpose — the board is the lesson. The dock is a
+ * 72px strip with 56px touch buttons, pop-ups are 340px wide and only as tall
+ * as what they hold, and the window is sized to fit (app.js), so nothing
+ * transparent sits over Note 3. Device-independent pixels throughout.
+ */
+
+:root {
+  --glass: rgba(17, 19, 28, 0.95);
+  --glass-edge: rgba(255, 255, 255, 0.12);
+  --raised: rgba(255, 255, 255, 0.08);
+  --raised-hover: rgba(255, 255, 255, 0.15);
+  --text: #f5f6fa;
+  --muted: #a3a8bb;
+  --accent: #6366f1;
+  --accent-soft: rgba(99, 102, 241, 0.25);
+  --live: #ef4444;
+  --poll: #f59e0b;
+  --doubt: #38bdf8;
+  --ok: #22c55e;
+  --danger: #f43f5e;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font: 15px/1.35 "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+button:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+input, select {
+  font: inherit;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--glass-edge);
+  border-radius: 10px;
+  padding: 0 12px;
+  height: 44px;
+  width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+}
+select option { background: #1b1e2b; }
+
+/* ── Layout: the dock against the screen edge, the pop-up beside it ─── */
+
+.shell {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  align-items: flex-start;
+}
+.shell.side-right { flex-direction: row-reverse; }
+.shell.side-left { flex-direction: row; }
+
+.card, .dock, .panel, .mini {
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.card {
+  flex: 1;
+  min-width: 0;
+  max-height: 620px; /* the window's cap (app.js MAX_HEIGHT) less the shell's padding */
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.card.center { align-items: center; text-align: center; }
+/* The grip and the fold along the top of a full-size screen. */
+.card-bar { align-self: stretch; display: flex; align-items: center; gap: 6px; margin: -10px -8px -4px; }
+.card-bar .grip { flex: 1; width: auto; height: 28px; }
+
+.brand { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: 21px; margin: 0; line-height: 1.2; }
+h2 { font-size: 17px; margin: 0; }
+p { margin: 0; color: var(--muted); }
+label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row.end { justify-content: flex-end; }
+.row.center { justify-content: center; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.spacer { flex: 1; min-width: 0; }
+.scroll { max-height: 300px; overflow-y: auto; display: grid; gap: 8px; align-content: start; padding-right: 2px; }
+.scroll::-webkit-scrollbar { width: 8px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--raised-hover); border-radius: 4px; }
+
+.btn {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 12px;
+  background: var(--raised);
+  font-weight: 600;
+}
+.btn:hover:not(:disabled) { background: var(--raised-hover); }
+.btn.primary { background: var(--accent); }
+.btn.primary:hover:not(:disabled) { background: #575ae8; }
+.btn.danger { background: var(--danger); }
+.btn.wide { width: 100%; min-height: 52px; font-size: 16px; }
+.btn.quiet { background: transparent; color: var(--muted); }
+.btn.small { min-height: 40px; padding: 0 14px; font-size: 14px; }
+.icon-btn { width: 40px; height: 40px; flex: none; border-radius: 12px; background: var(--raised); font-size: 17px; }
+
+.error { color: #fda4af; }
+.notice { color: #fde68a; font-size: 13px; }
+
+/* ── Lectures and settings ───────────────────────────────────────────── */
+
+.lecture { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 12px; background: var(--raised); }
+.lecture .what { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.lecture .what strong { font-size: 16px; }
+.lecture .what span { color: var(--muted); font-size: 13px; }
+.lecture.is-live { outline: 2px solid var(--live); }
+.setting { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); }
+.setting .spacer { display: grid; gap: 1px; }
+.setting span { color: var(--muted); font-size: 12px; }
+.folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { text-align: center; padding: 18px 8px; color: var(--muted); }
+
+/* ── The dock ────────────────────────────────────────────────────────── */
+
+.dock {
+  width: 72px;
+  flex: none;
+  padding: 6px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.grip {
+  width: 100%;
+  height: 22px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 2px;
+  cursor: grab;
+  touch-action: none;
+}
+.grip:active { cursor: grabbing; background: var(--raised); }
+
+.live-pill { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25); flex: none; animation: pulse 1.6s infinite; }
+
+.yt {
+  width: 100%;
+  padding: 3px 0;
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+}
+.yt.live { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
+.yt.starting { color: #fde68a; }
+.yt.failed { background: rgba(245, 158, 11, 0.25); color: #fde68a; }
+
+.dock-btn {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
+  background: var(--raised);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.dock-btn .icon { font-size: 22px; line-height: 1.05; }
+.dock-btn:hover { background: var(--raised-hover); }
+.dock-btn.active { background: var(--accent-soft); outline: 2px solid var(--accent); }
+.dock-btn.poll.running { background: rgba(245, 158, 11, 0.2); outline: 2px solid var(--poll); }
+.dock-btn .icon.count { font-size: 19px; font-weight: 800; color: var(--poll); font-variant-numeric: tabular-nums; }
+.dock-btn.end { color: #fecdd3; }
+
+.badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--doubt);
+  color: #04131c;
+  font-size: 12px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+
+.dock-foot { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 4px; }
+.conn { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+.conn.connecting, .conn.offline { background: var(--poll); animation: pulse 1.2s infinite; }
+.fold { width: 30px; height: 24px; border-radius: 8px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; }
+.fold:hover { background: var(--raised); }
+
+/* Folded: one bubble. */
+.mini-label { font-size: 12px; letter-spacing: 0.02em; }
+.mini {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: grab;
+  touch-action: none;
+}
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ── Pop-ups ─────────────────────────────────────────────────────────── */
+
+.panel {
+  width: 340px;
+  flex: none;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.panel-head { display: flex; align-items: center; gap: 10px; }
+.panel-head h2 { flex: 1; }
+
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choices.four { grid-template-columns: repeat(4, 1fr); }
+.choice {
+  min-height: 72px;
+  border-radius: 14px;
+  background: var(--raised);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+}
+.choice strong { font-size: 26px; }
+.choice span { color: var(--muted); font-size: 12px; }
+.choice:hover:not(:disabled) { background: var(--raised-hover); }
+
+.big-row { display: flex; align-items: center; justify-content: space-between; }
+.big-number { font-size: 42px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--poll); }
+
+.bars { display: grid; gap: 8px; }
+.bar { display: grid; grid-template-columns: 22px 1fr 56px; gap: 8px; align-items: center; font-weight: 700; }
+.bar .track { height: 26px; border-radius: 8px; background: var(--raised); overflow: hidden; }
+.bar .fill { height: 100%; background: #64748b; border-radius: 8px; transition: width 0.4s ease; }
+.bar.correct .fill { background: var(--ok); }
+.bar.correct .letter { color: var(--ok); }
+.bar .num { text-align: right; font-variant-numeric: tabular-nums; }
+.fastest { display: grid; gap: 6px; }
+.fastest ol { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+
+.doubt { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--raised); }
+.doubt.pinned { outline: 2px solid var(--doubt); background: rgba(56, 189, 248, 0.12); }
+.doubt .who { font-size: 12px; color: var(--muted); }
+.doubt .who strong { color: var(--text); }
+.doubt .body { font-size: 15px; color: var(--text); user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
+.doubt .tag { font-size: 11px; font-weight: 700; color: var(--doubt); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 5px solid var(--raised-hover);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.tick { font-size: 44px; color: var(--ok); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dot, .conn, .spinner { animation: none; }
+}

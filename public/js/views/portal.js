@@ -5926,7 +5926,7 @@ function openWeightSheet({ latest, onSaved }) {
  * opened the tab since the badge was last edited.
  */
 function buildTabs(storeStatus = 'coming_soon', navBadges = {}) {
-  // CoachBook: Home, Timetable, Tests, Fees, Profile (views/portalCoaching.js)
+  // CoachBook: Home, Batches, Tests, Fees, Profile (views/portalCoaching.js)
   // — and, while its store is not switched off, the Store in Fees' slot. Fees
   // stays a real screen, reached from Home's fee banner and Profile's tile.
   const store = storeStatus === 'disabled' ? null : { key: 'store', label: 'Store', icon: 'bag', badge: storeStatus === 'live' ? null : 'Soon' };
@@ -5982,7 +5982,7 @@ const seenNavBadges = {
 };
 
 // CoachBook's Fees is off the bar while its store holds the slot (buildTabs).
-const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile', attendance: 'home', materials: 'home', fees: 'profile' };
+const TAB_HOME_OF = { schedule: 'home', pass: 'home', pay: 'profile', attendance: 'home', materials: 'home', fees: 'profile', live: 'home' };
 
 /**
  * The tab bar's own icons, apart from the app-wide set in ui.js because each
@@ -6049,7 +6049,13 @@ const NAV_ICONS = {
     ],
     stroke: ['M5.5 18v2.5', 'M18.5 18v2.5'],
   },
-  // CoachBook's Timetable, Tests and Fees tabs.
+  // CoachBook's Batches, Timetable, Tests and Fees tabs.
+  batchesTab: {
+    line: ['M7 3.5h10', { tag: 'rect', x: 3, y: 6.5, width: 18, height: 14, rx: 3 }, 'M10.5 10.6v5.8l4.8-2.9z'],
+    body: [{ tag: 'rect', x: 3, y: 6.5, width: 18, height: 14, rx: 3 }],
+    stroke: ['M7 3.5h10'],
+    cut: ['M10.5 10.6v5.8l4.8-2.9z'],
+  },
   calendarTab: {
     line: [{ tag: 'rect', x: 3, y: 5, width: 18, height: 16, rx: 3 }, 'M8 3v4', 'M16 3v4', 'M3 10h18', 'M7.5 14h2', 'M14.5 14h2', 'M7.5 17.5h2'],
     body: [{ tag: 'rect', x: 3, y: 5, width: 18, height: 16, rx: 3 }],
@@ -11409,7 +11415,7 @@ function renderPortalApp(ctx, initialMe) {
       return;
     }
 
-    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials', 'fees'] : [])]);
+    const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials', 'fees', 'live'] : [])]);
     clear(list).append(
       ...items.map((item) => {
         const style = NOTIFICATION_STYLE[item.category] ?? NOTIFICATION_STYLE.announcement;
@@ -12576,7 +12582,7 @@ function renderPortalApp(ctx, initialMe) {
     profile: renderProfileTab,
     // CoachBook replaces Home and Schedule and adds its own screens; the Pass
     // (the QR student ID) and Profile stay the portal's own.
-    ...(isCoaching() ? coachingPortalTabs({ getMe: () => me, switchTab }) : {}),
+    ...(isCoaching() ? coachingPortalTabs({ getMe: () => me, switchTab, registerCleanup, openScreen }) : {}),
   };
 
   paintTabbar();
@@ -12620,7 +12626,7 @@ function renderPortalApp(ctx, initialMe) {
   // reload would otherwise reopen the notification's screen forever after.
   const requested = window.location.hash.replace(/^#\/portal\/?/, '').split(/[/?]/)[0];
   if (requested) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/portal`);
-  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials', 'fees'] : [])]);
+  const reachable = new Set([...TABS.map((tab) => tab.key), 'pass', 'pay', 'schedule', ...(isCoaching() ? ['attendance', 'materials', 'fees', 'live'] : [])]);
   const restored = lastTab.get();
   // The phone's workout notification: its taps routed to this portal instance.
   // Taps that launched the app are handed over right here, before the first

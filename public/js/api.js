@@ -547,6 +547,8 @@ export const api = {
     request('GET', '/platform/admin/backups', undefined, { token: platformSession.token }),
   platformRunBackup: () =>
     request('POST', '/platform/admin/backups/run', {}, { token: platformSession.token }),
+  platformStorage: () =>
+    request('GET', '/platform/admin/storage', undefined, { token: platformSession.token }),
 
   // Platform-wide exercise catalogue, with demo images / GIFs / clips.
   platformCatalog: (params) =>

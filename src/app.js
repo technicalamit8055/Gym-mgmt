@@ -8,6 +8,9 @@ import { authRoutes, staffRoutes } from './routes/auth.js';
 import { bookingRoutes, classRoutes } from './routes/classes.js';
 import { coachingRoutes } from './routes/coaching/index.js';
 import { coachingPortalRoutes } from './routes/coaching/portal.js';
+import { liveHlsRoutes, recordingHlsRoutes } from './routes/coaching/liveHls.js';
+import { studioRoutes } from './routes/coaching/studio.js';
+import { handleYoutubeCallback } from './routes/coaching/youtube.js';
 import { handleTlsAsk } from './routes/customDomains.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { dietRoutes } from './routes/diets.js';
@@ -120,6 +123,11 @@ export function createApp() {
   // that hostname already resolving to a gym.
   app.get('/api/custom-domains/tls-check', handleTlsAsk);
 
+  // Google sends every institute's YouTube sign-in back to this one address
+  // (a registered redirect URI cannot vary by gym), so it finds its own
+  // institute from the sign-in's state — see routes/coaching/youtube.js.
+  app.get('/api/youtube/callback', handleYoutubeCallback);
+
   app.use(resolveTenant);
 
   // The installed-app manifest, named after whichever gym the address resolved
@@ -195,6 +203,13 @@ export function createApp() {
   // CoachBook: courses, batches, admissions, fees, attendance, timetable,
   // tests and study material — one mount, gated per module inside.
   app.use('/api/coaching', coachingRoutes);
+  // The classroom smartboard's controller (the studio/ app), signed in with
+  // its own device token rather than a person's — see coaching/studio.js.
+  app.use('/api/studio', studioRoutes);
+  // A private class's video, for students' players: a signed link, no sign-in.
+  app.use('/api/live-hls', liveHlsRoutes);
+  // A recorded lecture this server holds, the same way.
+  app.use('/api/recording-hls', recordingHlsRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });

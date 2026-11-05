@@ -1,3 +1,4 @@
+import { gymDateOf } from '../clock.js';
 import { all } from '../db.js';
 import { addDays, today } from '../validate.js';
 import { moduleEnabled } from '../verticals.js';
@@ -17,7 +18,10 @@ import { coachingSettings, sendInstallmentReminder } from './notify.js';
  *
  * reminder_sent_at is the only state: it is stamped when a reminder is
  * queued (and put back if it fails — see notify.js), so re-running the sweep
- * is always safe.
+ * is always safe. It is a UTC instant, so it is read back as the gym-local
+ * date before being compared with one: a bare date() puts a reminder sent just
+ * after midnight IST on "yesterday", and it went out again every hour until
+ * 05:30.
  */
 export function sendCoachingFeeReminders({ gymName, currency = 'INR' } = {}) {
   try {
@@ -28,6 +32,7 @@ export function sendCoachingFeeReminders({ gymName, currency = 'INR' } = {}) {
     const now = today();
     const target = addDays(now, settings.fee_reminder_days_before ?? 3);
     const overdueEvery = Math.max(1, settings.overdue_reminder_days ?? 7);
+    const sentOn = gymDateOf('inst.reminder_sent_at');
     const due = all(
       `SELECT inst.*, fp.member_id, c.name AS course_name, m.first_name, m.last_name, m.phone, m.emergency_phone
        FROM (${INSTALLMENT_SELECT}) inst
@@ -36,15 +41,15 @@ export function sendCoachingFeeReminders({ gymName, currency = 'INR' } = {}) {
        JOIN members m ON m.id = fp.member_id
        WHERE fp.status = 'active' AND inst.balance > 0.005 AND m.status = 'active'
          AND (
-           (inst.due_date = ? AND (inst.reminder_sent_at IS NULL OR date(inst.reminder_sent_at) < ?))
+           (inst.due_date = ? AND (inst.reminder_sent_at IS NULL OR ${sentOn} < ?))
            OR (
              inst.due_date < ?
              AND (
                inst.reminder_sent_at IS NULL
                -- the "due soon" nudge doesn't count: the first overdue one
                -- goes the day after the due date, not a whole interval later
-               OR date(inst.reminder_sent_at) <= inst.due_date
-               OR date(inst.reminder_sent_at) <= date(?, ?)
+               OR ${sentOn} <= inst.due_date
+               OR ${sentOn} <= date(?, ?)
              )
            )
          )`,

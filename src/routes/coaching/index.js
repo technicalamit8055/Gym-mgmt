@@ -4,11 +4,16 @@ import { academicRoutes } from './academics.js';
 import { admissionRoutes } from './admissions.js';
 import { attendanceRoutes } from './attendance.js';
 import { feeRoutes } from './fees.js';
+import { liveRoutes } from './live.js';
 import { materialRoutes } from './materials.js';
 import { overviewRoutes } from './overview.js';
+import { recordingRoutes } from './recordings.js';
 import { studentRoutes } from './students.js';
+import { studioDeviceRoutes } from './studio.js';
 import { testRoutes } from './tests.js';
 import { timetableRoutes } from './timetable.js';
+import { streamingRoutes } from './streaming.js';
+import { youtubeRoutes } from './youtube.js';
 
 /**
  * CoachBook's staff API, mounted at /api/coaching.
@@ -29,3 +34,8 @@ coachingRoutes.use(attendanceRoutes);
 coachingRoutes.use(timetableRoutes);
 coachingRoutes.use(testRoutes);
 coachingRoutes.use(materialRoutes);
+coachingRoutes.use(liveRoutes);
+coachingRoutes.use(recordingRoutes);
+coachingRoutes.use(studioDeviceRoutes);
+coachingRoutes.use(youtubeRoutes);
+coachingRoutes.use(streamingRoutes);

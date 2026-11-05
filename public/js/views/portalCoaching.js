@@ -1,6 +1,8 @@
 import { coaching } from '../coachingApi.js';
 import { clear, date, h, initials, money, renderIcon, time, toast, today } from '../ui.js';
 import { attendanceCalendarView } from './coaching/attendance.js';
+import { liveClassTab } from './coaching/liveClass.js';
+import { myBatchesScreens } from './coaching/myBatches.js';
 import { fill, INSTALLMENT_STATUS, MATERIAL_KIND_LABEL, pct, TEST_TYPE_LABEL, tone, WEEK_ORDER, WEEKDAYS, WEEKDAYS_LONG } from './coaching/common.js';
 
 /**
@@ -8,7 +10,10 @@ import { fill, INSTALLMENT_STATUS, MATERIAL_KIND_LABEL, pct, TEST_TYPE_LABEL, to
  * portal.js draws for an institute instead of the gym's Workout/Diet:
  *
  *   Home        digital student ID, today's classes, fee banner, latest result
- *   Timetable   the week's lectures by day, and upcoming tests
+ *   Batches     My Batches: each batch's subjects, their recorded lectures,
+ *               notes and DPPs, and the lecture player (coaching/myBatches.js)
+ *   Timetable   the week's lectures by day, and upcoming tests — off the
+ *               bar since Batches took its slot, reached from Home's Today card
  *   Tests       results with rank and percentile, subject averages, trend
  *   Fees        course fee, installments, payments and PDF receipts — off
  *               the bar (via Home and Profile) while the Store holds its slot
@@ -16,6 +21,9 @@ import { fill, INSTALLMENT_STATUS, MATERIAL_KIND_LABEL, pct, TEST_TYPE_LABEL, to
  *               draws the CoachBook store for an institute (portalStore.js)
  *   Attendance  the month as a calendar (from Home and Profile)
  *   Notes       notes, DPPs, PYQs and assignments to download (from Home)
+ *   Live        the class on air: stream, polls, chat and doubts, and its
+ *               notes once it ends (coaching/liveClass.js; from Home's
+ *               "Live now" card)
  *
  * The QR ID itself is the portal's existing Pass tab — the same scannable
  * code the gate terminal and the desk read.
@@ -49,10 +57,30 @@ function classRow(slot) {
   );
 }
 
-export function coachingPortalTabs({ getMe, switchTab }) {
+/** Home's "Live now" card, one per class of the student's on air. */
+function liveCard(session, switchTab) {
+  return h(
+    'button',
+    { class: 'cbl-home', type: 'button', onclick: () => switchTab('live') },
+    h('span', { class: 'cbl-home-badge' }, h('span', { class: 'cbl-dot' }), 'LIVE'),
+    h(
+      'div',
+      { class: 'cb-grow' },
+      h('div', { class: 'cb-strong' }, `${session.subject_name} is live now`),
+      h('div', { class: 'cb-small cbl-home-sub' }, [session.faculty_name, session.batch_name].filter(Boolean).join(' · ')),
+    ),
+    h('span', { class: 'cbl-home-join' }, 'Join', renderIcon('chevronRight', { size: 16 })),
+  );
+}
+
+export function coachingPortalTabs({ getMe, switchTab, registerCleanup, openScreen }) {
   async function home() {
     const me = getMe();
-    const data = await coaching.portal.overview();
+    // A class on air goes first on Home; if asking fails, Home still loads.
+    const [data, live] = await Promise.all([
+      coaching.portal.overview(),
+      coaching.portal.liveActive().catch(() => ({ items: [] })),
+    ]);
     const m = me.member;
     const enrollment = data.enrollments[0];
     const att = data.attendance;
@@ -173,6 +201,7 @@ export function coachingPortalTabs({ getMe, switchTab }) {
       'div',
       { class: 'portal-tab-body cbp-stack' },
       h('div', { class: 'portal-page-head' }, h('h2', {}, `${hello}, ${m.first_name}`), h('p', {}, 'Here is your day at the institute.')),
+      ...live.items.map((session) => liveCard(session, switchTab)),
       idCard,
       banner,
       classes,
@@ -431,13 +460,16 @@ export function coachingPortalTabs({ getMe, switchTab }) {
     );
   }
 
-  return { home, schedule, attendance, tests, materials, fees };
+  const live = () => liveClassTab({ registerCleanup, switchTab });
+  const { batchesTab: batches } = myBatchesScreens({ openScreen, switchTab, registerCleanup });
+
+  return { home, schedule, attendance, tests, materials, fees, live, batches };
 }
 
 /** The bottom bar for an institute (see buildTabs in portal.js). */
 export const COACHING_PORTAL_TABS = [
   { key: 'home', label: 'Home', icon: 'home' },
-  { key: 'schedule', label: 'Timetable', icon: 'calendarTab' },
+  { key: 'batches', label: 'Batches', icon: 'batchesTab' },
   { key: 'tests', label: 'Tests', icon: 'trophyTab' },
   { key: 'fees', label: 'Fees', icon: 'walletTab' },
   { key: 'profile', label: 'Profile', icon: 'person' },

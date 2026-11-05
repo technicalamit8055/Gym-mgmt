@@ -70,6 +70,19 @@ export const coaching = {
   faculty: () => request('GET', `${C}/faculty`),
   updateFaculty: (id, payload) => request('PATCH', `${C}/faculty/${id}`, payload),
 
+  // Smartboards running CoachBook Studio
+  studioDevices: () => request('GET', `${C}/studio-devices`),
+  createStudioDevice: (payload) => request('POST', `${C}/studio-devices`, payload),
+  newPairingCode: (id) => request('POST', `${C}/studio-devices/${id}/pairing-code`, {}),
+  deleteStudioDevice: (id) => request('DELETE', `${C}/studio-devices/${id}`),
+  // The YouTube channel boards stream unlisted classes to
+  youtube: () => request('GET', `${C}/youtube`),
+  youtubeConnect: () => request('POST', `${C}/youtube/connect`, {}),
+  youtubeDisconnect: () => request('DELETE', `${C}/youtube`),
+  streaming: () => request('GET', `${C}/streaming`),
+  setStreaming: (provider) => request('PUT', `${C}/streaming`, { provider }),
+  updateStreaming: (patch) => request('PUT', `${C}/streaming`, patch),
+
   // Students & enrollment
   academics: (memberId) => request('GET', `${C}/students/${memberId}/academics`),
   enroll: (payload) => request('POST', `${C}/enrollments`, payload),
@@ -152,8 +165,22 @@ export const coaching = {
   submissions: (id) => request('GET', `${C}/materials/${id}/submissions`),
   setSubmission: (id, payload) => request('PUT', `${C}/materials/${id}/submissions`, payload),
 
+  // Recorded lectures, by batch and subject
+  recordings: (params) => request('GET', `${C}/recordings${query(params)}`),
+  addRecording: (payload) => request('POST', `${C}/recordings`, payload),
+  updateRecording: (id, payload) => request('PATCH', `${C}/recordings/${id}`, payload),
+  deleteRecording: (id) => request('DELETE', `${C}/recordings/${id}`),
+  playRecording: (id) => request('GET', `${C}/recordings/${id}/play`),
+  checkRecording: (id) => request('POST', `${C}/recordings/${id}/check`, {}),
+
   // The student & parent app
   portal: {
+    // My Batches: the batches, a batch's subjects, a subject's lectures and notes.
+    myBatches: () => request('GET', '/portal/coaching/batches', undefined, { member: true }),
+    myBatch: (id) => request('GET', `/portal/coaching/batches/${id}`, undefined, { member: true }),
+    mySubject: (batchId, subjectId) => request('GET', `/portal/coaching/batches/${batchId}/subjects/${subjectId}`, undefined, { member: true }),
+    recording: (id) => request('GET', `/portal/coaching/recordings/${id}`, undefined, { member: true }),
+    saveProgress: (id, payload) => request('PUT', `/portal/coaching/recordings/${id}/progress`, payload, { member: true }),
     overview: () => request('GET', '/portal/coaching/overview', undefined, { member: true }),
     timetable: () => request('GET', '/portal/coaching/timetable', undefined, { member: true }),
     attendance: (month) => request('GET', `/portal/coaching/attendance${query({ month })}`, undefined, { member: true }),
@@ -163,5 +190,18 @@ export const coaching = {
     fees: () => request('GET', '/portal/coaching/fees', undefined, { member: true }),
     downloadReceipt: (id) =>
       download(`/portal/coaching/fees/payments/${id}/receipt`, `Fee_Receipt_FEE-${String(id).padStart(5, '0')}.pdf`, { member: true }),
+    // Live classes: what is on air, and a one-time pass onto its socket.
+    liveActive: () => request('GET', '/portal/coaching/live/active', undefined, { member: true }),
+    liveTicket: (sessionId) => request('POST', `/portal/coaching/live/sessions/${sessionId}/socket-ticket`, undefined, { member: true }),
   },
 };
+
+/**
+ * The address of the live-class socket for a ticket from liveTicket(). On
+ * the web that is this page's own host; in the native app serverUrl() names
+ * the server an /api path goes to, and the socket is on that same host.
+ */
+export function liveSocketUrl({ ticket, path }) {
+  const origin = new URL(serverUrl(`${pathPrefix}/api/health`), window.location.href).origin;
+  return `${origin.replace(/^http/, 'ws')}${path}?ticket=${encodeURIComponent(ticket)}`;
+}

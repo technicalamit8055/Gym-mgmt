@@ -63,7 +63,8 @@ const bytes = (n) => {
   const value = Number(n || 0);
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value < 1024 ** 3) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / 1024 ** 3).toFixed(1)} GB`;
 };
 
 const statusBadge = (status) =>
@@ -1082,6 +1083,57 @@ function backupCard() {
 }
 
 /**
+ * The disk class recordings live on (src/recordingStorage.js): how full it
+ * is, and whose recordings take the most. Amber once it is under the warning
+ * line, red once recording has paused for every institute.
+ */
+function storageCard() {
+  const head = h('div', { class: 'card-head' }, cardTitle('database', 'Server storage', 'blue'));
+  const body = h('div', {}, h('div', { class: 'empty' }, 'Loading…'));
+  const pill = (icon, text) => h('span', { class: 'op-pill' }, renderIcon(icon, { size: 13 }), text);
+
+  (async () => {
+    try {
+      const s = await api.platformStorage();
+      const { disk } = s;
+      const used = Math.max(0, Math.min(100, 100 - disk.free_pct));
+      const tone = disk.state === 'full' ? 'red' : disk.state === 'low' ? 'amber' : 'green';
+      clear(head).append(cardTitle('database', 'Server storage', tone));
+      const note = {
+        full: [`Recording is paused for every institute: under ${s.stop_pct}% free. Live classes carry on. Delete old recordings, shorten how long institutes keep them, or enlarge the disk.`, 'op-note-red'],
+        low: [`Under ${s.warn_pct}% free. Recording pauses by itself under ${s.stop_pct}%.`, 'op-note-amber'],
+        ok: [null, null],
+      }[disk.state];
+      // The DOM's own append writes a null as the word "null": only what is there.
+      clear(body).append(...[
+        h('div', { class: 'op-pills' },
+          pill('database', `${bytes(disk.free_bytes)} free of ${bytes(disk.total_bytes)}`),
+          pill('play', `Recordings: ${bytes(s.recordings_bytes)}`),
+          pill('alert', `Recording pauses under ${s.stop_pct}% free`)),
+        h('div', { style: 'margin-top:12px;height:10px;border-radius:999px;background:var(--surface-2);overflow:hidden', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(used)), 'aria-label': 'Disk used' },
+          h('div', { style: `height:100%;width:${used}%;background:var(--${tone})` })),
+        h('div', { class: 'op-list-note', style: 'margin-top:6px' }, `${Math.round(used)}% used · ${disk.free_pct}% free`),
+        note[0] ? h('p', { class: note[1], style: 'margin:10px 0 0;font-size:13px' }, note[0]) : null,
+        h('div', { style: 'margin-top:14px' },
+          s.institutes.length
+            ? h('div', { class: 'op-list' }, ...s.institutes.slice(0, 8).map((i) => h('div', { class: 'op-list-row' },
+              h('span', { class: 'op-list-icon tone-blue' }, renderIcon('play', { size: 15 })),
+              h('div', { class: 'op-list-main' },
+                h('div', { class: 'op-list-title' }, i.name),
+                h('div', { class: 'op-list-note' }, `${i.recordings} recording${i.recordings === 1 ? '' : 's'} · kept ${i.keep_days} days · ${i.recording_on ? 'recording on' : 'recording off'}`)),
+              h('span', { class: 'op-list-aside' }, bytes(i.bytes)))))
+            : emptyState('Institutes turn recording on under Smartboards → Who can watch classes.', { icon: 'play', title: 'No class recordings on this server' })),
+        h('div', { class: 'op-list-note', style: 'margin-top:10px', title: s.recordings_dir }, `Stored in ${s.recordings_dir}`),
+      ].filter(Boolean));
+    } catch (err) {
+      clear(body).append(h('div', { class: 'empty' }, err.message || 'Could not read the disk'));
+    }
+  })();
+
+  return h('div', { class: 'card' }, head, body);
+}
+
+/**
  * The gyms that want the operator today: trials about to lapse or already
  * lapsed, suspensions, unreadable databases and domains stuck on DNS. Worst
  * first, so the top of the card is always the most urgent thing.
@@ -1784,6 +1836,8 @@ export async function renderPlatformConsole({ context, rerender }) {
         attentionCard(data.items, (row) => openDetailModal(row, rerender)),
         backupCard(),
       ),
+
+      storageCard(),
 
       directory,
     ),

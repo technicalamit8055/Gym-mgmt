@@ -38,7 +38,7 @@ const ALLOWED_MIMES = new Set([
 /** Never the bytes — just whether there is a file, and how big. */
 export const MATERIAL_SELECT = `
   SELECT ma.id, ma.course_id, ma.batch_id, ma.subject_id, ma.title, ma.kind, ma.description, ma.file_url, ma.file_name,
-         ma.mime, ma.file_size_bytes, ma.due_date, ma.uploaded_by, ma.created_at,
+         ma.mime, ma.file_size_bytes, ma.due_date, ma.uploaded_by, ma.created_at, ma.live_session_id,
          (ma.bytes IS NOT NULL) AS has_file,
          c.name AS course_name, b.name AS batch_name, s.name AS subject_name, u.name AS uploaded_by_name
   FROM academic_materials ma

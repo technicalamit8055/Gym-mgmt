@@ -567,4 +567,304 @@ export const COACHING_MIGRATIONS = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_sent ON whatsapp_logs(sent_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_logs_member ON whatsapp_logs(member_id)');
   },
+
+  /* ---------------------------------------------- Live classes --- */
+  // A lecture streamed to one batch: the teacher goes live, the batch's
+  // student app shows it, and polls and doubts hang off the session. See
+  // src/routes/coaching/live.js. The started/ended instants are UTC
+  // `YYYY-MM-DD HH:MM:SS`, the same shape as datetime('now').
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS live_sessions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id     INTEGER NOT NULL REFERENCES academic_batches(id) ON DELETE CASCADE,
+        subject_id   INTEGER REFERENCES academic_subjects(id) ON DELETE SET NULL,
+        faculty_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        title        TEXT,
+        status       TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'live', 'ended')),
+        stream_url   TEXT,
+        scheduled_at TEXT,
+        started_at   TEXT,
+        ended_at     TEXT,
+        created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        CHECK (status <> 'live' OR started_at IS NOT NULL),
+        CHECK (status <> 'ended' OR ended_at IS NOT NULL)
+      )
+    `);
+    // One class on air per batch and per teacher, held by the database rather
+    // than a check-then-insert, so two taps on "Go live" cannot both win.
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_live_one_per_batch ON live_sessions(batch_id) WHERE status = 'live'");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_live_one_per_faculty ON live_sessions(faculty_id) WHERE status = 'live'");
+    db.exec('CREATE INDEX IF NOT EXISTS idx_live_batch ON live_sessions(batch_id, status)');
+
+    // "Which option?" with A–D on the board: the question and option texts are
+    // optional because the teacher usually just says them. option_count is how
+    // many of A–D are in play, and the correct answer has to be one of them
+    // (NULL for an opinion poll). duration_sec is the countdown.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS live_polls (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id     INTEGER NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+        question       TEXT,
+        option_count   INTEGER NOT NULL DEFAULT 4 CHECK (option_count BETWEEN 2 AND 4),
+        option_a       TEXT,
+        option_b       TEXT,
+        option_c       TEXT,
+        option_d       TEXT,
+        correct_option TEXT CHECK (correct_option IS NULL OR (correct_option IN ('A', 'B', 'C', 'D') AND instr('ABCD', correct_option) <= option_count)),
+        duration_sec   INTEGER NOT NULL DEFAULT 30 CHECK (duration_sec BETWEEN 5 AND 600),
+        status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'open', 'closed')),
+        opened_at      TEXT,
+        closes_at      TEXT,
+        closed_at      TEXT,
+        created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_live_polls_session ON live_polls(session_id, id)');
+    // One answer per student per poll. response_ms is the time from the poll
+    // opening to the answer — the leaderboard's tie-break. Whether it was right
+    // is choice = correct_option, worked out when read, never stored, so
+    // fixing a mis-keyed answer re-marks every vote.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS live_poll_votes (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        poll_id     INTEGER NOT NULL REFERENCES live_polls(id) ON DELETE CASCADE,
+        member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        choice      TEXT NOT NULL CHECK (choice IN ('A', 'B', 'C', 'D')),
+        response_ms INTEGER NOT NULL CHECK (response_ms >= 0),
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (poll_id, member_id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_live_votes_member ON live_poll_votes(member_id)');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS live_doubts (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id  INTEGER NOT NULL REFERENCES live_sessions(id) ON DELETE CASCADE,
+        member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        body        TEXT NOT NULL CHECK (length(body) > 0),
+        pinned      INTEGER NOT NULL DEFAULT 0,
+        pinned_at   TEXT,
+        resolved    INTEGER NOT NULL DEFAULT 0,
+        resolved_at TEXT,
+        resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_live_doubts_session ON live_doubts(session_id, pinned, resolved)');
+  },
+
+  // The notes a smartboard publishes when a live class ends point back at the
+  // class. One notes file per class: a retried or corrected export replaces
+  // the file instead of listing the same lecture twice.
+  (db) => {
+    ensureColumn(db, 'academic_materials', 'live_session_id', 'INTEGER REFERENCES live_sessions(id) ON DELETE SET NULL');
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_materials_live_notes ON academic_materials(live_session_id) WHERE live_session_id IS NOT NULL AND kind = 'notes'",
+    );
+  },
+
+  // One doubt pinned on the class's screens at a time; pinning another
+  // unpins the first in the same transaction (src/coaching/liveDoubts.js).
+  // pinned_at is when it was last pinned, kept after it comes down.
+  (db) => {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_live_doubts_one_pinned ON live_doubts(session_id) WHERE pinned = 1');
+  },
+
+  /* ------------------------------------------- Smartboard studios --- */
+  // A classroom smartboard running CoachBook Studio (the studio/ app). It is
+  // paired to a classroom, not a person: a manager registers it and gets a
+  // one-time pairing code, the board trades the code for its device token,
+  // and from then on it runs the classes timetabled in its room. Both secrets
+  // are stored only as SHA-256 hashes — they are long random strings, so a
+  // fast hash is enough; nothing here can be guessed the way a password can.
+  // See src/coaching/studio.js.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS studio_devices (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        name               TEXT NOT NULL,
+        classroom_id       INTEGER NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+        token_hash         TEXT UNIQUE,
+        pairing_code_hash  TEXT UNIQUE,
+        pairing_expires_at TEXT,
+        paired_at          TEXT,
+        last_seen_at       TEXT,
+        created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // Which board ran a class, so it can keep controlling the class it
+    // started even past the end of the timetable slot.
+    ensureColumn(db, 'live_sessions', 'studio_device_id', 'INTEGER REFERENCES studio_devices(id) ON DELETE SET NULL');
+  },
+
+  /* --------------------------------------------- Unlisted YouTube --- */
+  // The institute's YouTube channel, signed in to once by a manager, so each
+  // class a board streams becomes its own unlisted broadcast. One row at most.
+  // The refresh token is sealed (src/sealed.js); `broken_at` is set when
+  // Google stops accepting it, so the Smartboards page can ask for a
+  // reconnect instead of every class failing quietly. See src/coaching/youtube.js.
+  //
+  // A board's YouTube stream (its ingest key) is created once and reused for
+  // every class, sealed too; `youtube_stream_channel` says which channel it
+  // belongs to, so connecting a different channel makes a new one.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS youtube_connection (
+        id                   INTEGER PRIMARY KEY CHECK (id = 1),
+        channel_id           TEXT NOT NULL,
+        channel_title        TEXT,
+        refresh_token_sealed TEXT NOT NULL,
+        connected_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        connected_at         TEXT NOT NULL DEFAULT (datetime('now')),
+        broken_at            TEXT,
+        broken_reason        TEXT
+      )
+    `);
+    // A sign-in in progress: the hash of the one-time state sent to Google,
+    // who started it, and where to send them back.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS youtube_oauth_states (
+        state_hash  TEXT PRIMARY KEY,
+        user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        return_url  TEXT NOT NULL,
+        expires_at  TEXT NOT NULL
+      )
+    `);
+    ensureColumn(db, 'studio_devices', 'youtube_stream_id', 'TEXT');
+    ensureColumn(db, 'studio_devices', 'youtube_stream_channel', 'TEXT');
+    ensureColumn(db, 'studio_devices', 'youtube_ingest_sealed', 'TEXT');
+    ensureColumn(db, 'live_sessions', 'youtube_broadcast_id', 'TEXT');
+  },
+
+  /* ---------------------------------------------- Private streaming --- */
+  // Where an institute's boards stream: 'youtube' (as before) or 'private',
+  // Cloudflare Stream played in CoachBook's own player. A board's Cloudflare
+  // live input is made once and reused, its ingest key sealed like the
+  // YouTube one; a class records which input carries it, and each student is
+  // signed their own link to it. See src/coaching/privateStream.js.
+  (db) => {
+    ensureColumn(db, 'coaching_settings', 'stream_provider', "TEXT NOT NULL DEFAULT 'youtube' CHECK (stream_provider IN ('youtube', 'private'))");
+    ensureColumn(db, 'studio_devices', 'cf_live_input_id', 'TEXT');
+    ensureColumn(db, 'studio_devices', 'cf_ingest_sealed', 'TEXT');
+    ensureColumn(db, 'live_sessions', 'cf_live_input_id', 'TEXT');
+  },
+
+  /* ---------------------------------------------- Recorded lectures --- */
+  // A batch's lecture library, by subject: what students rewatch after class.
+  // A live class adds its own row when it ends (src/coaching/recordings.js);
+  // staff can add a lecture recorded elsewhere as a link. `video_ref` is the
+  // YouTube video id, the Cloudflare video uid, or the link itself. A
+  // Cloudflare recording is 'processing' until Cloudflare has the video —
+  // `checked_at` is when we last asked. `chapter` is free text that groups a
+  // subject's lectures in the app ("Electrostatics").
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS class_recordings (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id        INTEGER NOT NULL REFERENCES academic_batches(id) ON DELETE CASCADE,
+        subject_id      INTEGER REFERENCES academic_subjects(id) ON DELETE SET NULL,
+        faculty_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        live_session_id INTEGER REFERENCES live_sessions(id) ON DELETE SET NULL,
+        title           TEXT NOT NULL,
+        chapter         TEXT,
+        source          TEXT NOT NULL CHECK (source IN ('youtube', 'cloudflare', 'server', 'link')),
+        video_ref       TEXT,
+        status          TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('processing', 'ready', 'failed')),
+        duration_sec    INTEGER CHECK (duration_sec IS NULL OR duration_sec >= 0),
+        recorded_at     TEXT NOT NULL,
+        published       INTEGER NOT NULL DEFAULT 1,
+        checked_at      TEXT,
+        created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        CHECK (status <> 'ready' OR video_ref IS NOT NULL)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_recordings_batch ON class_recordings(batch_id, subject_id, recorded_at)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_recordings_session ON class_recordings(live_session_id) WHERE live_session_id IS NOT NULL');
+    // Where each student got to in a lecture, for "Continue watching" and the
+    // ticks on a subject's list. Completed once they reach 90% of it.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS recording_progress (
+        recording_id INTEGER NOT NULL REFERENCES class_recordings(id) ON DELETE CASCADE,
+        member_id    INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        position_sec INTEGER NOT NULL DEFAULT 0 CHECK (position_sec >= 0),
+        completed    INTEGER NOT NULL DEFAULT 0,
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (recording_id, member_id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_recording_progress_member ON recording_progress(member_id, updated_at)');
+  },
+
+  /* ---------------------------------- Recording self-hosted classes --- */
+  // A private class this server carries can be recorded to its disk
+  // (src/coaching/serverRecording.js) and filed as source 'server'. Off by
+  // default — it is the largest thing the server stores — and deleted after
+  // `recording_keep_days`.
+  //
+  // Databases made before 'server' was a source get class_recordings
+  // rebuilt to allow it. recording_progress points at the table with ON
+  // DELETE CASCADE, so foreign keys are off for the rebuild — dropping the
+  // old table would otherwise take every student's progress with it — and
+  // checked before they go back on, as SQLite's own procedure does it.
+  (db) => {
+    ensureColumn(db, 'coaching_settings', 'record_classes', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(db, 'coaching_settings', 'recording_keep_days', 'INTEGER NOT NULL DEFAULT 30');
+    const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'class_recordings'").get();
+    if (table && !table.sql.includes("'server'")) rebuildRecordingsForServer(db);
+    // How much of the server's disk a recording takes (src/recordingStorage.js) —
+    // after the rebuild, which copies only the columns it names.
+    if (table) ensureColumn(db, 'class_recordings', 'size_bytes', 'INTEGER');
+  },
 ];
+
+/** Widens class_recordings.source to allow 'server' — see the migration above. */
+function rebuildRecordingsForServer(db) {
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE class_recordings_new (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id        INTEGER NOT NULL REFERENCES academic_batches(id) ON DELETE CASCADE,
+        subject_id      INTEGER REFERENCES academic_subjects(id) ON DELETE SET NULL,
+        faculty_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        live_session_id INTEGER REFERENCES live_sessions(id) ON DELETE SET NULL,
+        title           TEXT NOT NULL,
+        chapter         TEXT,
+        source          TEXT NOT NULL CHECK (source IN ('youtube', 'cloudflare', 'server', 'link')),
+        video_ref       TEXT,
+        status          TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('processing', 'ready', 'failed')),
+        duration_sec    INTEGER CHECK (duration_sec IS NULL OR duration_sec >= 0),
+        recorded_at     TEXT NOT NULL,
+        published       INTEGER NOT NULL DEFAULT 1,
+        checked_at      TEXT,
+        created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        CHECK (status <> 'ready' OR video_ref IS NOT NULL)
+      )
+    `);
+    db.exec(`
+      INSERT INTO class_recordings_new (id, batch_id, subject_id, faculty_id, live_session_id, title, chapter, source, video_ref,
+                                        status, duration_sec, recorded_at, published, checked_at, created_by, created_at)
+      SELECT id, batch_id, subject_id, faculty_id, live_session_id, title, chapter, source, video_ref,
+             status, duration_sec, recorded_at, published, checked_at, created_by, created_at FROM class_recordings
+    `);
+    db.exec('DROP TABLE class_recordings');
+    db.exec('ALTER TABLE class_recordings_new RENAME TO class_recordings');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_recordings_batch ON class_recordings(batch_id, subject_id, recorded_at)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_recordings_session ON class_recordings(live_session_id) WHERE live_session_id IS NOT NULL');
+    const broken = db.prepare('PRAGMA foreign_key_check').all();
+    if (broken.length) throw new Error(`class_recordings rebuild left ${broken.length} broken references`);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}

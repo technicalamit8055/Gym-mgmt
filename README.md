@@ -366,6 +366,8 @@ All optional — sensible defaults apply.
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | generated | Web Push key pair (base64url raw P-256 point / private scalar). When unset, generated once and kept in `VAPID_KEY_FILE` |
 | `VAPID_KEY_FILE` | `<platform db dir>/vapid-keys.json` | Where the generated key pair is kept — back it up with the databases |
 | `VAPID_SUBJECT` | `mailto:$PLATFORM_ADMIN_EMAIL` | Contact the push services (Google, Apple, Mozilla) can reach; must be `mailto:` or `https:` |
+| `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` | — | Google OAuth client for CoachBook's unlisted YouTube classes. Unset, the Smartboards page says YouTube sign-in isn't set up and boards stream publicly with a typed-in key. See [docs/YOUTUBE.md](docs/YOUTUBE.md) |
+| `YOUTUBE_REDIRECT_URI` | `https://$ROOT_DOMAIN/api/youtube/callback` (`http://localhost:$PORT/…` without `ROOT_DOMAIN`) | Must match the redirect URI registered on the Google client exactly |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | — / `587` | Outgoing mail for members' "Forgot password?" codes. Unset, members can still get a temporary password on WhatsApp (once a day), from the gym's linked WhatsApp |
 | `MAIL_FROM` | `` | Address those emails come from; the gym's name is the display name |
 | `PUSH_SWEEP_INTERVAL_MS` | `300000` | How often the reminder sweep runs |

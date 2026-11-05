@@ -5,10 +5,12 @@ import { renderAcademics, renderBatchDetail } from './academics.js';
 import { renderTimetable } from './timetable.js';
 import { renderTests, renderTestDetail } from './tests.js';
 import { renderMaterials } from './materials.js';
+import { renderRecordings } from './recordings.js';
 import { renderFees } from './fees.js';
 import { renderAdmissions } from './admissions.js';
 import { renderFaculty } from './faculty.js';
 import { renderCoachingStore } from './store.js';
+import { renderSmartboards } from './smartboards.js';
 
 /**
  * CoachBook's sidebar, phone tabs and routes — the third vertical's share of
@@ -29,6 +31,7 @@ export function coachingNav() {
     { path: '/timetable', label: 'Timetable', icon: 'calendar' },
     { path: '/tests', label: 'Tests & marks', icon: 'trophy' },
     { path: '/materials', label: 'Study material', icon: 'fileText' },
+    { path: '/recordings', label: 'Recorded lectures', icon: 'play' },
     { section: 'Business' },
     // Money, so the API limits the whole fees screen to the billing roles —
     // hidden rather than letting a teacher click into a 403.
@@ -42,6 +45,9 @@ export function coachingNav() {
     { section: 'Operations' },
     { path: '/faculty', label: 'Faculty', icon: 'users' },
     { path: '/devices', label: 'Biometric devices', icon: 'devices' },
+    // A paired board can start any lecture in its room, so the API keeps
+    // pairing to managers — hidden from everyone else.
+    { path: '/smartboards', label: 'Smartboards', icon: 'monitor', roles: ['admin', 'manager'] },
     { path: '/staff', label: 'Staff accounts', icon: 'staff' },
     { path: '/settings', label: t('settings'), icon: 'settings' },
   ];
@@ -103,6 +109,14 @@ export function coachingRoutes() {
       view: renderMaterials,
     },
     {
+      pattern: /^\/recordings$/,
+      title: 'Recorded lectures',
+      icon: 'play',
+      iconTone: 'violet',
+      subtitle: 'Every class students can rewatch in My Batches, by batch, subject and chapter',
+      view: renderRecordings,
+    },
+    {
       pattern: /^\/fees$/,
       title: 'Fees & installments',
       icon: 'wallet',
@@ -133,6 +147,14 @@ export function coachingRoutes() {
       iconTone: 'blue',
       subtitle: 'Teachers, what they teach, weekly load and this month’s lectures',
       view: renderFaculty,
+    },
+    {
+      pattern: /^\/smartboards$/,
+      title: 'Smartboards',
+      icon: 'monitor',
+      iconTone: 'violet',
+      subtitle: 'Classroom boards running CoachBook Studio — add one and pair it with a code',
+      view: renderSmartboards,
     },
   ];
 }

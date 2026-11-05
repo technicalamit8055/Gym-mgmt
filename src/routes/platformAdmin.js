@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import express, { Router } from 'express';
 import { issuePlatformToken, readToken } from '../auth.js';
 import { archiveTenantDatabase, listBackups, runBackup } from '../backup.js';
+import { storageSummary } from '../recordingStorage.js';
 import { config } from '../config.js';
 import {
   activateDomain,
@@ -475,6 +476,11 @@ platformAdminRoutes.delete('/tenants/:slug', (req, res) => {
 /** One backup at a time per process: two concurrent VACUUM INTO runs would
  * race on the same destination folder and each report the other's files. */
 let backupInFlight = false;
+
+/** The disk class recordings are on, and which institutes use it (src/recordingStorage.js). */
+platformAdminRoutes.get('/storage', (_req, res) => {
+  res.json(storageSummary());
+});
 
 platformAdminRoutes.get('/backups', (_req, res) => {
   res.json({

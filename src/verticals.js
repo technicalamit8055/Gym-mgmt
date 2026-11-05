@@ -168,7 +168,7 @@ export const VERTICALS = {
       shifts: 'Batches',
       emergencyContact: 'Guardian',
     },
-    modules: new Set(['batches', 'admissions', 'fees', 'installments', 'attendance', 'timetable', 'tests', 'materials', 'whatsapp']),
+    modules: new Set(['batches', 'admissions', 'fees', 'installments', 'attendance', 'timetable', 'tests', 'materials', 'whatsapp', 'live']),
     starterPrices: {},
     starterPlans: [],
     /**

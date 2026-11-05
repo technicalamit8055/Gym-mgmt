@@ -13,7 +13,7 @@ process.env.AUTH_SECRET = 'test-secret';
 process.env.WHATSAPP_MESSAGE_GAP_MS = '0';
 
 const { createApp } = await import('../src/app.js');
-const { closeDb, tenantStorage } = await import('../src/db.js');
+const { closeDb, run, tenantStorage } = await import('../src/db.js');
 const { closeRegistryDb, findTenantBySlug, tenantDbPath } = await import('../src/tenants.js');
 const { addDays, today } = await import('../src/validate.js');
 const { sentInMemory } = await import('../src/whatsapp.js');
@@ -309,6 +309,18 @@ describe('admission with an installment fee plan', () => {
       const messages = sentInMemory.slice(before);
       assert.ok(messages.some((m) => m.type === 'fee_due' && /still pending/.test(m.message)));
       assert.ok(messages.some((m) => m.type === 'fee_due' && /is due on/.test(m.message)));
+    });
+  });
+
+  it('does not resend overnight when the reminder went out after midnight IST', async () => {
+    await withWhatsApp(async () => {
+      const store = { slug: SLUG, dbFile: tenantDbPath(SLUG), businessType: 'coaching', timezone: 'Asia/Kolkata' };
+      tenantStorage.run(store, () => {
+        // 00:30 IST today is 19:00 UTC yesterday — stored as UTC, as datetime('now') would have.
+        const sentAt = `${addDays(today(), -1)} 19:00:00`;
+        run('UPDATE student_fee_installments SET reminder_sent_at = ?', [sentAt]);
+        assert.equal(sendCoachingFeeReminders({ gymName: 'Apex Institute' }), 0, 'already reminded today, gym time');
+      });
     });
   });
 

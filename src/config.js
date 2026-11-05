@@ -50,6 +50,22 @@ export const config = {
   storeMediaDir:
     process.env.STORE_MEDIA_DIR ||
     path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'store-media'),
+  // Recordings of private classes this server carried (src/coaching/serverRecording.js),
+  // one folder per institute. Beside the platform DB like the media above —
+  // and the largest thing on it: about 0.8 GB per hour of class recorded.
+  recordingsDir:
+    process.env.RECORDINGS_DIR ||
+    path.join(path.dirname(path.resolve(process.env.PLATFORM_DB_FILE || path.join(ROOT, 'data', 'platform.db'))), 'recordings'),
+  // The disk recordings are on (src/recordingStorage.js): under warnPct free,
+  // the operator is warned (console card, and a daily email where email is
+  // set up); under stopPct — or under stopBytes, on a small disk — new
+  // recordings stop, and one in progress stops where it is. Live classes go
+  // on regardless.
+  recordingDisk: {
+    warnPct: Number(process.env.RECORDING_WARN_FREE_PCT || 20),
+    stopPct: Number(process.env.RECORDING_STOP_FREE_PCT || 10),
+    stopBytes: 2 * 1024 ** 3,
+  },
   trialDays: Number(process.env.TRIAL_DAYS || 7),
   // Open Food Facts, for the member app's barcode scanner (src/foodBarcode.js).
   // Overridable so tests can point it at a local stub instead of the internet.
@@ -216,6 +232,46 @@ export const config = {
   fcm: {
     credentialsFile: process.env.FCM_CREDENTIALS || '',
     projectId: process.env.FCM_PROJECT_ID || '',
+  },
+  // CoachBook's unlisted YouTube classes (src/coaching/youtube.js): an
+  // institute signs in to its channel once, and every class a smartboard
+  // streams becomes its own unlisted broadcast. One OAuth client for the
+  // whole platform — Google Cloud console › APIs & Services › Credentials,
+  // type "Web application" — with redirectUri registered on it exactly.
+  // Unset: the Smartboards page says YouTube sign-in isn't set up on this
+  // server, and boards keep streaming with a typed-in key (public streams).
+  // See docs/YOUTUBE.md.
+  youtube: {
+    clientId: process.env.YOUTUBE_CLIENT_ID || '',
+    clientSecret: process.env.YOUTUBE_CLIENT_SECRET || '',
+    // One fixed address for every institute — Google allows no wildcards —
+    // so it is a platform path, never under /g/<slug> or a custom domain.
+    redirectUri:
+      process.env.YOUTUBE_REDIRECT_URI ||
+      (process.env.ROOT_DOMAIN
+        ? `https://${process.env.ROOT_DOMAIN}/api/youtube/callback`
+        : `http://localhost:${process.env.PORT || 3000}/api/youtube/callback`),
+  },
+  // CoachBook's private classes (src/coaching/privateStream.js): smartboards
+  // stream privately instead of to YouTube, and each student's app gets its
+  // own signed link that runs out, played in CoachBook's own player with a
+  // quality menu. Who carries the video, for the whole platform:
+  //   selfhosted  (default) this server itself (src/coaching/selfHostedStream.js):
+  //               no account, no per-minute bill — only the server's bandwidth
+  //   cloudflare  Cloudflare Stream, below: billed by the minute watched
+  // See docs/PRIVATE_STREAMING.md.
+  privateStreamBackend: process.env.PRIVATE_STREAM_BACKEND === 'cloudflare' ? 'cloudflare' : 'selfhosted',
+  // Only for PRIVATE_STREAM_BACKEND=cloudflare. One Cloudflare account for the
+  // whole platform. keyId and keyPem are a Stream signing key (`npm run
+  // stream:key` makes one and prints both).
+  cloudflareStream: {
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID || '',
+    apiToken: process.env.CLOUDFLARE_STREAM_API_TOKEN || '',
+    // The <code> in customer-<code>.cloudflarestream.com (Stream › any video › its links).
+    customerCode: process.env.CLOUDFLARE_STREAM_CUSTOMER_CODE || '',
+    keyId: process.env.CLOUDFLARE_STREAM_KEY_ID || '',
+    // base64 of the PEM, exactly as Cloudflare returns it.
+    keyPem: process.env.CLOUDFLARE_STREAM_KEY_PEM || '',
   },
   // Operator console credentials. Both must be set for the console to exist
   // at all — an unset password must never mean "no password required".

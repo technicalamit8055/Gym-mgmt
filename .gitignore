@@ -14,3 +14,6 @@ public/native-config.json
 # The member app's shared debug signing key (see android/app/build.gradle):
 # copied to each PC by hand, never committed — the repo is public
 android/app/debug.keystore
+
+# CoachBook Studio installers (cd studio && npm run dist)
+studio/dist/
