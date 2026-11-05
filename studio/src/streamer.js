@@ -76,7 +76,11 @@ export function hlsArgs({ hls, fps = 30 }) {
     ...RENDITIONS.flatMap((r, i) => [`-b:v:${i}`, `${r.kbps}k`, `-maxrate:v:${i}`, `${r.kbps}k`, `-bufsize:v:${i}`, `${r.kbps * 2}k`]),
     '-c:a', 'aac', '-b:a', '96k', '-ar', '44100', '-ac', '2',
     '-f', 'hls', '-hls_time', '2', '-hls_list_size', '6',
-    '-hls_flags', 'delete_segments+independent_segments',
+    // No delete_segments: the server drops old segments itself. On Windows,
+    // ffmpeg asks to delete "<token>\<file>", which no route answers, and
+    // through nginx those requests stalled the uploads until ffmpeg gave up —
+    // about a minute into every run, so the class kept dropping and restarting.
+    '-hls_flags', 'independent_segments',
     '-method', 'PUT',
     // One kept-open connection that waits for each answer. Otherwise ffmpeg
     // hangs up the moment a file is sent, and a proxy in front of the server

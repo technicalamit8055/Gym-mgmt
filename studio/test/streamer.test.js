@@ -122,6 +122,7 @@ describe('the private stream (HLS uploaded to CoachBook)', () => {
     assert.equal(after('-f'), 'hls');
     assert.equal(after('-method'), 'PUT');
     assert.equal(after('-http_persistent'), '1', 'behind nginx, a hung-up upload is dropped');
+    assert.doesNotMatch(after('-hls_flags'), /delete_segments/, 'on Windows its DELETEs go to "<token>\\<file>" and stall the uploads');
     assert.equal(after('-master_pl_name'), 'master.m3u8');
     assert.equal(after('-hls_segment_filename'), `${UPLOAD}stream_%v_%05d.ts`);
     assert.equal(args.at(-1), `${UPLOAD}stream_%v.m3u8`);
