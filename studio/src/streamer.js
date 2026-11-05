@@ -78,6 +78,11 @@ export function hlsArgs({ hls, fps = 30 }) {
     '-f', 'hls', '-hls_time', '2', '-hls_list_size', '6',
     '-hls_flags', 'delete_segments+independent_segments',
     '-method', 'PUT',
+    // One kept-open connection that waits for each answer. Otherwise ffmpeg
+    // hangs up the moment a file is sent, and a proxy in front of the server
+    // (nginx) drops the upload as cut short: students wait for a video that
+    // never arrives.
+    '-http_persistent', '1',
     '-master_pl_name', 'master.m3u8',
     '-var_stream_map', RENDITIONS.map((_, i) => `v:${i},a:${i}`).join(' '),
     '-hls_segment_filename', `${hls}stream_%v_%05d.ts`,

@@ -84,9 +84,25 @@ or Cloudflare.
   starts it again by itself, and students' players pick it up after a few
   seconds.
 - **One server process.** It must run as a single process, not a cluster.
-- **Raise the reverse proxy's upload limit.** If nginx is in front, set
-  `client_max_body_size 16m;`. Its default of 1 MB can refuse a 720p
-  segment. Caddy needs nothing.
+- **Set up the reverse proxy for the board's uploads.** Caddy needs
+  nothing. If nginx is in front, it needs two changes:
+  - **Upload limit.** Set `client_max_body_size 16m;`. Its default of
+    1 MB can refuse a 720p segment.
+  - **Upload pass-through.** Without it, nginx drops the uploads
+    (`408`/`499`/`400` in its access log) and students wait for a video
+    that never comes. Put this above `location / {`:
+    ```nginx
+    location ~ ^(/g/[^/]+)?/api/studio/hls/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_ignore_client_abort on;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    ```
 - **The school's internet.** The board needs about 4 Mbps of upload.
 
 ### Cloudflare Stream (paid, for scale)
