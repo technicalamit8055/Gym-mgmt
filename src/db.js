@@ -1771,6 +1771,63 @@ const MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_voice_admin_sender ON voice_admin_log(sender_phone, created_at)');
   },
+  (db) => {
+    // Staff alerts (src/staffAlerts.js): the bell in the staff app. One row per
+    // person per alert — "₹1,500 to confirm from Rahul", "4 memberships
+    // expired yesterday". `dedupe_key` makes the morning digests safe to run
+    // every few minutes, the same idea as member_notifications'.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS staff_notifications (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL,
+        title      TEXT NOT NULL,
+        body       TEXT NOT NULL DEFAULT '',
+        link       TEXT,
+        dedupe_key TEXT,
+        pushed     INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        read_at    TEXT
+      )
+    `);
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_notif_dedupe ON staff_notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL',
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_staff_notif_inbox ON staff_notifications(user_id, created_at)');
+    // Which alerts a person switched off: a row only for a choice made, so a
+    // new alert type reaches everyone it is meant for without a backfill.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS staff_notification_prefs (
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind       TEXT NOT NULL,
+        enabled    INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (user_id, kind)
+      )
+    `);
+    // Staff devices for Web Push — push_subscriptions' columns, keyed to a
+    // users row instead of a member. Kept apart so a member signing in on the
+    // desk browser can never be handed the desk's alerts, or the reverse.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS staff_push_subscriptions (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        endpoint        TEXT NOT NULL UNIQUE,
+        p256dh          TEXT NOT NULL,
+        auth            TEXT NOT NULL,
+        platform        TEXT NOT NULL DEFAULT 'other' CHECK (platform IN ('ios', 'android', 'desktop', 'other')),
+        user_agent      TEXT,
+        path_prefix     TEXT NOT NULL DEFAULT '',
+        origin          TEXT,
+        failure_count   INTEGER NOT NULL DEFAULT 0,
+        last_success_at TEXT,
+        last_error      TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_staff_push_user ON staff_push_subscriptions(user_id)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

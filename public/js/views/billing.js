@@ -166,8 +166,16 @@ function toggleRowMenu(anchor, items) {
   menu.querySelector('button')?.focus();
 }
 
-export async function renderBilling({ setActions, reload }) {
-  const state = { tab: 'memberships', filter: 'active', from: '', to: '' };
+export async function renderBilling({ setActions, reload, params = [] }) {
+  // `/billing/confirm`, `/billing/expired`, `/billing/expiring`: where a staff
+  // alert's link lands (see staffBell.js).
+  const view = params[0];
+  const state = {
+    tab: view === 'confirm' && session.managesBilling ? 'confirm' : 'memberships',
+    filter: view === 'expired' || view === 'expiring' ? view : 'active',
+    from: '',
+    to: '',
+  };
   const body = h('div', {});
 
   setActions(
@@ -235,7 +243,8 @@ export async function renderBilling({ setActions, reload }) {
     h('option', { value: 'frozen' }, 'Frozen'),
   );
   // The coloured dot in front of the label says which slice is on screen.
-  const filterControl = h('label', { class: 'bill-filter', dataset: { tone: 'green' } }, h('span', { class: 'bill-filter-dot', 'aria-hidden': 'true' }), filterSelect);
+  filterSelect.value = state.filter;
+  const filterControl = h('label', { class: 'bill-filter', dataset: { tone: FILTERS[state.filter][0] } }, h('span', { class: 'bill-filter-dot', 'aria-hidden': 'true' }), filterSelect);
 
   async function collect(row) {
     const member = await api.member(row.member_id);

@@ -78,7 +78,7 @@ export function platformName() {
 
 /** The service worker registration, or null if none comes up in time (a
  * worker that failed to install would otherwise hang `ready` forever). */
-async function registration() {
+export async function registration() {
   if (!('serviceWorker' in navigator)) return null;
   return Promise.race([navigator.serviceWorker.ready, new Promise((resolve) => setTimeout(() => resolve(null), 8000))]);
 }
@@ -89,14 +89,14 @@ export async function currentSubscription() {
   return reg ? reg.pushManager.getSubscription() : null;
 }
 
-function keyBytes(base64url) {
+export function keyBytes(base64url) {
   const padded = `${base64url}${'='.repeat((4 - (base64url.length % 4)) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
 }
 
 /** Whether `subscription` was made under `publicKey` — after the server's
  * VAPID keys change, an old subscription can never be pushed to again. */
-function sameKey(subscription, publicKey) {
+export function sameKey(subscription, publicKey) {
   const current = subscription.options?.applicationServerKey;
   if (!current) return true; // Older browsers do not expose it; assume it matches.
   const a = new Uint8Array(current);

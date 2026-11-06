@@ -5,6 +5,7 @@ import { all, get, getBusinessType, run, tenantStorage, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { membershipPrice, sellMembership } from './memberships.js';
 import { notifyMember } from './notifications.js';
+import { alertPaymentClaim } from './staffAlerts.js';
 import { DEFAULT_TENANT_SLUG } from './config.js';
 import { tenantPublicUrl, tenantUrl } from './tenant.js';
 import { today } from './validate.js';
@@ -308,6 +309,7 @@ export function claimRequest(id, { utr = null } = {}) {
   run("UPDATE payment_requests SET status = 'claimed', utr = ?, claimed_at = datetime('now') WHERE id = ? AND status = 'pending'", [clean, id]);
   const claimed = getRequest(id);
   alertDesk(claimed).catch((err) => console.error('[payments] desk alert failed:', err.message));
+  alertPaymentClaim(claimed);
   return claimed;
 }
 

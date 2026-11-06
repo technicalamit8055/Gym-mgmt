@@ -696,6 +696,17 @@ export const api = {
   deletePayment: (id) => request('DELETE', `/payments/${id}`),
 
   // Members paying online to the gym's UPI ID: the settings and the desk's "to confirm" queue.
+  // The staff bell: this person's own alerts, settings and push devices.
+  staffAlerts: {
+    unread: () => request('GET', '/staff-alerts/unread'),
+    list: (params) => request('GET', `/staff-alerts${query(params)}`),
+    markRead: (ids) => request('POST', '/staff-alerts/read', ids ? { ids } : {}),
+    config: () => request('GET', '/staff-alerts/config'),
+    savePreferences: (patch) => request('PUT', '/staff-alerts/preferences', patch),
+    subscribe: (payload) => request('POST', '/staff-alerts/subscriptions', payload),
+    unsubscribe: (endpoint) => request('DELETE', '/staff-alerts/subscriptions', { endpoint }),
+    test: () => request('POST', '/staff-alerts/test', {}),
+  },
   onlinePayments: {
     settings: () => request('GET', '/online-payments/settings'),
     saveSettings: (payload) => request('PUT', '/online-payments/settings', payload),

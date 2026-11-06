@@ -27,6 +27,7 @@ import {
   onFullscreenChange,
 } from './ui.js';
 import { applyGymIcons, onInstallChange, promptInstall } from './pwa.js';
+import { releaseStaffPush, staffBell } from './staffBell.js';
 import {
   getAppMode,
   getAppTheme,
@@ -149,7 +150,9 @@ function buildRoutes() {
     },
     { pattern: /^\/members$/, title: t('members'), view: renderMembers },
     { pattern: /^\/members\/(\d+)$/, title: t('member'), view: renderMemberDetail },
-    { pattern: /^\/billing$/, title: t('memberships'), subtitle: 'Manage memberships, payments and invoices', view: renderBilling },
+    // The optional tail is where a staff alert lands: the "To confirm" queue,
+    // or the memberships list filtered to last night's expiries.
+    { pattern: /^\/billing(?:\/(confirm|expired|expiring))?$/, title: t('memberships'), subtitle: 'Manage memberships, payments and invoices', view: renderBilling },
     {
       pattern: /^\/plans$/,
       title: t('plans'),
@@ -574,7 +577,7 @@ function renderShell() {
         { class: 'sidebar-actions' },
         installBtn,
         h('button', { class: 'btn sm ghost', onclick: openPasswordModal }, renderIcon('key', { size: 15 }), 'Password'),
-        h('button', { class: 'btn sm ghost', onclick: signOut }, renderIcon('logout', { size: 15 }), 'Sign out'),
+        h('button', { class: 'btn sm ghost', onclick: signOutHere }, renderIcon('logout', { size: 15 }), 'Sign out'),
         h(
           'button',
           { id: 'btn-fullscreen-sidebar', class: 'btn sm ghost', onclick: () => toggleFullscreen() },
@@ -592,6 +595,11 @@ function renderShell() {
   const titleIcon = h('span', { class: 'topbar-icon', hidden: true });
   const content = h('div', { class: 'content' }, skeletonPage());
   const actions = h('div', { class: 'row' });
+
+  // Every role's own alerts: payments to confirm, expiries, trials booked…
+  // (staffBell.js). One per shell; the previous shell's polling stops here.
+  bell?.stop();
+  bell = staffBell({ navigate });
 
   const fullscreenTopbarBtn = h(
     'button',
@@ -667,7 +675,7 @@ function renderShell() {
       h(
         'div',
         { class: 'main' },
-        h('header', { class: 'topbar' }, navToggle, titleIcon, h('div', { class: 'topbar-title' }, title, subtitle), h('div', { class: 'spacer' }), actions, modeTopbarBtn, fullscreenTopbarBtn),
+        h('header', { class: 'topbar' }, navToggle, titleIcon, h('div', { class: 'topbar-title' }, title, subtitle), h('div', { class: 'spacer' }), actions, bell.node, modeTopbarBtn, fullscreenTopbarBtn),
         content,
       ),
       tabbar,
@@ -716,6 +724,8 @@ function openPasswordModal() {
 /* ------------------------------------------------------------------ router */
 
 let shell;
+/** The topbar's notification bell for the current shell (staffBell.js). */
+let bell;
 
 /**
  * Renders one of the pre-auth pages, full-page, with no app shell around it.
@@ -1068,7 +1078,20 @@ document.addEventListener('visibilitychange', async () => {
 
 /** Drops the session and shows whatever this address offers signed-out
  * visitors — a gym's login card, or the landing page on the root domain. */
+/**
+ * The Sign out button: on a shared desk PC, the next person to sign in must
+ * not keep getting this person's alerts, so this browser is released first —
+ * while the session that can do that still exists. Bounded, so a dead
+ * network never holds up signing out.
+ */
+async function signOutHere() {
+  await Promise.race([releaseStaffPush(), new Promise((resolve) => setTimeout(resolve, 2000))]);
+  signOut();
+}
+
 function signOut(message) {
+  bell?.stop();
+  bell = undefined;
   session.clear();
   shell = undefined;
   lastRenderedPath = null;

@@ -12,6 +12,7 @@ import { pruneServerRecordings } from './coaching/recordings.js';
 import { warnOperatorIfLow } from './recordingStorage.js';
 import { sendCoachingFeeReminders } from './coaching/sweep.js';
 import { sweepPushNotifications } from './notifications.js';
+import { sweepStaffAlerts } from './staffAlerts.js';
 import { sendTrialFollowUps } from './trialPasses.js';
 import { vapidKeys } from './webPush.js';
 import { closeAllWhatsAppSessions, connectWhatsApp, hasStoredCredentials } from './whatsapp.js';
@@ -138,7 +139,15 @@ async function sweepPushReminders() {
             timezone: tenant.timezone,
             businessType: tenant.businessType,
           },
-          () => sweepPushNotifications(),
+          async () => {
+            try {
+              await sweepPushNotifications();
+            } finally {
+              // The staff bell's morning digests (expiries, overdue fees) —
+              // run even when a member reminder failed above.
+              await sweepStaffAlerts();
+            }
+          },
         );
       } catch (err) {
         console.error(`[push:${tenant.slug}] reminder sweep failed:`, err.message);

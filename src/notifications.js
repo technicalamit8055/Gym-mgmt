@@ -234,7 +234,7 @@ function pruneOldNotifications() {
  * broadcast that its route answered before it finished. */
 const inflight = new Set();
 
-function track(promise) {
+export function track(promise) {
   inflight.add(promise);
   promise.finally(() => inflight.delete(promise)).catch(() => {});
   return promise;
@@ -271,25 +271,26 @@ const portalUrl = (prefix, screen) => `${prefix || ''}/#/portal${screen ? `/${sc
  * each: success resets its failure streak, "gone" deletes it, anything else
  * counts towards MAX_CONSECUTIVE_FAILURES.
  *
+ * `table` is where the rows live: members' devices, or staff devices
+ * (staff_push_subscriptions, src/staffAlerts.js) — the same columns either way.
+ *
  * @returns {Promise<{delivered: number, failed: number}>}
  */
-async function pushToSubscriptions(subscriptions, buildPayload, options) {
+const SUBSCRIPTION_TABLES = new Set(['push_subscriptions', 'staff_push_subscriptions']);
+
+export async function pushToSubscriptions(subscriptions, buildPayload, options, { table = 'push_subscriptions' } = {}) {
+  if (!SUBSCRIPTION_TABLES.has(table)) throw new Error(`Unknown subscription table ${table}`);
   const outcomes = await pool(subscriptions, SEND_CONCURRENCY, async (sub) => {
     // Android app devices go through Firebase; every other row is Web Push.
     const send = sub.endpoint.startsWith(FCM_PREFIX) ? sendFcm : sendPush;
     const result = await send(sub, buildPayload(sub), options(sub));
     if (result.ok) {
-      run("UPDATE push_subscriptions SET failure_count = 0, last_error = NULL, last_success_at = datetime('now') WHERE id = ?", [
-        sub.id,
-      ]);
+      run(`UPDATE ${table} SET failure_count = 0, last_error = NULL, last_success_at = datetime('now') WHERE id = ?`, [sub.id]);
     } else if (result.gone) {
-      run('DELETE FROM push_subscriptions WHERE id = ?', [sub.id]);
+      run(`DELETE FROM ${table} WHERE id = ?`, [sub.id]);
     } else {
-      run('UPDATE push_subscriptions SET failure_count = failure_count + 1, last_error = ? WHERE id = ?', [
-        result.error,
-        sub.id,
-      ]);
-      run('DELETE FROM push_subscriptions WHERE id = ? AND failure_count >= ?', [sub.id, MAX_CONSECUTIVE_FAILURES]);
+      run(`UPDATE ${table} SET failure_count = failure_count + 1, last_error = ? WHERE id = ?`, [result.error, sub.id]);
+      run(`DELETE FROM ${table} WHERE id = ? AND failure_count >= ?`, [sub.id, MAX_CONSECUTIVE_FAILURES]);
     }
     return result.ok;
   });
@@ -306,7 +307,7 @@ async function pushToSubscriptions(subscriptions, buildPayload, options) {
  * routes take the slug from the path, so they answer on the root domain, a
  * /g/<slug> address, a subdomain or a custom domain alike.
  */
-function branding() {
+export function branding() {
   const library = moduleEnabled('seats');
   const coaching = moduleEnabled('batches');
   const slug = tenantStorage.getStore()?.slug;
@@ -580,7 +581,7 @@ const toMinutes = (hhmm) => {
 };
 
 /** The gym's wall clock at `now`: its calendar date and minutes past midnight. */
-function gymClock(now) {
+export function gymClock(now) {
   const local = new Date(now.getTime() + gymOffsetMinutes() * 60_000);
   return {
     date: local.toISOString().slice(0, 10),

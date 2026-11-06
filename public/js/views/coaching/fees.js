@@ -595,8 +595,8 @@ async function collectionsPane(state, repaint) {
 
 /* ── Page ────────────────────────────────────────────────────────────── */
 
-export async function renderFees({ setActions }) {
-  const state = { pane: 'dues', window: 'overdue', planStatus: '', q: '' };
+export async function renderFees({ setActions, params = [] }) {
+  const state = { pane: params[0] === 'confirm' && session.managesBilling ? 'confirm' : 'dues', window: 'overdue', planStatus: '', q: '' };
   const statsHost = h('div', {});
   const tabsHost = h('div', {});
   const host = h('div', {});

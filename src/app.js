@@ -25,6 +25,7 @@ import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { announcementImageRoutes, notificationRoutes, portalNotificationRoutes } from './routes/notifications.js';
 import { paymentRoutes } from './routes/payments.js';
 import { onlinePaymentRoutes, portalPayRoutes, publicPayRoutes } from './routes/onlinePayments.js';
+import { staffAlertRoutes } from './routes/staffAlerts.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
 import { portalRoutes } from './routes/portal.js';
@@ -178,6 +179,8 @@ export function createApp() {
   app.use('/api/portal/pay', portalPayRoutes);
   app.use('/api/portal', portalRoutes);
   app.use('/api/notifications', notificationRoutes);
+  // The staff app's bell: every role's own alerts inbox and alert settings.
+  app.use('/api/staff-alerts', staffAlertRoutes);
   app.use('/api/plans', planRoutes);
   app.use('/api/subscriptions', subscriptionRoutes);
   app.use('/api/payments', paymentRoutes);

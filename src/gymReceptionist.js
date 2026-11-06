@@ -7,6 +7,7 @@ import { badRequest, notFound } from './errors.js';
 import { receptionistEntitled } from './coaching/receptionistBilling.js';
 import * as data from './gymReceptionistData.js';
 import { FALLBACK_REPLY, promisesFollowUp, runGymReceptionist } from './gymReceptionistAi.js';
+import { alertTrialBooked } from './staffAlerts.js';
 import { findTenantBySlug, tenantDbPath } from './tenants.js';
 import { conversationForLead, deskSettings, loadLead, sendTrialPass } from './trialPasses.js';
 import { today } from './validate.js';
@@ -208,6 +209,8 @@ async function respond(buffer, messages) {
     data.upsertLead(conv, { note: `Asked: ${messages.map((m) => m.text).join(' / ').slice(0, 300)}` });
   }
   if (state.booked && !state.booked.already_issued) {
+    const t = state.booked.trial;
+    alertTrialBooked({ id: state.booked.pass_id, name: t.name, when: `${t.valid}${t.arrival ? `, coming around ${t.arrival}` : ''}` });
     await sendTrialPass(state.booked.pass_id, { gymName, author: 'ai' });
     await sendLocation(slug, conv, placeOf(settings, gymName));
     await alertOwner(slug, conv, state.booked, settings);

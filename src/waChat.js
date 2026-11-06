@@ -1,6 +1,7 @@
 import { gymNowTime, gymOffsetMinutes, utcTimestamp } from './clock.js';
 import { config } from './config.js';
 import { all, get, run, tenantStorage } from './db.js';
+import { alertChatHandoff } from './staffAlerts.js';
 import { today } from './validate.js';
 import { sendChatMessage } from './whatsapp.js';
 
@@ -150,7 +151,10 @@ export function setPaused(conv, paused) {
 
 /** Raises the "needs a reply from the team" flag on the chat. */
 export function flagForStaff(conv, why) {
+  const raised = get('SELECT needs_staff FROM wa_conversations WHERE id = ?', [conv.id])?.needs_staff === 0;
   run("UPDATE wa_conversations SET needs_staff = 1, handoff_reason = ?, updated_at = datetime('now') WHERE id = ?", [why, conv.id]);
+  // The bell rings when the flag goes up, not again for every message after.
+  if (raised) alertChatHandoff({ who: conv.contact_name || (conv.phone ? `+${conv.phone}` : 'A visitor'), reason: why });
 }
 
 const HISTORY_MESSAGES = 20;

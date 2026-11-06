@@ -119,7 +119,8 @@ export function coachingRoutes() {
       view: renderRecordings,
     },
     {
-      pattern: /^\/fees$/,
+      // `/fees/confirm` opens straight on the "To confirm" queue (a staff alert's link).
+      pattern: /^\/fees(?:\/(confirm))?$/,
       title: 'Fees & installments',
       icon: 'wallet',
       iconTone: 'green',

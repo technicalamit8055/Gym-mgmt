@@ -4,6 +4,7 @@ import { gymNowTime } from '../clock.js';
 import { config } from '../config.js';
 import { all, get, run, tenantStorage } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
+import { alertTrialBooked } from '../staffAlerts.js';
 import { findTenantBySlug, tenantDbPath } from '../tenants.js';
 import { today } from '../validate.js';
 import { moduleEnabled } from '../verticals.js';
@@ -208,6 +209,14 @@ async function respond(buffer, messages) {
     data.upsertLead(conv, { note: `Asked: ${messages.map((m) => m.text).join(' / ').slice(0, 300)}` });
   }
   if (state.booked && !state.booked.already_booked) {
+    const b = state.booked.booking;
+    const student = get('SELECT student_name FROM student_inquiries WHERE id = ?', [state.booked.inquiry_id])?.student_name;
+    alertTrialBooked({
+      id: state.booked.inquiry_id,
+      name: student || 'a new student',
+      when: `${b.day}, ${b.time}${b.teacher ? ` with ${b.teacher}` : ''}`,
+      coaching: true,
+    });
     await sendLocation(slug, conv, placeOf(settings, instituteName));
     await alertDirector(slug, conv, state.booked, settings);
   } else if (state.wantsLocation) {
