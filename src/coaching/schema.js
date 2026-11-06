@@ -914,6 +914,35 @@ export const COACHING_MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_ai_test_generations_day ON ai_test_generations(created_at)');
   },
+
+  /* ------------------------------------------------- OMR sheet grading --- */
+  // A test marked from printed OMR sheets carries its paper's shape and
+  // answer key (src/coaching/omr.js has the key format); omr_questions NULL
+  // means a test marked some other way, as before. Each scanned sheet keeps
+  // its raw marks, so a corrected key re-grades every student without a
+  // rescan and the per-question analysis can be worked out. marks_obtained in
+  // academic_test_marks stays the one score the rest of the app reads.
+  (db) => {
+    ensureColumn(db, 'academic_tests', 'omr_questions', 'INTEGER');
+    ensureColumn(db, 'academic_tests', 'omr_options', 'INTEGER');
+    ensureColumn(db, 'academic_tests', 'omr_marks_correct', 'REAL');
+    ensureColumn(db, 'academic_tests', 'omr_answer_key', 'TEXT');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS academic_omr_responses (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        test_id    INTEGER NOT NULL REFERENCES academic_tests(id) ON DELETE CASCADE,
+        member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        answers    TEXT NOT NULL,
+        correct    INTEGER NOT NULL DEFAULT 0,
+        wrong      INTEGER NOT NULL DEFAULT 0,
+        blank      INTEGER NOT NULL DEFAULT 0,
+        score      REAL NOT NULL DEFAULT 0,
+        scanned_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        scanned_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (test_id, member_id)
+      )
+    `);
+  },
 ];
 
 /** Widens class_recordings.source to allow 'server' — see the migration above. */

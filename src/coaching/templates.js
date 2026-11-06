@@ -41,6 +41,8 @@ export const TEMPLATE_PLACEHOLDERS = {
   fee_receipt_template: ['student_name', 'amount', 'receipt_no', 'balance_amount', 'course_name', 'institute_name'],
   scorecard_template: [
     'student_name', 'marks_obtained', 'max_marks', 'percentage', 'rank', 'total_students', 'highest', 'average', 'test_title', 'subject_name', 'institute_name',
+    // Filled for tests marked by the OMR scanner, '—' otherwise.
+    'correct', 'wrong', 'unattempted',
   ],
   low_attendance_template: ['student_name', 'batch_name', 'percentage', 'threshold', 'institute_name'],
 };

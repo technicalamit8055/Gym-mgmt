@@ -6,6 +6,7 @@ import { attendanceRoutes } from './attendance.js';
 import { feeRoutes } from './fees.js';
 import { liveRoutes } from './live.js';
 import { materialRoutes } from './materials.js';
+import { omrRoutes } from './omr.js';
 import { overviewRoutes } from './overview.js';
 import { paperRoutes } from './papers.js';
 import { recordingRoutes } from './recordings.js';
@@ -36,6 +37,7 @@ coachingRoutes.use(timetableRoutes);
 // Ahead of testRoutes, whose /tests/:id would otherwise take /tests/generator.
 coachingRoutes.use(paperRoutes);
 coachingRoutes.use(testRoutes);
+coachingRoutes.use(omrRoutes);
 coachingRoutes.use(materialRoutes);
 coachingRoutes.use(liveRoutes);
 coachingRoutes.use(recordingRoutes);

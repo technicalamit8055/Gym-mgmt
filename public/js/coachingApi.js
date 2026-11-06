@@ -159,6 +159,12 @@ export const coaching = {
   generatePaper: (payload) => request('POST', `${C}/tests/generate`, payload),
   paper: (id) => request('GET', `${C}/tests/${id}/paper`),
   savePaper: (id, questions) => request('PUT', `${C}/tests/${id}/paper`, { questions }),
+  // OMR sheets: answer key, printable sheet and phone scans
+  omr: (id) => request('GET', `${C}/tests/${id}/omr`),
+  saveOmr: (id, payload) => request('PUT', `${C}/tests/${id}/omr`, payload),
+  omrSheet: (id, { named = false } = {}) => download(`${C}/tests/${id}/omr/sheet.pdf${named ? '?named=1' : ''}`),
+  saveOmrScan: (id, payload) => request('POST', `${C}/tests/${id}/omr/scans`, payload),
+  deleteOmrScan: (id, memberId) => request('DELETE', `${C}/tests/${id}/omr/scans/${memberId}`),
 
   // Study material
   materials: (params) => request('GET', `${C}/materials${query(params)}`),

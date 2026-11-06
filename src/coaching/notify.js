@@ -266,8 +266,10 @@ export function sendScorecards(testId, { instituteName, stats }) {
   );
   if (!test) return { queued: 0 };
   const rows = all(
-    `SELECT tm.*, m.first_name, m.last_name, m.phone, m.emergency_phone
+    `SELECT tm.*, m.first_name, m.last_name, m.phone, m.emergency_phone,
+            omr.correct AS omr_correct, omr.wrong AS omr_wrong, omr.blank AS omr_blank
      FROM academic_test_marks tm JOIN members m ON m.id = tm.member_id
+     LEFT JOIN academic_omr_responses omr ON omr.test_id = tm.test_id AND omr.member_id = tm.member_id
      WHERE tm.test_id = ? AND tm.is_absent = 0 AND tm.whatsapp_sent = 0`,
     [testId],
   );
@@ -281,11 +283,22 @@ export function sendScorecards(testId, { instituteName, stats }) {
       continue;
     }
     run('UPDATE academic_test_marks SET whatsapp_sent = 1 WHERE id = ?', [row.id]);
+    // A sheet marked by the OMR scanner has a question-by-question breakdown.
+    // When the institute's template does not place it, it goes on a line of
+    // its own at the end, so parents get it without anyone editing a template.
+    const omr = row.omr_correct !== null && row.omr_correct !== undefined;
+    const breakdown = omr ? `Correct: ${row.omr_correct}, Wrong: ${row.omr_wrong}, Unattempted: ${row.omr_blank}.` : '';
+    const template = omr && !/\{\{\s*(correct|wrong|unattempted)\s*\}\}/.test(settings.scorecard_template)
+      ? `${settings.scorecard_template}\n${breakdown}`
+      : settings.scorecard_template;
     queue({
       phone,
       type: 'scorecard',
       memberId: row.member_id,
-      message: renderTemplate(settings.scorecard_template, {
+      message: renderTemplate(template, {
+        correct: omr ? row.omr_correct : '—',
+        wrong: omr ? row.omr_wrong : '—',
+        unattempted: omr ? row.omr_blank : '—',
         student_name: studentName(row),
         marks_obtained: fmt(row.marks_obtained),
         max_marks: fmt(test.max_marks),

@@ -7,6 +7,7 @@ import { activeRoster } from '../../coaching/attendance.js';
 import { sendScorecards } from '../../coaching/notify.js';
 import { testStats } from '../../coaching/ranks.js';
 import { checkPaper, closeExpiredAttempts, LEVELS, questionCount, recomputeRanks, regradeTest, savePaper } from '../../coaching/papers.js';
+import { regradeOmr } from './omr.js';
 import { dateQuery, idParam, idQuery, instituteName, optional, updateSql } from './shared.js';
 
 /**
@@ -122,6 +123,9 @@ testRoutes.patch('/tests/:id', (req, res) => {
   checkTest({ ...current, ...body });
   const hasPaper = questionCount(id) > 0;
   if (body.online && !hasPaper) throw badRequest('Add questions before opening a test in the student app', { online: 'no questions' });
+  if (current.omr_questions && body.max_marks !== undefined && body.max_marks !== current.max_marks) {
+    throw badRequest('This test is marked from OMR sheets — its maximum is questions × marks per question; change those on the answer key', { max_marks: 'set by the OMR key' });
+  }
   if (hasPaper && body.max_marks !== undefined && body.max_marks !== current.max_marks) {
     throw badRequest('This test’s question paper sets its maximum marks — change the marks on the questions', { max_marks: 'set by the paper' });
   }
@@ -133,6 +137,8 @@ testRoutes.patch('/tests/:id', (req, res) => {
   run(sql, params);
   // App attempts are scored with the test's negative marking.
   if (body.negative_marking !== undefined && body.negative_marking !== current.negative_marking) regradeTest(id);
+  // So are scanned OMR sheets.
+  if (body.negative_marking !== undefined && body.negative_marking !== current.negative_marking) regradeOmr(id);
   res.json(get(`${TEST_SELECT} WHERE t.id = ?`, [id]));
 });
 

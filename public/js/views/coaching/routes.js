@@ -4,6 +4,7 @@ import { renderAttendanceDesk } from './attendance.js';
 import { renderAcademics, renderBatchDetail } from './academics.js';
 import { renderTimetable } from './timetable.js';
 import { renderTests, renderTestDetail } from './tests.js';
+import { renderOmrScanner } from './omr.js';
 import { renderMaterials } from './materials.js';
 import { renderRecordings } from './recordings.js';
 import { renderFees } from './fees.js';
@@ -100,6 +101,7 @@ export function coachingRoutes() {
       view: renderTests,
     },
     { pattern: /^\/tests\/(\d+)$/, title: 'Test', view: renderTestDetail },
+    { pattern: /^\/tests\/(\d+)\/scan$/, title: 'Scan OMR sheets', view: renderOmrScanner },
     {
       pattern: /^\/materials$/,
       title: 'Study material',

@@ -2,6 +2,7 @@ import { coaching } from '../../coachingApi.js';
 import { buildForm, clear, closeModal, confirmDialog, date, emptyState, h, openModal, renderIcon, stat, toast, today } from '../../ui.js';
 import { batchOptions, fill, fullName, openAlertSettings, pct, reportSend, section, selectControl, TEST_TYPE_LABEL } from './common.js';
 import { openGenerator, paperSection } from './dpp.js';
+import { omrSection } from './omr.js';
 
 /**
  * Test series. The list is every test with how far its marks have got; a
@@ -385,6 +386,7 @@ export async function renderTestDetail({ params, setTitle, setActions, navigate,
     test.syllabus ? h('p', { class: 'muted cb-small' }, `Syllabus: ${test.syllabus}`) : null,
     statsHost,
     paperSection({ test, instituteName, onChanged: reload }),
+    omrSection({ test, navigate, onChanged: reload }),
     section('Marks', tableHost, {
       icon: 'edit',
       subtitle: 'Type a mark and press Enter to move down. Ranks update when you save.',
