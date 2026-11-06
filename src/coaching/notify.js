@@ -1,6 +1,7 @@
 import { all, get, run, tenantStorage } from '../db.js';
 import { generateReceiptPdf } from '../receiptPdf.js';
 import { renderTemplate, sendWhatsAppMessage, whatsappReady } from '../whatsapp.js';
+import { reminderPayLink, withPayLink } from '../onlinePayments.js';
 import { feeReceipt, receiptNumber } from './fees.js';
 
 /**
@@ -222,25 +223,27 @@ export async function sendFeeReceipt(paymentId, { instituteName, logoBuffer = nu
 /* ── Fee reminders ───────────────────────────────────────────────────── */
 
 /** One installment's reminder: "due on" before the date, "still pending" after. */
-export function sendInstallmentReminder(installment, { instituteName, currency = 'INR', now }) {
+export function sendInstallmentReminder(installment, { instituteName, currency = 'INR', now, baseUrl }) {
   const settings = coachingSettings();
   const phone = guardianPhone(installment);
   if (!phone) return false;
   const overdue = installment.due_date < now;
   const sentBefore = installment.reminder_sent_at;
   run("UPDATE student_fee_installments SET reminder_sent_at = datetime('now') WHERE id = ?", [installment.id]);
+  const text = renderTemplate(overdue ? settings.fee_overdue_template : settings.fee_due_template, {
+    student_name: studentName(installment),
+    installment_no: installment.installment_number,
+    amount: formatAmount(installment.balance, currency),
+    due_date: formatDay(installment.due_date),
+    course_name: installment.course_name,
+    institute_name: instituteName,
+  });
   queue({
     phone,
     type: 'fee_due',
     memberId: installment.member_id,
-    message: renderTemplate(overdue ? settings.fee_overdue_template : settings.fee_due_template, {
-      student_name: studentName(installment),
-      installment_no: installment.installment_number,
-      amount: formatAmount(installment.balance, currency),
-      due_date: formatDay(installment.due_date),
-      course_name: installment.course_name,
-      institute_name: instituteName,
-    }),
+    // "Pay online: …" for this installment, when the institute takes payments in the app.
+    message: withPayLink(text, reminderPayLink({ memberId: installment.member_id, installmentId: installment.id, baseUrl })),
     onFailed: () => run('UPDATE student_fee_installments SET reminder_sent_at = ? WHERE id = ?', [sentBefore ?? null, installment.id]),
   });
   return true;

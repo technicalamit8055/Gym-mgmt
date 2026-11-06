@@ -695,6 +695,18 @@ export const api = {
   paymentReceipt: (id) => request('GET', `/payments/${id}/receipt`),
   deletePayment: (id) => request('DELETE', `/payments/${id}`),
 
+  // Members paying online to the gym's UPI ID: the settings and the desk's "to confirm" queue.
+  onlinePayments: {
+    settings: () => request('GET', '/online-payments/settings'),
+    saveSettings: (payload) => request('PUT', '/online-payments/settings', payload),
+    requests: (params) => request('GET', `/online-payments/requests${query(params)}`),
+    confirm: (id) => request('POST', `/online-payments/requests/${id}/confirm`, {}),
+    reject: (id, reason) => request('POST', `/online-payments/requests/${id}/reject`, { reason }),
+  },
+  // A pay link from a WhatsApp reminder: no sign-in, the token is the credential.
+  payLink: (token) => request('GET', `/pay/${encodeURIComponent(token)}`, undefined, { anonymous: true }),
+  claimPayLink: (token, utr) => request('POST', `/pay/${encodeURIComponent(token)}/claim`, { utr }, { anonymous: true }),
+
   attendance: (params) => request('GET', `/attendance${query(params)}`),
   checkIn: (payload) => request('POST', '/attendance/check-in', payload),
   checkOut: (payload) => request('POST', '/attendance/check-out', payload),
@@ -1042,6 +1054,13 @@ export const api = {
       test: () => request('POST', '/portal/notifications/test', {}, { member: true }),
       workoutStarted: (payload) => request('PUT', '/portal/notifications/active-workout', payload, { member: true }),
       workoutEnded: () => request('DELETE', '/portal/notifications/active-workout', undefined, { member: true }),
+    },
+    // Paying a renewal, dues or a fee installment to the gym's UPI ID (upiPay.js).
+    pay: {
+      state: () => request('GET', '/portal/pay', undefined, { member: true }),
+      start: (payload) => request('POST', '/portal/pay', payload, { member: true }),
+      get: (id) => request('GET', `/portal/pay/${id}`, undefined, { member: true }),
+      claim: (id, utr) => request('POST', `/portal/pay/${id}/claim`, { utr }, { member: true }),
     },
     downloadReceipt: async (id) => {
       const res = await fetch(serverUrl(`${pathPrefix}/api/portal/payments/${id}/receipt`), {

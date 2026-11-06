@@ -46,6 +46,7 @@ import { renderSettings } from './views/settings.js';
 import { renderPlatformConsole } from './views/platform.js';
 import { renderSellerPanel } from './views/sellerPanel.js';
 import { renderReset } from './views/reset.js';
+import { renderPay } from './views/pay.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderMembers, renderMemberDetail } from './views/members.js';
 import { renderCheckIn } from './views/checkin.js';
@@ -239,6 +240,8 @@ const PUBLIC_ROUTES = [
   // Public by necessity — someone redeeming a reset link cannot sign in. The
   // pattern allows the trailing `?token=…` the link carries in the hash.
   { pattern: /^\/reset(\?|$)/, title: 'Set a new password', view: renderReset },
+  // A pay link from a WhatsApp reminder — public too; the token in the hash is the credential.
+  { pattern: /^\/pay(\?|$)/, title: 'Pay online', view: renderPay },
   // The member app: its own sign-in (member code/phone + password, a different
   // credential from any staff login) and its own tab shell. Rendered full-page
   // like every other entry here — a member has no staff sidebar to sit inside.

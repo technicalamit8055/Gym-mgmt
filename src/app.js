@@ -24,6 +24,7 @@ import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocumen
 import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { announcementImageRoutes, notificationRoutes, portalNotificationRoutes } from './routes/notifications.js';
 import { paymentRoutes } from './routes/payments.js';
+import { onlinePaymentRoutes, portalPayRoutes, publicPayRoutes } from './routes/onlinePayments.js';
 import { planRoutes } from './routes/plans.js';
 import { platformRoutes } from './routes/platform.js';
 import { portalRoutes } from './routes/portal.js';
@@ -173,11 +174,17 @@ export function createApp() {
   // CoachBook's student & parent screens (timetable, attendance, tests,
   // notes, fees) — the same member sign-in, gated on the coaching modules.
   app.use('/api/portal/coaching', coachingPortalRoutes);
+  // Paying a renewal, dues or a fee installment from the app (onlinePayments.js).
+  app.use('/api/portal/pay', portalPayRoutes);
   app.use('/api/portal', portalRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/plans', planRoutes);
   app.use('/api/subscriptions', subscriptionRoutes);
   app.use('/api/payments', paymentRoutes);
+  // The desk's side of online payments: UPI settings and the "to confirm" queue.
+  app.use('/api/online-payments', onlinePaymentRoutes);
+  // A pay link from a WhatsApp reminder: the URL's token is the only credential.
+  app.use('/api/pay', publicPayRoutes);
   app.use('/api/attendance', attendanceRoutes);
   app.use('/api/sessions', sessionRoutes);
   app.use('/api/biometric', biometricRoutes);

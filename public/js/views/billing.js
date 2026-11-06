@@ -19,6 +19,7 @@ import { openMembershipForm, openPaymentForm } from './forms.js';
 import { downloadReceipt, getGymName, printReceipt } from '../receipt.js';
 import { isLibrary } from '../vertical.js';
 import { renderStoreHub } from './storeHub.js';
+import { claimedPaymentCount, paymentQueuePane } from './paymentQueue.js';
 
 /** Membership filter → [dot tone, caption under the "listed" count]. */
 const FILTERS = {
@@ -179,6 +180,7 @@ export async function renderBilling({ setActions, reload }) {
       : null,
   );
 
+  const toConfirm = session.managesBilling ? await claimedPaymentCount() : null;
   const tabs = h(
     'div',
     { class: 'bill-tabs', role: 'tablist' },
@@ -188,6 +190,8 @@ export async function renderBilling({ setActions, reload }) {
       // The store and the fitness add-on are gym products; a library has
       // neither, so it has nothing to earn commission on.
       isLibrary() ? null : ['store', 'Store & Commissions', 'bag'],
+      // Payments members made from the app, waiting for someone to check them.
+      session.managesBilling ? ['confirm', toConfirm ? `To confirm (${toConfirm})` : 'To confirm', 'wallet'] : null,
     ].filter(Boolean).map(([key, label, icon]) =>
       h(
         'button',
@@ -558,6 +562,13 @@ export async function renderBilling({ setActions, reload }) {
 
   const toolbar = h('div', { class: 'toolbar bill-toolbar' });
 
+  /** Keeps "To confirm (n)" honest after the desk confirms or rejects one. */
+  async function refreshConfirmTab() {
+    const button = tabs.querySelector('[data-tab="confirm"]');
+    const n = await claimedPaymentCount();
+    if (button && n !== null) button.lastChild.textContent = n ? `To confirm (${n})` : 'To confirm';
+  }
+
   async function render() {
     closeRowMenu?.();
     clear(toolbar).append(
@@ -575,7 +586,9 @@ export async function renderBilling({ setActions, reload }) {
         ? await renderMemberships()
         : state.tab === 'payments'
           ? await renderPayments()
-          : await renderStoreHub({ billStat });
+          : state.tab === 'confirm'
+            ? await paymentQueuePane({ onChanged: refreshConfirmTab })
+            : await renderStoreHub({ billStat });
     clear(body).append(view);
   }
 

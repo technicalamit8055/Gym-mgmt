@@ -255,3 +255,18 @@ export function tenantPlatformUrl(req, slug) {
   const host = req.customDomain && config.rootDomain ? config.rootDomain : req.get('host');
   return `${proto}://${host}/${TENANT_PATH_PREFIX}/${slug}`;
 }
+
+/**
+ * The gym's address when there is no request to read a host from — a link
+ * written into a WhatsApp reminder by the hourly sweep. Needs ROOT_DOMAIN (or
+ * a live custom domain): without one the server cannot know its own public
+ * address, and returns null rather than guess.
+ */
+export function tenantPublicUrl(slug) {
+  const domain = slug && slug !== DEFAULT_TENANT_SLUG ? primaryDomainFor(slug) : null;
+  if (domain) return `https://${domain}`;
+  if (!config.rootDomain) return null;
+  if (!slug || slug === DEFAULT_TENANT_SLUG) return `https://${config.rootDomain}`;
+  if (config.tenantUrlMode === 'subdomain') return `https://${slug}.${config.rootDomain}`;
+  return `https://${config.rootDomain}/${TENANT_PATH_PREFIX}/${slug}`;
+}

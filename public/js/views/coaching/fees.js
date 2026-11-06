@@ -3,6 +3,7 @@ import { coaching } from '../../coachingApi.js';
 import { clear, closeModal, confirmDialog, date, dateField, emptyState, h, money, openModal, renderIcon, stat, toast, today } from '../../ui.js';
 import { fill, fullName, INSTALLMENT_STATUS, openAlertSettings, pct, pillTabs, PLAN_STATUS, reportSend, section, selectControl, tone } from './common.js';
 import { feeFields } from './enrollForm.js';
+import { claimedPaymentCount, paymentQueuePane } from '../paymentQueue.js';
 
 /**
  * Fees & installments: who owes what and when, collecting it, and the
@@ -601,7 +602,7 @@ export async function renderFees({ setActions }) {
   const host = h('div', {});
 
   async function repaint() {
-    const summary = await coaching.feeSummary();
+    const [summary, toConfirm] = await Promise.all([coaching.feeSummary(), session.managesBilling ? claimedPaymentCount() : null]);
     fill(statsHost, 
       h(
         'div',
@@ -622,7 +623,9 @@ export async function renderFees({ setActions }) {
           { key: 'dues', label: 'Dues', icon: 'alert', count: summary.overdue_count || null },
           { key: 'plans', label: 'Fee plans', icon: 'list' },
           { key: 'collections', label: 'Collections', icon: 'receipt', count: summary.pending_cheques || null },
-        ],
+          // Installments parents paid from the app, waiting for the office to check them.
+          session.managesBilling ? { key: 'confirm', label: 'To confirm', icon: 'wallet', count: toConfirm || null } : null,
+        ].filter(Boolean),
         state.pane,
         (key) => {
           state.pane = key;
@@ -631,7 +634,14 @@ export async function renderFees({ setActions }) {
       ),
     );
     try {
-      const pane = state.pane === 'dues' ? await duesPane(state, repaint) : state.pane === 'plans' ? await plansPane(state, repaint) : await collectionsPane(state, repaint);
+      const pane =
+        state.pane === 'dues'
+          ? await duesPane(state, repaint)
+          : state.pane === 'plans'
+            ? await plansPane(state, repaint)
+            : state.pane === 'confirm'
+              ? await paymentQueuePane({ onChanged: repaint })
+              : await collectionsPane(state, repaint);
       fill(host, pane);
       if (state.refocusSearch && state.search) {
         state.refocusSearch = false;

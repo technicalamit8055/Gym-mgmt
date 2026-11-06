@@ -6,6 +6,7 @@ import { assertProductionReady, config, DEFAULT_TENANT_SLUG } from './config.js'
 import { closeDb, tenantStorage } from './db.js';
 import { closeRegistryDb, listTenants, tenantDbPath } from './tenants.js';
 import { sendAutomatedBirthdayWishes, sendAutomatedRenewalReminders } from './maintenance.js';
+import { expireStaleRequests } from './onlinePayments.js';
 import { attachLiveGateway } from './coaching/liveGateway.js';
 import { pruneServerRecordings } from './coaching/recordings.js';
 import { warnOperatorIfLow } from './recordingStorage.js';
@@ -86,6 +87,8 @@ function sweepAutomatedMessages() {
           sendCoachingFeeReminders({ gymName: tenant.gymName, currency: tenant.currency });
           // GymBook free-trial follow-ups; a no-op outside that vertical.
           sendTrialFollowUps({ gymName: tenant.gymName });
+          // Online payments nobody paid within their time.
+          expireStaleRequests();
           // CoachBook class recordings on this server, past the institute's keep-for days.
           try {
             pruneServerRecordings();

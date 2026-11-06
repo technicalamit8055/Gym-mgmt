@@ -1,4 +1,6 @@
+import { api } from '../api.js';
 import { coaching } from '../coachingApi.js';
+import { openMemberPayment, startMemberPayment } from '../upiPay.js';
 import { clear, date, h, initials, money, renderIcon, time, toast, today } from '../ui.js';
 import { attendanceCalendarView } from './coaching/attendance.js';
 import { liveClassTab } from './coaching/liveClass.js';
@@ -404,7 +406,35 @@ export function coachingPortalTabs({ getMe, switchTab, registerCleanup, openScre
   }
 
   async function fees() {
-    const data = await coaching.portal.fees();
+    const [data, pay] = await Promise.all([coaching.portal.fees(), api.portal.pay.state().catch(() => null)]);
+    const payEnabled = Boolean(pay?.enabled);
+    // An installment already paid online and waiting for the office shows that, not a second Pay button.
+    const waiting = new Map((pay?.requests ?? []).filter((r) => r.status === 'claimed' && r.installment_id).map((r) => [r.installment_id, r]));
+    const refresh = () => switchTab('fees');
+    const payAction = (inst) => {
+      if (!payEnabled || !(inst.balance > 0.005)) return null;
+      const open = waiting.get(inst.id);
+      if (open) {
+        return h(
+          'button',
+          { class: 'btn sm ghost', type: 'button', onclick: () => openMemberPayment(api, open.id, { onChange: refresh }).catch((err) => toast(err.message, 'error')) },
+          'Confirming…',
+        );
+      }
+      return h(
+        'button',
+        {
+          class: 'btn sm primary',
+          type: 'button',
+          'aria-label': `Pay installment ${inst.installment_number} online`,
+          onclick: () =>
+            startMemberPayment(api, { kind: 'fee_installment', installment_id: inst.id }, { onChange: refresh }).catch((err) =>
+              toast(err.message || 'Could not start the payment', 'error'),
+            ),
+        },
+        `Pay ${money(inst.balance)}`,
+      );
+    };
     if (!data.plans.length) return tabBody('Fees', null, h('div', { class: 'cbp-card cbp-empty' }, 'No course fee on your account yet.'));
     return tabBody(
       'Fees',
@@ -427,7 +457,7 @@ export function coachingPortalTabs({ getMe, switchTab, registerCleanup, openScre
                 { class: 'cbp-install' },
                 h('span', { class: 'cb-roll' }, `#${inst.installment_number}`),
                 h('div', { class: 'cb-grow' }, h('div', { class: 'cb-strong' }, money(inst.amount_due)), h('div', { class: 'muted cb-small' }, `${inst.label || ''} · due ${date(inst.due_date)}${inst.amount_paid > 0 && inst.balance > 0.005 ? ` · ${money(inst.balance)} left` : ''}`)),
-                tone(INSTALLMENT_STATUS, inst.status),
+                payAction(inst) ?? tone(INSTALLMENT_STATUS, inst.status),
               ),
             ),
           ),

@@ -44,6 +44,7 @@ import { cropAndResizeImage } from '../photo.js';
 import { openWorkoutShare } from '../shareCards.js';
 import { clearWidgets, refreshWidgets, setWidgetHandler } from '../widgets.js';
 import { payWithRazorpay } from '../razorpayCheckout.js';
+import { openMemberPayment, startMemberPayment } from '../upiPay.js';
 import { coachingHeroArt, createOrdersNav, orderCard, orderClosed, pullStoreState, renderLiveStore } from './portalStore.js';
 import { canInstall, installPrimerDue, isIos, onInstallChange, promptInstall, snoozeInstallPrimer } from '../pwa.js';
 import * as push from '../push.js';
@@ -7230,8 +7231,22 @@ function renderPortalApp(ctx, initialMe) {
 
   /* --------------------------------------------------------------- Pay tab */
 
+  /** What the gym takes in the app (upiPay.js): set by renderPayTab, read by renewalTile. */
+  let payState = { enabled: false, dues: [], requests: [] };
+  const refreshPayTab = () => {
+    if (active === 'pay') switchTab('pay');
+  };
+  const payOnline = (payload) =>
+    startMemberPayment(api, payload, { onChange: refreshPayTab }).catch((err) => toast(err.message || 'Could not start the payment', 'error'));
+
   async function renderPayTab() {
-    const [paymentsRes, plansRes] = await Promise.all([api.portal.payments(), api.portal.plans()]);
+    const [paymentsRes, plansRes, payRes] = await Promise.all([
+      api.portal.payments(),
+      api.portal.plans(),
+      // An older server, or a hiccup, just means "pay at the desk" as before.
+      api.portal.pay.state().catch(() => null),
+    ]);
+    payState = payRes ?? { enabled: false, dues: [], requests: [] };
     const sub = me.subscription;
     const payments = paymentsRes.items;
     const body = h(
@@ -7261,7 +7276,7 @@ function renderPortalApp(ctx, initialMe) {
             'div',
             { class: 'portal-pay-plan-who' },
             h('strong', {}, sub ? sub.plan_name : `No active ${t('plan').toLowerCase()}`),
-            h('small', {}, sub ? `Current ${isLibrary() ? 'pass' : 'membership plan'}` : 'Pick one below and renew at the front desk'),
+            h('small', {}, sub ? `Current ${isLibrary() ? 'pass' : 'membership plan'}` : payState.enabled ? 'Pick one below and pay online' : 'Pick one below and renew at the front desk'),
             sub ? h('span', { class: 'portal-prof-status tone-green' }, h('i'), 'Active') : null,
           ),
         ),
@@ -7291,9 +7306,51 @@ function renderPortalApp(ctx, initialMe) {
           : null,
       ),
     );
-    if (sub && sub.due > 0) {
+    if (payState.enabled && payState.dues.length) {
+      for (const due of payState.dues) {
+        body.append(
+          h(
+            'button',
+            {
+              class: 'portal-due-banner is-payable',
+              type: 'button',
+              onclick: () => payOnline({ kind: 'dues', subscription_id: due.subscription_id }),
+            },
+            renderIcon('outgoing', { size: 16 }),
+            h('span', {}, ` ${money(due.due)} due on ${due.plan_name}`),
+            h('b', {}, 'Pay now'),
+          ),
+        );
+      }
+    } else if (sub && sub.due > 0) {
       body.append(
         h('div', { class: 'portal-due-banner' }, renderIcon('outgoing', { size: 16 }), ` ${money(sub.due)} due — pay at the front desk`),
+      );
+    }
+
+    /* Online payments started here: waiting for the gym, confirmed, or not found */
+    const recent = payState.requests.filter((r) => r.status !== 'expired' && r.status !== 'pending');
+    if (recent.length) {
+      const label = { claimed: 'Waiting for the gym', confirmed: 'Confirmed', rejected: 'Not found' };
+      body.append(
+        h('div', { class: 'portal-pay-section-head' }, h('h3', { class: 'portal-prof-label' }, 'Online payments')),
+        h(
+          'div',
+          { class: 'portal-pay-list' },
+          ...recent.slice(0, 5).map((r) =>
+            h(
+              'button',
+              {
+                class: `portal-pay-row upipay-row is-${r.status}`,
+                type: 'button',
+                onclick: () => openMemberPayment(api, r.id, { onChange: refreshPayTab }).catch((err) => toast(err.message, 'error')),
+              },
+              h('span', { class: 'portal-pay-row-ico' }, renderIcon('wallet', { size: 22 })),
+              h('div', { class: 'portal-pay-row-meta' }, h('strong', {}, r.title), h('small', {}, `${label[r.status]} · ref ${r.ref_code}`)),
+              h('div', { class: 'portal-pay-row-amount' }, money(r.amount)),
+            ),
+          ),
+        ),
       );
     }
 
@@ -7358,7 +7415,13 @@ function renderPortalApp(ctx, initialMe) {
         'div',
         { class: 'portal-pay-note' },
         h('span', { class: 'portal-pay-note-ico' }, renderIcon('info', { size: 18, stroke: 2.4 })),
-        h('span', {}, `Ask the front desk to renew or switch your ${t('plan').toLowerCase()}.`),
+        h(
+          'span',
+          {},
+          payState.enabled
+            ? `Tap a ${t('plan').toLowerCase()} to pay online with any UPI app — or renew at the front desk.`
+            : `Ask the front desk to renew or switch your ${t('plan').toLowerCase()}.`,
+        ),
         h('span', { class: 'portal-pay-note-mark', 'aria-hidden': 'true' }, renderIcon('barbell', { size: 64, stroke: 1.6 })),
       ),
     );
@@ -7415,14 +7478,36 @@ function renderPortalApp(ctx, initialMe) {
           { class: 'portal-pay-plan-modal' },
           p.description ? h('p', {}, p.description) : null,
           h('ul', { class: 'portal-pay-perks' }, ...perks.map((perk) => h('li', {}, renderIcon('check', { size: 12, stroke: 3 }), perk))),
-          h(
-            'p',
-            { class: 'muted' },
-            current
-              ? `This is your current ${t('plan').toLowerCase()}. Renew it at the front desk before it runs out.`
-              : `Renewals and switches are done at the front desk — show them this screen and they'll set it up.`,
-          ),
+          payState.enabled
+            ? h(
+                'p',
+                { class: 'muted' },
+                current
+                  ? `Renewing now adds ${p.duration_days} days after your current ${t('plan').toLowerCase()} ends — you lose no days.`
+                  : `Pay online with any UPI app. The gym confirms it, then your new ${t('plan').toLowerCase()} starts.`,
+              )
+            : h(
+                'p',
+                { class: 'muted' },
+                current
+                  ? `This is your current ${t('plan').toLowerCase()}. Renew it at the front desk before it runs out.`
+                  : `Renewals and switches are done at the front desk — show them this screen and they'll set it up.`,
+              ),
         ),
+        footer: payState.enabled
+          ? h(
+              'button',
+              {
+                class: 'btn primary',
+                type: 'button',
+                onclick: () => {
+                  closeModal();
+                  payOnline({ kind: 'membership', plan_id: p.id });
+                },
+              },
+              `Pay ${money(p.price)} online`,
+            )
+          : null,
       });
     return h(
       'button',

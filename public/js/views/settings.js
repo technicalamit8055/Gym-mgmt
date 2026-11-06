@@ -226,6 +226,82 @@ function appListingCard(tenant, { isAdmin, reload }) {
   );
 }
 
+/**
+ * Members paying online to the gym's own UPI ID (src/onlinePayments.js).
+ * The money goes straight to the gym; the desk confirms each payment in
+ * Billing → To confirm. The ₹1 test QR is there so an owner can check the
+ * UPI ID really reaches their account before switching it on.
+ */
+function onlinePaymentsCard(settings, { reload }) {
+  const members = t('members').toLowerCase();
+  const form = buildForm(
+    [
+      { name: 'upi_vpa', label: 'UPI ID', value: settings.upi_vpa || '', placeholder: 'e.g. yourgym@okaxis', full: true },
+      { name: 'payee_name', label: 'Name shown in UPI apps', value: settings.payee_name || '', placeholder: 'e.g. Pulse Fitness' },
+      { name: 'alert_phone', label: 'WhatsApp me each payment on', value: settings.alert_phone || '', placeholder: 'Owner phone (optional)' },
+      {
+        name: 'enabled',
+        label: `Let ${members} pay in the app`,
+        type: 'select',
+        value: settings.enabled ? 'yes' : 'no',
+        options: [
+          { value: 'yes', label: 'On' },
+          { value: 'no', label: 'Off — front desk only' },
+        ],
+      },
+      {
+        name: 'pay_link_in_reminders',
+        label: 'Pay link in WhatsApp reminders',
+        type: 'select',
+        value: settings.pay_link_in_reminders ? 'yes' : 'no',
+        options: [
+          { value: 'yes', label: 'Yes' },
+          { value: 'no', label: 'No' },
+        ],
+      },
+    ],
+    {
+      onSubmit: async (values) => {
+        await api.onlinePayments.saveSettings({
+          ...values,
+          enabled: values.enabled === 'yes',
+          pay_link_in_reminders: values.pay_link_in_reminders === 'yes',
+        });
+        toast('Online payments saved');
+        await reload();
+      },
+    },
+  );
+  form.querySelector('.modal-foot').remove();
+  form.classList.add('stg-form');
+  form.append(h('button', { class: 'btn primary stg-save', type: 'submit' }, renderIcon('save', { size: 18 }), 'Save'));
+
+  return h(
+    'div',
+    { class: 'card stg-card' },
+    cardHead(
+      'wallet',
+      'green',
+      'Online payments',
+      `${t('members')} pay renewals${isCoaching() ? ' and fee installments' : ' and dues'} from the app with any UPI app, straight to your UPI ID. You confirm each one under ${isCoaching() ? 'Fees' : 'Billing'} → To confirm.`,
+      h('span', { class: `badge stg-badge ${settings.live ? 'green' : 'grey'}` }, settings.live ? 'on' : 'off'),
+    ),
+    settings.sample_qr
+      ? h(
+          'div',
+          { class: 'stg-upi-test' },
+          h('img', { src: settings.sample_qr, alt: 'Test QR for ₹1 to your UPI ID', width: 120, height: 120 }),
+          h(
+            'p',
+            { class: 'muted' },
+            'Scan this ₹1 test from your own phone. If your UPI app shows your name and the money lands in your account, members can pay you. A business UPI ID (PhonePe Business, Paytm for Business, Google Pay for Business) avoids the daily limits of a personal one.',
+          ),
+        )
+      : null,
+    form,
+  );
+}
+
 function subscriptionCard(tenant, billing, reload) {
   const isAdmin = session.can('admin');
   const daysLeft = tenant.trial_ends_on ? relativeDays(tenant.trial_ends_on) : null;
@@ -327,7 +403,7 @@ export async function renderSettings({ reload }) {
   // Billing status is admin-only server-side; managers still get the page.
   // Domains are best-effort too: a failure there must not cost the owner the
   // rest of their settings.
-  const [billing, domains, appQr] = await Promise.all([
+  const [billing, domains, appQr, payments] = await Promise.all([
     api.billingStatus().catch((err) => {
       if (!(err instanceof ApiError)) throw err;
       return null;
@@ -340,6 +416,13 @@ export async function renderSettings({ reload }) {
       if (!(err instanceof ApiError)) throw err;
       return null;
     }),
+    // Admins and managers only (the server says 403 to anyone else).
+    session.can('admin', 'manager')
+      ? api.onlinePayments.settings().catch((err) => {
+          if (!(err instanceof ApiError)) throw err;
+          return null;
+        })
+      : null,
   ]);
 
   // A live custom domain is the address to hand out; the platform address
@@ -672,6 +755,7 @@ export async function renderSettings({ reload }) {
         ),
       ),
       subscriptionCard(tenant, billing, reload),
+      payments ? onlinePaymentsCard(payments, { reload }) : null,
       h(
         'div',
         { class: 'card stg-card' },

@@ -1685,6 +1685,60 @@ const MIGRATIONS = [
     ensureColumn(db, 'wa_conversations', 'lead_id', 'INTEGER REFERENCES gym_leads(id) ON DELETE SET NULL');
     db.exec('CREATE INDEX IF NOT EXISTS idx_wa_conv_lead ON wa_conversations(lead_id)');
   },
+  (db) => {
+    // Members paying online (src/onlinePayments.js). One row: where the money
+    // goes. 'upi' pays the gym's own UPI ID and the desk confirms it;
+    // 'razorpay_route' (later) settles to the gym's linked Razorpay account.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS payment_settings (
+        id                     INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled                INTEGER NOT NULL DEFAULT 0,
+        gateway                TEXT NOT NULL DEFAULT 'upi' CHECK (gateway IN ('upi', 'razorpay_route')),
+        upi_vpa                TEXT,
+        payee_name             TEXT,
+        pay_link_in_reminders  INTEGER NOT NULL DEFAULT 1,
+        alert_phone            TEXT,
+        route_account_id       TEXT,
+        updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('INSERT OR IGNORE INTO payment_settings (id) VALUES (1)');
+
+    // A member's intent to pay one thing: a membership (plan), the dues on a
+    // membership, or a CoachBook fee installment. The amount is fixed by the
+    // server when the request is made. Nothing is granted until the desk
+    // confirms it, which is what creates the real subscription / payment row.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS payment_requests (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        token            TEXT NOT NULL UNIQUE,
+        ref_code         TEXT NOT NULL UNIQUE,
+        member_id        INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        kind             TEXT NOT NULL CHECK (kind IN ('membership', 'dues', 'fee_installment')),
+        plan_id          INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+        subscription_id  INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+        fee_plan_id      INTEGER,
+        installment_id   INTEGER,
+        amount           REAL NOT NULL CHECK (amount > 0),
+        status           TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending', 'claimed', 'confirmed', 'rejected', 'expired')),
+        utr              TEXT,
+        claimed_at       TEXT,
+        decided_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        decided_at       TEXT,
+        reject_reason    TEXT,
+        payment_id       INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+        expires_at       TEXT NOT NULL,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    // A UTR identifies one bank transfer: the same one cannot pay twice.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_payreq_utr ON payment_requests(utr) WHERE utr IS NOT NULL AND status IN ('claimed', 'confirmed')",
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_payreq_status ON payment_requests(status, created_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_payreq_member ON payment_requests(member_id)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,
@@ -1765,8 +1819,43 @@ export function run(sql, params = []) {
   return getDb().prepare(sql).run(...params);
 }
 
+/** How deep each handle is in tx() calls — so a tx() inside another (selling
+ * a membership from inside confirming an online payment) becomes a savepoint
+ * rather than a second BEGIN, which SQLite refuses. */
+const txDepth = new WeakMap();
+
 export function tx(fn) {
   const handle = getDb();
+  const depth = txDepth.get(handle) ?? 0;
+  if (depth > 0) {
+    const savepoint = `tx_${depth}`;
+    handle.exec(`SAVEPOINT ${savepoint}`);
+    txDepth.set(handle, depth + 1);
+    try {
+      const result = fn();
+      handle.exec(`RELEASE ${savepoint}`);
+      return result;
+    } catch (err) {
+      handle.exec(`ROLLBACK TO ${savepoint}`);
+      handle.exec(`RELEASE ${savepoint}`);
+      throw err;
+    } finally {
+      txDepth.set(handle, depth);
+    }
+  }
+  return outerTx(handle, fn);
+}
+
+function outerTx(handle, fn) {
+  txDepth.set(handle, 1);
+  try {
+    return runOuterTx(handle, fn);
+  } finally {
+    txDepth.set(handle, 0);
+  }
+}
+
+function runOuterTx(handle, fn) {
   handle.exec('BEGIN');
   try {
     const result = fn();

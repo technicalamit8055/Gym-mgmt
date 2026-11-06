@@ -73,6 +73,29 @@ across non-cancelled memberships minus what was collected. The billing view
 totals contract value, collected and outstanding for whatever you filter to, and
 offers a one-click Collect on anything unpaid.
 
+**Online payments (members pay in the app)** — a gym or institute types its own
+UPI ID under **Settings → Online payments**. Members then pay a renewal or their
+dues from GymVym's Invoices screen, and parents pay a fee installment from the
+CoachBook app's Fees tab. They pay with any UPI app, through a `upi://pay` link
+on Android or a QR code anywhere else, and the money goes straight to the gym.
+The rules are in [src/onlinePayments.js](src/onlinePayments.js):
+- The server sets the amount: the plan price, the dues owed, or the
+  installment's balance. The app never chooses it.
+- Each payment carries a short reference (`GB7K4Q2M`) in the UPI note.
+- A plain UPI ID gives no callback, so after paying the member taps **I've
+  paid**, optionally adding the 12-digit UTR. A UTR can be used only once.
+- Nothing is granted until the desk confirms it under **Billing → To confirm**
+  (or **Fees → To confirm**). Confirming is the step that sells the membership
+  through the same code as the desk's sale, so a renewal still starts the day
+  after the current one ends. It also records the payment and sends the usual
+  receipt. Confirming twice is harmless.
+- Rejecting tells the member why.
+- Unpaid requests expire after 48 hours. Claimed ones wait for the desk.
+- Renewal and installment reminders on WhatsApp carry a pay link
+  (`{{pay_link}}`, or added as a last line). The link opens a public page for
+  that one payment, with no sign-in needed. Links written by the hourly sweep
+  need `ROOT_DOMAIN` set, so the server knows its own public address.
+
 **Check-in desk** — type or scan a member code and press enter. The desk gets an
 immediate verdict: welcome with the expiry date and remaining sessions, or a
 refusal that says why (no active membership, frozen, sessions used up). Session

@@ -2,6 +2,7 @@ import { gymMonthDay, localtimeModifiers } from './clock.js';
 import { config } from './config.js';
 import { run, get, all } from './db.js';
 import { today, addDays } from './validate.js';
+import { reminderPayLink, withPayLink } from './onlinePayments.js';
 import { moduleEnabled } from './verticals.js';
 import { birthdayMessage, getWhatsAppStatus, reminderMessage, sendWhatsAppMessage } from './whatsapp.js';
 
@@ -144,7 +145,7 @@ export function sendAutomatedRenewalReminders({ gymName = config.gymName } = {})
     const target = addDays(now, settings.reminder_days_before ?? 3);
 
     const expiring = all(
-      `SELECT s.id, s.member_id, s.end_date, m.first_name, m.last_name, m.phone, p.name AS plan_name
+      `SELECT s.id, s.member_id, s.plan_id, s.end_date, m.first_name, m.last_name, m.phone, p.name AS plan_name
        FROM subscriptions s
        JOIN members m ON m.id = s.member_id
        JOIN plans p ON p.id = s.plan_id
@@ -166,7 +167,11 @@ export function sendAutomatedRenewalReminders({ gymName = config.gymName } = {})
       // logs both outcomes, so there is nothing useful to block on here.
       sendWhatsAppMessage({
         phone: sub.phone,
-        message: reminderMessage(sub, { gymName, template: settings.reminder_template }),
+        // "Pay online: …" to renew the same plan, when the gym takes payments in the app.
+        message: withPayLink(
+          reminderMessage(sub, { gymName, template: settings.reminder_template }),
+          reminderPayLink({ memberId: sub.member_id, planId: sub.plan_id }),
+        ),
         type: 'reminder',
         memberId: sub.member_id,
       }).catch((err) => console.error('[whatsapp] reminder failed:', err.message));

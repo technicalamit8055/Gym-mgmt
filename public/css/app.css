@@ -12887,3 +12887,72 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .op-rc-warn .svg-icon { flex: none; color: var(--amber); margin-top: 1px; }
 .op-rc .form-grid { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
 .op-rc-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+
+/* ── Online payments: the UPI pay sheet (upiPay.js), the desk queue
+   (views/paymentQueue.js) and the settings test QR ─────────────────── */
+.upipay { display: grid; gap: 14px; text-align: center; }
+.upipay-amount { display: grid; gap: 2px; }
+.upipay-amount small { color: var(--muted); font-size: 13px; }
+.upipay-amount strong { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+.upipay-amount span { color: var(--muted); font-size: 13px; }
+.upipay-open { justify-content: center; width: 100%; min-height: 48px; font-size: 16px; }
+.upipay-qr { display: grid; justify-items: center; gap: 6px; }
+.upipay-qr img { width: 220px; height: 220px; max-width: 100%; border-radius: 12px; background: #fff; padding: 8px; }
+.upipay-qr small, .upipay-ref { color: var(--muted); font-size: 12px; margin: 0; }
+.upipay-vpa {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); font-weight: 600; word-break: break-all;
+}
+.upipay-step { display: grid; gap: 8px; text-align: left; border-top: 1px solid var(--border); padding-top: 14px; }
+.upipay-step label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.upipay-utr {
+  height: var(--control-h); padding: 0 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; letter-spacing: 0.06em;
+}
+.upipay-paid { justify-content: center; min-height: 44px; }
+.upipay-status { display: grid; justify-items: center; gap: 6px; padding: 6px 0; }
+.upipay-status h3 { margin: 0; font-size: 18px; }
+.upipay-status p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.upipay-status-ico {
+  width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(251, 191, 36, 0.14); color: var(--amber);
+}
+.upipay-status.ok .upipay-status-ico { background: rgba(52, 211, 153, 0.14); color: var(--green); }
+.upipay-status.bad .upipay-status-ico { background: rgba(248, 113, 113, 0.14); color: var(--red); }
+.upipay-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; text-align: left; font-size: 14px; }
+.upipay-facts dt { color: var(--muted); }
+.upipay-facts dd { margin: 0; font-weight: 600; word-break: break-all; }
+.upipay-page .upipay { margin-top: 8px; }
+.portal-due-banner.is-payable { width: 100%; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; text-align: left; }
+.portal-due-banner.is-payable span { flex: 1; }
+.portal-due-banner.is-payable b { padding: 4px 10px; border-radius: 999px; background: var(--red); color: #fff; font-size: 12px; }
+.upipay-row { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.upipay-row.is-claimed .portal-pay-row-ico { color: var(--amber); }
+.upipay-row.is-confirmed .portal-pay-row-ico { color: var(--green); }
+.upipay-row.is-rejected .portal-pay-row-ico { color: var(--red); }
+
+.payq-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.payq-head h3 { margin: 0 0 2px; }
+.payq-head p { margin: 0; font-size: 13px; }
+.payq-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.payq-list { display: grid; gap: 8px; }
+.payq-row {
+  display: grid; grid-template-columns: minmax(140px, 1.4fr) minmax(140px, 1.2fr) auto auto auto; align-items: center; gap: 12px;
+  padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+}
+.payq-row.is-claimed { border-color: rgba(251, 191, 36, 0.45); }
+.payq-who, .payq-ref { display: grid; gap: 2px; min-width: 0; }
+.payq-ref { font-size: 13px; }
+.payq-amount { font-weight: 800; font-size: 16px; }
+.payq-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.payq-reason { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .payq-row { grid-template-columns: 1fr auto; }
+  .payq-ref { grid-column: 1 / -1; }
+  .payq-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .payq-actions .btn { flex: 1; justify-content: center; }
+}
+
+.stg-upi-test { display: flex; align-items: center; gap: 14px; margin: 4px 0 14px; }
+.stg-upi-test img { border-radius: 10px; background: #fff; padding: 6px; flex-shrink: 0; }
+.stg-upi-test p { margin: 0; font-size: 13px; line-height: 1.45; }

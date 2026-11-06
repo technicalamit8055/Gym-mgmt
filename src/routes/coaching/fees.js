@@ -3,6 +3,7 @@ import { MANAGES_BILLING, requireRole } from '../../auth.js';
 import { all, get, run } from '../../db.js';
 import { badRequest, notFound } from '../../errors.js';
 import { parse, today } from '../../validate.js';
+import { baseUrlFor } from '../../onlinePayments.js';
 import { requireModule } from '../../verticals.js';
 import { whatsappReady } from '../../whatsapp.js';
 import {
@@ -139,7 +140,7 @@ feeRoutes.post('/fees/installments/:id/remind', (req, res) => {
   if (!installment) throw notFound('Installment not found');
   if (installment.balance <= 0.005) throw badRequest('That installment is already paid');
   if (!whatsappReady()) throw badRequest('WhatsApp is not connected. Link it on the WhatsApp page first.');
-  const sent = sendInstallmentReminder(installment, { instituteName: instituteName(req), currency: tenantCurrency(req), now: today() });
+  const sent = sendInstallmentReminder(installment, { instituteName: instituteName(req), currency: tenantCurrency(req), now: today(), baseUrl: baseUrlFor(req) });
   if (!sent) throw badRequest('No guardian or student phone number on file');
   res.json({ ok: true, queued: 1 });
 });
@@ -154,7 +155,7 @@ feeRoutes.post('/fees/remind-overdue', (req, res) => {
   for (const due of listDues({ window: 'overdue' })) {
     if (due.reminder_sent_at && due.reminder_sent_at.slice(0, 10) === new Date().toISOString().slice(0, 10)) continue;
     const installment = installmentForReminder(due.id);
-    if (sendInstallmentReminder(installment, { instituteName: instituteName(req), currency: tenantCurrency(req), now })) queued += 1;
+    if (sendInstallmentReminder(installment, { instituteName: instituteName(req), currency: tenantCurrency(req), now, baseUrl: baseUrlFor(req) })) queued += 1;
     else skipped += 1;
   }
   res.json({ queued, skipped });

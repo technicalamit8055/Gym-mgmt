@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { all, get, run } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { parse, toInt } from '../validate.js';
+import { baseUrlFor, reminderPayLink, withPayLink } from '../onlinePayments.js';
 import { generateReceiptPdf } from '../receiptPdf.js';
 import {
   birthdayMessage,
@@ -265,10 +266,13 @@ whatsappRoutes.post('/send-reminder', async (req, res, next) => {
 
     await sendWhatsAppMessage({
       phone: sub.phone,
-      message: reminderMessage(sub, {
-        gymName: gymNameFor(req),
-        template: settingsFor().reminder_template,
-      }),
+      message: withPayLink(
+        reminderMessage(sub, {
+          gymName: gymNameFor(req),
+          template: settingsFor().reminder_template,
+        }),
+        reminderPayLink({ memberId: sub.member_id, planId: sub.plan_id, baseUrl: baseUrlFor(req) }),
+      ),
       type: 'reminder',
       memberId: sub.member_id,
     });
