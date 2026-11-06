@@ -115,6 +115,15 @@ export const config = {
     // off. The sheet shows the coach working meanwhile, so waiting is fine.
     timeoutMs: Number(process.env.AI_COACH_TIMEOUT_MS || 45000),
   },
+  // CoachBook's DPP & test generator (src/coaching/papers.js): the same Vertex
+  // project as the coach. A paper is a long, maths-heavy JSON document that
+  // the model has to solve as it writes, so it gets more time than a chat.
+  aiTests: {
+    model: process.env.AI_TEST_MODEL || process.env.AI_COACH_MODEL || 'gemini-3.8-flash',
+    // Papers generated per institute per rolling day — the cost ceiling.
+    dailyLimit: Number(process.env.AI_TEST_DAILY_LIMIT || 40),
+    timeoutMs: Number(process.env.AI_TEST_TIMEOUT_MS || 150000),
+  },
   // CoachBook's WhatsApp admissions receptionist (src/coaching/receptionist.js):
   // the same Vertex project as the coach, so it is off until that is set and
   // each institute has also switched it on in its own settings.

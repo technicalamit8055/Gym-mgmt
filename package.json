@@ -15,6 +15,7 @@
     "vendor:jsqr": "node scripts/vendor-jsqr.js",
     "vendor:zxing": "node scripts/vendor-zxing.js",
     "vendor:hls": "node scripts/vendor-hls.js",
+    "vendor:katex": "node scripts/vendor-katex.js",
     "stream:key": "node --no-warnings=ExperimentalWarning scripts/stream-key.js",
     "icons:gen": "node scripts/gen-icons.js",
     "icons:gen:library": "node scripts/gen-icons-library.js",

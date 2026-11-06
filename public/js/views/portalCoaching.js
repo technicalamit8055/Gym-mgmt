@@ -5,6 +5,7 @@ import { clear, date, h, initials, money, renderIcon, time, toast, today } from 
 import { attendanceCalendarView } from './coaching/attendance.js';
 import { liveClassTab } from './coaching/liveClass.js';
 import { myBatchesScreens } from './coaching/myBatches.js';
+import { testPlayerScreens } from './coaching/testPlayer.js';
 import { fill, INSTALLMENT_STATUS, MATERIAL_KIND_LABEL, pct, TEST_TYPE_LABEL, tone, WEEK_ORDER, WEEKDAYS, WEEKDAYS_LONG } from './coaching/common.js';
 
 /**
@@ -325,6 +326,7 @@ export function coachingPortalTabs({ getMe, switchTab, registerCleanup, openScre
     return tabBody(
       'Tests & results',
       card.tests_taken ? `${card.tests_taken} tests taken · average ${pct(card.overall_percentage)}` : 'Your results appear here once they are published.',
+      player.onlineTestsCard(card.online),
       trend,
       card.subjects.length
         ? h(
@@ -492,6 +494,8 @@ export function coachingPortalTabs({ getMe, switchTab, registerCleanup, openScre
 
   const live = () => liveClassTab({ registerCleanup, switchTab });
   const { batchesTab: batches } = myBatchesScreens({ openScreen, switchTab, registerCleanup });
+  // DPPs and tests the student sits in the app (coaching/testPlayer.js).
+  const player = testPlayerScreens({ openScreen, registerCleanup });
 
   return { home, schedule, attendance, tests, materials, fees, live, batches };
 }

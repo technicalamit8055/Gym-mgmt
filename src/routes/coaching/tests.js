@@ -5,7 +5,8 @@ import { parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { activeRoster } from '../../coaching/attendance.js';
 import { sendScorecards } from '../../coaching/notify.js';
-import { rankMarks, testStats } from '../../coaching/ranks.js';
+import { testStats } from '../../coaching/ranks.js';
+import { checkPaper, closeExpiredAttempts, LEVELS, questionCount, recomputeRanks, regradeTest, savePaper } from '../../coaching/papers.js';
 import { dateQuery, idParam, idQuery, instituteName, optional, updateSql } from './shared.js';
 
 /**
@@ -31,10 +32,21 @@ const TEST_FIELDS = {
   passing_marks: { type: 'number', min: 0, default: 0 },
   negative_marking: { type: 'number', min: 0, max: 100, default: 0 },
   syllabus: { type: 'string', max: 1000 },
+  // A test with a question paper (src/coaching/papers.js) can be sat in the
+  // student app once `online`; these describe and time it.
+  online: { type: 'boolean', default: 0 },
+  duration_min: { type: 'int', min: 1, max: 600 },
+  answers_after: { type: 'enum', values: ['submit', 'publish'], default: 'publish' },
+  class_level: { type: 'string', max: 40 },
+  topic: { type: 'string', max: 200 },
+  level: { type: 'enum', values: Object.keys(LEVELS) },
+  generated: { type: 'boolean', default: 0 },
 };
 
 const TEST_SELECT = `
   SELECT t.*, b.name AS batch_name, b.code AS batch_code, s.name AS subject_name,
+         (SELECT COUNT(*) FROM academic_test_questions q WHERE q.test_id = t.id) AS question_count,
+         (SELECT COUNT(*) FROM academic_test_attempts a WHERE a.test_id = t.id AND a.submitted_at IS NOT NULL) AS app_submissions,
          (SELECT COUNT(*) FROM academic_test_marks tm WHERE tm.test_id = t.id) AS marks_entered,
          (SELECT COUNT(*) FROM academic_test_marks tm WHERE tm.test_id = t.id AND tm.is_absent = 0) AS appeared,
          (SELECT ROUND(AVG(tm.marks_obtained), 2) FROM academic_test_marks tm WHERE tm.test_id = t.id AND tm.is_absent = 0) AS average,
@@ -71,18 +83,32 @@ testRoutes.get('/tests', (req, res) => {
   res.json({ items: all(`${TEST_SELECT} WHERE ${where.join(' AND ')} ORDER BY t.test_date DESC, t.id DESC LIMIT 500`, params) });
 });
 
+/**
+ * Creates a test — with its question paper in the same request when
+ * `questions` is sent (the DPP generator's "Save"), in which case the paper's
+ * marks set the maximum.
+ */
 testRoutes.post('/tests', (req, res) => {
+  const paper = Array.isArray(req.body?.questions) ? checkPaper(req.body.questions) : null;
+  if (paper?.length) req.body.max_marks = paper.reduce((acc, q) => acc + q.marks, 0);
   const body = parse(req.body, TEST_FIELDS);
   checkTest(body);
-  const info = run(
-    `INSERT INTO academic_tests (batch_id, subject_id, title, test_type, test_date, max_marks, passing_marks, negative_marking, syllabus, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      body.batch_id, body.subject_id ?? null, body.title, body.test_type, body.test_date, body.max_marks,
-      body.passing_marks, body.negative_marking, body.syllabus ?? null, req.user?.id ?? null,
-    ],
-  );
-  res.status(201).json(get(`${TEST_SELECT} WHERE t.id = ?`, [info.lastInsertRowid]));
+  if (body.online && !paper?.length) throw badRequest('Add questions before opening a test in the student app', { online: 'no questions' });
+  const id = tx(() => {
+    const info = run(
+      `INSERT INTO academic_tests (batch_id, subject_id, title, test_type, test_date, max_marks, passing_marks, negative_marking, syllabus, created_by,
+                                   online, duration_min, answers_after, class_level, topic, level, generated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        body.batch_id, body.subject_id ?? null, body.title, body.test_type, body.test_date, body.max_marks,
+        body.passing_marks, body.negative_marking, body.syllabus ?? null, req.user?.id ?? null,
+        body.online, body.duration_min ?? null, body.answers_after, body.class_level ?? null, body.topic ?? null, body.level ?? null, body.generated,
+      ],
+    );
+    if (paper?.length) savePaper(info.lastInsertRowid, paper);
+    return info.lastInsertRowid;
+  });
+  res.status(201).json(get(`${TEST_SELECT} WHERE t.id = ?`, [id]));
 });
 
 testRoutes.patch('/tests/:id', (req, res) => {
@@ -94,12 +120,19 @@ testRoutes.patch('/tests/:id', (req, res) => {
     throw conflict('Marks are already entered for this test, so it cannot move to another batch');
   }
   checkTest({ ...current, ...body });
+  const hasPaper = questionCount(id) > 0;
+  if (body.online && !hasPaper) throw badRequest('Add questions before opening a test in the student app', { online: 'no questions' });
+  if (hasPaper && body.max_marks !== undefined && body.max_marks !== current.max_marks) {
+    throw badRequest('This test’s question paper sets its maximum marks — change the marks on the questions', { max_marks: 'set by the paper' });
+  }
   if (body.max_marks && body.max_marks < current.max_marks) {
     const top = get('SELECT MAX(marks_obtained) AS top FROM academic_test_marks WHERE test_id = ?', [id]).top;
     if (top !== null && top > body.max_marks) throw conflict(`A student already has ${top}, above that maximum`, { max_marks: 'below a score' });
   }
   const { sql, params } = updateSql('academic_tests', body, id);
   run(sql, params);
+  // App attempts are scored with the test's negative marking.
+  if (body.negative_marking !== undefined && body.negative_marking !== current.negative_marking) regradeTest(id);
   res.json(get(`${TEST_SELECT} WHERE t.id = ?`, [id]));
 });
 
@@ -112,9 +145,14 @@ testRoutes.delete('/tests/:id', (req, res) => {
 /** The marks sheet: every student on the batch's roster (plus anyone who has
  * a mark but has since left), with their mark, rank and percentile. */
 function marksSheet(testId) {
+  // Attempts whose time ran out with the app closed are scored first.
+  closeExpiredAttempts(testId);
   const test = get(`${TEST_SELECT} WHERE t.id = ?`, [testId]);
   if (!test) return null;
   const marks = new Map(all('SELECT * FROM academic_test_marks WHERE test_id = ?', [testId]).map((m) => [m.member_id, m]));
+  const attempts = new Map(
+    all('SELECT member_id, submitted_at, correct, wrong, skipped FROM academic_test_attempts WHERE test_id = ?', [testId]).map((a) => [a.member_id, a]),
+  );
   const roster = activeRoster(test.batch_id);
   const onRoster = new Set(roster.map((r) => r.member_id));
   const leavers = all(
@@ -137,18 +175,16 @@ function marksSheet(testId) {
       percentile: mark?.percentile ?? null,
       remarks: mark?.remarks ?? null,
       whatsapp_sent: Boolean(mark?.whatsapp_sent),
+      // Sat in the student app: 'in_progress' or 'submitted', with the tally.
+      app: (() => {
+        const a = attempts.get(student.member_id);
+        if (!a) return null;
+        return a.submitted_at ? { status: 'submitted', correct: a.correct, wrong: a.wrong, skipped: a.skipped } : { status: 'in_progress' };
+      })(),
     };
   });
   const entered = items.filter((i) => i.entered).map((i) => ({ ...i, is_absent: i.is_absent ? 1 : 0 }));
   return { test, items, stats: testStats(entered, { maxMarks: test.max_marks, passingMarks: test.passing_marks }) };
-}
-
-/** Writes ranks and percentiles for the whole test from its current marks. */
-function recomputeRanks(testId) {
-  const rows = all('SELECT id, marks_obtained, is_absent FROM academic_test_marks WHERE test_id = ?', [testId]);
-  for (const row of rankMarks(rows)) {
-    run('UPDATE academic_test_marks SET rank = ?, percentile = ? WHERE id = ?', [row.rank, row.percentile, row.id]);
-  }
 }
 
 testRoutes.get('/tests/:id', (req, res) => {

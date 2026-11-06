@@ -1391,3 +1391,135 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
 /* Recorded lectures, staff side (views/coaching/recordings.js). */
 .cb-recording .cbb-thumb { width: 80px; }
 .cb-recording .cb-grow { min-width: 0; }
+
+/* ------------------------------------------- DPP generator & papers --- */
+/* Question papers on the teacher's side (views/coaching/dpp.js) and the
+ * student app's test screen (views/coaching/testPlayer.js). Maths is KaTeX,
+ * which takes the surrounding text colour, so both themes just work. */
+
+.math-text { overflow-wrap: anywhere; line-height: 1.6; }
+.math-text .katex { font-size: 1.06em; }
+.math-text .katex-display { margin: 0.5em 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.math-error { color: var(--red); font-size: 0.92em; }
+
+.dpp-list { display: grid; gap: 10px; }
+.dpp-q {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--surface);
+  display: grid;
+  gap: 8px;
+}
+.dpp-q-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dpp-q-no { font-weight: 700; color: var(--brand); min-width: 28px; }
+.dpp-q-text { font-size: 15px; }
+.dpp-options { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.dpp-options li {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
+.dpp-options li.is-correct { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.dpp-options li.is-correct > svg { color: var(--green); margin-left: auto; flex: none; }
+.dpp-opt-letter {
+  flex: none; display: inline-grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  font-size: 12px; font-weight: 700;
+  background: var(--brand-soft); color: var(--brand);
+}
+.dpp-numeric { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text); }
+.dpp-numeric > svg { color: var(--green); }
+.dpp-hint { font-size: 13px; color: var(--muted); }
+.dpp-hint strong { color: var(--text); }
+.dpp-solution { font-size: 13.5px; }
+.dpp-solution summary { cursor: pointer; color: var(--brand); font-weight: 600; padding: 2px 0; }
+.dpp-solution > .math-text { margin-top: 6px; padding: 8px 10px; border-left: 3px solid var(--brand-soft); }
+
+.dpp-gen { display: grid; gap: 12px; }
+.dpp-working { display: grid; justify-items: center; gap: 10px; padding: 48px 16px; text-align: center; }
+.dpp-spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid var(--brand-soft); border-top-color: var(--brand);
+  animation: dpp-spin 0.9s linear infinite;
+}
+@keyframes dpp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dpp-spinner { animation-duration: 3s; } }
+.dpp-error, .dpp-warn, .dpp-blocked {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px;
+}
+.dpp-error { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+.dpp-warn { background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--text); }
+.dpp-warn > svg { color: var(--amber); flex: none; margin-top: 1px; }
+.dpp-blocked { background: var(--surface-2, var(--bg-alt)); color: var(--muted); }
+.dpp-preview-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dpp-save { padding: 14px; display: grid; gap: 10px; }
+.dpp-save h4 { margin: 0; }
+.dpp-paper-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.dpp-edit-option { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.dpp-edit-option input[type='text'], .dpp-edit-option input:not([type]) { flex: 1; min-width: 0; }
+.dpp-edit-preview {
+  min-height: 40px; padding: 8px 10px; margin-top: 4px;
+  border: 1px dashed var(--border); border-radius: var(--radius-sm);
+}
+
+/* — the student app — */
+
+.dpp-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 2px; background: none; border: 0; border-top: 1px solid var(--border);
+  color: inherit; text-align: left; font: inherit; cursor: pointer;
+}
+.dpp-row:first-of-type { border-top: 0; }
+.dpp-row > svg { color: var(--muted); flex: none; }
+.dpp-row-score { font-weight: 700; font-size: 17px; white-space: nowrap; }
+.dpp-row-score small { font-weight: 500; color: var(--muted); font-size: 12px; }
+
+.dpp-intro { display: grid; gap: 12px; }
+.dpp-intro-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.dpp-intro-grid > div { padding: 10px 4px; border-radius: var(--radius-sm); background: var(--surface-2, var(--bg-alt)); display: grid; }
+.dpp-intro-grid strong { font-size: 20px; }
+.dpp-intro-grid span { font-size: 12px; color: var(--muted); }
+.dpp-intro-grid .is-good strong { color: var(--green); }
+.dpp-intro-grid .is-bad strong { color: var(--red); }
+.dpp-rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; color: var(--muted); }
+.dpp-start { width: 100%; justify-content: center; min-height: 46px; }
+
+.dpp-bar {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 2px; background: var(--bg);
+}
+.dpp-timer { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 17px; }
+.dpp-timer.is-low { color: var(--red); }
+.dpp-nav { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.dpp-nav-chip {
+  flex: none; width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.dpp-nav-chip.is-answered { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.dpp-nav-chip.is-current { outline: 2px solid var(--brand); outline-offset: 1px; }
+.dpp-question { display: grid; gap: 12px; }
+.dpp-choices { display: grid; gap: 8px; }
+.dpp-choice {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%;
+  padding: 12px; min-height: 48px;
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.dpp-choice.is-picked { border-color: var(--brand); background: var(--brand-soft); }
+.dpp-choice.is-picked .dpp-opt-letter { background: var(--brand); color: var(--bg); }
+.dpp-choices.is-review .dpp-choice { cursor: default; }
+.dpp-choice.is-correct { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.dpp-choice.is-wrong { border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.dpp-yours { margin-left: auto; flex: none; font-size: 11px; font-weight: 600; color: var(--muted); }
+.dpp-numeric-wrap { display: grid; gap: 4px; }
+.dpp-numeric-input { font-size: 18px; min-height: 48px; max-width: 260px; }
+.dpp-steps { display: flex; justify-content: space-between; gap: 10px; }
+.dpp-steps .btn { min-height: 44px; }
+.dpp-result { display: grid; gap: 12px; }
+.dpp-result-score { display: grid; justify-items: center; }
+.dpp-result-score strong { font-size: 40px; line-height: 1.1; color: var(--brand); }
+.dpp-result-score span { color: var(--muted); font-size: 13px; }

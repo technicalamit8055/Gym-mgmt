@@ -10,6 +10,17 @@ import { plansForMember, receiptNumber } from '../../coaching/fees.js';
 import { doubtsForStudent } from '../../coaching/liveDoubts.js';
 import { issueSocketTicket } from '../../coaching/liveGateway.js';
 import { feeReceiptPdf } from '../../coaching/notify.js';
+import {
+  attemptFor,
+  closeExpiredAttempts,
+  paperQuestions,
+  saveAnswers,
+  startAttempt,
+  startBlocker,
+  studentOnlineTests,
+  studentPaper,
+  submitAttempt,
+} from '../../coaching/papers.js';
 import { forStudent } from '../../coaching/privateStream.js';
 import { checkProcessing, lectureChapters, numbered, playUrl, RECORDING_SELECT, saveProgress, signedSource } from '../../coaching/recordings.js';
 import { SLOT_SELECT } from '../../coaching/timetable.js';
@@ -88,7 +99,70 @@ coachingPortalRoutes.get('/attendance', (req, res) => {
 });
 
 coachingPortalRoutes.get('/tests', (req, res) => {
-  res.json(reportCard(req.member.id, { publishedOnly: true }));
+  res.json({
+    ...reportCard(req.member.id, { publishedOnly: true }),
+    // DPPs and tests to sit in the app (src/coaching/papers.js).
+    online: studentOnlineTests(req.member.id, activeBatchIds(req.member.id)),
+  });
+});
+
+/* ── Sitting a test in the app ───────────────────────────────────────── */
+
+/** The test, if it is one of the student's batches' and on the app (or they
+ * have already sat it) — with its questions; 404 otherwise. */
+function appTest(req) {
+  const id = idParam(req);
+  const memberId = req.member.id;
+  const batchIds = activeBatchIds(memberId);
+  const test = batchIds.length
+    ? get(
+        `SELECT t.*, b.name AS batch_name, s.name AS subject_name
+         FROM academic_tests t JOIN academic_batches b ON b.id = t.batch_id LEFT JOIN academic_subjects s ON s.id = t.subject_id
+         WHERE t.id = ? AND t.batch_id IN (${placeholders(batchIds)})`,
+        [id, ...batchIds],
+      )
+    : null;
+  if (!test) throw notFound('Test not found');
+  closeExpiredAttempts(id);
+  const attempt = attemptFor(id, memberId);
+  const questions = paperQuestions(id);
+  if (!questions.length || (!test.online && !attempt)) throw notFound('Test not found');
+  return { test, attempt, questions, memberId };
+}
+
+function paperResponse({ test, questions, memberId }) {
+  const attempt = attemptFor(test.id, memberId);
+  const rank = get('SELECT rank FROM academic_test_marks WHERE test_id = ? AND member_id = ?', [test.id, memberId])?.rank ?? null;
+  const appeared = get('SELECT COUNT(*) AS n FROM academic_test_marks WHERE test_id = ? AND is_absent = 0', [test.id]).n;
+  const paper = studentPaper(test, attempt, questions, { rank });
+  return { ...paper, can_start: !startBlocker(test, attempt, today()), blocked_reason: startBlocker(test, attempt, today()), appeared };
+}
+
+coachingPortalRoutes.get('/tests/:id/paper', (req, res) => {
+  res.json(paperResponse(appTest(req)));
+});
+
+coachingPortalRoutes.post('/tests/:id/start', (req, res) => {
+  const ctx = appTest(req);
+  const blocked = startBlocker(ctx.test, ctx.attempt, today());
+  if (blocked) throw conflict(blocked);
+  startAttempt(ctx.test, ctx.memberId);
+  res.json(paperResponse(ctx));
+});
+
+/** Autosave while the student works — every answer tap, debounced. */
+coachingPortalRoutes.put('/tests/:id/answers', (req, res) => {
+  const ctx = appTest(req);
+  if (!ctx.attempt) throw conflict('Start the test first');
+  saveAnswers(ctx.attempt, ctx.questions, { answers: req.body?.answers, hints_used: req.body?.hints_used });
+  res.json({ ok: true, seconds_left: attemptFor(ctx.test.id, ctx.memberId).seconds_left });
+});
+
+coachingPortalRoutes.post('/tests/:id/submit', (req, res) => {
+  const ctx = appTest(req);
+  if (!ctx.attempt) throw conflict('Start the test first');
+  submitAttempt(ctx.test, ctx.attempt, ctx.questions, { answers: req.body?.answers, hints_used: req.body?.hints_used });
+  res.json(paperResponse(ctx));
 });
 
 /** Material for the student's batches, their courses, or the whole institute. */

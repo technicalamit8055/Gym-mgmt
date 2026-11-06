@@ -1,6 +1,7 @@
 import { coaching } from '../../coachingApi.js';
 import { buildForm, clear, closeModal, confirmDialog, date, emptyState, h, openModal, renderIcon, stat, toast, today } from '../../ui.js';
 import { batchOptions, fill, fullName, openAlertSettings, pct, reportSend, section, selectControl, TEST_TYPE_LABEL } from './common.js';
+import { openGenerator, paperSection } from './dpp.js';
 
 /**
  * Test series. The list is every test with how far its marks have got; a
@@ -35,7 +36,23 @@ function openTestForm({ test, batches, courses, onSaved }) {
         options: Object.entries(TEST_TYPE_LABEL).map(([value, label]) => ({ value, label })),
       },
       { name: 'test_date', label: 'Date', type: 'date', required: true, value: test?.test_date || today() },
-      { name: 'max_marks', label: 'Maximum marks', type: 'number', required: true, min: 1, value: test?.max_marks ?? 100 },
+      // A test with a question paper takes its maximum from the paper's marks.
+      test?.question_count
+        ? null
+        : { name: 'max_marks', label: 'Maximum marks', type: 'number', required: true, min: 1, value: test?.max_marks ?? 100 },
+      test?.question_count ? { name: 'duration_min', label: 'Time limit in the app (minutes)', type: 'number', min: 1, value: test?.duration_min ?? '', hint: 'Empty for no limit' } : null,
+      test?.question_count
+        ? {
+            name: 'answers_after',
+            label: 'Students see answers & solutions',
+            type: 'select',
+            value: test.answers_after,
+            options: [
+              { value: 'submit', label: 'As soon as they submit' },
+              { value: 'publish', label: 'When the result is published' },
+            ],
+          }
+        : null,
       { name: 'passing_marks', label: 'Passing marks', type: 'number', min: 0, value: test?.passing_marks ?? '' },
       { name: 'negative_marking', label: 'Negative marks per wrong answer', type: 'number', min: 0, step: '0.25', value: test?.negative_marking ?? 0, hint: 'Allows scores below zero' },
       { name: 'syllabus', label: 'Syllabus / chapters', type: 'textarea', full: true, value: test?.syllabus, placeholder: 'Electrostatics, Current Electricity' },
@@ -66,6 +83,17 @@ export async function renderTests({ navigate, setActions }) {
 
   setActions(
     h('button', { class: 'btn ghost', onclick: () => openAlertSettings({ focus: 'tests' }) }, renderIcon('settings', { size: 15 }), 'Scorecard message'),
+    h(
+      'button',
+      {
+        class: 'btn',
+        disabled: !batches.length,
+        onclick: () =>
+          openGenerator({ batches, courses, navigate, presetBatchId: state.batchId ? Number(state.batchId) : null }).catch((err) => toast(err.message, 'error')),
+      },
+      renderIcon('sparkle', { size: 16 }),
+      'Generate DPP',
+    ),
     h(
       'button',
       { class: 'btn primary', disabled: !batches.length, onclick: () => openTestForm({ batches, courses, onSaved: (t) => navigate(`/tests/${t.id}`) }) },
@@ -114,7 +142,16 @@ export async function renderTests({ navigate, setActions }) {
                         'tr',
                         { class: 'clickable', onclick: () => navigate(`/tests/${t.id}`) },
                         h('td', { class: 'muted' }, date(t.test_date)),
-                        h('td', {}, h('div', { class: 'cb-strong' }, t.title), h('div', { class: 'muted cb-small' }, `${TEST_TYPE_LABEL[t.test_type]}${t.subject_name ? ` · ${t.subject_name}` : ''} · out of ${fmt(t.max_marks)}`)),
+                        h(
+                          'td',
+                          {},
+                          h('div', { class: 'cb-strong' }, t.title, t.online ? h('span', { class: 'badge dot green', style: 'margin-left:8px', title: 'Students can sit it in the app' }, 'In app') : null),
+                          h(
+                            'div',
+                            { class: 'muted cb-small' },
+                            `${TEST_TYPE_LABEL[t.test_type]}${t.subject_name ? ` · ${t.subject_name}` : ''} · out of ${fmt(t.max_marks)}${t.question_count ? ` · ${t.question_count} questions` : ''}`,
+                          ),
+                        ),
                         h('td', {}, t.batch_name),
                         h('td', {}, `${t.marks_entered}/${t.enrolled}`),
                         h('td', {}, t.average === null ? '—' : `${fmt(t.average)} (${pct((t.average / t.max_marks) * 100)})`),
@@ -247,7 +284,23 @@ export async function renderTestDetail({ params, setTitle, setActions, navigate,
         h('td', {}, h('label', { class: 'cb-check' }, absent, 'Absent')),
         h('td', { class: 'muted' }, student.percentile !== null ? fmt(student.percentile) : '—'),
         h('td', {}, remarks),
-        h('td', {}, student.whatsapp_sent ? h('span', { class: 'badge green', title: 'Scorecard sent to the parent' }, renderIcon('whatsapp', { size: 12 })) : null),
+        h(
+          'td',
+          {},
+          student.app
+            ? h(
+                'span',
+                {
+                  class: `badge ${student.app.status === 'submitted' ? 'blue' : 'amber'}`,
+                  style: 'margin-right:4px',
+                  title: student.app.status === 'submitted' ? `Sat in the app: ${student.app.correct} right, ${student.app.wrong} wrong, ${student.app.skipped} skipped` : 'Taking it in the app now',
+                },
+                renderIcon('smartphone', { size: 12 }),
+                student.app.status === 'submitted' ? ` ${student.app.correct}/${student.app.correct + student.app.wrong + student.app.skipped}` : ' …',
+              )
+            : null,
+          student.whatsapp_sent ? h('span', { class: 'badge green', title: 'Scorecard sent to the parent' }, renderIcon('whatsapp', { size: 12 })) : null,
+        ),
       );
     });
     fill(tableHost, 
@@ -331,6 +384,7 @@ export async function renderTestDetail({ params, setTitle, setActions, navigate,
     ),
     test.syllabus ? h('p', { class: 'muted cb-small' }, `Syllabus: ${test.syllabus}`) : null,
     statsHost,
+    paperSection({ test, instituteName, onChanged: reload }),
     section('Marks', tableHost, {
       icon: 'edit',
       subtitle: 'Type a mark and press Enter to move down. Ranks update when you save.',

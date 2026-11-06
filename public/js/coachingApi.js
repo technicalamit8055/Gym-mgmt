@@ -154,6 +154,11 @@ export const coaching = {
   publishTest: (id, notify) => request('POST', `${C}/tests/${id}/publish`, { notify }),
   unpublishTest: (id) => request('POST', `${C}/tests/${id}/unpublish`, {}),
   reportCard: (memberId, params) => request('GET', `${C}/tests/students/${memberId}/report-card${query(params)}`),
+  // Question papers and the DPP generator
+  generator: () => request('GET', `${C}/tests/generator`),
+  generatePaper: (payload) => request('POST', `${C}/tests/generate`, payload),
+  paper: (id) => request('GET', `${C}/tests/${id}/paper`),
+  savePaper: (id, questions) => request('PUT', `${C}/tests/${id}/paper`, { questions }),
 
   // Study material
   materials: (params) => request('GET', `${C}/materials${query(params)}`),
@@ -185,6 +190,11 @@ export const coaching = {
     timetable: () => request('GET', '/portal/coaching/timetable', undefined, { member: true }),
     attendance: (month) => request('GET', `/portal/coaching/attendance${query({ month })}`, undefined, { member: true }),
     tests: () => request('GET', '/portal/coaching/tests', undefined, { member: true }),
+    // Sitting a DPP or test in the app.
+    testPaper: (id) => request('GET', `/portal/coaching/tests/${id}/paper`, undefined, { member: true }),
+    startTest: (id) => request('POST', `/portal/coaching/tests/${id}/start`, {}, { member: true }),
+    saveTestAnswers: (id, payload) => request('PUT', `/portal/coaching/tests/${id}/answers`, payload, { member: true }),
+    submitTest: (id, payload) => request('POST', `/portal/coaching/tests/${id}/submit`, payload, { member: true }),
     materials: () => request('GET', '/portal/coaching/materials', undefined, { member: true }),
     downloadMaterial: (id) => download(`/portal/coaching/materials/${id}/file`, undefined, { member: true }),
     fees: () => request('GET', '/portal/coaching/fees', undefined, { member: true }),
