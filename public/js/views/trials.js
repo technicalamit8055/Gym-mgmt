@@ -492,7 +492,7 @@ const DAY_PRESETS = [
   { value: '1,2,3,4,5', label: 'Monday to Friday' },
 ];
 
-const BOOLEAN_FIELDS = ['ai_receptionist', 'hot_lead_alerts', 'trial_enabled', 'trial_followups'];
+const BOOLEAN_FIELDS = ['ai_receptionist', 'hot_lead_alerts', 'voice_admin', 'trial_enabled', 'trial_followups'];
 const NUMBER_FIELDS = ['ai_pause_minutes', 'trial_days', 'trial_visits', 'trial_cooldown_days', 'trial_daily_cap', 'trial_booking_days'];
 
 /** The front desk's and the trials' settings in one modal, with the AI
@@ -567,8 +567,17 @@ export async function openDeskSettings({ onSaved } = {}) {
       },
       { name: 'latitude', label: 'Latitude', type: 'number', step: 'any', value: s.latitude ?? '' },
       { name: 'longitude', label: 'Longitude', type: 'number', step: 'any', value: s.longitude ?? '' },
-      { name: 'owner_phone', label: 'Owner’s WhatsApp (hot-lead alerts)', value: s.owner_phone || '', placeholder: '98765 43210', hint: 'Gets “🔥 HOT LEAD” the moment the assistant books a trial.' },
+      { name: 'owner_phone', label: 'Owner’s WhatsApp', value: s.owner_phone || '', placeholder: '98765 43210', hint: 'Gets “🔥 HOT LEAD” the moment the assistant books a trial, and may send voice commands.' },
       onOff('hot_lead_alerts', 'Hot-lead alerts', s.hot_lead_alerts),
+      {
+        ...onOff(
+          'voice_admin',
+          'Voice commands from the owner',
+          s.voice_admin,
+          'Send this gym’s WhatsApp a voice note from the owner’s number (or an admin or manager’s own phone): “Add Rahul Verma, 98112 23344, 3-month plan, took 4000 cash, starts tomorrow.” The member, plan and payment are saved, they get a welcome WhatsApp with their QR card, and you get a ✅ back. Reply “undo” within 30 minutes to reverse one.',
+        ),
+        full: true,
+      },
       onOff('trial_enabled', 'Assistant offers free trials', s.trial_enabled, 'The desk can always issue a pass by hand.'),
       { name: 'trial_days', label: 'Trial length (days)', type: 'number', min: 1, max: 30, value: s.trial_days },
       { name: 'trial_visits', label: 'Visits on a trial', type: 'number', min: 1, max: 30, value: s.trial_visits, hint: 'At most one a day.' },

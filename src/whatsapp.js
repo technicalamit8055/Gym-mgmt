@@ -3,6 +3,7 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
+  downloadMediaMessage,
   generateMessageIDV2,
   getContentType,
   isJidBroadcast,
@@ -472,7 +473,15 @@ export async function sendWhatsAppMessage({ phone, message, logMessage = message
   if (!jid) fail(`"${phone}" is not a valid phone number`);
   if (!message && !document && !image) fail('Message is empty');
   if (memoryMode()) {
-    sentInMemory.push({ phone: String(phone), jid, message, type, memberId, slug });
+    sentInMemory.push({
+      phone: String(phone),
+      jid,
+      message,
+      type,
+      memberId,
+      slug,
+      ...(image?.buffer ? { image: { mimetype: image.mimetype || 'image/png', bytes: image.buffer.length } } : {}),
+    });
     logDelivery(store, { phone: String(phone), memberId, type, message: logMessage, status: 'sent', error: null });
     return { ok: true };
   }
@@ -631,6 +640,32 @@ async function phoneForChat(sock, key) {
   }
 }
 
+/** Whether a chat is the linked account's chat with itself, by either of
+ * its addresses. */
+function isOwnChat(sock, jid) {
+  const me = sock.user;
+  if (!me || !jid) return false;
+  return [me.id, me.lid].filter(Boolean).some((own) => jidNormalizedUser(own) === jid);
+}
+
+/**
+ * A voice note or audio clip on a message, or null. Nothing is downloaded
+ * until a handler calls `download()`: the receptionist never needs a lead's
+ * voice notes, so only a command someone actually acts on pays for one.
+ */
+function voiceNoteOf(sock, msg) {
+  const content = normalizeMessageContent(msg.message);
+  const audio = content?.audioMessage;
+  if (!audio) return null;
+  return {
+    mimetype: String(audio.mimetype || 'audio/ogg'),
+    seconds: Number(audio.seconds || 0),
+    bytes: Number(audio.fileLength || 0),
+    voiceNote: Boolean(audio.ptt),
+    download: () => downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage }),
+  };
+}
+
 async function handleUpsert(session, sock, { messages = [], type } = {}) {
   if (!inboundHandler) return;
   for (const msg of messages) {
@@ -644,15 +679,20 @@ async function handleUpsert(session, sock, { messages = [], type } = {}) {
     if (sentAt && Date.now() / 1000 - sentAt > MAX_INBOUND_AGE_S) continue;
     const content = messageText(msg.message);
     if (!content || !content.text.trim()) continue;
+    const jid = jidNormalizedUser(key.remoteJid);
     const event = {
       slug: session.slug,
-      jid: jidNormalizedUser(key.remoteJid),
+      jid,
       phone: await phoneForChat(sock, key),
       pushName: key.fromMe ? null : msg.pushName || null,
       id: key.id,
       fromMe: Boolean(key.fromMe),
+      // The linked phone's own "Message yourself" chat: an owner whose own
+      // number is the gym's talking to GymBook, not a chat with anyone.
+      self: isOwnChat(sock, jid),
       kind: content.kind,
       text: content.text.slice(0, 4000),
+      audio: voiceNoteOf(sock, msg),
       at: sentAt ? sentAt * 1000 : Date.now(),
       key,
     };

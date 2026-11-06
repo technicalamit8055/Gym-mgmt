@@ -98,6 +98,15 @@ export function qrPngDataUrl(token) {
   });
 }
 
+/** The same raster as bytes, for sending the card as a WhatsApp picture. */
+export function qrPngBuffer(token) {
+  return QRCode.toBuffer(qrPayload(token), {
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    width: 512,
+  });
+}
+
 /* ── Member-app poster ────────────────────────────────────────────────── */
 
 /**

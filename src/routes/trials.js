@@ -22,6 +22,7 @@ import {
 } from '../trialPasses.js';
 import { parse, today } from '../validate.js';
 import { requireModule } from '../verticals.js';
+import { hasTrustedNumber } from '../voiceAdmin.js';
 import { formatPhoneNumber, whatsappReady } from '../whatsapp.js';
 import { coordinatesFromMapsUrl } from './coaching/admissions.js';
 import { idParam, optional, weekdaysValue } from './coaching/shared.js';
@@ -350,6 +351,7 @@ const SETTINGS_FIELDS = {
   maps_url: { type: 'string', max: 500 },
   owner_phone: { type: 'string', max: 30 },
   hot_lead_alerts: { type: 'boolean' },
+  voice_admin: { type: 'boolean' },
   trial_enabled: { type: 'boolean' },
   trial_days: { type: 'int', min: 1, max: 30 },
   trial_visits: { type: 'int', min: 1, max: 30 },
@@ -397,6 +399,12 @@ trialRoutes.patch('/settings', requireRole(...MANAGES_BILLING), (req, res) => {
   if (merged.trial_visits > merged.trial_days) throw badRequest('A trial cannot have more visits than days — one visit a day', { trial_visits: 'more than days' });
   const columns = Object.keys(body).filter((c) => body[c] !== null || CLEARABLE.has(c));
   if (!columns.length) throw badRequest('Nothing to update');
+  // Commands are trusted by the sender's number; with none to trust, the
+  // switch would be on and nothing would ever answer.
+  const ownerPhone = 'owner_phone' in body ? body.owner_phone : get('SELECT owner_phone FROM gym_receptionist_settings WHERE id = 1')?.owner_phone;
+  if (body.voice_admin === 1 && !hasTrustedNumber(ownerPhone)) {
+    throw badRequest("Add the owner's WhatsApp number first — voice commands are only taken from it", { owner_phone: 'required for voice commands' });
+  }
   // Switching the assistant on needs a plan: the first time, that starts
   // the free trial; after a lapse it is a 402 telling the owner to renew.
   let trialStarted = false;

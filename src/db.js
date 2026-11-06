@@ -1739,6 +1739,38 @@ const MIGRATIONS = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_payreq_status ON payment_requests(status, created_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_payreq_member ON payment_requests(member_id)');
   },
+  (db) => {
+    // The owner's WhatsApp voice commands (src/voiceAdmin.js): "Add Rahul
+    // Verma, 98112 23344, 3-month plan, took 4000 cash". Off until the owner
+    // turns it on — it writes members and money from a chat.
+    ensureColumn(db, 'gym_receptionist_settings', 'voice_admin', 'INTEGER NOT NULL DEFAULT 0');
+    // One row per command heard. `wa_id` drops WhatsApp's redeliveries; a
+    // 'clarify' row is the question a follow-up answers; an 'added' row is
+    // what "undo" reverses. Ids, not foreign keys, for what undo deletes.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS voice_admin_log (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        wa_id            TEXT UNIQUE,
+        sender_phone     TEXT NOT NULL,
+        sender_name      TEXT,
+        source           TEXT NOT NULL CHECK (source IN ('voice', 'text')),
+        transcript       TEXT,
+        outcome          TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (outcome IN ('pending', 'added', 'clarify', 'ignored', 'rejected', 'failed', 'undo')),
+        member_id        INTEGER,
+        subscription_id  INTEGER,
+        payment_id       INTEGER,
+        lead_id          INTEGER,
+        lead_prev_status TEXT,
+        reply            TEXT,
+        error            TEXT,
+        tokens           INTEGER NOT NULL DEFAULT 0,
+        undone_at        TEXT,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_voice_admin_sender ON voice_admin_log(sender_phone, created_at)');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

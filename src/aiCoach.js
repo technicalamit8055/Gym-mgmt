@@ -502,10 +502,23 @@ const TRANSCRIBE_SCHEMA = {
 
 /** The transcript out of Gemini's JSON, as one line no longer than a typed
  * question may be. Throws on anything that is not the JSON asked for. */
-export function parseTranscript(raw) {
+export function parseTranscript(raw, maxLength = MAX_QUESTION_LENGTH) {
   const parsed = JSON.parse(stripCodeFences(String(raw ?? '')));
   if (typeof parsed?.text !== 'string') throw new Error('Transcript reply has no text');
-  return parsed.text.replace(/\s+/g, ' ').trim().slice(0, MAX_QUESTION_LENGTH);
+  return parsed.text.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+/**
+ * The voice pipeline's one step every caller shares: a clip (base64) written
+ * down by Gemini under `instruction`, with `prompt` saying what to expect.
+ * Ask Coach (transcribeVoice below) and the owner's WhatsApp voice commands
+ * (src/voiceAdmin.js) both come through here. Resolves to { text,
+ * input_tokens, output_tokens }; throws on a provider error.
+ */
+export async function transcribeAudio({ audio, mimeType, instruction, prompt, maxLength = MAX_QUESTION_LENGTH }) {
+  const ai = await getClient();
+  const response = await voiceCall(ai, instruction, [{ inlineData: { mimeType, data: audio } }, { text: prompt }]);
+  return { text: parseTranscript(response?.text, maxLength), ...usageOf(response?.usageMetadata) };
 }
 
 /**
@@ -515,14 +528,15 @@ export function parseTranscript(raw) {
  * askCoach.
  */
 export async function transcribeVoice({ audio, mimeType, screen }) {
-  const ai = await getClient();
   const topic = screen === 'diet' ? 'food, meals and macros' : 'the workout in front of them';
-  const response = await voiceCall(ai, TRANSCRIBE_INSTRUCTION, [
-    { inlineData: { mimeType, data: audio } },
-    { text: `The member is asking about ${topic}. Write down what they said — Hindi or Hinglish in Roman letters.` },
-  ]);
-  const usage = usageOf(response?.usageMetadata);
-  let text = parseTranscript(response?.text);
+  const { text: heard, ...usage } = await transcribeAudio({
+    audio,
+    mimeType,
+    instruction: TRANSCRIBE_INSTRUCTION,
+    prompt: `The member is asking about ${topic}. Write down what they said — Hindi or Hinglish in Roman letters.`,
+  });
+  const ai = await getClient();
+  let text = heard;
   // Now and then — most often over music — Gemini writes Hindi in Devanagari
   // despite the instruction, and the coach would answer in Devanagari too.
   // Rewriting the script is a cheap text-only call; if it fails, the
