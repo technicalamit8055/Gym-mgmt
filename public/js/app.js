@@ -44,6 +44,7 @@ import { renderLanding } from './views/landing.js';
 import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
+import { renderPrintTemplates } from './views/printTemplates.js';
 import { renderPlatformConsole } from './views/platform.js';
 import { renderSellerPanel } from './views/sellerPanel.js';
 import { renderReset } from './views/reset.js';
@@ -105,6 +106,7 @@ function buildNav() {
       { path: '/devices', label: 'Biometric devices', icon: 'devices' },
       { path: '/sessions', label: t('shifts'), icon: 'sessions' },
       { path: '/staff', label: t('staff'), icon: 'staff' },
+      { path: '/templates', label: 'Print templates', icon: 'print', roles: ['admin', 'manager'] },
       { path: '/settings', label: t('settings'), icon: 'settings' },
     ];
   }
@@ -133,6 +135,7 @@ function buildNav() {
     { path: '/devices', label: 'Biometric devices', icon: 'devices' },
     { path: '/sessions', label: 'Gym sessions', icon: 'sessions' },
     { path: '/staff', label: 'Staff', icon: 'staff' },
+    { path: '/templates', label: 'Print templates', icon: 'print', roles: ['admin', 'manager'] },
     { path: '/settings', label: 'Gym settings', icon: 'settings' },
   ];
 }
@@ -173,6 +176,13 @@ function buildRoutes() {
     { pattern: /^\/devices$/, title: 'Biometric devices', view: renderDevices },
     { pattern: /^\/sessions$/, title: t('shifts'), view: renderSessions },
     { pattern: /^\/staff$/, title: t('staff'), view: renderStaff },
+    {
+      pattern: /^\/templates$/,
+      title: 'Print templates',
+      icon: 'print',
+      subtitle: isCoaching() ? 'How your receipts, ID cards and OMR sheets look' : 'How your receipts and ID cards look',
+      view: renderPrintTemplates,
+    },
     {
       pattern: /^\/settings$/,
       title: t('settings'),

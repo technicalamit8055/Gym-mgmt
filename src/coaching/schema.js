@@ -943,6 +943,11 @@ export const COACHING_MIGRATIONS = [
       )
     `);
   },
+
+  // Which sheet style a test's OMR sheets are printed in (public/js/omrLayout.js
+  // OMR_STYLES) — the scanner reads with the same one. NULL is the original
+  // 'coachbook' sheet, which every test set up before styles existed used.
+  (db) => ensureColumn(db, 'academic_tests', 'omr_style', 'TEXT'),
 ];
 
 /** Widens class_recordings.source to allow 'server' — see the migration above. */

@@ -5,6 +5,7 @@ import { moduleEnabled } from '../verticals.js';
 import { whatsappReady } from '../whatsapp.js';
 import { INSTALLMENT_SELECT } from './fees.js';
 import { coachingSettings, sendInstallmentReminder } from './notify.js';
+import { alertFeeDue } from './studentAlerts.js';
 
 /**
  * The hourly fee-reminder sweep (called from server.js inside each tenant's
@@ -57,6 +58,7 @@ export function sendCoachingFeeReminders({ gymName, currency = 'INR' } = {}) {
     );
     let queued = 0;
     for (const installment of due) {
+      alertFeeDue(installment, { currency, now });
       if (sendInstallmentReminder(installment, { instituteName: gymName, currency, now })) queued += 1;
     }
     return queued;

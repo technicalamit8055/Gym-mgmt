@@ -17,7 +17,8 @@ const { closeRegistryDb } = await import('../src/tenants.js');
 const { today } = await import('../src/validate.js');
 const { sentInMemory } = await import('../src/whatsapp.js');
 const { gradeResponse, parseAnswerKey, questionStats } = await import('../src/coaching/omr.js');
-const { rollDigits } = await import('../public/js/omrLayout.js');
+const { MARKERS, MARKER_SIZE, OMR_STYLES, ORIENTATION_BAR, ORIENTATION_BLANK, rollDigits, rollDigitsFor, sheetLayout } = await import('../public/js/omrLayout.js');
+const { omrSamplePdf, omrSheetPdf } = await import('../src/coaching/omrSheet.js');
 const { findSheet, readSheet } = await import('../public/js/omrScan.js');
 const { renderSheet, sampleAnswers } = await import('./helpers/omrRender.js');
 
@@ -60,6 +61,98 @@ describe('answer keys', () => {
     assert.equal(rollDigits('B12A-07'), '0007');
     assert.equal(rollDigits('2024105'), '4105');
     assert.equal(rollDigits('NEET'), null);
+    assert.equal(rollDigits('B12A-07', 6), '000007');
+    assert.equal(rollDigitsFor('coachbook'), 4);
+    assert.equal(rollDigitsFor('board'), 6);
+  });
+});
+
+/* ── Sheet styles ────────────────────────────────────────────────────── */
+
+describe('OMR sheet styles', () => {
+  // What the scanner needs from every style (see omrScan.js): bubbles inside
+  // the printable area, off the bare-paper strips it checks, clear of the
+  // markers and orientation patches, and with paper all round each one.
+  const PAPER_ROWS = [[14, 26, 76], [14, 134, 184], [283, 26, 76], [283, 134, 184]];
+  const PAPER_COLS = [[14, 28, 270], [196.5, 28, 270]];
+  const near = (b, r, box) => b.x + r > box.x && b.x - r < box.x + box.width && b.y + r > box.y && b.y - r < box.y + box.height;
+
+  for (const style of OMR_STYLES) {
+    for (const options of [4, 5]) {
+      it(`keeps ${style} (${options} options) readable by the scanner`, () => {
+        const layout = sheetLayout({ questions: 100, options, style });
+        assert.equal(layout.style, style);
+        assert.equal(layout.items.length, 100);
+        assert.equal(layout.roll.length, rollDigitsFor(style));
+        const r = layout.bubbleRadius;
+        const ring = r * 1.32;
+        const bubbles = [...layout.items.flatMap((i) => i.bubbles), ...layout.roll.flatMap((c) => c.bubbles)];
+        for (const b of bubbles) {
+          assert.ok(b.x - ring >= 18 && b.x + ring <= 193 && b.y - ring >= 18 && b.y + ring <= 279, `${style}: bubble at ${b.x},${b.y} out of bounds`);
+          for (const [y, x0, x1] of PAPER_ROWS) assert.ok(!(Math.abs(b.y - y) < ring + 1 && b.x > x0 - ring && b.x < x1 + ring));
+          for (const [x, y0, y1] of PAPER_COLS) assert.ok(!(Math.abs(b.x - x) < ring + 1 && b.y > y0 - ring && b.y < y1 + ring));
+          for (const m of Object.values(MARKERS)) assert.ok(!near(b, ring, { x: m.x - MARKER_SIZE / 2, y: m.y - MARKER_SIZE / 2, width: MARKER_SIZE, height: MARKER_SIZE }));
+          assert.ok(!near(b, ring, ORIENTATION_BAR) && !near(b, ring, ORIENTATION_BLANK));
+          assert.ok(/^[A-E0-9]$/.test(b.label) && b.display);
+        }
+        // No bubble's paper ring reaches into a neighbour.
+        for (let i = 0; i < bubbles.length; i++) {
+          for (let j = i + 1; j < bubbles.length; j++) {
+            const d = Math.hypot(bubbles[i].x - bubbles[j].x, bubbles[i].y - bubbles[j].y);
+            assert.ok(d >= ring + r, `${style}: bubbles ${i} and ${j} only ${d.toFixed(2)} mm apart`);
+          }
+        }
+        // Printed frames and rules stay 1.4 radii clear of every answer bubble.
+        for (const col of layout.columns.filter((c) => c.frame)) {
+          const f = col.frame;
+          const lines = [col.headerRule, f.y, f.y + f.height, ...col.dividers];
+          for (const item of layout.items) {
+            for (const b of item.bubbles) {
+              if (b.x < f.x || b.x > f.x + f.width) continue;
+              for (const y of lines) assert.ok(Math.abs(b.y - y) >= r * 1.4, `${style}: rule at ${y} too close to bubble at ${b.y}`);
+              assert.ok(b.x - f.x >= r * 1.4 && f.x + f.width - b.x >= r * 1.4, `${style}: frame too close to bubble at ${b.x}`);
+            }
+          }
+        }
+      });
+    }
+  }
+
+  it('shows the competitive sheet’s options as numbers but reads them as letters', () => {
+    const layout = sheetLayout({ questions: 3, options: 4, style: 'competitive' });
+    assert.deepEqual(layout.items[0].bubbles.map((b) => b.display), ['1', '2', '3', '4']);
+    assert.deepEqual(layout.items[0].bubbles.map((b) => b.label), ['A', 'B', 'C', 'D']);
+    assert.throws(() => sheetLayout({ questions: 3, options: 4, style: 'nope' }), /Unknown OMR sheet style/);
+  });
+
+  const frame = { width: 900, height: 1200 };
+  for (const style of ['board', 'competitive']) {
+    it(`reads a filled ${style} sheet and its 6-digit roll number`, () => {
+      const answers = sampleAnswers(100, 4, 21);
+      const gray = renderSheet({
+        style, questions: 100, options: 4, answers, roll: '004217', frame,
+        quad: [[110, 95], [800, 130], [835, 1125], [70, 1100]],
+      });
+      const found = findSheet(gray, frame.width, frame.height);
+      assert.ok(found.found, JSON.stringify(found));
+      const read = readSheet(gray, frame.width, frame.height, found.H, { questions: 100, options: 4, style });
+      assert.deepEqual(read.answers, answers);
+      assert.equal(read.roll, '004217');
+      assert.equal(read.rollProblem, null);
+    });
+  }
+
+  it('prints every style, blank and named, with the institute template', async () => {
+    const test = { title: 'Mock 1', batch_name: 'Class 10', subject_name: 'Science', test_date: '2026-11-07', omr_questions: 40, omr_options: 5, omr_marks_correct: 4, negative_marking: 1 };
+    const template = { default_style: 'board', heading: 'Vidya Classes', subheading: 'Half-yearly', hindi: true, instructions: '', extra_fields: ["Father's name", 'Centre'] };
+    for (const style of OMR_STYLES) {
+      const blank = await omrSheetPdf({ institute: 'Vidya', test, style, template });
+      assert.equal(blank.subarray(0, 5).toString(), '%PDF-');
+      const named = await omrSheetPdf({ institute: 'Vidya', test, style, template: { ...template, instructions: 'Line one\nलाइन दो' }, students: [{ name: 'Aarav Shah', roll: 'B10-000123' }, { name: 'दिया', roll: '7' }] });
+      assert.ok(named.length > blank.length);
+      const sample = await omrSamplePdf({ institute: 'Vidya', style, template });
+      assert.equal(sample.subarray(0, 5).toString(), '%PDF-');
+    }
   });
 });
 
@@ -307,6 +400,29 @@ describe('OMR marking through the API', () => {
     assert.match(mismatch.body.error, /out of 12/);
     const ok = await call('PUT', `/api/coaching/tests/${created.body.id}/omr`, { questions: 3, options: 4, marks_correct: 4, answer_key: state.body.paper_key });
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  });
+
+  it('keeps the sheet style on the test and will not change it under scanned sheets', async () => {
+    assert.equal((await call('GET', `/api/coaching/tests/${test.id}/omr`)).body.style, 'coachbook', 'a test set up before styles stays on the original sheet');
+    const restyle = await call('PUT', `/api/coaching/tests/${test.id}/omr`, { questions: 5, options: 4, marks_correct: 4, answer_key: 'ABCD*', style: 'board' });
+    assert.equal(restyle.status, 409);
+    const bad = await call('PUT', `/api/coaching/tests/${test.id}/omr`, { questions: 5, options: 4, marks_correct: 4, answer_key: 'ABCD*', style: 'fancy' });
+    assert.equal(bad.status, 400);
+
+    const created = await call('POST', '/api/coaching/tests', { batch_id: batch.id, title: 'Board mock', test_type: 'mock', test_date: today(), max_marks: 40 });
+    const id = created.body.id;
+    const fresh = await call('GET', `/api/coaching/tests/${id}/omr`);
+    assert.equal(fresh.body.style, 'coachbook', 'the institute default until a template says otherwise');
+    assert.ok(fresh.body.styles.includes('competitive'));
+    const set = await call('PUT', `/api/coaching/tests/${id}/omr`, { questions: 10, options: 4, marks_correct: 4, style: 'board' });
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.equal(set.body.style, 'board');
+    assert.equal(set.body.roster[0].roll_digits, rollDigits(students[0].roll, 6));
+    const kept = await call('PUT', `/api/coaching/tests/${id}/omr`, { questions: 10, options: 4, marks_correct: 4 });
+    assert.equal(kept.body.style, 'board', 'saving without a style keeps the one the sheets were printed in');
+    const pdf = await call('GET', `/api/coaching/tests/${id}/omr/sheet.pdf?named=1`);
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
   });
 
   it('takes a scan back out along with its mark', async () => {

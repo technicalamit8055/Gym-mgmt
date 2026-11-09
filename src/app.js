@@ -31,6 +31,7 @@ import { platformRoutes } from './routes/platform.js';
 import { portalRoutes } from './routes/portal.js';
 import { pwaRoutes } from './routes/pwa.js';
 import { qrRoutes } from './routes/qr.js';
+import { templateRoutes } from './routes/templates.js';
 import { reportRoutes } from './routes/reports.js';
 import { seatRoutes } from './routes/seats.js';
 import { sellerRoutes } from './routes/seller.js';
@@ -192,6 +193,7 @@ export function createApp() {
   app.use('/api/sessions', sessionRoutes);
   app.use('/api/biometric', biometricRoutes);
   app.use('/api/qr', qrRoutes);
+  app.use('/api/templates', templateRoutes);
   app.use('/api/classes', classRoutes);
   app.use('/api/bookings', bookingRoutes);
   app.use('/api/equipment', equipmentRoutes);

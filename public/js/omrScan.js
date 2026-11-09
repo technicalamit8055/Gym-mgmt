@@ -453,11 +453,12 @@ function readRow(fills, labels, threshold) {
  * answers[i] is '' (blank), one letter, or several letters when more than
  * one bubble is filled — grading treats that as a wrong answer, the usual OMR
  * rule. unsure lists question numbers with a borderline bubble. roll is the
- * four bubbled digits, or null with rollProblem 'blank', 'multiple' or
- * 'partial' when they cannot be read.
+ * bubbled digits (4, or 6 on the exam-pattern sheets), or null with rollProblem 'blank', 'multiple' or
+ * 'partial' when they cannot be read. `style` is the sheet style the test
+ * was printed in (omrLayout.js OMR_STYLES), whose bubbles differ.
  */
-export function readSheet(gray, width, height, H, { questions, options }) {
-  const layout = sheetLayout({ questions, options });
+export function readSheet(gray, width, height, H, { questions, options, style = 'coachbook' }) {
+  const layout = sheetLayout({ questions, options, style });
   const image = { gray, width, height };
   const r = layout.bubbleRadius;
   const answerFills = layout.items.map((item) => item.bubbles.map((b) => bubbleFill(image, H, b.x, b.y, r)));

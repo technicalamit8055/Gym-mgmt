@@ -7,12 +7,12 @@ import { homography, project } from '../../public/js/omrScan.js';
  * through a perspective transform onto a dark table, with light falling off
  * across the page, a little blur and sensor noise.
  */
-export function renderSheet({ questions, options, answers, roll, quad, frame, light = [1, 0.62], seed = 7, fillRadius = 0.92, fillInk = 45 }) {
+export function renderSheet({ questions, options, style = 'coachbook', answers, roll, quad, frame, light = [1, 0.62], seed = 7, fillRadius = 0.92, fillInk = 45 }) {
   const S = 6;
   const W = PAGE.width * S;
   const Hh = PAGE.height * S;
   const sheet = new Uint8Array(W * Hh).fill(238);
-  const layout = sheetLayout({ questions, options });
+  const layout = sheetLayout({ questions, options, style });
   const disc = (cx, cy, r, value) => {
     for (let y = Math.floor((cy - r) * S); y <= Math.ceil((cy + r) * S); y++) {
       for (let x = Math.floor((cx - r) * S); x <= Math.ceil((cx + r) * S); x++) {
@@ -35,6 +35,20 @@ export function renderSheet({ questions, options, answers, roll, quad, frame, li
   // Header "text": rows of short dark strokes, and a filled example bubble.
   for (let line = 0; line < 8; line++) for (let word = 0; word < 14; word++) rect(22 + word * 9, 24 + line * 8, 6, 1.6, 60);
   disc(35, 92, 2, 25);
+  // The exam-pattern sheets' printed frames and rules, as thin dark lines.
+  const outline = (x, y, w, h, value) => {
+    rect(x, y, w, 0.15, value);
+    rect(x, y + h, w, 0.15, value);
+    rect(x, y, 0.15, h, value);
+    rect(x + w, y, 0.15, h, value);
+  };
+  for (const col of layout.columns) {
+    if (!col.frame || !col.used) continue;
+    outline(col.frame.x, col.frame.y, col.frame.width, col.frame.height, 90);
+    rect(col.frame.x, col.headerRule, col.frame.width, 0.15, 90);
+    for (const y of col.dividers) rect(col.frame.x + 1.2, y, col.frame.width - 2.4, 0.1, 150);
+  }
+  if (layout.rollPanel) outline(layout.rollPanel.x, layout.rollPanel.y, layout.rollPanel.width, layout.rollPanel.height, 90);
   for (const item of layout.items) for (const b of item.bubbles) ring(b.x, b.y, layout.bubbleRadius, 120);
   for (const col of layout.roll) for (const b of col.bubbles) ring(b.x, b.y, layout.bubbleRadius, 120);
   layout.items.forEach((item, i) => {

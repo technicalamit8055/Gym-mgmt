@@ -106,6 +106,7 @@ export async function sendAutoReceiptIfEnabled(paymentId, req, overrides = null)
           const pdfBuffer = await generateReceiptPdf(paymentRecord, {
             gymName,
             logoBuffer: req?.tenant?.logo_bytes ? Buffer.from(req.tenant.logo_bytes) : null,
+            currency: req?.tenant?.currency || 'INR',
           });
           const receiptNo = paymentRecord.id ? `PAY-${String(paymentRecord.id).padStart(5, '0')}` : '00000';
           doc = {
@@ -137,6 +138,21 @@ paymentRoutes.get('/:id/receipt', (req, res) => {
   const payment = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [Number(req.params.id)]);
   if (!payment) throw notFound('Payment not found');
   res.json(payment);
+});
+
+/** The receipt as the gym's templated PDF — what "Download receipt" saves. */
+paymentRoutes.get('/:id/receipt.pdf', async (req, res) => {
+  const payment = get(`${PAYMENT_SELECT} WHERE pay.id = ?`, [Number(req.params.id)]);
+  if (!payment) throw notFound('Payment not found');
+  const pdf = await generateReceiptPdf(payment, {
+    gymName: req.tenant?.gym_name || config.gymName || 'GymBook',
+    logoBuffer: req.tenant?.logo_bytes ? Buffer.from(req.tenant.logo_bytes) : null,
+    currency: req.tenant?.currency || 'INR',
+  });
+  const receiptNo = `PAY-${String(payment.id).padStart(5, '0')}`;
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `attachment; filename="Receipt_${receiptNo}${payment.member_code ? `-${payment.member_code}` : ''}.pdf"`);
+  res.send(pdf);
 });
 
 paymentRoutes.delete('/:id', requireRole('admin'), (req, res) => {

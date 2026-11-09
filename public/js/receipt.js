@@ -1,12 +1,14 @@
-import { serverOrigin, serverUrl } from './api.js';
-import { clear, date, fullName, h, money, today } from './ui.js';
+import { api, serverOrigin, serverUrl } from './api.js';
+import { clear, date, fullName, h, money, toast, today } from './ui.js';
 import { imageBytesToPdf } from './pdf.js';
 
 /**
  * Payment receipt: a clean, printer-friendly document rendered into #print-root
  * using the same body.printing mechanism as QR ID cards.
  *
- * `printReceipt(data, { gymName })` builds and prints a single receipt.
+ * `printReceipt(data, { gymName })` builds and prints a single receipt in the
+ * owner's receipt template (Settings › Print templates) — the same style the
+ * server's PDF uses, so a printed and a downloaded receipt match.
  *
  * `data` is a payment object with at least:
  *   id, amount, method, paid_on, reference, note,
@@ -18,115 +20,112 @@ import { imageBytesToPdf } from './pdf.js';
  * values + the API response rather than making an extra fetch.
  */
 
-function receiptNode(data, { gymName = 'GymBook', logoUrl } = {}) {
-  const memberName = data.first_name
-    ? fullName(data)
-    : data.member_name || 'Member';
+export const DEFAULT_RECEIPT_TEMPLATE = {
+  style: 'modern',
+  accent: '#4f46e5',
+  show_logo: true,
+  address: '',
+  contact: '',
+  footer_note: 'Thank you for your payment!',
+  terms: '',
+  show_signature: false,
+  signature_label: 'Authorised signatory',
+};
 
+let templatePromise = null;
+
+/** The gym's receipt template, fetched once per page load (and dropped when the editor saves). */
+export function receiptTemplate() {
+  if (!templatePromise) {
+    templatePromise = api.templates
+      .get()
+      .then((res) => ({ ...DEFAULT_RECEIPT_TEMPLATE, ...(res?.templates?.receipt || {}) }))
+      .catch(() => {
+        templatePromise = null;
+        return { ...DEFAULT_RECEIPT_TEMPLATE };
+      });
+  }
+  return templatePromise;
+}
+
+export function forgetReceiptTemplate() {
+  templatePromise = null;
+}
+
+const METHOD_LABELS = { upi: 'UPI', cash: 'Cash', card: 'Card', bank: 'Bank transfer', bank_transfer: 'Bank transfer', neft: 'NEFT', imps: 'IMPS', rtgs: 'RTGS', cheque: 'Cheque', online: 'Online', wallet: 'Wallet' };
+const methodLabel = (method) => {
+  const key = String(method || 'cash').trim().toLowerCase();
+  return METHOD_LABELS[key] || key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+/** The receipt as DOM, in the template's style. Exported for the template editor's preview. */
+export function receiptNode(data, { gymName = 'GymBook', logoUrl, template = DEFAULT_RECEIPT_TEMPLATE } = {}) {
+  const t = { ...DEFAULT_RECEIPT_TEMPLATE, ...template };
+  const style = ['modern', 'classic', 'minimal'].includes(t.style) ? t.style : 'modern';
+  const memberName = data.first_name ? fullName(data) : data.member_name || 'Member';
+  const receiptNo = data.receipt_no || (data.id ? `PAY-${String(data.id).padStart(5, '0')}` : '—');
+  const paidOn = date(data.paid_on || today());
   const now = new Date();
   const timestamp = `${date(now)}, ${now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  const finalLogoUrl = t.show_logo ? logoUrl ?? getGymLogoUrl() : null;
 
-  const finalLogoUrl = logoUrl ?? getGymLogoUrl();
-  const gymHeading = finalLogoUrl
-    ? h('div', { class: 'receipt-gym-brand' },
-        h('img', { class: 'receipt-logo-img', src: finalLogoUrl, alt: gymName }),
-        h('div', { class: 'receipt-gym' }, gymName),
-      )
-    : h('div', { class: 'receipt-gym' }, gymName);
+  const row = (label, value, cls = '') =>
+    h('div', { class: `receipt-row ${cls}`.trim() }, h('span', { class: 'receipt-label' }, label), h('span', { class: 'receipt-value' }, value));
+  const section = (title, ...rows) => h('div', { class: 'receipt-section' }, h('div', { class: 'receipt-section-title' }, title), ...rows.filter(Boolean));
 
+  const amount = money(data.amount);
   return h(
     'div',
-    { class: 'receipt' },
+    { class: `receipt rc-${style}`, style: `--rc-accent:${t.accent}` },
 
-    /* ── header ─────────────────────────────────────────────────────── */
     h('div', { class: 'receipt-header' },
-      gymHeading,
+      finalLogoUrl ? h('img', { class: 'receipt-logo-img', src: finalLogoUrl, alt: '' }) : null,
+      h('div', { class: 'receipt-gym' }, gymName),
+      t.address ? h('div', { class: 'receipt-sub' }, t.address) : null,
+      t.contact ? h('div', { class: 'receipt-sub' }, t.contact) : null,
       h('div', { class: 'receipt-title' }, 'Payment Receipt'),
     ),
 
-    h('div', { class: 'receipt-divider' }),
+    style === 'classic'
+      ? h('div', { class: 'receipt-meta-line' }, h('span', {}, `Receipt no. ${receiptNo}`), h('span', {}, `Date ${paidOn}`))
+      : null,
 
-    /* ── member info ───────────────────────────────────────────────── */
-    h('div', { class: 'receipt-section' },
-      h('div', { class: 'receipt-section-title' }, 'Member'),
-      h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Name'),
-        h('span', { class: 'receipt-value' }, memberName),
-      ),
-      data.member_code ? h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Code'),
-        h('span', { class: 'receipt-value' }, data.member_code),
-      ) : null,
-      data.phone ? h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Phone'),
-        h('span', { class: 'receipt-value' }, data.phone),
-      ) : null,
+    style === 'modern'
+      ? h('div', { class: 'receipt-hero' },
+          h('div', { class: 'receipt-hero-label' }, 'Amount paid', h('span', { class: 'receipt-paid' }, 'Paid')),
+          h('div', { class: 'receipt-hero-amount' }, amount),
+          h('div', { class: 'receipt-hero-meta' }, `${receiptNo} · ${paidOn} · ${methodLabel(data.method)}`),
+        )
+      : null,
+
+    section('Member',
+      row('Name', memberName, 'is-strong'),
+      data.member_code ? row('Code', data.member_code) : null,
+      data.phone ? row('Phone', data.phone) : null,
     ),
-
-    h('div', { class: 'receipt-divider' }),
-
-    /* ── payment info ──────────────────────────────────────────────── */
-    h('div', { class: 'receipt-section' },
-      h('div', { class: 'receipt-section-title' }, 'Payment Details'),
-      h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Receipt #'),
-        h('span', { class: 'receipt-value' }, data.id ? `PAY-${String(data.id).padStart(5, '0')}` : '—'),
-      ),
-      h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Date'),
-        h('span', { class: 'receipt-value' }, date(data.paid_on || today())),
-      ),
-      h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Method'),
-        h('span', { class: 'receipt-value receipt-method' }, String(data.method || 'cash').toUpperCase()),
-      ),
-      data.reference ? h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Reference'),
-        h('span', { class: 'receipt-value' }, data.reference),
-      ) : null,
-      data.note ? h('div', { class: 'receipt-row' },
-        h('span', { class: 'receipt-label' }, 'Note'),
-        h('span', { class: 'receipt-value' }, data.note),
-      ) : null,
+    section('Payment details',
+      style === 'classic' ? null : row('Receipt no.', receiptNo),
+      style === 'classic' ? null : row('Date', paidOn),
+      row('Method', methodLabel(data.method)),
+      data.reference ? row('Reference', data.reference) : null,
+      data.note ? row('Note', data.note) : null,
     ),
+    data.plan_name
+      ? section('Membership',
+          row('Plan', data.plan_name),
+          data.start_date && data.end_date ? row('Period', `${date(data.start_date)} – ${date(data.end_date)}`) : null,
+          data.price != null ? row('Plan price', money(data.price)) : null,
+          data.discount ? row('Discount', `−${money(data.discount)}`, 'is-discount') : null,
+        )
+      : null,
 
-    /* ── plan info (if linked to a subscription) ───────────────────── */
-    data.plan_name ? h('div', {},
-      h('div', { class: 'receipt-divider' }),
-      h('div', { class: 'receipt-section' },
-        h('div', { class: 'receipt-section-title' }, 'Membership'),
-        h('div', { class: 'receipt-row' },
-          h('span', { class: 'receipt-label' }, 'Plan'),
-          h('span', { class: 'receipt-value' }, data.plan_name),
-        ),
-        data.start_date && data.end_date ? h('div', { class: 'receipt-row' },
-          h('span', { class: 'receipt-label' }, 'Period'),
-          h('span', { class: 'receipt-value' }, `${date(data.start_date)} → ${date(data.end_date)}`),
-        ) : null,
-        data.price != null ? h('div', { class: 'receipt-row' },
-          h('span', { class: 'receipt-label' }, 'Plan price'),
-          h('span', { class: 'receipt-value' }, money(data.price)),
-        ) : null,
-        data.discount ? h('div', { class: 'receipt-row' },
-          h('span', { class: 'receipt-label' }, 'Discount'),
-          h('span', { class: 'receipt-value' }, `− ${money(data.discount)}`),
-        ) : null,
-      ),
-    ) : null,
+    style === 'modern' ? null : h('div', { class: 'receipt-total' }, h('span', {}, style === 'minimal' ? 'Total paid' : 'Amount paid'), h('span', {}, amount)),
 
-    h('div', { class: 'receipt-divider thick' }),
+    t.terms ? h('div', { class: 'receipt-terms' }, style === 'minimal' ? null : h('div', { class: 'receipt-terms-title' }, 'Terms'), t.terms) : null,
+    t.show_signature ? h('div', { class: 'receipt-sign' }, h('span', {}, t.signature_label || 'Authorised signatory')) : null,
 
-    /* ── total ──────────────────────────────────────────────────────── */
-    h('div', { class: 'receipt-total' },
-      h('span', {}, 'Amount Paid'),
-      h('span', {}, money(data.amount)),
-    ),
-
-    h('div', { class: 'receipt-divider' }),
-
-    /* ── footer ─────────────────────────────────────────────────────── */
     h('div', { class: 'receipt-footer' },
-      h('div', {}, 'Thank you for your payment!'),
+      t.footer_note ? h('div', { class: 'receipt-thanks' }, t.footer_note) : null,
       h('div', { class: 'receipt-timestamp' }, `Printed on ${timestamp}`),
     ),
   );
@@ -330,20 +329,24 @@ export async function renderReceiptPdfBytes(data, { gymName = 'GymBook', logoUrl
 }
 
 /**
- * Downloads a payment receipt as a PDF — rendered to a canvas first (so any
- * currency symbol or script the browser can display comes through correctly,
- * which the 14 standard PDF fonts alone cannot guarantee) and wrapped as a
- * single embedded image, so it opens correctly on any device with no
- * dependency on this app's stylesheet.
+ * Downloads a payment receipt as a PDF. A saved payment comes from the server
+ * (GET /payments/:id/receipt.pdf), drawn in the gym's receipt template — the
+ * same file WhatsApp and the member portal send. Only a payment with no id
+ * yet falls back to the in-browser canvas rendering below.
  *
  * @param {object} data - Payment data (see receiptNode for shape)
  * @param {object} opts
  * @param {string} opts.gymName - The gym's display name
  */
 export async function downloadReceipt(data, { gymName = 'GymBook', logoUrl } = {}) {
-  const pdfBytes = await renderReceiptPdfBytes(data, { gymName, logoUrl });
-
   const receiptNo = data.id ? `PAY-${String(data.id).padStart(5, '0')}` : 'receipt';
+  if (data.id) {
+    const saved = await api.downloadPaymentReceipt(data.id, `${receiptNo}${data.member_code ? `-${data.member_code}` : ''}.pdf`);
+    if (saved) toast(saved);
+    return;
+  }
+
+  const pdfBytes = await renderReceiptPdfBytes(data, { gymName, logoUrl });
   const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
   const link = document.createElement('a');
   link.href = url;
@@ -361,11 +364,12 @@ export async function downloadReceipt(data, { gymName = 'GymBook', logoUrl } = {
  * @param {object} opts
  * @param {string} opts.gymName - The gym's display name
  */
-export function printReceipt(data, { gymName } = {}) {
+export async function printReceipt(data, { gymName } = {}) {
   const root = document.getElementById('print-root');
   if (!root) return;
 
-  clear(root).append(h('div', { class: 'receipt-page' }, receiptNode(data, { gymName })));
+  const template = await receiptTemplate();
+  clear(root).append(h('div', { class: 'receipt-page' }, receiptNode(data, { gymName, template })));
   document.body.classList.add('printing');
 
   const cleanup = () => {

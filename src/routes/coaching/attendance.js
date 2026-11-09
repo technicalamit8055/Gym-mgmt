@@ -14,6 +14,7 @@ import {
   weekdayOf,
 } from '../../coaching/attendance.js';
 import { coachingSettings, sendAbsenceAlerts, sendLowAttendanceAlerts } from '../../coaching/notify.js';
+import { alertAbsentStudents } from '../../coaching/studentAlerts.js';
 import { dateQuery, idParam, idQuery, instituteName, monthQuery } from './shared.js';
 
 /**
@@ -122,6 +123,8 @@ attendanceRoutes.put('/attendance/sheet', (req, res) => {
     body.notify && date === today()
       ? sendAbsenceAlerts({ batchId: body.batch_id, subjectId: body.subject_id ?? null, date, instituteName: instituteName(req) })
       : { queued: 0, skipped: 0, connected: null, not_today: date !== today() };
+  // And the absent students themselves, in their app.
+  if (body.notify && date === today()) alertAbsentStudents({ batchId: body.batch_id, subjectId: body.subject_id ?? null, date });
   res.json({ saved, alerts, sheet: attendanceSheet({ batchId: body.batch_id, subjectId: body.subject_id ?? null, date }) });
 });
 

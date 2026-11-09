@@ -3,6 +3,7 @@ import { all, get, run, tenantStorage } from '../db.js';
 import { classRecording, cloudflarePlayable, playbackUrl } from './privateStream.js';
 import { recordingToken } from './selfHostedStream.js';
 import { finishRecording, recordingSize, removeRecording } from './serverRecording.js';
+import { announceRecording } from './studentAlerts.js';
 
 /**
  * Recorded lectures: each batch's library of classes to rewatch, by subject
@@ -133,6 +134,7 @@ export function recordClass(sessionId) {
     [s.batch_id, s.subject_id, s.faculty_id, s.id, s.title || `${s.subject_name || 'Class'} lecture`, chapter, source, ref, status, seconds, startedAt, s.created_by, server?.sizeBytes ?? null],
   );
   const id = Number(info.lastInsertRowid);
+  if (status === 'ready') announceRecording(id);
   if (source === 'cloudflare') {
     for (const ms of CHECK_AFTER_MS) setTimeout(() => track(checkRecording(id)), ms).unref?.();
   }
@@ -164,7 +166,8 @@ export async function checkRecording(id) {
   try {
     const found = await classRecording(r.cf_live_input_id, { from: r.started_at, to: r.ended_at ?? utcTimestamp() });
     if (found.state === 'ready') {
-      run("UPDATE class_recordings SET status = 'ready', video_ref = ?, duration_sec = COALESCE(?, duration_sec) WHERE id = ? AND status = 'processing'", [found.uid, found.duration, id]);
+      const ready = run("UPDATE class_recordings SET status = 'ready', video_ref = ?, duration_sec = COALESCE(?, duration_sec) WHERE id = ? AND status = 'processing'", [found.uid, found.duration, id]);
+      if (ready.changes) announceRecording(id);
     } else if ((found.state === 'none' && age > NONE_AFTER_MS) || age > GIVE_UP_MS) {
       run("UPDATE class_recordings SET status = 'failed' WHERE id = ? AND status = 'processing'", [id]);
     }

@@ -264,6 +264,45 @@ describe('starting a live class', () => {
   });
 });
 
+/* ── Notifying the batch ─────────────────────────────────────────────── */
+
+const inbox = async (who) => (await call('GET', '/api/portal/notifications', undefined, { useToken: who.token })).body.items;
+const liveAlerts = async (who) => (await inbox(who)).filter((n) => n.screen === 'live' && n.title === 'Physics class is live now');
+
+describe('telling the batch a class is live', () => {
+  it('puts “class is live” in every enrolled student’s notifications, opening the Live screen', async () => {
+    for (const who of [aarav, kabir]) {
+      const alerts = await liveAlerts(who);
+      assert.equal(alerts.length, 1, JSON.stringify(alerts));
+      assert.equal(alerts[0].category, 'announcement');
+      assert.match(alerts[0].body, /Prof Verma has started “Rotational motion” for Batch 12-A/);
+    }
+  });
+
+  it('leaves out other batches and students who dropped out', async () => {
+    assert.equal((await liveAlerts(diya)).length, 0);
+    assert.equal((await liveAlerts(meera)).length, 0);
+  });
+
+  it('announces each class once, however many times it is read back', async () => {
+    const { announceLiveClass } = await import('../src/coaching/studentAlerts.js');
+    const { LIVE_SELECT } = await import('../src/routes/coaching/live.js');
+    inTenant(SLUG, () => announceLiveClass(get(`${LIVE_SELECT} WHERE ls.id = ?`, [sessionA.id])));
+    assert.equal((await liveAlerts(aarav)).length, 1);
+  });
+
+  it('tells the batch about new study material, scoped like the material', async () => {
+    const res = await call('POST', '/api/coaching/materials', {
+      batch_id: batchA.id, subject_id: physics.id, title: 'Rotation DPP 1', kind: 'dpp', file_url: 'https://files.vidya.test/dpp1.pdf',
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const forAarav = (await inbox(aarav)).filter((n) => n.screen === 'materials');
+    assert.equal(forAarav.length, 1);
+    assert.equal(forAarav[0].title, 'New DPP in Physics');
+    assert.equal((await inbox(diya)).filter((n) => n.screen === 'materials').length, 0);
+  });
+});
+
 /* ── The student app ─────────────────────────────────────────────────── */
 
 describe('the student’s live lecture', () => {

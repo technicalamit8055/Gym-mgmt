@@ -3,6 +3,7 @@ import { requireAuth } from '../auth.js';
 import { openVisitFor, performCheckIn } from '../checkin.js';
 import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { get } from '../db.js';
+import { templateFor } from '../printTemplates.js';
 import { badRequest, notFound } from '../errors.js';
 import { autoCloseFinishedVisits, expireOverdueSubscriptions } from '../maintenance.js';
 import {
@@ -51,6 +52,9 @@ async function buildCard(req, memberId) {
     issued_at: get('SELECT qr_issued_at FROM members WHERE id = ?', [memberId])?.qr_issued_at ?? null,
     svg,
     png,
+    // The owner's card design (src/printTemplates.js) — the preview, print
+    // sheet and PNG all draw from it.
+    template: templateFor('id_card'),
   };
 }
 

@@ -5,6 +5,7 @@ import { parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { activeRoster } from '../../coaching/attendance.js';
 import { sendScorecards } from '../../coaching/notify.js';
+import { announceOnlineTest, announceResults } from '../../coaching/studentAlerts.js';
 import { testStats } from '../../coaching/ranks.js';
 import { checkPaper, closeExpiredAttempts, LEVELS, questionCount, recomputeRanks, regradeTest, savePaper } from '../../coaching/papers.js';
 import { regradeOmr } from './omr.js';
@@ -109,6 +110,7 @@ testRoutes.post('/tests', (req, res) => {
     if (paper?.length) savePaper(info.lastInsertRowid, paper);
     return info.lastInsertRowid;
   });
+  if (body.online) announceOnlineTest(id);
   res.status(201).json(get(`${TEST_SELECT} WHERE t.id = ?`, [id]));
 });
 
@@ -139,6 +141,8 @@ testRoutes.patch('/tests/:id', (req, res) => {
   if (body.negative_marking !== undefined && body.negative_marking !== current.negative_marking) regradeTest(id);
   // So are scanned OMR sheets.
   if (body.negative_marking !== undefined && body.negative_marking !== current.negative_marking) regradeOmr(id);
+  // Opened in the student app just now: the batch hears it is there to attempt.
+  if (body.online && !current.online) announceOnlineTest(id);
   res.json(get(`${TEST_SELECT} WHERE t.id = ?`, [id]));
 });
 
@@ -269,7 +273,9 @@ testRoutes.post('/tests/:id/publish', (req, res) => {
   run("UPDATE academic_tests SET published_at = COALESCE(published_at, datetime('now')) WHERE id = ?", [testId]);
   const sheet = marksSheet(testId);
   const whatsapp = body.notify ? sendScorecards(testId, { instituteName: instituteName(req), stats: sheet.stats }) : { queued: 0 };
-  res.json({ ...sheet, whatsapp });
+  // The students' own app: their score and rank on their phone.
+  const pushed = body.notify ? announceResults(testId) : 0;
+  res.json({ ...sheet, whatsapp, pushed });
 });
 
 testRoutes.post('/tests/:id/unpublish', (req, res) => {

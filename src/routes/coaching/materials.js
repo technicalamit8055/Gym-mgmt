@@ -4,6 +4,7 @@ import { badRequest, notFound } from '../../errors.js';
 import { parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { activeRoster } from '../../coaching/attendance.js';
+import { announceMaterial } from '../../coaching/studentAlerts.js';
 import { idParam, idQuery, optional, updateSql } from './shared.js';
 
 /**
@@ -110,6 +111,7 @@ materialRoutes.post('/materials', (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [body.course_id ?? null, body.batch_id ?? null, body.subject_id ?? null, body.title, body.kind, body.description ?? null, body.file_url, body.due_date ?? null, req.user?.id ?? null],
   );
+  announceMaterial(info.lastInsertRowid);
   res.status(201).json(get(`${MATERIAL_SELECT} WHERE ma.id = ?`, [info.lastInsertRowid]));
 });
 
@@ -132,6 +134,7 @@ materialRoutes.post(
         body.file_name.replace(/[\\/:*?"<>|]+/g, '_'), mime, bytes, bytes.length, body.due_date ?? null, req.user?.id ?? null,
       ],
     );
+    announceMaterial(info.lastInsertRowid);
     res.status(201).json(get(`${MATERIAL_SELECT} WHERE ma.id = ?`, [info.lastInsertRowid]));
   },
 );

@@ -156,6 +156,24 @@ const blobBase64 = (blob) =>
     reader.readAsDataURL(blob);
   });
 
+/** Fetches an authenticated file (a PDF) as a Blob, with an optional JSON body. */
+async function fetchBlob(method, path, body) {
+  const headers = {};
+  if (session.token) headers.Authorization = `Bearer ${session.token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(serverUrl(`${pathPrefix}/api${path}`), { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) {
+    let message = 'Could not load that file';
+    try {
+      message = (await res.json()).error || message;
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(res.status, message);
+  }
+  return res.blob();
+}
+
 /**
  * Hands a fetched file (a PDF receipt, a study material) to the user. A
  * browser downloads it. The app's WebView ignores <a download>, so there the
@@ -693,6 +711,17 @@ export const api = {
   payments: (params) => request('GET', `/payments${query(params)}`),
   createPayment: (payload) => request('POST', '/payments', payload),
   paymentReceipt: (id) => request('GET', `/payments/${id}/receipt`),
+  /** The receipt as the gym's templated PDF, saved to the device. */
+  downloadPaymentReceipt: async (id, fileName) =>
+    saveFile(await fetchBlob('GET', `/payments/${id}/receipt.pdf`), fileName || `Receipt_PAY-${String(id).padStart(5, '0')}.pdf`),
+  // The owner's print templates (Settings › Print templates): receipt, ID card, OMR sheet.
+  templates: {
+    get: () => request('GET', '/templates'),
+    save: (kind, payload) => request('PUT', `/templates/${kind}`, payload),
+    reset: (kind) => request('DELETE', `/templates/${kind}`),
+    /** A sample PDF drawn with unsaved values, as a Blob. */
+    preview: (kind, payload) => fetchBlob('POST', `/templates/${kind}/preview`, payload),
+  },
   deletePayment: (id) => request('DELETE', `/payments/${id}`),
 
   // Members paying online to the gym's UPI ID: the settings and the desk's "to confirm" queue.

@@ -14,6 +14,7 @@ import { broadcastToSession } from '../../coaching/liveRooms.js';
 import { stampNotesPdf } from '../../coaching/notesPdf.js';
 import { formatDay } from '../../coaching/notify.js';
 import { recordClass } from '../../coaching/recordings.js';
+import { announceLiveClass } from '../../coaching/studentAlerts.js';
 import { closeStream } from '../../coaching/selfHostedStream.js';
 import { finishBroadcastLater } from '../../coaching/youtube.js';
 import { MATERIAL_SELECT, MAX_MATERIAL_BYTES } from './materials.js';
@@ -151,7 +152,14 @@ export function openLiveSession({ batchId, subjectId, facultyId, title = null, s
     if (err.errcode !== SQLITE_CONSTRAINT_UNIQUE) throw err;
     throw alreadyLive(batchId, facultyId) ?? conflict('Another class just went live for this batch');
   }
-  return get(`${LIVE_SELECT} WHERE ls.id = ?`, [info.lastInsertRowid]);
+  const session = get(`${LIVE_SELECT} WHERE ls.id = ?`, [info.lastInsertRowid]);
+  // Every student on the batch gets "class is live" on their phone.
+  try {
+    announceLiveClass(session);
+  } catch (err) {
+    console.error('[coaching] could not announce the live class:', err.message);
+  }
+  return session;
 }
 
 /** The class's own teacher, or a manager — refused otherwise. */

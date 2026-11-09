@@ -1828,6 +1828,17 @@ const MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_staff_push_user ON staff_push_subscriptions(user_id)');
   },
+  // The owner's print templates — receipt, ID card, OMR sheet (src/printTemplates.js).
+  // One JSON row per kind; defaults live in code, so an absent row means "as shipped".
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS print_templates (
+        kind       TEXT PRIMARY KEY,
+        data       TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

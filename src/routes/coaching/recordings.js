@@ -6,6 +6,7 @@ import { badRequest, notFound } from '../../errors.js';
 import { parse } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { checkProcessing, checkRecording, deleteRecording, lectureChapters, playUrl, RECORDING_SELECT, signedSource, youtubeVideoId } from '../../coaching/recordings.js';
+import { announceRecording } from '../../coaching/studentAlerts.js';
 import { idParam, idQuery, optional, updateSql } from './shared.js';
 
 /**
@@ -103,6 +104,7 @@ recordingRoutes.post('/recordings', canEdit, (req, res) => {
       body.published, req.user.id,
     ],
   );
+  announceRecording(info.lastInsertRowid);
   res.status(201).json(withViews(get(`${RECORDING_SELECT} WHERE r.id = ?`, [info.lastInsertRowid])));
 });
 
@@ -120,6 +122,8 @@ recordingRoutes.patch('/recordings/:id', canEdit, (req, res) => {
   if ('chapter' in body) body.chapter = body.chapter || null;
   const { sql, params } = updateSql('class_recordings', body, id);
   run(sql, params);
+  // Published only now (it is announced once, whenever that is).
+  if (body.published) announceRecording(id);
   res.json(withViews(get(`${RECORDING_SELECT} WHERE r.id = ?`, [id])));
 });
 

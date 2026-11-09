@@ -731,6 +731,7 @@ portalRoutes.get('/payments/:id/receipt', requireMemberAuth, async (req, res) =>
   const pdfBuffer = await generateReceiptPdf(payment, {
     gymName,
     logoBuffer: req.tenant?.logo_bytes ? Buffer.from(req.tenant.logo_bytes) : null,
+    currency: req.tenant?.currency || 'INR',
   });
   const receiptNo = `PAY-${String(payment.id).padStart(5, '0')}`;
   res.set('Content-Type', 'application/pdf');

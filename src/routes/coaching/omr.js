@@ -7,14 +7,15 @@ import { activeRoster } from '../../coaching/attendance.js';
 import { cleanResponse, gradeResponse, MAX_QUESTIONS, parseAnswerKey, questionStats } from '../../coaching/omr.js';
 import { omrSheetPdf } from '../../coaching/omrSheet.js';
 import { rankMarks } from '../../coaching/ranks.js';
-import { OPTION_LABELS, rollDigits } from '../../../public/js/omrLayout.js';
+import { OMR_STYLES, OPTION_LABELS, rollDigits, rollDigitsFor } from '../../../public/js/omrLayout.js';
+import { templateFor } from '../../printTemplates.js';
 import { idParam, instituteName } from './shared.js';
 
 /**
  * OMR sheet marking for a test — the server half of the phone scanner.
  *
  *   GET    /tests/:id/omr              the paper's shape, key, roster and who is scanned
- *   PUT    /tests/:id/omr              set the shape and (optionally) the answer key
+ *   PUT    /tests/:id/omr              set the shape, sheet style and (optionally) the answer key
  *   GET    /tests/:id/omr/sheet.pdf    the printable sheet; ?named=1 for one page per student
  *   POST   /tests/:id/omr/scans        one scanned sheet: grade it, save the mark, re-rank
  *   DELETE /tests/:id/omr/scans/:mid   take a scan (and the mark it made) back out
@@ -46,6 +47,13 @@ function loadTest(id) {
 }
 
 const keyOf = (test) => (test.omr_answer_key ? JSON.parse(test.omr_answer_key) : null);
+/** The style a test's sheets are printed (and read) in; NULL is the original sheet. */
+const styleOf = (test) => (OMR_STYLES.includes(test.omr_style) ? test.omr_style : 'coachbook');
+/** The institute's default for new tests, from its OMR print template. */
+const defaultStyle = () => {
+  const style = templateFor('omr').default_style;
+  return OMR_STYLES.includes(style) ? style : 'coachbook';
+};
 const paperOf = (test) => ({ questions: test.omr_questions, options: test.omr_options });
 const scheme = (test) => ({ marksCorrect: test.omr_marks_correct, negative: test.negative_marking || 0 });
 
@@ -104,6 +112,9 @@ function omrState(testId) {
   const key = keyOf(test);
   const responses = new Map(all('SELECT * FROM academic_omr_responses WHERE test_id = ?', [testId]).map((r) => [r.member_id, r]));
   const marks = new Map(all('SELECT member_id, rank, marks_obtained, is_absent FROM academic_test_marks WHERE test_id = ?', [testId]).map((m) => [m.member_id, m]));
+  // A test not set up yet offers the institute's default style.
+  const style = test.omr_questions ? styleOf(test) : defaultStyle();
+  const digits = rollDigitsFor(style);
   const roster = activeRoster(test.batch_id).map((s) => {
     const r = responses.get(s.member_id);
     const mark = marks.get(s.member_id);
@@ -113,7 +124,7 @@ function omrState(testId) {
       first_name: s.first_name,
       last_name: s.last_name,
       roll_number: s.roll_number,
-      roll_digits: rollDigits(s.roll_number),
+      roll_digits: rollDigits(s.roll_number, digits),
       scanned: Boolean(r),
       answers: r ? JSON.parse(r.answers) : null,
       correct: r?.correct ?? null,
@@ -138,6 +149,8 @@ function omrState(testId) {
       published_at: test.published_at,
     },
     configured: Boolean(test.omr_questions),
+    style,
+    styles: OMR_STYLES,
     questions: test.omr_questions,
     options: test.omr_options,
     marks_correct: test.omr_marks_correct,
@@ -170,6 +183,15 @@ omrRoutes.put('/tests/:id/omr', (req, res) => {
   if (scanned && (body.questions !== test.omr_questions || body.options !== test.omr_options)) {
     throw conflict(`${scanned} sheet${scanned === 1 ? ' is' : 's are'} already scanned against ${test.omr_questions} questions × ${test.omr_options} options. Delete those scans to change the paper.`);
   }
+  // The sheet style: as sent, else what the test already has, else the institute's default.
+  const requested = req.body?.style;
+  if (requested !== undefined && requested !== null && !OMR_STYLES.includes(requested)) {
+    throw badRequest(`style must be one of ${OMR_STYLES.join(', ')}`, { style: 'invalid' });
+  }
+  const style = requested || (test.omr_questions ? styleOf(test) : defaultStyle());
+  if (scanned && style !== styleOf(test)) {
+    throw conflict(`${scanned} sheet${scanned === 1 ? ' is' : 's are'} already scanned on the ${styleOf(test)} sheet. Delete those scans to change the sheet style.`, { style: 'scanned' });
+  }
   if (scanned && !key) throw badRequest('Sheets are already scanned, so the answer key cannot be removed', { answer_key: 'required' });
   const maxMarks = Math.round(body.questions * body.marks_correct * 100) / 100;
   // A test with a question paper already has its maximum set by the paper
@@ -192,8 +214,8 @@ omrRoutes.put('/tests/:id/omr', (req, res) => {
   ).top;
   if (typedTop !== null && typedTop > maxMarks) throw conflict(`A student already has ${typedTop} typed in, above this paper's ${maxMarks}`);
   tx(() => {
-    run('UPDATE academic_tests SET omr_questions = ?, omr_options = ?, omr_marks_correct = ?, omr_answer_key = ?, max_marks = ? WHERE id = ?', [
-      body.questions, body.options, body.marks_correct, key ? JSON.stringify(key) : null, maxMarks, testId,
+    run('UPDATE academic_tests SET omr_questions = ?, omr_options = ?, omr_marks_correct = ?, omr_answer_key = ?, max_marks = ?, omr_style = ? WHERE id = ?', [
+      body.questions, body.options, body.marks_correct, key ? JSON.stringify(key) : null, maxMarks, style, testId,
     ]);
     regradeOmr(testId);
   });
@@ -208,7 +230,7 @@ omrRoutes.get('/tests/:id/omr/sheet.pdf', async (req, res) => {
     ? activeRoster(test.batch_id).map((s) => ({ name: `${s.first_name || ''} ${s.last_name || ''}`.trim(), roll: s.roll_number }))
     : null;
   if (named && !students.length) throw badRequest('Nobody is enrolled in this batch');
-  const pdf = await omrSheetPdf({ institute: instituteName(req), test, students });
+  const pdf = await omrSheetPdf({ institute: instituteName(req), test, students, style: styleOf(test) });
   const safe = test.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 60) || 'test';
   res.set('Content-Type', 'application/pdf');
   res.set('Content-Disposition', `attachment; filename="OMR_${safe}${named ? '_named' : ''}.pdf"`);

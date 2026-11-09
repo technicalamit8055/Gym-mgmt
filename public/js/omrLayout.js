@@ -54,6 +54,26 @@ export const MAX_QUESTIONS = 100;
 export const ROWS_PER_COLUMN = 25;
 export const ROLL_DIGITS = 4;
 
+/**
+ * The sheet styles an institute can print. Every style shares the corner
+ * markers, the orientation bar and its blank twin, so one scanner finds them
+ * all; what differs is where the bubbles sit, so a test remembers the style
+ * its sheets were printed in (academic_tests.omr_style) and the scanner reads
+ * with that one.
+ *
+ *   coachbook   — the original sheet (version 1, geometry frozen);
+ *   board       — school-board pattern: candidate boxes, a 6-digit roll grid,
+ *                 five framed columns of 20, bilingual Hindi/English text;
+ *   competitive — entrance-exam pattern: options printed as 1 2 3 4, four
+ *                 framed columns of 25, a 6-digit roll grid.
+ */
+export const OMR_STYLES = ['coachbook', 'board', 'competitive'];
+export const OMR_STYLE_NAMES = {
+  coachbook: 'Standard (CoachBook)',
+  board: 'Board pattern (BSEB 10th / 12th)',
+  competitive: 'Competitive (JEE / NEET pattern)',
+};
+
 const ANSWER_TOP = 106;
 const ROW_PITCH = 6.5;
 /** A little extra space after every fifth row, so a student's eye does not slip a line. */
@@ -74,12 +94,130 @@ const ROLL_PITCH_Y = 5.6;
  * The full geometry for a paper of `questions` questions with `options`
  * choices each: every bubble's centre, plus where the labels go.
  */
-export function sheetLayout({ questions, options = 4 } = {}) {
+export function sheetLayout({ questions, options = 4, style = 'coachbook' } = {}) {
   const q = Math.trunc(Number(questions));
   const o = Math.trunc(Number(options));
   if (!(q >= 1 && q <= MAX_QUESTIONS)) throw new RangeError(`An OMR sheet holds 1 to ${MAX_QUESTIONS} questions`);
   if (!(o >= 2 && o <= OPTION_LABELS.length)) throw new RangeError(`An OMR question has 2 to ${OPTION_LABELS.length} options`);
+  const s = style || 'coachbook';
+  if (!OMR_STYLES.includes(s)) throw new RangeError(`Unknown OMR sheet style "${style}"`);
+  if (s !== 'coachbook') return patternLayout(q, o, PATTERNS[s]);
+  return coachbookLayout(q, o);
+}
 
+/* ── Board and competitive patterns ──────────────────────────────────── */
+
+/**
+ * Geometry for the two exam-pattern sheets. Both put a candidate panel
+ * (write-in boxes) on the left and a 6-digit roll grid on the right of the
+ * header, an instructions band under them, and framed answer columns below.
+ * Frames sit at least 1.4 bubble radii from every bubble centre, so the
+ * scanner's paper ring around a bubble only ever sees paper.
+ */
+const PATTERNS = {
+  board: {
+    version: 1,
+    style: 'board',
+    radius: 2.0,
+    rows: 20,
+    columns: 5,
+    answerTop: 150,
+    rowPitch: 6.2,
+    blockGap: 1.5,
+    numericLabels: false,
+    // Option x offsets inside a column, by option count.
+    firstOption: (o) => (o === 5 ? 10.8 : 12.5),
+    optionPitch: (o) => (o === 5 ? 5.0 : 5.6),
+  },
+  competitive: {
+    version: 1,
+    style: 'competitive',
+    radius: 2.0,
+    rows: 25,
+    columns: 4,
+    answerTop: 136,
+    rowPitch: 5.4,
+    blockGap: 1.2,
+    numericLabels: true,
+    firstOption: () => 13,
+    optionPitch: () => 6.0,
+  },
+};
+
+const FRAME_LEFT = 19;
+const FRAME_RIGHT = 191;
+const PATTERN_ROLL = { digits: 6, left: 151, pitchX: 6.4, boxTop: 39, boxSize: 5.6, top: 48, pitchY: 5.2 };
+const HEADER_PANEL_TOP = 31;
+const HEADER_PANEL_BOTTOM = 99;
+
+function patternLayout(q, o, p) {
+  const colWidth = (FRAME_RIGHT - FRAME_LEFT) / p.columns;
+  const rowY = (row) => p.answerTop + row * p.rowPitch + Math.floor(row / 5) * p.blockGap;
+  const first = p.firstOption(o);
+  const pitch = p.optionPitch(o);
+  const display = (j) => (p.numericLabels ? String(j + 1) : OPTION_LABELS[j]);
+  const items = [];
+  for (let i = 0; i < q; i++) {
+    const column = Math.floor(i / p.rows);
+    const row = i % p.rows;
+    const left = FRAME_LEFT + column * colWidth;
+    const y = rowY(row);
+    items.push({
+      number: i + 1,
+      labelX: left + first - p.radius - 1.6,
+      y,
+      bubbles: Array.from({ length: o }, (_, j) => ({ x: left + first + j * pitch, y, label: OPTION_LABELS[j], display: display(j) })),
+    });
+  }
+  const used = Math.ceil(q / p.rows);
+  const R = PATTERN_ROLL;
+  const roll = Array.from({ length: R.digits }, (_, d) => {
+    const x = R.left + d * R.pitchX;
+    return {
+      box: { x: x - R.boxSize / 2, y: R.boxTop, size: R.boxSize },
+      bubbles: Array.from({ length: 10 }, (_, digit) => ({ x, y: R.top + digit * R.pitchY, label: String(digit), display: String(digit) })),
+    };
+  });
+  const lastRow = rowY(p.rows - 1);
+  return {
+    version: p.version,
+    style: p.style,
+    questions: q,
+    options: o,
+    bubbleRadius: p.radius,
+    items,
+    // Every column frame is drawn, used or not, so a short paper still looks like the real sheet.
+    columns: Array.from({ length: p.columns }, (_, c) => {
+      const left = FRAME_LEFT + c * colWidth;
+      return {
+        left,
+        width: colWidth,
+        used: c < used,
+        headerY: p.answerTop - 6.4,
+        firstOptionX: left + first,
+        optionPitch: pitch,
+        labels: Array.from({ length: o }, (_, j) => display(j)),
+        // Hairlines between blocks of five, in the middle of the block gap.
+        dividers: Array.from({ length: Math.floor((p.rows - 1) / 5) }, (_, k) => (rowY(k * 5 + 4) + rowY(k * 5 + 5)) / 2),
+        frame: { x: left + 0.6, y: p.answerTop - 9.5, width: colWidth - 1.2, height: lastRow - p.answerTop + 9.5 + 3.6 },
+        headerRule: p.answerTop - 3.4,
+      };
+    }),
+    rows: p.rows,
+    answerTop: p.answerTop,
+    answerBottom: lastRow + p.radius,
+    roll,
+    rollDigits: R.digits,
+    rollPanel: { x: 144, y: HEADER_PANEL_TOP, width: 46, height: HEADER_PANEL_BOTTOM - HEADER_PANEL_TOP },
+    rollLabel: { x: 144, y: HEADER_PANEL_TOP + 2, width: 46 },
+    candidatePanel: { x: 20, y: HEADER_PANEL_TOP, width: 121, height: HEADER_PANEL_BOTTOM - HEADER_PANEL_TOP },
+    instructions: { x: 20, y: HEADER_PANEL_BOTTOM + 3, width: 170, height: p.answerTop - 9.5 - (HEADER_PANEL_BOTTOM + 3) - 2.5 },
+  };
+}
+
+/* ── The original CoachBook sheet (version 1) ────────────────────────── */
+
+function coachbookLayout(q, o) {
   const rowY = (row) => ANSWER_TOP + row * ROW_PITCH + Math.floor(row / 5) * BLOCK_GAP;
   const items = [];
   for (let i = 0; i < q; i++) {
@@ -91,7 +229,7 @@ export function sheetLayout({ questions, options = 4 } = {}) {
       number: i + 1,
       labelX: left + OPTION_OFFSET - BUBBLE_RADIUS - 1.6,
       y,
-      bubbles: Array.from({ length: o }, (_, j) => ({ x: left + OPTION_OFFSET + j * OPTION_PITCH, y, label: OPTION_LABELS[j] })),
+      bubbles: Array.from({ length: o }, (_, j) => ({ x: left + OPTION_OFFSET + j * OPTION_PITCH, y, label: OPTION_LABELS[j], display: OPTION_LABELS[j] })),
     });
   }
   const columns = Math.ceil(q / ROWS_PER_COLUMN);
@@ -100,12 +238,14 @@ export function sheetLayout({ questions, options = 4 } = {}) {
     const x = ROLL_LEFT + d * ROLL_PITCH_X;
     return {
       box: { x: x - ROLL_BOX_SIZE / 2, y: ROLL_BOX_TOP, size: ROLL_BOX_SIZE },
-      bubbles: Array.from({ length: 10 }, (_, digit) => ({ x, y: ROLL_TOP + digit * ROLL_PITCH_Y, label: String(digit) })),
+      bubbles: Array.from({ length: 10 }, (_, digit) => ({ x, y: ROLL_TOP + digit * ROLL_PITCH_Y, label: String(digit), display: String(digit) })),
     };
   });
 
   return {
     version: SHEET_VERSION,
+    style: 'coachbook',
+    rollDigits: ROLL_DIGITS,
     questions: q,
     options: o,
     bubbleRadius: BUBBLE_RADIUS,
@@ -128,8 +268,11 @@ export function sheetLayout({ questions, options = 4 } = {}) {
  * trimmed to ROLL_DIGITS. "B12A-07" → "0007", "2024105" → "4105". Null when
  * the roll number has no digits at all.
  */
-export function rollDigits(rollNumber) {
+export function rollDigits(rollNumber, digits = ROLL_DIGITS) {
   const match = /(\d+)\D*$/.exec(String(rollNumber ?? ''));
   if (!match) return null;
-  return match[1].slice(-ROLL_DIGITS).padStart(ROLL_DIGITS, '0');
+  return match[1].slice(-digits).padStart(digits, '0');
 }
+
+/** How many roll-number digits a style's sheet bubbles. */
+export const rollDigitsFor = (style) => (style && style !== 'coachbook' ? PATTERN_ROLL.digits : ROLL_DIGITS);

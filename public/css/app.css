@@ -1823,65 +1823,98 @@ body[data-vertical='library'] .stat.accent,
  * The ID card. Sized in inches against CR80 card stock (3.375in x 2.125in) so
  * the on-screen preview and the printed sheet are the same object — screens
  * render at 96 CSS px/in, printers at their own DPI, and both honour `in`.
+ * One DOM (qrcard.js idCardNode), three owner-picked styles: .idc-classic,
+ * .idc-band and the portrait .idc-vertical. --idc-accent comes from the template.
  */
 .id-card {
+  --idc-accent: #111827;
+  --idc-on-accent: #ffffff;
+  box-sizing: border-box;
   width: 3.375in;
   height: 2.125in;
   /* A preview that shrank to fit its container would misrepresent what comes
      out of the printer, so it keeps its inch geometry and .qr-preview scrolls. */
   flex: none;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.08in;
-  padding: 0.16in;
+  display: flex;
+  flex-direction: column;
   border-radius: 0.1in;
   background: #ffffff;
   color: #111827;
   border: 1px solid #d1d5db;
   overflow: hidden;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
-.id-card-main { min-width: 0; display: flex; flex-direction: column; }
-.id-card-gym {
-  font-size: 0.13in;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #111827;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.idc-head {
+  display: flex; align-items: center; gap: 0.06in; min-width: 0;
+  margin: 0 0.16in; padding: 0.1in 0 0.07in;
+  border-bottom: 0.02in solid var(--idc-accent);
 }
-.id-card-gym-brand { display: flex; align-items: center; gap: 0.06in; min-width: 0; }
-.id-card-logo-img { width: 0.22in; height: 0.22in; border-radius: 0.04in; object-fit: cover; flex-shrink: 0; }
-.id-card-photo {
-  width: 0.62in; height: 0.62in;
-  object-fit: cover;
-  border-radius: 0.06in;
-  border: 1px solid #d1d5db;
-  margin: 0.07in 0;
+.idc-logo { width: 0.24in; height: 0.24in; border-radius: 0.045in; object-fit: cover; flex: none; }
+.idc-org {
+  flex: 1; min-width: 0;
+  font-size: 0.13in; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--idc-accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.id-card-name {
-  font-size: 0.13in;
-  font-weight: 700;
-  color: #111827;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.idc-title {
+  flex: none; font-size: 0.07in; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #6b7280; white-space: nowrap;
 }
-.id-card-code {
-  font-size: 0.1in;
-  color: #6b7280;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  margin-top: 0.02in;
+.idc-body {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.1in; align-items: center;
+  padding: 0.08in 0.16in;
 }
-.id-card-valid { font-size: 0.1in; color: #6b7280; margin-top: 0.03in; }
-.id-card-valid.muted { color: #9ca3af; }
+.idc-info { display: flex; flex-direction: column; min-width: 0; }
+.idc-text { min-width: 0; }
+.idc-photo {
+  box-sizing: border-box; width: 0.6in; height: 0.6in; flex: none;
+  object-fit: cover; border-radius: 0.06in; border: 1px solid #d1d5db; margin-bottom: 0.05in;
+}
+.idc-initials {
+  display: grid; place-items: center; border: 0;
+  background: color-mix(in srgb, var(--idc-accent) 14%, #ffffff);
+  color: var(--idc-accent); font-size: 0.22in; font-weight: 800;
+}
+.idc-name { font-size: 0.13in; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.idc-code { font-size: 0.095in; color: #4b5563; font-family: ui-monospace, 'SF Mono', Menlo, monospace; margin-top: 0.02in; }
+.idc-meta { font-size: 0.085in; color: #6b7280; margin-top: 0.025in; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.idc-qr { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.idc-qr-img { width: 1.05in; height: 1.05in; }
+.idc-qr-img svg { width: 100%; height: 100%; display: block; }
+.idc-hint { font-size: 0.07in; color: #6b7280; margin-top: 0.03in; letter-spacing: 0.02em; }
+.idc-foot {
+  flex: none; padding: 0.035in 0.16in; text-align: center;
+  font-size: 0.068in; color: #6b7280; border-top: 1px solid #e5e7eb;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
-.id-card-qr { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.id-card-qr-img { width: 1.15in; height: 1.15in; }
-.id-card-qr-img svg { width: 100%; height: 100%; display: block; }
-.id-card-hint { font-size: 0.075in; color: #6b7280; margin-top: 0.04in; letter-spacing: 0.02em; }
+/* Header band: the accent fills the top strip, photo sits beside the details. */
+.idc-band .idc-head { margin: 0; padding: 0.09in 0.16in; border: 0; background: var(--idc-accent); }
+.idc-band .idc-org, .idc-band .idc-title { color: var(--idc-on-accent); }
+.idc-band .idc-info { flex-direction: row; align-items: center; gap: 0.1in; }
+.idc-band .idc-photo { width: 0.72in; height: 0.86in; margin: 0; }
+.idc-band .idc-qr-img { width: 1in; height: 1in; }
+.idc-band .idc-foot, .idc-vertical .idc-foot { border: 0; background: var(--idc-accent); color: var(--idc-on-accent); }
+
+/* Portrait: the card turned on its side, a round photo over the band. */
+.id-card.idc-vertical { width: 2.125in; height: 3.375in; }
+.idc-vertical .idc-head {
+  flex-direction: column; gap: 0.03in; margin: 0; padding: 0.14in 0.14in 0.36in;
+  border: 0; background: var(--idc-accent); text-align: center;
+}
+.idc-vertical.idc-nophoto .idc-head { padding-bottom: 0.14in; }
+.idc-vertical .idc-logo { width: 0.26in; height: 0.26in; }
+.idc-vertical .idc-org { flex: none; width: 100%; font-size: 0.12in; }
+.idc-vertical .idc-org, .idc-vertical .idc-title { color: var(--idc-on-accent); }
+.idc-vertical .idc-body { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 0.06in; padding: 0 0.14in 0.1in; text-align: center; }
+.idc-vertical .idc-info { align-items: center; width: 100%; }
+.idc-vertical .idc-text { width: 100%; }
+.idc-vertical .idc-photo { width: 0.78in; height: 0.78in; margin: -0.3in 0 0.06in; border-radius: 50%; border: 0.03in solid #ffffff; }
+.idc-vertical.idc-nophoto .idc-text { margin-top: 0.1in; }
+.idc-vertical .idc-qr-img { width: 0.95in; height: 0.95in; }
 
 /* ------------------------------------------------------------------ printing */
 
@@ -1934,31 +1967,86 @@ body[data-vertical='library'] .stat.accent,
 .app-poster-preview .app-poster { zoom: 0.72; border-radius: 12px; box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.45); }
 @media (max-width: 560px) { .app-poster-preview .app-poster { zoom: 0.46; } }
 
+/* The printed receipt (receipt.js receiptNode): the gym's receipt template
+   picks .rc-modern, .rc-classic or .rc-minimal; --rc-accent is its colour.
+   Mirrors the server PDF (src/receiptPdf.js) so print and download match. */
 .receipt {
-  width: 3.4in;
+  --rc-accent: #4f46e5;
+  box-sizing: border-box;
+  width: 3.6in;
   margin: 0 auto;
-  padding: 20px;
+  padding: 22px 22px 18px;
   background: #ffffff;
   border-radius: 12px;
-  color: #111827;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #0f172a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+  font-size: 13px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
-.receipt-header { text-align: center; margin-bottom: 12px; }
-.receipt-gym-brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 4px; }
-.receipt-logo-img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
-.receipt-gym { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #111827; }
-.receipt-title { font-size: 13px; color: #6b7280; font-weight: 500; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
-.receipt-divider { border-bottom: 1px dashed #d1d5db; margin: 12px 0; }
-.receipt-divider.thick { border-bottom: 2px solid #111827; margin: 14px 0; }
-.receipt-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6b7280; margin-bottom: 6px; letter-spacing: 0.05em; }
-.receipt-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-bottom: 4px; }
-.receipt-label { color: #4b5563; }
-.receipt-value { font-weight: 500; color: #111827; text-align: right; }
-.receipt-method { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
-.receipt-total { display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: 700; color: #111827; margin: 6px 0; }
-.receipt-footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 12px; }
-.receipt-timestamp { font-size: 10px; color: #9ca3af; margin-top: 4px; }
+.receipt-header { text-align: center; margin-bottom: 14px; }
+.receipt-logo-img { display: block; width: 44px; height: 44px; margin: 0 auto 8px; border-radius: 8px; object-fit: cover; }
+.receipt-gym { font-size: 19px; font-weight: 700; color: #0f172a; line-height: 1.25; }
+.receipt-sub { font-size: 11px; color: #64748b; margin-top: 2px; white-space: pre-line; }
+.receipt-title {
+  display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--rc-accent); background: color-mix(in srgb, var(--rc-accent) 10%, #ffffff);
+}
+.receipt-hero {
+  margin: 0 0 16px; padding: 14px 16px; border-radius: 12px;
+  background: #ecfdf5; border: 1px solid #a7f3d0;
+}
+.receipt-hero-label {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #047857;
+}
+.receipt-paid { padding: 2px 9px; border-radius: 999px; background: #047857; color: #ffffff; font-size: 9px; }
+.receipt-hero-amount { font-size: 30px; font-weight: 800; color: #065f46; line-height: 1.2; margin-top: 2px; }
+.receipt-hero-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+.receipt-section { padding: 0 0 10px; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
+.receipt-section-title { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #94a3b8; margin-bottom: 7px; }
+.receipt-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+.receipt-label { color: #64748b; flex: none; }
+.receipt-value { color: #0f172a; text-align: right; overflow-wrap: anywhere; }
+.receipt-row.is-strong .receipt-value { font-weight: 700; }
+.receipt-row.is-discount .receipt-value { color: #047857; }
+.receipt-total { display: flex; justify-content: space-between; align-items: center; font-weight: 800; }
+.receipt-terms { margin-top: 14px; font-size: 10.5px; color: #64748b; white-space: pre-line; }
+.receipt-terms-title { font-size: 9px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #94a3b8; margin-bottom: 3px; }
+.receipt-sign { display: flex; justify-content: flex-end; margin-top: 38px; }
+.receipt-sign span { min-width: 1.6in; padding-top: 4px; border-top: 1px solid #334155; text-align: center; font-size: 11px; color: #64748b; }
+.receipt-footer { text-align: center; margin-top: 16px; padding-top: 12px; border-top: 1px dashed #cbd5e1; }
+.receipt-thanks { font-size: 13px; font-weight: 600; color: #334155; }
+.receipt-timestamp { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+
+/* Classic: framed, ruled rows, the title as a solid band, a boxed total. */
+.receipt.rc-classic { width: 3.9in; border-radius: 0; border: 2px solid var(--rc-accent); outline: 1px solid var(--rc-accent); outline-offset: -6px; padding: 26px; }
+.rc-classic .receipt-gym { color: var(--rc-accent); }
+.rc-classic .receipt-title { display: block; border-radius: 0; background: var(--rc-accent); color: #ffffff; padding: 6px; }
+.rc-classic .receipt-meta-line { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: #334155; margin: -4px 0 14px; }
+.rc-classic .receipt-section { border: 0; padding: 0; margin-bottom: 14px; }
+.rc-classic .receipt-section-title { color: var(--rc-accent); font-weight: 700; padding-bottom: 4px; border-bottom: 1.5px solid var(--rc-accent); margin-bottom: 0; }
+.rc-classic .receipt-row { margin: 0; padding: 6px 0; border-bottom: 1px solid #eef0f3; }
+.rc-classic .receipt-total {
+  padding: 12px 14px; border: 1.5px solid var(--rc-accent); border-radius: 4px;
+  background: color-mix(in srgb, var(--rc-accent) 8%, #ffffff);
+}
+.rc-classic .receipt-total span:first-child { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--rc-accent); }
+.rc-classic .receipt-total span:last-child { font-size: 22px; }
+
+/* Minimal: narrow, black on white, no fills — for thermal and ink-saving printers. */
+.receipt.rc-minimal { width: 2.9in; padding: 14px; border-radius: 0; font-size: 12px; }
+.rc-minimal .receipt-gym { font-size: 17px; }
+.rc-minimal .receipt-title { display: block; background: none; color: #0f172a; padding: 0 0 8px; border-bottom: 1px dashed #0f172a; border-radius: 0; }
+.rc-minimal .receipt-section { border-bottom: 1px dashed #64748b; margin-bottom: 8px; padding-bottom: 6px; }
+.rc-minimal .receipt-section-title { color: #0f172a; font-weight: 800; }
+.rc-minimal .receipt-label { color: #334155; }
+.rc-minimal .receipt-row.is-discount .receipt-value { color: #0f172a; }
+.rc-minimal .receipt-total { padding: 8px 0; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; text-transform: uppercase; }
+.rc-minimal .receipt-total span:last-child { font-size: 20px; }
+.rc-minimal .receipt-footer { border-top-color: #64748b; }
 
 @media print {
   /* Only the card sheet or receipt reaches the paper; the app shell, toasts and any open
@@ -1986,7 +2074,8 @@ body[data-vertical='library'] .stat.accent,
      follows from the artwork's 2:3 shape. */
   .app-poster-page .gym-poster-wrap .gym-poster { width: auto; height: 10in; max-width: 100%; }
   .id-card { border: 1px dashed #9ca3af; box-shadow: none; }
-  .receipt { border: 1px solid #9ca3af; box-shadow: none; width: 3.2in; }
+  .receipt { box-shadow: none; }
+  .receipt.rc-modern { border: 1px solid #cbd5e1; }
 
   @page { margin: 0.4in; }
 }
@@ -13047,3 +13136,44 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
   transition: transform 0.15s var(--ease);
 }
 .sa-switch.on .sa-switch-thumb { transform: translateX(18px); }
+
+/* ------------------------------------------- print templates (settings) */
+/* views/printTemplates.js: the list card and the editor modal, form beside a live preview. */
+.tpl-list { display: grid; gap: 10px; }
+.tpl-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.tpl-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.tpl-row-text strong { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tpl-current { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); }
+.modal.tpl-modal { width: min(1080px, calc(100vw - 32px)); max-width: none; }
+.tpl-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.tpl-form { align-content: start; }
+.tpl-styles { display: grid; gap: 8px; }
+.tpl-style { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.tpl-style:has(input:checked) { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, transparent); }
+.tpl-style input { margin-top: 3px; accent-color: var(--brand); }
+.tpl-style-text { display: grid; gap: 2px; }
+.tpl-style-text small { color: var(--muted); font-size: 12px; }
+.tpl-check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; margin: 2px 0 8px; }
+.tpl-check input { margin-top: 3px; accent-color: var(--brand); }
+.tpl-check > span { display: grid; gap: 2px; }
+.tpl-color { display: flex; gap: 8px; align-items: center; }
+.tpl-color input[type="color"] { width: 44px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: none; cursor: pointer; flex: none; }
+.tpl-color .tpl-hex { font-family: ui-monospace, "SF Mono", Menlo, monospace; text-transform: lowercase; }
+.tpl-preview-col { position: sticky; top: 0; display: grid; gap: 10px; justify-items: center; }
+.tpl-preview-label { justify-self: start; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.tpl-preview { width: 100%; display: flex; justify-content: center; padding: 18px; border-radius: 14px; overflow: auto; max-height: 68vh;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--text) 5%, transparent) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.tpl-preview-id_card { align-items: center; min-height: 260px; }
+.tpl-preview .id-card { box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.45); }
+.tpl-pdf-note { display: grid; justify-items: center; gap: 10px; text-align: center; color: var(--muted); padding: 30px 12px; max-width: 360px; }
+.tpl-foot { width: 100%; align-items: center; }
+@media (max-width: 860px) {
+  .tpl-editor { grid-template-columns: 1fr; }
+  .tpl-preview-col { position: static; }
+  .tpl-preview { max-height: none; }
+}
+.tpl-page { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; align-items: stretch; }
+.tpl-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.tpl-tile h3 { margin: 4px 0 0; }
+.tpl-tile p { margin: 0; flex: 1; line-height: 1.5; }
+.tpl-tile .btn { margin-top: 6px; }

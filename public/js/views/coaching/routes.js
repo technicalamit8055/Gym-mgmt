@@ -50,6 +50,7 @@ export function coachingNav() {
     // pairing to managers — hidden from everyone else.
     { path: '/smartboards', label: 'Smartboards', icon: 'monitor', roles: ['admin', 'manager'] },
     { path: '/staff', label: 'Staff accounts', icon: 'staff' },
+    { path: '/templates', label: 'Print templates', icon: 'print', roles: ['admin', 'manager'] },
     { path: '/settings', label: t('settings'), icon: 'settings' },
   ];
 }

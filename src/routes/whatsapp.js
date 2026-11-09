@@ -181,6 +181,7 @@ whatsappRoutes.post('/send-receipt', async (req, res, next) => {
         : await generateReceiptPdf(payment, {
             gymName: gymNameFor(req),
             logoBuffer: req?.tenant?.logo_bytes ? Buffer.from(req.tenant.logo_bytes) : null,
+            currency: req?.tenant?.currency || 'INR',
           });
       const receiptNo = payment.id ? `PAY-${String(payment.id).padStart(5, '0')}` : '00000';
       doc = {

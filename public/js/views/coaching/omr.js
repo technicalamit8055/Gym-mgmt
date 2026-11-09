@@ -1,6 +1,6 @@
 import { coaching } from '../../coachingApi.js';
 import { ensureCameraPermission } from '../../nativePermissions.js';
-import { MAX_QUESTIONS, OPTION_LABELS, sheetLayout } from '../../omrLayout.js';
+import { MAX_QUESTIONS, OMR_STYLE_NAMES, OMR_STYLES, OPTION_LABELS, sheetLayout } from '../../omrLayout.js';
 import { findSheet, readSheet, sheetToFrame, toGray } from '../../omrScan.js';
 import { closeModal, h, openModal, renderIcon, toast } from '../../ui.js';
 import { fill, fullName, reportSend, section } from './common.js';
@@ -68,6 +68,9 @@ function openOmrSetup({ test, state, onSaved }) {
   const questions = h('input', { type: 'number', min: 1, max: MAX_QUESTIONS, value: state.questions ?? '' , placeholder: 'e.g. 60' });
   const options = h('select', {}, h('option', { value: 4 }, '4 (A–D)'), h('option', { value: 5 }, '5 (A–E)'));
   options.value = String(state.options ?? 4);
+  // Fixed once sheets are scanned: they were read against this style's bubbles.
+  const style = h('select', { disabled: Boolean(state.scanned) }, ...(state.styles || OMR_STYLES).map((s) => h('option', { value: s }, OMR_STYLE_NAMES[s] || s)));
+  style.value = state.style || 'coachbook';
   const marks = h('input', { type: 'number', min: 0.25, step: '0.25', value: state.marks_correct ?? 4 });
   const key = h('textarea', { rows: 5, placeholder: 'ABCDA BCDAB … — spaces and question numbers are ignored. (AC) accepts A or C, * is a bonus question.', spellcheck: false, autocapitalize: 'characters' });
   key.value = keyText(state.answer_key);
@@ -110,6 +113,7 @@ function openOmrSetup({ test, state, onSaved }) {
       const saved = await coaching.saveOmr(test.id, {
         questions: Number(questions.value),
         options: Number(options.value),
+        style: style.value,
         marks_correct: Number(marks.value),
         answer_key: key.value.trim() || null,
       });
@@ -135,6 +139,7 @@ function openOmrSetup({ test, state, onSaved }) {
         { class: 'form-grid' },
         field('Questions', questions, `Up to ${MAX_QUESTIONS} on one sheet`),
         field('Options per question', options),
+        field('Sheet style', style, state.scanned ? 'Fixed — sheets are already scanned on it' : 'Board pattern prints Hindi + English; Competitive numbers options 1–4'),
         field('Marks per correct answer', marks, test.negative_marking ? `A wrong answer costs ${fmt(test.negative_marking)} (set on the test)` : 'No negative marking (set on the test)'),
       ),
       h('label', { class: 'field full' }, h('span', {}, 'Answer key'), key, counter),
@@ -194,6 +199,7 @@ export function omrSection({ test, navigate, onChanged }) {
         'div',
         { class: 'omr-summary' },
         h('span', { class: 'badge violet' }, `${state.questions} questions × ${state.options} options`),
+        h('span', { class: 'badge' }, OMR_STYLE_NAMES[state.style] || 'Standard sheet'),
         h('span', { class: 'badge' }, `+${fmt(state.marks_correct)} / −${fmt(test.negative_marking || 0)}`),
         state.answer_key ? h('span', { class: 'badge dot green' }, 'Key entered') : h('span', { class: 'badge dot amber' }, 'No answer key yet'),
         h('span', { class: 'muted' }, `${state.scanned} of ${state.roster.length} sheets scanned`),
@@ -255,7 +261,7 @@ export async function renderOmrScanner({ params, setTitle, setActions, navigate 
     return h('div', {});
   }
   setTitle(`Scan · ${state.test.title}`);
-  const paper = { questions: state.questions, options: state.options };
+  const paper = { questions: state.questions, options: state.options, style: state.style || 'coachbook' };
   const scheme = { marksCorrect: state.marks_correct, negative: state.test.negative_marking || 0 };
   const layout = sheetLayout(paper);
 
