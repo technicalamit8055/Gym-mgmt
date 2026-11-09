@@ -3383,6 +3383,83 @@ body[data-mode='light'] .login {
   }
 }
 
+/* The student portal (CoachBook) on a laptop/desktop: students watch lectures
+   and sit tests there, so instead of the phone frame it fills the window —
+   header across the top, the bottom tabs become a left sidebar, and the page
+   gets a wide, centred column. Placed after the phone-frame block so it wins. */
+@media (min-width: 900px) {
+  .portal-frame.is-wide { padding: 0; display: block; background: var(--bg); }
+  .portal-frame.is-wide .portal-app {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: 'top top' 'nav main';
+    background: radial-gradient(900px 500px at 85% -10%, color-mix(in srgb, var(--brand) 10%, transparent), transparent 70%), var(--bg);
+  }
+  .portal-frame.is-wide .portal-topbar {
+    grid-area: top;
+    padding: 12px 28px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  }
+  .portal-frame.is-wide .portal-topbar-name { font-size: 17px; }
+
+  /* Bottom tab bar → sidebar. */
+  .portal-frame.is-wide .portal-tabbar {
+    grid-area: nav;
+    position: static;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 4px;
+    padding: 20px 14px;
+    overflow-y: auto;
+    border-top: none;
+    border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    box-shadow: none;
+  }
+  .portal-frame.is-wide .portal-tab {
+    position: relative;
+    flex: none;
+    max-width: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px 6px 6px;
+    border-radius: 12px;
+    font-size: 14.5px;
+    text-align: left;
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+  .portal-frame.is-wide .portal-tab:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); }
+  .portal-frame.is-wide .portal-tab.active { background: color-mix(in srgb, var(--brand) 11%, transparent); }
+  /* The whole row is the highlight now, so the icon's own pill steps aside
+     and the ripple/badge position against the row. */
+  .portal-frame.is-wide .portal-tab-icon { position: static; width: 36px; height: 36px; flex: none; }
+  .portal-frame.is-wide .portal-tab-icon::before { display: none; }
+  .portal-frame.is-wide .portal-tab-ripple { border-radius: 12px; }
+  .portal-frame.is-wide .portal-tab-label { flex: 1; min-width: 0; }
+  .portal-frame.is-wide .portal-tab.active .portal-tab-label { animation: none; }
+  .portal-frame.is-wide .portal-tab-badge { top: 50%; right: 10px; transform: translateY(-50%); }
+  .portal-frame.is-wide .portal-tab-badge.is-image { right: 12px; }
+
+  .portal-frame.is-wide .portal-content {
+    grid-area: main;
+    padding: 28px 40px 48px;
+  }
+  .portal-frame.is-wide .portal-content > * {
+    width: 100%;
+    max-width: 1040px;
+    margin-inline: auto;
+  }
+}
+
 .portal-topbar {
   display: flex; align-items: center; gap: 12px;
   padding: calc(14px + var(--safe-top)) 18px 10px;

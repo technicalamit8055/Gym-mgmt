@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ensureAdminAccount, seedStarterPlans } from '../bootstrap.js';
 import { issueToken, requireAuth, requireRole } from '../auth.js';
+import { siteEnabled } from '../coaching/site.js';
 import { config, DEFAULT_TENANT_SLUG } from '../config.js';
 import { get, tenantStorage } from '../db.js';
 import { badRequest, conflict, notFound, tooManyRequests } from '../errors.js';
@@ -124,11 +125,16 @@ platformRoutes.get('/tenant', (req, res) => {
     });
   }
 
+  // The institute website (src/coaching/site.js). `on_root`: this address is
+  // the institute's own domain, so "#/" opens the website and staff sign in at
+  // "#/login". Everywhere else the website is still at "#/site".
+  const siteLive = ['trial', 'active'].includes(req.tenant.status) && siteEnabled();
   res.json({
     tenant: publicTenant(req.tenant),
     trial_days: config.trialDays,
     url_mode: config.tenantUrlMode,
     platform_admin: isPlatformAdminConfigured(),
+    site: { enabled: siteLive, on_root: siteLive && Boolean(req.customDomain) },
   });
 });
 

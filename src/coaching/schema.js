@@ -948,6 +948,39 @@ export const COACHING_MIGRATIONS = [
   // OMR_STYLES) — the scanner reads with the same one. NULL is the original
   // 'coachbook' sheet, which every test set up before styles existed used.
   (db) => ensureColumn(db, 'academic_tests', 'omr_style', 'TEXT'),
+
+  /* ------------------------------------------- The institute website --- */
+  // The public page an institute's own domain opens on (src/coaching/site.js).
+  // Off until the owner publishes it, so a custom domain that has been showing
+  // the staff sign-in keeps doing so. `content` is the editor's JSON, always
+  // stored in the complete shape normalizeSiteContent() returns.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS site_settings (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled      INTEGER NOT NULL DEFAULT 0,
+        content      TEXT,
+        published_at TEXT,
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    db.prepare('INSERT OR IGNORE INTO site_settings (id) VALUES (1)').run();
+    // The banner and gallery pictures. A replaced picture is a new row (and so
+    // a new URL), which lets the bytes be cached forever.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS site_images (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind       TEXT NOT NULL CHECK (kind IN ('hero', 'gallery')),
+        mime       TEXT NOT NULL,
+        bytes      BLOB NOT NULL,
+        caption    TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_site_images_kind ON site_images(kind, sort_order, id)');
+  },
 ];
 
 /** Widens class_recordings.source to allow 'server' — see the migration above. */

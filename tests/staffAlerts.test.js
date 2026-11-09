@@ -306,11 +306,11 @@ describe('staff alerts at a gym', () => {
 });
 
 describe('staff alerts at a coaching institute', () => {
-  it('offers overdue fees and demo bookings instead of membership expiries', async () => {
+  it('offers overdue fees, demo bookings and website enquiries instead of membership expiries', async () => {
     const kinds = (await call('GET', '/api/staff-alerts/config', undefined, { token: tokens.academy, slug: ACADEMY })).body.kinds;
     assert.deepEqual(
       kinds.map((k) => k.key),
-      ['payment_claim', 'fees_overdue', 'trial_booked', 'chat_handoff'],
+      ['payment_claim', 'fees_overdue', 'trial_booked', 'website_enquiry', 'chat_handoff'],
     );
     assert.equal(kinds.find((k) => k.key === 'trial_booked').label, 'Demo classes booked');
   });

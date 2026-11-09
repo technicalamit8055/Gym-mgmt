@@ -508,6 +508,9 @@ export const api = {
   // public ones so a stale token from a previous gym can't turn a signed-out
   // page into a 401 redirect loop.
   tenantContext: () => request('GET', '/platform/tenant', undefined, { anonymous: true }),
+  // The institute website (src/routes/site.js): what a visitor's browser reads.
+  site: () => request('GET', '/site', undefined, { anonymous: true }),
+  siteEnquiry: (payload) => request('POST', '/site/enquiry', payload, { anonymous: true }),
   slugAvailable: (slug) => request('GET', `/platform/slug-available${query({ slug })}`, undefined, { anonymous: true }),
   signup: (payload) => request('POST', '/platform/signup', payload, { anonymous: true }),
   updateGym: (payload) => request('PATCH', '/platform/tenant', payload),

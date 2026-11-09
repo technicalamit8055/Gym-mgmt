@@ -43,6 +43,12 @@ export const coaching = {
   dashboard: () => request('GET', `${C}/dashboard`),
   settings: () => request('GET', `${C}/settings`),
   updateSettings: (payload) => request('PATCH', `${C}/settings`, payload),
+  // The institute website editor (src/routes/coaching/landingPage.js).
+  website: () => request('GET', `${C}/website`),
+  saveWebsite: (payload) => request('PUT', `${C}/website`, payload),
+  websitePreview: () => request('GET', `${C}/website/preview`),
+  addWebsiteImage: (payload) => request('POST', `${C}/website/images`, payload),
+  removeWebsiteImage: (id) => request('DELETE', `${C}/website/images/${id}`),
 
   // Courses, subjects, batches, fee structures, classrooms, faculty
   courses: (params) => request('GET', `${C}/courses${query(params)}`),

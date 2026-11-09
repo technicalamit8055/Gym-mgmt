@@ -12,6 +12,7 @@ import { renderAdmissions } from './admissions.js';
 import { renderFaculty } from './faculty.js';
 import { renderCoachingStore } from './store.js';
 import { renderSmartboards } from './smartboards.js';
+import { renderInstituteLandingManagement } from './landingPage.js';
 
 /**
  * CoachBook's sidebar, phone tabs and routes — the third vertical's share of
@@ -45,6 +46,7 @@ export function coachingNav() {
     { path: '/notifications', label: 'Push notifications', icon: 'bell', roles: ['admin', 'manager'] },
     { section: 'Operations' },
     { path: '/faculty', label: 'Faculty', icon: 'users' },
+    { path: '/website', label: 'Website', icon: 'globe', roles: ['admin', 'manager'] },
     { path: '/devices', label: 'Biometric devices', icon: 'devices' },
     // A paired board can start any lecture in its room, so the API keeps
     // pairing to managers — hidden from everyone else.
@@ -159,6 +161,14 @@ export function coachingRoutes() {
       iconTone: 'violet',
       subtitle: 'Classroom boards running CoachBook Studio — add one and pair it with a code',
       view: renderSmartboards,
+    },
+    {
+      pattern: /^\/website$/,
+      title: 'Institute Website',
+      icon: 'globe',
+      iconTone: 'blue',
+      subtitle: 'The public page your custom domain opens on — courses, results and an enquiry form',
+      view: renderInstituteLandingManagement,
     },
   ];
 }

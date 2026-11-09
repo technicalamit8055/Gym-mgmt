@@ -4,6 +4,7 @@ import { cropAndResizeImage, makeAppIcon } from '../photo.js';
 import { appPosterNode, downloadAppPosterPng, printAppPoster } from '../qrcard.js';
 import { getAppMode, getAppTheme, isCoaching, isLibrary, setAppMode, setAppTheme, t, tl } from '../vertical.js';
 import { customDomainCard } from './customDomains.js';
+import { instituteLandingSettingsCard } from './coaching/landingPage.js';
 
 /**
  * The gym's own account page: identity, regional settings and subscription.
@@ -783,6 +784,7 @@ export async function renderSettings({ reload }) {
           ['database', 'Data', 'Its own database file'],
         ]),
       ),
+      instituteLandingSettingsCard(tenant, domains, { isAdmin, reload }),
       appQrCard(appQr),
       appListingCard(tenant, { isAdmin, reload }),
       h(

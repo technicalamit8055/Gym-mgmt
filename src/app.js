@@ -1,7 +1,8 @@
 import path from 'node:path';
 import express from 'express';
 import { config, ROOT } from './config.js';
-import { hostnameOf, isPlatformHost } from './customDomains.js';
+import { siteEnabled, siteShellHtml } from './coaching/site.js';
+import { hostnameOf, isPlatformHost, primaryDomainFor } from './customDomains.js';
 import { HttpError } from './errors.js';
 import { attendanceRoutes } from './routes/attendance.js';
 import { authRoutes, staffRoutes } from './routes/auth.js';
@@ -36,6 +37,7 @@ import { reportRoutes } from './routes/reports.js';
 import { seatRoutes } from './routes/seats.js';
 import { sellerRoutes } from './routes/seller.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { siteRoutes } from './routes/site.js';
 import { storeHubRoutes } from './routes/storeHub.js';
 import { storeMediaRoutes } from './routes/storeMedia.js';
 import { subscriptionRoutes } from './routes/subscriptions.js';
@@ -222,9 +224,29 @@ export function createApp() {
   app.use('/api/live-hls', liveHlsRoutes);
   // A recorded lecture this server holds, the same way.
   app.use('/api/recording-hls', recordingHlsRoutes);
+  // An institute's public website: its content and enquiry form, no sign-in.
+  app.use('/api/site', siteRoutes);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'No such endpoint' });
+  });
+
+  // An institute with a published website gets its own name in index.html's
+  // <title> and share tags (see siteShellHtml) — WhatsApp link previews and
+  // search engines read those without running the page's JavaScript.
+  app.get(['/', '/index.html'], (req, res, next) => {
+    const tenant = req.tenant;
+    if (tenant?.business_type !== 'coaching' || !['trial', 'active'].includes(tenant.status) || !siteEnabled()) {
+      return next();
+    }
+    const domain = primaryDomainFor(tenant.slug);
+    res.set('Cache-Control', 'no-cache');
+    res.type('html').send(
+      siteShellHtml(tenant, {
+        origin: `${req.protocol}://${req.get('host')}`,
+        canonical: domain ? `https://${domain}/` : null,
+      }),
+    );
   });
 
   app.use(

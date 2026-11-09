@@ -12766,7 +12766,14 @@ function renderPortalApp(ctx, initialMe) {
   }
   if (requested === 'notifications') openNotificationCenter();
 
-  return h('div', { class: 'portal-frame' }, h('div', { class: 'portal-app' }, topbar, content, tabbar));
+  // A student opening the institute on a laptop (to watch lectures, sit a
+  // test) gets a full-screen layout with a sidebar instead of the phone
+  // frame; see .portal-frame.is-wide in app.css.
+  return h(
+    'div',
+    { class: isCoaching() ? 'portal-frame is-wide' : 'portal-frame' },
+    h('div', { class: 'portal-app' }, topbar, content, tabbar),
+  );
 }
 
 /* --------------------------------------------------------------- entry --- */

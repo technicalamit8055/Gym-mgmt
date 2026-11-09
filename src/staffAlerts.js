@@ -74,6 +74,12 @@ export function alertCatalog() {
       hint: 'When the WhatsApp assistant books one',
       roles: ALL_ROLES,
     },
+    coaching && {
+      key: 'website_enquiry',
+      label: 'Website enquiries',
+      hint: 'When a parent or student sends the enquiry form on your website',
+      roles: DESK_ROLES,
+    },
     !library && {
       key: 'chat_handoff',
       label: 'WhatsApp chats needing a reply',
@@ -318,6 +324,18 @@ export function alertTrialBooked({ id, name, when, coaching = false }) {
     body: `${when} — booked by the WhatsApp assistant.`,
     link: coaching ? '/admissions' : '/trials',
     dedupeKey: `${coaching ? 'demo' : 'trial'}:${id}:${when}`,
+    ttl: 24 * 60 * 60,
+  });
+}
+
+/** Someone sent the enquiry form on the institute's website (src/routes/site.js). */
+export function alertWebsiteEnquiry({ id, name, course, repeat = false }) {
+  notifyStaffQuietly('website_enquiry', {
+    title: repeat ? `${name} enquired again on the website` : `New website enquiry: ${name}`,
+    body: course ? `Interested in ${course}. Call them back from Admissions.` : 'Call them back from Admissions.',
+    link: '/admissions',
+    dedupeKey: `site-enquiry:${id}:${Date.now()}`,
+    urgency: 'high',
     ttl: 24 * 60 * 60,
   });
 }

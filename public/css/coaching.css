@@ -1591,3 +1591,48 @@ body[data-vertical='coaching'] .bk-gallery-slide .bk-art-none { color: color-mix
   .omr-stage { width: min(100%, calc(74vh * (var(--ar)))); border-radius: 10px; }
   .omr-answers { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); }
 }
+
+/* The institute website editor (views/coaching/landingPage.js). The public
+   page itself is styled in site.css. */
+/* ── The editor ── */
+.site-editor { max-width: 920px; }
+.site-hint { font-size: 12.5px; margin: 4px 0 10px; }
+.site-subhead { margin: 18px 0 2px; font-size: 13.5px; font-weight: 650; }
+.site-toggles { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 12px; }
+.site-pick-list { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 260px; overflow: auto; }
+.site-repeater { display: grid; gap: 8px; }
+.site-repeater-row { display: flex; gap: 8px; align-items: flex-start; }
+.site-rep-col { flex: 1 1 0; min-width: 0; }
+.site-rep-col.narrow { flex: 0 0 110px; }
+.site-rep-col.narrow-md { flex: 0 1 190px; }
+.site-rep-col input, .site-rep-col textarea { width: 100%; }
+.site-rep-col textarea { min-height: 40px; }
+.site-repeater > .btn { justify-self: start; }
+@media (max-width: 640px) {
+  .site-repeater-row { flex-wrap: wrap; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .site-rep-col, .site-rep-col.narrow, .site-rep-col.narrow-md { flex: 1 1 100%; }
+}
+.site-banner-pick { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 6px 0 4px; }
+.site-banner-pick > img, .site-banner-empty { width: 220px; max-width: 100%; aspect-ratio: 16 / 7; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
+.site-banner-pick > div:last-child { flex: 1 1 220px; }
+.site-banner-empty { display: grid; place-items: center; align-content: center; gap: 4px; color: var(--muted); font-size: 12.5px; background: var(--bg-alt); }
+.site-gallery-edit { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.site-gallery-thumb { position: relative; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.site-gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.site-gallery-thumb .btn { position: absolute; top: 6px; right: 6px; background: rgba(0, 0, 0, 0.6); color: #fff; border: 0; }
+.site-gallery-add {
+  aspect-ratio: 4 / 3; border-radius: 10px; border: 1.5px dashed var(--border); background: transparent; color: var(--muted);
+  display: grid; place-items: center; align-content: center; gap: 4px; font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.site-gallery-add:hover { border-color: var(--brand); color: var(--brand); }
+
+.site-status { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; }
+.site-status.is-live { border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+.site-status-icon { flex: none; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--brand-soft); color: var(--brand); }
+.site-status.is-live .site-status-icon { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+.site-status-body { flex: 1 1 300px; min-width: 0; }
+.site-status-text { margin: 6px 0 0; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+.site-status-text code { font-size: 12.5px; }
+.site-status-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.site-editor-foot { display: flex; justify-content: flex-end; gap: 8px; position: sticky; bottom: calc(12px + var(--safe-bottom)); z-index: 5; }
+.site-editor-foot .btn { box-shadow: var(--shadow); }

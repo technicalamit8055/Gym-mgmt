@@ -16,6 +16,7 @@ import { testRoutes } from './tests.js';
 import { timetableRoutes } from './timetable.js';
 import { streamingRoutes } from './streaming.js';
 import { youtubeRoutes } from './youtube.js';
+import { coachingLandingRoutes } from './landingPage.js';
 
 /**
  * CoachBook's staff API, mounted at /api/coaching.
@@ -44,3 +45,4 @@ coachingRoutes.use(recordingRoutes);
 coachingRoutes.use(studioDeviceRoutes);
 coachingRoutes.use(youtubeRoutes);
 coachingRoutes.use(streamingRoutes);
+coachingRoutes.use(coachingLandingRoutes);

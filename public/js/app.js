@@ -42,6 +42,7 @@ import {
 } from './vertical.js';
 import { renderLanding } from './views/landing.js';
 import { renderLandingLibrary } from './views/landingLibrary.js';
+import { renderInstituteSite } from './views/coaching/landingPage.js';
 import { renderSignup } from './views/signup.js';
 import { renderSettings } from './views/settings.js';
 import { renderPrintTemplates } from './views/printTemplates.js';
@@ -228,6 +229,18 @@ function buildRoutes() {
 }
 
 /**
+ * An institute's public website (views/coaching/landingPage.js). Always at
+ * "#/site"; dispatch() also shows it at "#/" on the institute's own domain.
+ * Titled by the page itself, never with a "— GymBook" suffix.
+ */
+const SITE_ROUTE = {
+  pattern: /^\/site$/,
+  ownTitle: true,
+  title: () => gymName(),
+  view: (ctx) => renderInstituteSite(ctx),
+};
+
+/**
  * Pages that exist before anyone signs in, and outside any one gym.
  *
  * These render full-page instead of inside the app shell: the shell's sidebar
@@ -268,6 +281,7 @@ const PUBLIC_ROUTES = [
   { pattern: /^\/portal\/find-gym$/, title: 'Find your gym', view: renderFindGym, platformOwned: true },
   { pattern: /^\/portal\/login$/, title: 'Member Sign in', view: renderPortal },
   { pattern: /^\/portal(\/.*)?$/, title: 'Member Portal', view: renderPortal },
+  SITE_ROUTE,
 ];
 
 const root = () => document.getElementById('app');
@@ -455,6 +469,13 @@ function renderLogin(message) {
             `${t('member')}? `,
             h('a', { href: '#/portal' }, `Open the ${t('member')} app →`),
           ),
+          platform.site?.enabled
+            ? h(
+                'p',
+                { class: 'auth-alt', style: 'margin-top:8px' },
+                h('a', { href: platform.site.on_root ? '#/' : '#/site' }, `← Back to the ${gymName()} website`),
+              )
+            : null,
         ),
       ),
     ),
@@ -751,7 +772,7 @@ async function renderPublicRoute(publicRoute) {
   // page (signup, the operator console, password reset) is platform-owned and
   // keeps the fixed suffix regardless of which marketing site sent someone
   // there.
-  document.title = publicRoute.landing ? ownTitle : `${ownTitle} — GymBook`;
+  document.title = publicRoute.landing || publicRoute.ownTitle ? ownTitle : `${ownTitle} — GymBook`;
 
   const swap = (node) => {
     clear(root()).append(node);
@@ -908,6 +929,14 @@ async function dispatch() {
     return;
   }
 
+  // "#/login": where staff sign in once an institute's website has taken over
+  // "#/" on its own domain. Signed out, it falls through to renderLogin()
+  // below; signed in, it goes on to the app; the root domain has no sign-in.
+  if (path === '/login' && (session.token || !platform.tenant)) {
+    navigate(session.token ? '/dashboard' : '/');
+    return;
+  }
+
   const publicRoute = PUBLIC_ROUTES.find((r) => r.pattern.test(path));
 
   // "#/" means the landing page only on the root domain with nobody signed
@@ -932,6 +961,12 @@ async function dispatch() {
     // hashchange, and dispatch() runs again).
     if (!platform.tenant) {
       navigate('/');
+      return;
+    }
+    // On an institute's own domain with its website published, the address
+    // itself opens the website; staff sign in at #/login instead.
+    if (platform.site?.on_root && (path === '/' || path === '')) {
+      await renderPublicRoute(SITE_ROUTE);
       return;
     }
     renderLogin();
