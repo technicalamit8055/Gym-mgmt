@@ -3,7 +3,7 @@ import { all } from '../db.js';
 import { addDays, today } from '../validate.js';
 import { moduleEnabled } from '../verticals.js';
 import { whatsappReady } from '../whatsapp.js';
-import { INSTALLMENT_SELECT } from './fees.js';
+import { billMonthlyPlans, INSTALLMENT_SELECT } from './fees.js';
 import { coachingSettings, sendInstallmentReminder } from './notify.js';
 import { alertFeeDue } from './studentAlerts.js';
 
@@ -25,6 +25,13 @@ import { alertFeeDue } from './studentAlerts.js';
  * 05:30.
  */
 export function sendCoachingFeeReminders({ gymName, currency = 'INR' } = {}) {
+  // Monthly plans first, so a month that has just come due is there to be
+  // reminded about. Runs whether or not reminders are on.
+  try {
+    if (moduleEnabled('fees')) billMonthlyPlans();
+  } catch (err) {
+    console.error('[coaching] monthly fee billing failed:', err.message);
+  }
   try {
     if (!moduleEnabled('installments')) return 0;
     const settings = coachingSettings();

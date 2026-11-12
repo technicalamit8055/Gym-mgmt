@@ -7,6 +7,7 @@ import { baseUrlFor } from '../../onlinePayments.js';
 import { requireModule } from '../../verticals.js';
 import { whatsappReady } from '../../whatsapp.js';
 import {
+  billMonthlyPlans,
   bounceCheque,
   clearCheque,
   collectPayment,
@@ -18,6 +19,9 @@ import {
   listPlans,
   receiptNumber,
   rescheduleUnpaid,
+  resumeMonthlyPlan,
+  updateMonthlyTerms,
+  waiveInstallment,
 } from '../../coaching/fees.js';
 import { feeReceiptPdf, sendFeeReceipt, sendInstallmentReminder } from '../../coaching/notify.js';
 import { alertFeeDue, alertFeeReceived } from '../../coaching/studentAlerts.js';
@@ -30,7 +34,12 @@ import { dateQuery, idParam, idQuery, instituteName, tenantCurrency, tenantLogo 
  * to see what a family has paid.
  */
 export const feeRoutes = Router();
-feeRoutes.use('/fees', requireModule('fees'), requireRole(...MANAGES_BILLING));
+feeRoutes.use('/fees', requireModule('fees'), requireRole(...MANAGES_BILLING), (_req, _res, next) => {
+  // Any month that has come due since the last sweep is billed before the
+  // screen reads it (the sweep is hourly, and the host may have slept).
+  billMonthlyPlans();
+  next();
+});
 
 const receiptOptions = (req) => ({ instituteName: instituteName(req), logoBuffer: tenantLogo(req), currency: tenantCurrency(req) });
 
@@ -67,7 +76,9 @@ feeRoutes.post('/fees/plans', (req, res) => {
 });
 
 /** Cancelling (a student who left before paying), flagging as defaulted, or
- * re-opening. Money already collected stays collected either way. */
+ * re-opening. Money already collected stays collected either way. On a
+ * monthly plan, also its terms: the monthly fee, concession, billing day and
+ * last month — applied from the next month billed. */
 feeRoutes.patch('/fees/plans/:id', (req, res) => {
   const id = idParam(req);
   if (!get('SELECT id FROM student_fee_plans WHERE id = ?', [id])) throw notFound('Fee plan not found');
@@ -76,10 +87,30 @@ feeRoutes.patch('/fees/plans/:id', (req, res) => {
     note: { type: 'string', max: 300 },
     discount_reason: { type: 'string', max: 120 },
   });
+  const terms = parse(req.body, {
+    monthly_fee: { type: 'number', min: 0 },
+    monthly_discount: { type: 'number', min: 0 },
+    billing_day: { type: 'int', min: 1, max: 28 },
+  });
+  // '' clears the last month: the plan runs on until it is cancelled.
+  if (req.body?.end_month !== undefined) terms.end_month = String(req.body.end_month || '');
   const columns = Object.keys(body);
-  if (!columns.length) throw badRequest('Nothing to update');
-  run(`UPDATE student_fee_plans SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, [...columns.map((c) => body[c]), id]);
+  if (!columns.length && !Object.keys(terms).length) throw badRequest('Nothing to update');
+  if (Object.keys(terms).length) updateMonthlyTerms(id, terms);
+  const wasActive = get('SELECT status FROM student_fee_plans WHERE id = ?', [id]).status === 'active';
+  if (columns.length) {
+    run(`UPDATE student_fee_plans SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, [...columns.map((c) => body[c]), id]);
+  }
+  // A monthly plan re-opened bills again from this month on — not the
+  // months it spent closed.
+  if (body.status === 'active' && !wasActive) resumeMonthlyPlan(id);
   res.json(getPlan(id));
+});
+
+/** Waives one unpaid month of a monthly plan (summer break, a closed month). */
+feeRoutes.post('/fees/installments/:id/waive', (req, res) => {
+  const waived = waiveInstallment(idParam(req));
+  res.json({ ok: true, waived: { label: waived.label, amount: waived.amount_due }, plan: getPlan(waived.plan_id) });
 });
 
 feeRoutes.put('/fees/plans/:id/schedule', (req, res) => {

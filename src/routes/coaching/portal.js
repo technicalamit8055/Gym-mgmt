@@ -6,7 +6,7 @@ import { addDays, parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { attendanceCalendar, studentAttendance, weekdayOf } from '../../coaching/attendance.js';
 import { enrollmentsFor } from '../../coaching/enrollment.js';
-import { plansForMember, receiptNumber } from '../../coaching/fees.js';
+import { billMonthlyPlans, plansForMember, receiptNumber } from '../../coaching/fees.js';
 import { doubtsForStudent } from '../../coaching/liveDoubts.js';
 import { issueSocketTicket } from '../../coaching/liveGateway.js';
 import { feeReceiptPdf } from '../../coaching/notify.js';
@@ -70,6 +70,7 @@ coachingPortalRoutes.get('/overview', (req, res) => {
   const batchIds = activeBatchIds(memberId);
   const weekday = weekdayOf(now);
   const todayClasses = weekSlots(batchIds).filter((slot) => slot.weekday === weekday);
+  billMonthlyPlans();
   const plans = plansForMember(memberId).filter((p) => p.status !== 'cancelled');
   const nextDue = plans
     .flatMap((p) => p.installments.filter((i) => i.balance > 0.005).map((i) => ({ ...i, course_name: p.course_name })))
@@ -430,6 +431,7 @@ coachingPortalRoutes.put('/recordings/:id/progress', requireModule('live'), (req
 });
 
 coachingPortalRoutes.get('/fees', (req, res) => {
+  billMonthlyPlans();
   const plans = plansForMember(req.member.id).filter((p) => p.status !== 'cancelled');
   const payments = all(
     `SELECT p.id, p.amount, p.method, p.paid_on, p.reference, p.cheque_no, p.cheque_status, p.fee_plan_id

@@ -94,12 +94,11 @@ export function courseCatalog() {
       qualification: u.qualification || null,
       specialization: u.specialization || null,
     }));
-    const fees = all('SELECT id, name, total_fee, installments FROM fee_structures WHERE course_id = ? AND active = 1 ORDER BY total_fee', [c.id]).map((f) => ({
-      fee_plan_id: f.id,
-      name: f.name,
-      total_fee: f.total_fee,
-      installments: f.installments,
-    }));
+    const fees = all('SELECT id, name, total_fee, installments, billing_cycle FROM fee_structures WHERE course_id = ? AND active = 1 ORDER BY total_fee', [c.id]).map((f) =>
+      f.billing_cycle === 'monthly'
+        ? { fee_plan_id: f.id, name: f.name, monthly_fee: f.total_fee, billing: 'charged every month' }
+        : { fee_plan_id: f.id, name: f.name, total_fee: f.total_fee, installments: f.installments },
+    );
     const subjects = all('SELECT name FROM academic_subjects WHERE course_id = ? ORDER BY sort_order, name', [c.id]).map((s) => s.name);
     return {
       course_id: c.id,
@@ -124,6 +123,15 @@ export function feeBreakdown(courseId) {
   const course = get('SELECT id, name FROM academic_courses WHERE id = ? AND active = 1', [courseId]);
   if (!course) return { ok: false, error: 'No such course is open for admission.' };
   const plans = all('SELECT * FROM fee_structures WHERE course_id = ? AND active = 1 ORDER BY total_fee', [courseId]).map((f) => {
+    if (f.billing_cycle === 'monthly') {
+      return {
+        fee_plan_id: f.id,
+        name: f.name,
+        monthly_fee: f.total_fee,
+        billing: 'charged every month while the student attends; the first month is paid at admission',
+        components: parseComponents(f.components),
+      };
+    }
     const schedule = buildSchedule({ total: f.total_fee, installments: f.installments, startDate: today(), intervalDays: f.interval_days });
     return {
       fee_plan_id: f.id,

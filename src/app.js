@@ -20,6 +20,7 @@ import { exerciseMediaRoutes } from './routes/exerciseMedia.js';
 import { expenseRoutes } from './routes/expenses.js';
 import { fitnessAddonRoutes } from './routes/fitnessAddons.js';
 import { lockerRoutes } from './routes/lockers.js';
+import { marketingRoutes } from './routes/marketing.js';
 import { memberRoutes } from './routes/members.js';
 import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocuments.js';
 import { memberPhotoRoutes } from './routes/memberPhotos.js';
@@ -248,6 +249,11 @@ export function createApp() {
       }),
     );
   });
+
+  // The platform's own marketing pages ("/" and "/library" on the root
+  // domain), robots.txt and sitemap.xml — see src/marketing.js. Ahead of
+  // express.static so "/" is the rewritten shell, not the bare index.html.
+  app.use(marketingRoutes);
 
   app.use(
     express.static(path.join(ROOT, 'public'), {

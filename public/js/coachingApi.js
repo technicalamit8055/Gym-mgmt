@@ -124,6 +124,7 @@ export const coaching = {
   collect: (planId, payload) => request('POST', `${C}/fees/plans/${planId}/payments`, payload),
   dues: (params) => request('GET', `${C}/fees/dues${query(params)}`),
   remindInstallment: (id) => request('POST', `${C}/fees/installments/${id}/remind`, {}),
+  waiveInstallment: (id) => request('POST', `${C}/fees/installments/${id}/waive`, {}),
   remindOverdue: () => request('POST', `${C}/fees/remind-overdue`, {}),
   feePayments: (params) => request('GET', `${C}/fees/payments${query(params)}`),
   sendReceipt: (id) => request('POST', `${C}/fees/payments/${id}/send-receipt`, {}),

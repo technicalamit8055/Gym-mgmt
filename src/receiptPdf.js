@@ -450,8 +450,12 @@ function drawReceipt(doc, data, options, { draw, fontName, clean, logo, style, t
     if (data.course_name) row('Course', data.course_name);
     if (data.batch_name) row('Batch', data.batch_name);
     for (const component of components) row(component.label, money(component.amount));
+    if (data.monthly_fee != null) {
+      row('Monthly fee', money(data.monthly_fee));
+      if (data.monthly_discount) row('Discount per month', `−${money(data.monthly_discount)}`, { color: minimal ? COLORS.ink : COLORS.green });
+    }
     if (data.plan_total != null) row('Course fee', money(data.plan_total));
-    if (data.plan_discount) row('Concession', `−${money(data.plan_discount)}`, { color: minimal ? COLORS.ink : COLORS.green });
+    if (data.plan_discount) row('Discount', `−${money(data.plan_discount)}`, { color: minimal ? COLORS.ink : COLORS.green });
     if (data.plan_final != null) {
       if (!classic) {
         y += 1;

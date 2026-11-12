@@ -40,6 +40,7 @@ import {
   useMemberMode,
   usePlatformTheme,
 } from './vertical.js';
+import { marketingContent } from './marketing.js';
 import { renderLanding } from './views/landing.js';
 import { renderLandingLibrary } from './views/landingLibrary.js';
 import { renderInstituteSite } from './views/coaching/landingPage.js';
@@ -256,10 +257,13 @@ const PUBLIC_ROUTES = [
     pattern: /^\/?$/,
     landing: true,
     platformOwned: true,
-    title: () => (landingBrand === 'library' ? 'SeatBook — Study Hall Management' : 'GymBook — Gym Management'),
+    // The same title the server wrote into the HTML (src/marketing.js) —
+    // search engines that run JavaScript read this one, so the two must agree.
+    title: () => marketingContent(landingBrand).title,
     view: (ctx) => (landingBrand === 'library' ? renderLandingLibrary(ctx) : renderLanding(ctx)),
   },
-  { pattern: /^\/signup$/, title: 'Set up your account', view: renderSignup, platformOwned: true },
+  // "?type=gym|library|coaching" pre-selects the business type (see signup.js).
+  { pattern: /^\/signup(\?|$)/, title: 'Set up your account', view: renderSignup, platformOwned: true },
   { pattern: /^\/platform$/, title: 'Operator console', view: renderPlatformConsole, platformOwned: true },
   // Partner supplement shops — their own sign-in, not the console's or a gym's.
   { pattern: /^\/seller$/, title: 'Shop panel', view: renderSellerPanel, platformOwned: true },

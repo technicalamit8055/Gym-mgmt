@@ -1,8 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { ROOT } from '../config.js';
 import { all, get, getBusinessType, run, tenantStorage, tx } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
+import { escapeHtml, jsonLdScript, shellWithHead } from '../htmlShell.js';
 import { IMAGE_MIMES, parseUploadDataUrl } from '../photo.js';
 import { hasTenantLogo, tenantLogoUrl } from '../routes/platform.js';
 
@@ -204,7 +202,8 @@ export function siteStatus() {
 export function siteCourses() {
   return all(
     `SELECT c.id, c.name, c.code, c.target_exam, c.description,
-            (SELECT MIN(f.total_fee) FROM fee_structures f WHERE f.course_id = c.id AND f.active = 1) AS fee_from,
+            (SELECT MIN(f.total_fee) FROM fee_structures f WHERE f.course_id = c.id AND f.active = 1 AND f.billing_cycle = 'one_time') AS fee_from,
+            (SELECT MIN(f.total_fee) FROM fee_structures f WHERE f.course_id = c.id AND f.active = 1 AND f.billing_cycle = 'monthly') AS monthly_fee_from,
             (SELECT COUNT(*) FROM academic_batches b WHERE b.course_id = c.id AND b.active = 1) AS batch_count
        FROM academic_courses c
       WHERE c.active = 1
@@ -300,7 +299,11 @@ export function sitePayload(tenant) {
     courses: content.sections.courses
       ? siteCourses()
           .filter((course) => !hiddenCourses.has(course.id))
-          .map(({ fee_from: feeFrom, ...course }) => ({ ...course, fee_from: content.show_fees ? feeFrom : null }))
+          .map(({ fee_from: feeFrom, monthly_fee_from: monthlyFrom, ...course }) => ({
+            ...course,
+            fee_from: content.show_fees ? feeFrom : null,
+            monthly_fee_from: content.show_fees ? monthlyFrom : null,
+          }))
       : [],
     faculty: content.sections.faculty
       ? siteFaculty()
@@ -316,18 +319,6 @@ export function sitePayload(tenant) {
 }
 
 /* ── The HTML shell's <head> ───────────────────────────────────────────── */
-
-const escapeHtml = (value) =>
-  String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
-
-let shellCache = null;
-
-/** index.html, read once in production and on every call elsewhere so editing it needs no restart. */
-function baseShell() {
-  if (shellCache && process.env.NODE_ENV === 'production') return shellCache;
-  shellCache = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
-  return shellCache;
-}
 
 /**
  * index.html with the institute's own title, description and share tags.
@@ -373,24 +364,20 @@ export function siteShellHtml(tenant, { origin, canonical = null }) {
     })(),
   };
 
-  const tags = [
-    `<meta property="og:type" content="website" />`,
-    `<meta property="og:site_name" content="${escapeHtml(name)}" />`,
-    `<meta property="og:title" content="${escapeHtml(title)}" />`,
-    `<meta property="og:description" content="${escapeHtml(description)}" />`,
-    image ? `<meta property="og:image" content="${escapeHtml(image)}" />` : '',
-    canonical ? `<meta property="og:url" content="${escapeHtml(canonical)}" />` : '',
-    canonical ? `<link rel="canonical" href="${escapeHtml(canonical)}" />` : '',
-    `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
-    // "<" escaped so no text an owner typed can close the script element.
-    `<script type="application/ld+json">${JSON.stringify(org).replace(/</g, '\\u003c')}</script>`,
-  ]
-    .filter(Boolean)
-    .join('\n    ');
-
-  return baseShell()
-    .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
-    .replace(/<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
-    .replace(/<meta name="apple-mobile-web-app-title" content="[^"]*"\s*\/>/, `<meta name="apple-mobile-web-app-title" content="${escapeHtml(name)}" />`)
-    .replace('</head>', `    ${tags}\n  </head>`);
+  return shellWithHead({
+    title,
+    description,
+    appTitle: name,
+    tags: [
+      `<meta property="og:type" content="website" />`,
+      `<meta property="og:site_name" content="${escapeHtml(name)}" />`,
+      `<meta property="og:title" content="${escapeHtml(title)}" />`,
+      `<meta property="og:description" content="${escapeHtml(description)}" />`,
+      image ? `<meta property="og:image" content="${escapeHtml(image)}" />` : '',
+      canonical ? `<meta property="og:url" content="${escapeHtml(canonical)}" />` : '',
+      canonical ? `<link rel="canonical" href="${escapeHtml(canonical)}" />` : '',
+      `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
+      jsonLdScript(org),
+    ],
+  });
 }

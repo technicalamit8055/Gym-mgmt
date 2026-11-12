@@ -425,7 +425,11 @@ export function buildSite(data, { preview = false, draft = false, banner = null 
         h(
           'div',
           { class: 'site-course-foot' },
-          course.fee_from != null ? h('span', { class: 'site-fee' }, 'Fees from ', h('strong', {}, money(course.fee_from))) : null,
+          course.fee_from != null
+            ? h('span', { class: 'site-fee' }, 'Fees from ', h('strong', {}, money(course.fee_from)))
+            : course.monthly_fee_from != null
+              ? h('span', { class: 'site-fee' }, 'From ', h('strong', {}, money(course.monthly_fee_from)), ' / month')
+              : null,
           course.batch_count ? h('span', { class: 'site-chip-soft' }, renderIcon('users', { size: 13 }), `${course.batch_count} batch${course.batch_count === 1 ? '' : 'es'} running`) : null,
         ),
         has.enquiry

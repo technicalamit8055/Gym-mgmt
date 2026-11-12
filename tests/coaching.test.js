@@ -347,6 +347,134 @@ describe('admission with an installment fee plan', () => {
   });
 });
 
+/* ── Monthly fee plans ───────────────────────────────────────────────── */
+
+describe('monthly fee plans', () => {
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const label = (isoDate) => `${MONTHS[Number(isoDate.slice(5, 7)) - 1]} ${isoDate.slice(0, 4)}`;
+  const horizon = () => addDays(today(), 3); // fee_reminder_days_before's default
+  let plan;
+
+  it('bills every month that has come due, from the start month on', async () => {
+    const s = await createStudent('Tanvi', { emergency_phone: '9833333333' });
+    const start = addDays(today(), -70);
+    const res = await call('POST', '/api/coaching/enrollments', {
+      member_id: s.id,
+      batch_id: batch.id,
+      fee: { billing_cycle: 'monthly', monthly_fee: 3000, monthly_discount: 500, discount_reason: 'Merit', billing_day: 5, start_date: start },
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    plan = res.body.fee_plan;
+    assert.equal(plan.billing_cycle, 'monthly');
+    assert.equal(plan.monthly_net, 2500);
+    const n = plan.installments.length;
+    assert.ok(n >= 3 && n <= 4, `about 70 days of months, got ${n}`);
+    assert.equal(plan.installments[0].label, label(start));
+    assert.ok(plan.installments.every((i) => i.amount_due === 2500 && i.due_date <= horizon()));
+    assert.ok(plan.installments.slice(1).every((i) => i.due_date.endsWith('-05')), 'later months fall due on the billing day');
+    assert.ok(plan.next_month.due_date > horizon(), 'the next month is not billed early');
+    assert.equal(plan.total_amount, 3000 * n);
+    assert.equal(plan.discount_amount, 500 * n);
+    assert.equal(plan.final_amount, 2500 * n);
+    assert.equal(plan.effective_status, 'overdue');
+
+    // Every read re-runs the billing; nothing is billed twice.
+    await call('GET', '/api/coaching/fees/summary');
+    const again = await call('GET', `/api/coaching/fees/plans/${plan.id}`);
+    assert.equal(again.body.installments.length, n);
+    const summary = await call('GET', '/api/coaching/fees/summary');
+    assert.ok(summary.body.monthly_plans >= 1);
+    assert.ok(summary.body.monthly_expected >= 2500);
+  });
+
+  it('takes an advance: the coming months are billed and paid in one go', async () => {
+    const before = plan.installments.length;
+    const paid = await call('POST', `/api/coaching/fees/plans/${plan.id}/payments`, { amount: plan.balance + 5000, method: 'cash', send_receipt: false });
+    assert.equal(paid.status, 201, JSON.stringify(paid.body));
+    plan = paid.body.plan;
+    assert.equal(plan.installments.length, before + 2);
+    assert.ok(plan.installments.every((i) => i.status === 'paid'));
+    assert.equal(plan.balance, 0);
+    assert.equal(plan.effective_status, 'active', 'paid up, but still running — not "fully paid"');
+
+    const receipt = await call('GET', `/api/coaching/fees/payments/${paid.body.payment_id}/receipt`);
+    assert.equal(receipt.type, 'application/pdf');
+
+    const tooMuch = await call('POST', `/api/coaching/fees/plans/${plan.id}/payments`, { amount: 2500 * 13, send_receipt: false });
+    assert.equal(tooMuch.status, 409, 'at most a year ahead');
+    const after = await call('GET', `/api/coaching/fees/plans/${plan.id}`);
+    assert.equal(after.body.installments.length, before + 2, 'a refused advance leaves no month billed');
+  });
+
+  it('changes the fee from the next month, and refuses rescheduling', async () => {
+    const changed = await call('PATCH', `/api/coaching/fees/plans/${plan.id}`, { monthly_fee: 3500 });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.equal(changed.body.next_month.amount, 3000);
+    assert.ok(changed.body.installments.every((i) => i.amount_due === 2500), 'billed months keep their amount');
+
+    const early = await call('PATCH', `/api/coaching/fees/plans/${plan.id}`, { end_month: plan.installments[0].due_date.slice(0, 7) });
+    assert.equal(early.status, 400, 'cannot end before a month already billed');
+
+    const resched = await call('PUT', `/api/coaching/fees/plans/${plan.id}/schedule`, { installments: [{ amount_due: 100, due_date: today() }] });
+    assert.equal(resched.status, 400);
+  });
+
+  it('waives an unpaid month into the concession, never a paid one', async () => {
+    const s = await createStudent('Yash');
+    const res = await call('POST', '/api/coaching/fees/plans', {
+      member_id: s.id, course_id: course.id, billing_cycle: 'monthly', monthly_fee: 2000, start_date: today(),
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const month = res.body.installments[0];
+    assert.equal(month.due_date, today(), 'the first month is due at admission');
+
+    const waived = await call('POST', `/api/coaching/fees/installments/${month.id}/waive`);
+    assert.equal(waived.status, 200, JSON.stringify(waived.body));
+    assert.equal(waived.body.plan.final_amount, res.body.final_amount - 2000);
+    assert.equal(waived.body.plan.discount_amount, res.body.discount_amount + 2000);
+
+    const paidMonth = plan.installments[0];
+    const refused = await call('POST', `/api/coaching/fees/installments/${paidMonth.id}/waive`);
+    assert.equal(refused.status, 400);
+  });
+
+  it('stops at the last month, and then reads as fully paid', async () => {
+    const s = await createStudent('Zoya');
+    const start = addDays(today(), -70);
+    const res = await call('POST', '/api/coaching/fees/plans', {
+      member_id: s.id, course_id: course.id, billing_cycle: 'monthly', monthly_fee: 1500, billing_day: 1, start_date: start, end_month: start.slice(0, 7),
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.installments.length, 1);
+    assert.equal(res.body.next_month, null);
+    const paid = await call('POST', `/api/coaching/fees/plans/${res.body.id}/payments`, { amount: 1500, send_receipt: false });
+    assert.equal(paid.body.plan.effective_status, 'paid');
+    const over = await call('POST', `/api/coaching/fees/plans/${res.body.id}/payments`, { amount: 1, send_receipt: false });
+    assert.equal(over.status, 409, 'nothing to pay ahead for past the last month');
+  });
+
+  it('re-opened after a break, bills from this month — not the months it was closed', async () => {
+    const s = await createStudent('Arjun');
+    const res = await call('POST', '/api/coaching/fees/plans', {
+      member_id: s.id, course_id: course.id, billing_cycle: 'monthly', monthly_fee: 1000, billing_day: 1, start_date: addDays(today(), -150),
+    });
+    const id = res.body.id;
+    await call('PATCH', `/api/coaching/fees/plans/${id}`, { status: 'cancelled' });
+    // Pretend it was cancelled four months back: billed through then, nothing since.
+    const lastBilled = addDays(today(), -120).slice(0, 7);
+    tenantStorage.run({ slug: SLUG, dbFile: tenantDbPath(SLUG), businessType: 'coaching' }, () => {
+      run("DELETE FROM student_fee_installments WHERE plan_id = ? AND substr(due_date, 1, 7) > ?", [id, lastBilled]);
+      run('UPDATE student_fee_plans SET billed_through = ? WHERE id = ?', [lastBilled, id]);
+    });
+    const reopened = await call('PATCH', `/api/coaching/fees/plans/${id}`, { status: 'active' });
+    assert.equal(reopened.status, 200, JSON.stringify(reopened.body));
+    const months = reopened.body.installments.map((i) => i.due_date.slice(0, 7));
+    const gap = months.filter((m) => m > lastBilled && m < today().slice(0, 7));
+    assert.deepEqual(gap, [], 'no months billed for the time it was closed');
+    assert.ok(months.includes(today().slice(0, 7)), 'this month is billed');
+  });
+});
+
 /* ── Attendance & absentee alerts ────────────────────────────────────── */
 
 describe('batch attendance with parent alerts', () => {

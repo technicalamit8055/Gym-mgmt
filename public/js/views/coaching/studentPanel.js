@@ -89,6 +89,12 @@ export function coachingSummaryCard(member, { reload }) {
   return h('div', { class: 'card md-card cb-student-panel' }, h('div', { class: 'card-head' }, h('h3', {}, 'Batches & fees')), body);
 }
 
+/** A monthly plan's months: anything unpaid, plus the last few paid — not two years of rows. */
+const visibleInstallments = (plan) =>
+  plan.billing_cycle === 'monthly'
+    ? plan.installments.filter((i, n, list) => i.balance > 0.005 || n >= list.length - 4)
+    : plan.installments;
+
 function feePlanCard(plan, { member, reload }) {
   const paidPct = plan.final_amount ? Math.min(100, (plan.amount_paid / plan.final_amount) * 100) : 0;
   const canBill = session.managesBilling;
@@ -98,7 +104,9 @@ function feePlanCard(plan, { member, reload }) {
     h(
       'div',
       { class: 'row' },
-      h('div', { class: 'cb-grow' }, h('div', { class: 'cb-strong' }, plan.course_name), h('div', { class: 'muted cb-small' }, `${plan.batch_name || 'No batch'} · ${money(plan.final_amount)} payable${plan.discount_amount ? ` (${money(plan.discount_amount)} concession)` : ''}`)),
+      h('div', { class: 'cb-grow' }, h('div', { class: 'cb-strong' }, plan.course_name), h('div', { class: 'muted cb-small' }, plan.billing_cycle === 'monthly'
+        ? `${plan.batch_name || 'No batch'} · monthly fee ${money(plan.monthly_net)}${plan.monthly_discount ? ` (${money(plan.monthly_discount)} discount)` : ''} · ${money(plan.final_amount)} total fee till now`
+        : `${plan.batch_name || 'No batch'} · ${money(plan.final_amount)} payable${plan.discount_amount ? ` (${money(plan.discount_amount)} discount)` : ''}`)),
       tone(PLAN_STATUS, plan.effective_status),
     ),
     h('div', { class: 'cbp-progress' }, h('span', { style: `width:${paidPct}%` })),
@@ -106,11 +114,11 @@ function feePlanCard(plan, { member, reload }) {
     h(
       'div',
       { class: 'cb-installments' },
-      ...plan.installments.map((inst) =>
+      ...visibleInstallments(plan).map((inst) =>
         h(
           'div',
           { class: 'list-item' },
-          h('span', { class: 'cb-roll' }, `#${inst.installment_number}`),
+          h('span', { class: 'cb-roll' }, plan.billing_cycle === 'monthly' ? inst.label : `#${inst.installment_number}`),
           h('div', { class: 'cb-grow' }, h('div', {}, money(inst.amount_due)), h('div', { class: 'muted cb-small' }, `Due ${date(inst.due_date)}${inst.amount_paid > 0 && inst.balance > 0.005 ? ` · ${money(inst.balance)} left` : ''}`)),
           tone(INSTALLMENT_STATUS, inst.status),
           canBill && inst.balance > 0.005 && plan.status !== 'cancelled'

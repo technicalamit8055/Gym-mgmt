@@ -20,6 +20,7 @@
     "icons:gen": "node scripts/gen-icons.js",
     "icons:gen:library": "node scripts/gen-icons-library.js",
     "icons:gen:coaching": "node scripts/gen-icons-coaching.js",
+    "og:gen": "node scripts/gen-og.js",
     "emulator": "powershell -ExecutionPolicy Bypass -File scripts/open-emulator.ps1",
     "seed:store": "node --no-warnings=ExperimentalWarning scripts/seed-store.js",
     "devices": "adb devices -l",

@@ -447,17 +447,26 @@ export function coachingPortalTabs({ getMe, switchTab, registerCleanup, openScre
           'div',
           { class: 'cbp-card' },
           h('h3', { class: 'cbp-title' }, plan.course_name),
-          h('p', { class: 'cbp-sub' }, `${plan.batch_name || ''}${plan.discount_amount ? ` · ${money(plan.discount_amount)} concession` : ''}`),
+          h(
+            'p',
+            { class: 'cbp-sub' },
+            plan.billing_cycle === 'monthly'
+              ? `${plan.batch_name ? `${plan.batch_name} · ` : ''}Monthly fee ${money(plan.monthly_net)}, due on day ${plan.billing_day} of every month`
+              : `${plan.batch_name || ''}${plan.discount_amount ? ` · ${money(plan.discount_amount)} discount` : ''}`,
+          ),
           h('div', { class: 'cbp-progress' }, h('span', { style: `width:${paidPct}%` })),
-          h('div', { class: 'cbp-row cb-small' }, h('span', { class: 'cb-grow' }, `${money(plan.amount_paid)} paid of ${money(plan.final_amount)}`), h('strong', {}, plan.balance > 0.005 ? `${money(plan.balance)} left` : 'Fully paid')),
+          h('div', { class: 'cbp-row cb-small' }, h('span', { class: 'cb-grow' }, `${money(plan.amount_paid)} paid of ${money(plan.final_amount)}`), h('strong', {}, plan.balance > 0.005 ? `${money(plan.balance)} left` : plan.billing_cycle === 'monthly' ? 'All paid up' : 'Fully paid')),
           h(
             'div',
             { style: 'margin-top:8px' },
-            ...plan.installments.map((inst) =>
+            ...(plan.billing_cycle === 'monthly'
+              ? plan.installments.filter((i, n, list) => i.balance > 0.005 || n >= list.length - 4)
+              : plan.installments
+            ).map((inst) =>
               h(
                 'div',
                 { class: 'cbp-install' },
-                h('span', { class: 'cb-roll' }, `#${inst.installment_number}`),
+                h('span', { class: 'cb-roll' }, plan.billing_cycle === 'monthly' ? inst.label : `#${inst.installment_number}`),
                 h('div', { class: 'cb-grow' }, h('div', { class: 'cb-strong' }, money(inst.amount_due)), h('div', { class: 'muted cb-small' }, `${inst.label || ''} · due ${date(inst.due_date)}${inst.amount_paid > 0 && inst.balance > 0.005 ? ` · ${money(inst.balance)} left` : ''}`)),
                 payAction(inst) ?? tone(INSTALLMENT_STATUS, inst.status),
               ),

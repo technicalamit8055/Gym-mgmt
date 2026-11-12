@@ -1,6 +1,6 @@
 import { api, session } from '../../api.js';
 import { coaching } from '../../coachingApi.js';
-import { addDays, clear, closeModal, dateField, h, money, openModal, renderIcon, toast, today } from '../../ui.js';
+import { addDays, clear, closeModal, date, dateField, h, money, openModal, renderIcon, toast, today } from '../../ui.js';
 import { fill, fullName, timeRange, weekdayList } from './common.js';
 
 /**
@@ -31,13 +31,51 @@ export function splitFee(total, n, start, gap) {
   }));
 }
 
-/** The fee half of the form, also used on its own to add a plan later. */
-export function feeFields({ course, onChange }) {
-  const structures = course?.fee_structures || [];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const monthLabel = (ym) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+const addMonth = (ym) => {
+  const [y, m] = ym.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+};
+const ordinal = (n) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
+export const dayOfMonth = (n) => ordinal(Number(n));
+
+/**
+ * The first `count` months a monthly plan bills. Mirrors nextMonthToBill() in
+ * src/coaching/fees.js: due on the billing day, except the first month, due
+ * on the start date when that is later.
+ */
+export function monthlyPreview({ start, day, endMonth, amount, count = 3 }) {
+  const rows = [];
+  let month = start.slice(0, 7);
+  while (rows.length < count && (!endMonth || month <= endMonth)) {
+    const onDay = `${month}-${String(day).padStart(2, '0')}`;
+    rows.push({ label: monthLabel(month), due_date: rows.length === 0 && start > onDay ? start : onDay, amount_due: amount });
+    month = addMonth(month);
+  }
+  return rows;
+}
+
+/**
+ * The fee half of the form, also used on its own to add a plan later.
+ * Two kinds of plan: a course fee (paid in full or in installments) or a
+ * monthly fee (charged every month until a last month, or until stopped).
+ * `allowMonthly: false` hides the choice — the reschedule dialog re-splits a
+ * course fee and has no use for it.
+ */
+export function feeFields({ course, onChange, allowMonthly = true }) {
+  const all = course?.fee_structures || [];
+  // The course's monthly fee is set once in its fee planner (Courses &
+  // batches) and used as-is here; the structure picker is only for course
+  // fees paid in full or in installments.
+  const monthlyStructure = allowMonthly ? all.find((s) => s.billing_cycle === 'monthly') : null;
+  const structures = all.filter((s) => s.billing_cycle !== 'monthly');
   const first = structures[0];
   const state = {
     on: true,
-    structureId: first?.id ?? '',
+    cycle: allowMonthly ? 'monthly' : 'one_time',
+    structureId: allowMonthly ? monthlyStructure?.id ?? '' : first?.id ?? '',
+    oneTimeStructureId: first?.id ?? '',
     total: first?.total_fee ?? '',
     discount: 0,
     reason: '',
@@ -46,6 +84,10 @@ export function feeFields({ course, onChange }) {
     gap: first?.interval_days ?? 30,
     rows: [],
     edited: false,
+    monthlyFee: monthlyStructure ? monthlyStructure.total_fee : '',
+    monthlyDiscount: 0,
+    billingDay: Math.min(28, Number(today().slice(8, 10))),
+    endMonth: '',
   };
 
   const num = (v) => (v === '' || v === null ? '' : Number(v));
@@ -67,6 +109,7 @@ export function feeFields({ course, onChange }) {
           onchange: (e) => {
             const s = structures.find((x) => x.id === Number(e.target.value));
             state.structureId = s?.id ?? '';
+            state.oneTimeStructureId = state.structureId;
             if (s) {
               totalInput.value = s.total_fee;
               countSelect.value = String(Math.min(MAX_INSTALLMENTS, s.installments));
@@ -121,7 +164,7 @@ export function feeFields({ course, onChange }) {
       const diff = Math.round((total - payable()) * 100) / 100;
       const node = preview.querySelector('.cb-schedule-total');
       fill(node, 
-        h('span', {}, `Payable after concession: `, h('strong', {}, money(payable()))),
+        h('span', {}, `Fee after discount: `, h('strong', {}, money(payable()))),
         diff ? h('span', { class: 'cb-red' }, `Installments are ${money(Math.abs(diff))} ${diff > 0 ? 'over' : 'short'}`) : h('span', { class: 'cb-green' }, 'Adds up'),
       );
     }
@@ -145,34 +188,156 @@ export function feeFields({ course, onChange }) {
     },
   });
   const field = (label, control, full = false) => h('label', { class: `field${full ? ' full' : ''}` }, h('span', {}, label), control);
+
+  /* Monthly fee: charged every month on the billing day. */
+  state.monthStart = today();
+  const monthlyPayable = () => Math.max(0, (Number(state.monthlyFee) || 0) - (Number(state.monthlyDiscount) || 0));
+  const monthlyFeeInput = input({
+    type: 'number',
+    min: 0,
+    step: '1',
+    value: state.monthlyFee,
+    readOnly: Boolean(monthlyStructure),
+    oninput: (e) => paintMonthly({ monthlyFee: num(e.target.value) }),
+  });
+  const monthlyDiscountInput = input({ type: 'number', min: 0, step: '1', value: 0, oninput: (e) => paintMonthly({ monthlyDiscount: num(e.target.value) || 0 }) });
+  const monthlyReasonInput = input({ type: 'text', placeholder: 'Sibling, merit, early bird…', oninput: (e) => (state.reason = e.target.value) });
+  const billingDayInput = input({
+    type: 'number',
+    min: 1,
+    max: 28,
+    value: state.billingDay,
+    oninput: (e) => paintMonthly({ billingDay: Math.max(1, Math.min(28, Number(e.target.value) || 1)) }),
+  });
+  const monthStartInput = dateField({ name: 'month_start', value: state.monthStart, onchange: (e) => paintMonthly({ monthStart: e.target.value || today() }) });
+  const endMonthInput = input({ type: 'month', value: '', oninput: (e) => paintMonthly({ endMonth: e.target.value }) });
+  const monthlyPreviewNode = h('div', { class: 'cb-schedule' });
+
+  function paintMonthly(patch = {}) {
+    Object.assign(state, patch);
+    const amount = monthlyPayable();
+    const rows = monthlyPreview({ start: state.monthStart, day: state.billingDay, endMonth: state.endMonth, amount });
+    fill(
+      monthlyPreviewNode,
+      h('div', { class: 'cb-schedule-head' }, h('span', {}, 'Month'), h('span', {}, 'Due on'), h('span', { class: 'num' }, 'Amount')),
+      ...rows.map((row) => h('div', { class: 'cb-schedule-row' }, h('span', { class: 'cb-strong' }, row.label), h('span', {}, row.due_date ? date(row.due_date) : ''), h('span', { class: 'num' }, money(row.amount_due)))),
+      h(
+        'div',
+        { class: 'cb-schedule-total' },
+        h('span', {}, 'Every month: ', h('strong', {}, money(amount))),
+        h(
+          'span',
+          { class: 'muted' },
+          `Due on the ${dayOfMonth(state.billingDay)} · ${state.endMonth ? `until ${monthLabel(state.endMonth)}` : 'until you stop it'}`,
+        ),
+      ),
+    );
+    onChange?.(state);
+  }
+
+  const oneTimeGrid = h(
+    'div',
+    { class: 'form-grid' },
+    field('Course fee', totalInput),
+    field('Discount', discountInput),
+    field('Reason for discount', reasonInput, true),
+    field('Payment plan', countSelect),
+    field('Days between installments', gapInput),
+    field('First due on', startInput),
+  );
+  const monthlyGrid = h(
+    'div',
+    { class: 'form-grid' },
+    h(
+      'label',
+      { class: 'field' },
+      h('span', {}, 'Monthly fee'),
+      monthlyFeeInput,
+      h(
+        'small',
+        { class: 'muted' },
+        monthlyStructure
+          ? 'Fixed in the course’s fee planner. Use the discount for this student.'
+          : 'Tip: set the monthly fee once on the course (Courses & batches) to fill this in.',
+      ),
+    ),
+    field('Discount per month', monthlyDiscountInput),
+    field('Reason for discount', monthlyReasonInput, true),
+    field('First month starts on', monthStartInput),
+    field('Fee due date every month (1–28)', billingDayInput),
+    h(
+      'label',
+      { class: 'field full' },
+      h('span', {}, 'Last month (optional)'),
+      endMonthInput,
+      h('small', { class: 'muted' }, 'Leave blank to keep charging every month until you stop the plan.'),
+    ),
+  );
+  const oneTimePart = h(
+    'div',
+    {},
+    structureSelect ? h('div', { class: 'form-grid' }, field('Fee structure', structureSelect, true)) : null,
+    oneTimeGrid,
+    preview,
+  );
+  const monthlyPart = h('div', {}, monthlyGrid, monthlyPreviewNode);
+
+  function paintCycle() {
+    oneTimePart.hidden = state.cycle !== 'one_time';
+    monthlyPart.hidden = state.cycle !== 'monthly';
+  }
+  function setCycle(cycle, patch = {}) {
+    state.cycle = cycle;
+    state.structureId = cycle === 'monthly' ? monthlyStructure?.id ?? '' : state.oneTimeStructureId;
+    paintCycle();
+    if (cycle === 'monthly') paintMonthly(patch);
+    else onChange?.(state);
+  }
+  const cycleSelect = allowMonthly
+    ? h(
+        'select',
+        { onchange: (e) => setCycle(e.target.value) },
+        h('option', { value: 'monthly', selected: state.cycle === 'monthly' }, 'Monthly fee · charged every month'),
+        h('option', { value: 'one_time', selected: state.cycle === 'one_time' }, 'Course fee · paid in full or in installments'),
+      )
+    : null;
+  paintMonthly();
+  paintCycle();
+
   const body = h(
     'div',
     { class: 'cb-fee-body' },
-    h(
-      'div',
-      { class: 'form-grid' },
-      structureSelect ? field('Fee structure', structureSelect, true) : null,
-      field('Course fee', totalInput),
-      field('Concession', discountInput),
-      field('Concession reason', reasonInput, true),
-      field('Payment plan', countSelect),
-      field('Days between installments', gapInput),
-      field('First due on', startInput),
-    ),
-    preview,
+    cycleSelect ? h('div', { class: 'form-grid' }, field('How is the fee collected?', cycleSelect, true)) : null,
+    oneTimePart,
+    monthlyPart,
   );
 
   return {
     node: h(
       'div',
       { class: 'cb-fee-block' },
-      h('label', { class: 'cb-check cb-strong' }, toggle, 'Set up the course fee now'),
+      h('label', { class: 'cb-check cb-strong' }, toggle, 'Set up the fee now'),
       body,
     ),
     /** The `fee` payload for the API, or null when switched off. */
     value() {
       if (!state.on) return null;
-      if (!(Number(state.total) > 0)) throw new Error('Enter the course fee, or untick “Set up the course fee now”');
+      if (state.cycle === 'monthly') {
+        if (!(Number(state.monthlyFee) > 0)) throw new Error('Enter the monthly fee, or untick “Set up the fee now”');
+        if (!(monthlyPayable() > 0)) throw new Error('The discount must be less than the monthly fee');
+        if (state.endMonth && state.endMonth < state.monthStart.slice(0, 7)) throw new Error('The last month is before the first');
+        return {
+          billing_cycle: 'monthly',
+          fee_structure_id: state.structureId || undefined,
+          monthly_fee: Number(state.monthlyFee),
+          monthly_discount: Number(state.monthlyDiscount) || 0,
+          discount_reason: state.reason || undefined,
+          billing_day: state.billingDay,
+          start_date: state.monthStart,
+          end_month: state.endMonth || undefined,
+        };
+      }
+      if (!(Number(state.total) > 0)) throw new Error('Enter the course fee, or untick “Set up the fee now”');
       return {
         fee_structure_id: state.structureId || undefined,
         total_amount: Number(state.total),

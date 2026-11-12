@@ -107,7 +107,9 @@ export async function renderInstituteLandingManagement({ setActions }) {
       institute: data.institute,
       content: draft,
       courses: draft.sections.courses
-        ? data.courses.filter((c) => !hiddenCourses.has(c.id)).map((c) => ({ ...c, fee_from: draft.show_fees ? c.fee_from : null }))
+        ? data.courses
+            .filter((c) => !hiddenCourses.has(c.id))
+            .map((c) => ({ ...c, fee_from: draft.show_fees ? c.fee_from : null, monthly_fee_from: draft.show_fees ? c.monthly_fee_from : null }))
         : [],
       faculty: draft.sections.faculty ? data.faculty.filter((f) => !hiddenFaculty.has(f.id)) : [],
       hero_image_url: data.images.find((i) => i.kind === 'hero')?.url ?? null,

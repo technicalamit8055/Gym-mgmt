@@ -1,49 +1,32 @@
 import { gymPathUrl } from '../api.js';
+import { marketingContent } from '../marketing.js';
 import { h, renderIcon, toast } from '../ui.js';
+import { testDrive } from './landingDemo.js';
 import { productPreview } from './landingPreview.js';
+import {
+  comparison,
+  faqList,
+  featureGrid,
+  finalCta,
+  landingFooter,
+  productSwitch,
+  proofList,
+  roiCalculator,
+  sectionHead,
+  stickyCta,
+} from './landingSections.js';
 
 /**
- * The root domain's public page: what the product is, a way in for gyms that
- * already exist, and a way to create one that doesn't.
+ * The root domain's public pages: GymBook at "/", SeatBook at "/library"
+ * (views/landingLibrary.js). One layout for both — what the product is, a
+ * way in for accounts that already exist, and a way to create one that
+ * doesn't — with every word coming from public/js/marketing.js, which the
+ * server also reads to write the same page into the HTML for crawlers
+ * (src/marketing.js).
  *
  * Rendered full-page rather than inside the app shell — there is no gym to
  * put a sidebar for, and every nav item would 404.
  */
-
-/** `icon` names one of the vectors in ui.js — the marketing page is the first
- * thing a visitor sees, and an emoji renders differently on every platform. */
-const FEATURES = [
-  {
-    icon: 'checkin',
-    title: 'Check-in that keeps up',
-    body: 'QR ID cards, phone biometrics or a fingerprint terminal at the door. One rescan checks a member back out, and assigned shifts close forgotten visits on their own.',
-  },
-  {
-    icon: 'billing',
-    title: 'Memberships and money',
-    body: 'Sell plans, take payments in cash, card, UPI or bank, and see outstanding dues per member. Renewals pick up the day the old membership ends.',
-  },
-  {
-    icon: 'idCard',
-    title: 'Members, properly filed',
-    body: 'Contact and emergency details, health notes, a full history of visits, payments and bookings on one page — and a printable ID card for each.',
-  },
-  {
-    icon: 'equipment',
-    title: 'Classes and equipment',
-    body: 'A weekly timetable with trainers, rooms and capacity, live seat counts, plus an equipment register with service dates and maintenance alerts.',
-  },
-  {
-    icon: 'reports',
-    title: 'Numbers you can act on',
-    body: 'Revenue by period, method and plan. Attendance by hour and weekday. Joins, renewals and churn. Every report exports to CSV.',
-  },
-  {
-    icon: 'database',
-    title: 'Your data, on its own',
-    body: 'Every gym gets its own separate database file. Not a shared table with a filter on it — a different file, so one gym’s data cannot be queried from another.',
-  },
-];
 
 /** "Already have a gym?" — turns a typed address into the URL it lives at. */
 export function signInBox(urlMode, rootHost, copy = {}) {
@@ -94,89 +77,73 @@ export function signInBox(urlMode, rootHost, copy = {}) {
   );
 }
 
-export function renderLanding({ context, navigate }) {
+/** One marketing page, for `brand` 'gym' or 'library'. */
+export function renderMarketingPage(brand, { context, navigate }) {
   const trialDays = context.trial_days ?? 7;
-  const rootHost = window.location.host;
+  const content = marketingContent(brand, { trialDays });
+  const start = () => navigate('/signup');
+
+  const heroCta = h(
+    'div',
+    { class: 'landing-cta' },
+    h('button', { class: 'btn primary lg', onclick: start }, `Start your ${trialDays}-day free trial`),
+    proofList(content.proof),
+  );
+  const finale = finalCta(content, trialDays, start);
 
   return h(
     'div',
-    { class: 'landing' },
+    { class: 'landing', 'data-brand': brand === 'library' ? 'library' : null },
     h(
       'header',
       { class: 'landing-top' },
-      h('div', { class: 'brand' }, h('div', { class: 'logo' }, renderIcon('dumbbell', { size: 18 })), 'GymBook'),
+      h('a', { class: 'brand', href: content.path }, h('div', { class: 'logo' }, renderIcon(content.icon, { size: 18 })), content.name),
+      productSwitch(brand),
       h('div', { class: 'spacer' }),
-      context.platform_admin
-        ? h('a', { class: 'btn sm ghost', href: '#/platform' }, 'Operator console')
-        : null,
-      h('button', { class: 'btn sm primary', onclick: () => navigate('/signup') }, 'Start free'),
+      context.platform_admin ? h('a', { class: 'btn sm ghost', href: '#/platform' }, 'Operator console') : null,
+      h('button', { class: 'btn sm primary', onclick: start }, 'Start free'),
     ),
 
     h(
       'section',
       { class: 'landing-hero' },
-      h('span', { class: 'landing-eyebrow' }, renderIcon('sparkle', { size: 14 }), 'Built for the front desk'),
-      h('h1', {}, 'Run your gym. ', h('span', { class: 'grad' }, 'All of it.')),
-      h(
-        'p',
-        { class: 'lede' },
-        'Members, memberships, payments, check-ins, classes and equipment — in one place, on any screen at the front desk.',
-      ),
-      h(
-        'div',
-        { class: 'landing-cta' },
-        h('button', { class: 'btn primary lg', onclick: () => navigate('/signup') }, `Start your ${trialDays}-day free trial`),
-        h('span', { class: 'muted', style: 'font-size:13px' }, 'No card needed. Ready in about a minute.'),
-      ),
-      signInBox(context.url_mode, rootHost),
+      h('span', { class: 'landing-eyebrow' }, renderIcon('sparkle', { size: 14 }), content.eyebrow),
+      h('h1', {}, content.headline[0], h('span', { class: 'grad' }, content.headline[1])),
+      h('p', { class: 'lede' }, content.lede),
+      heroCta,
+      signInBox(context.url_mode, window.location.host, content.signin),
     ),
 
-    productPreview('gym'),
+    productPreview(brand),
 
-    h(
-      'div',
-      { class: 'landing-section-head' },
-      h('h2', {}, 'Everything the front desk needs'),
-      h('p', { class: 'muted' }, 'One system for the people, the payments and the place — so nothing lives in a spreadsheet.'),
-    ),
     h(
       'section',
-      { class: 'landing-features' },
-      FEATURES.map((feature) =>
-        h(
-          'div',
-          { class: 'card landing-feature' },
-          h('div', { class: 'landing-feature-icon' }, renderIcon(feature.icon, { size: 20 })),
-          h('h3', {}, feature.title),
-          h('p', { class: 'muted' }, feature.body),
-        ),
-      ),
+      { 'aria-labelledby': 'features-heading' },
+      sectionHead(content.featuresHeading, content.featuresLede, 'features-heading'),
+      featureGrid(content.features),
     ),
+
+    testDrive(content),
+    roiCalculator(content, start),
+    comparison(content.compare),
 
     h(
       'section',
       { class: 'landing-steps' },
-      h('h2', {}, 'From nothing to checking members in'),
+      h('h2', {}, content.steps.heading),
       h(
         'ol',
         {},
-        h('li', {}, h('strong', {}, 'Pick your address.'), ' It becomes the link your staff sign in at.'),
-        h('li', {}, h('strong', {}, 'Create the owner account.'), ' You land straight in, already signed in.'),
-        h(
-          'li',
-          {},
-          h('strong', {}, 'Three plans are waiting for you.'),
-          ' Edit the prices, add your members, and start scanning people in.',
-        ),
+        content.steps.items.map(([lead, rest]) => h('li', {}, h('strong', {}, lead), rest)),
       ),
-      h('button', { class: 'btn primary', onclick: () => navigate('/signup') }, 'Create my gym'),
+      h('button', { class: 'btn primary', onclick: start }, content.steps.cta),
     ),
 
-    h(
-      'footer',
-      { class: 'landing-foot muted' },
-      `GymBook — every gym on its own database. ${trialDays}-day trial, then a single monthly subscription. `,
-      h('a', { href: '/library' }, 'Running a library or study hall? →'),
-    ),
+    faqList(content),
+    finale,
+    landingFooter(content, trialDays),
+    stickyCta({ label: `Start your ${trialDays}-day free trial`, onStart: start, hero: heroCta, finale }),
   );
 }
+
+export const renderLanding = (ctx) => renderMarketingPage('gym', ctx);

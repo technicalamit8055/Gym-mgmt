@@ -47,6 +47,206 @@ export function buildSchedule({ total, installments, startDate, intervalDays = 3
   }));
 }
 
+/* ── Monthly plans ───────────────────────────────────────────────────── */
+
+/**
+ * A monthly plan has no fixed total. Each month becomes one installment
+ * ("Nov 2026") on the plan's billing day, created a few days ahead of its
+ * due date — as far ahead as the "due soon" reminder goes out — and the
+ * plan's total / discount / final grow by one month each time, so a monthly
+ * plan's balance, overdue amount and receipts come out of exactly the same
+ * queries as an installment plan's.
+ *
+ * The first month falls due on the billing day of the start month, or on the
+ * start date itself when that is later (a student admitted on the 20th of an
+ * institute that bills on the 5th pays the first month at admission).
+ */
+
+/** Months a family can pay ahead of what has been billed. */
+export const MAX_ADVANCE_MONTHS = 12;
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const monthLabel = (ym) => `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+export const isMonth = (value) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value ?? ''));
+
+export function addMonth(ym) {
+  let year = Number(ym.slice(0, 4));
+  let month = Number(ym.slice(5, 7)) + 1;
+  if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+const monthlyNet = (plan) => round2((plan.monthly_fee || 0) - (plan.monthly_discount || 0));
+
+/** The billing day a plan starting on `startDate` gets when none is chosen. */
+export const defaultBillingDay = (startDate) => Math.min(28, Number(String(startDate).slice(8, 10)) || 1);
+
+/** The month a plan bills next, and when it falls due; null once past its end month. */
+export function nextMonthToBill(plan) {
+  const month = plan.billed_through ? addMonth(plan.billed_through) : String(plan.start_date).slice(0, 7);
+  if (plan.end_month && month > plan.end_month) return null;
+  const onBillingDay = `${month}-${String(plan.billing_day).padStart(2, '0')}`;
+  const due = month === String(plan.start_date).slice(0, 7) && plan.start_date > onBillingDay ? plan.start_date : onBillingDay;
+  return { month, label: monthLabel(month), due_date: due, amount: monthlyNet(plan) };
+}
+
+/** How far ahead of its due date a month is billed: the "due soon" reminder's lead. */
+function billingHorizon() {
+  const settings = get('SELECT fee_reminder_days_before FROM coaching_settings WHERE id = 1');
+  return addDays(today(), Math.max(0, Math.min(30, settings?.fee_reminder_days_before ?? 3)));
+}
+
+/**
+ * Bills `plan`'s next month: its installment, and one more month on the
+ * plan's running totals. Returns the month billed, or null past the end month.
+ * `plan` is updated in place so a caller can bill several in a row.
+ */
+function billNextMonth(plan) {
+  const next = nextMonthToBill(plan);
+  if (!next) return null;
+  if (!(next.amount > 0)) throw badRequest('The discount must be less than the monthly fee', { monthly_discount: 'covers the whole fee' });
+  const number = (get('SELECT MAX(installment_number) AS n FROM student_fee_installments WHERE plan_id = ?', [plan.id]).n || 0) + 1;
+  run('INSERT INTO student_fee_installments (plan_id, installment_number, label, amount_due, due_date) VALUES (?, ?, ?, ?, ?)', [
+    plan.id,
+    number,
+    next.label,
+    next.amount,
+    next.due_date,
+  ]);
+  run(
+    `UPDATE student_fee_plans
+        SET total_amount = ROUND(total_amount + ?, 2), discount_amount = ROUND(discount_amount + ?, 2),
+            final_amount = ROUND(final_amount + ?, 2), billed_through = ?
+      WHERE id = ?`,
+    [plan.monthly_fee, plan.monthly_discount || 0, next.amount, next.month, plan.id],
+  );
+  plan.billed_through = next.month;
+  return next;
+}
+
+const MONTHLY_COLUMNS = 'id, status, monthly_fee, monthly_discount, billing_day, start_date, end_month, billed_through';
+
+/**
+ * Creates every month that has come due (or is within the reminder lead) on
+ * active monthly plans — all of them, or just `planId`. Run by the hourly
+ * sweep and before the fees screens read anything, so a month is never
+ * missing however long the server slept. Safe to re-run: `billed_through`
+ * moves forward with each month billed. Returns how many months were billed.
+ */
+export function billMonthlyPlans({ planId = null } = {}) {
+  const horizon = billingHorizon();
+  const plans = all(
+    `SELECT ${MONTHLY_COLUMNS} FROM student_fee_plans
+      WHERE billing_cycle = 'monthly' AND status = 'active' ${planId ? 'AND id = ?' : ''}`,
+    planId ? [planId] : [],
+  );
+  let billed = 0;
+  for (const plan of plans) {
+    tx(() => {
+      // Bounded, so a corrupt start date can never spin: ten years of months.
+      for (let guard = 0; guard < 120; guard += 1) {
+        const next = nextMonthToBill(plan);
+        if (!next || next.due_date > horizon) break;
+        billNextMonth(plan);
+        billed += 1;
+      }
+    });
+  }
+  return billed;
+}
+
+/** The monthly terms a client sent, checked. `current` is the plan being edited, if any. */
+function checkMonthlyTerms({ monthly_fee: fee, monthly_discount: discount = 0, end_month: endMonth, start_date: startDate }) {
+  if (!(Number(fee) > 0)) throw badRequest('Enter the monthly fee', { monthly_fee: 'must be above zero' });
+  if (Number(discount) < 0) throw badRequest('The discount cannot be below zero', { monthly_discount: 'negative' });
+  if (Number(discount) >= Number(fee) - EPSILON) {
+    throw badRequest('The discount must be less than the monthly fee', { monthly_discount: 'covers the whole fee' });
+  }
+  if (endMonth && !isMonth(endMonth)) throw badRequest('The last month must look like 2027-03', { end_month: 'YYYY-MM' });
+  if (endMonth && startDate && endMonth < String(startDate).slice(0, 7)) {
+    throw badRequest('The last month is before the first', { end_month: 'before the start' });
+  }
+}
+
+/** Adds what a monthly plan's screen needs: the month it bills next. */
+function withMonthly(plan) {
+  if (plan.billing_cycle !== 'monthly') return plan;
+  return { ...plan, next_month: plan.status === 'active' ? nextMonthToBill(plan) : null, monthly_net: monthlyNet(plan) };
+}
+
+/**
+ * Changes a monthly plan's terms — a fee revision, a new concession, a
+ * different billing day, or an end month (a student leaving after March).
+ * Months already billed keep the amount they were billed at; the change
+ * applies from the next month billed.
+ */
+export function updateMonthlyTerms(planId, patch) {
+  const plan = get(`SELECT ${MONTHLY_COLUMNS}, billing_cycle FROM student_fee_plans WHERE id = ?`, [planId]);
+  if (!plan) throw notFound('Fee plan not found');
+  if (plan.billing_cycle !== 'monthly') throw badRequest('This is not a monthly fee plan');
+  const next = { ...plan, ...patch };
+  checkMonthlyTerms(next);
+  if (patch.end_month && plan.billed_through && patch.end_month < plan.billed_through) {
+    throw badRequest(`Fee up to ${monthLabel(plan.billed_through)} is already added. Choose that month or a later one as the last month, or remove the fee for the extra months.`, { end_month: 'already added' });
+  }
+  const columns = ['monthly_fee', 'monthly_discount', 'billing_day', 'end_month'].filter((c) => patch[c] !== undefined);
+  if (!columns.length) return;
+  run(`UPDATE student_fee_plans SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, [
+    ...columns.map((c) => (c === 'end_month' ? patch[c] || null : patch[c])),
+    planId,
+  ]);
+  billMonthlyPlans({ planId });
+}
+
+/**
+ * A monthly plan re-opened after being cancelled or marked defaulted bills
+ * again from the current month: the months it spent closed are skipped,
+ * not charged in one lump. No-op for any other plan.
+ */
+export function resumeMonthlyPlan(planId) {
+  const plan = get(`SELECT ${MONTHLY_COLUMNS}, billing_cycle FROM student_fee_plans WHERE id = ?`, [planId]);
+  if (!plan || plan.billing_cycle !== 'monthly' || plan.status !== 'active') return;
+  const thisMonth = today().slice(0, 7);
+  const next = nextMonthToBill(plan);
+  if (next && next.month < thisMonth) {
+    // billed_through = last month, so this month is the next one billed.
+    const [y, m] = thisMonth.split('-').map(Number);
+    const lastMonth = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    run('UPDATE student_fee_plans SET billed_through = ? WHERE id = ?', [lastMonth, planId]);
+  }
+  billMonthlyPlans({ planId });
+}
+
+/**
+ * Waives one unpaid month — a student away for the summer, a month the
+ * institute was closed. The month's installment goes, and its amount moves
+ * into the plan's concession, so payable = fee − concession still holds.
+ */
+export function waiveInstallment(installmentId) {
+  const inst = get(
+    `SELECT i.*, fp.billing_cycle, fp.status AS plan_status,
+            (SELECT COUNT(*) FROM fee_payment_items fi WHERE fi.installment_id = i.id) AS payments
+     FROM student_fee_installments i JOIN student_fee_plans fp ON fp.id = i.plan_id WHERE i.id = ?`,
+    [installmentId],
+  );
+  if (!inst) throw notFound('Installment not found');
+  if (inst.billing_cycle !== 'monthly') throw badRequest('Fee can be removed only for a month on a monthly plan. For installments, use Reschedule.');
+  if (inst.plan_status === 'cancelled') throw badRequest('This fee plan is cancelled');
+  if (inst.payments) throw badRequest('A payment is already taken for this month. Delete that payment first, then remove the fee.');
+  tx(() => {
+    run('DELETE FROM student_fee_installments WHERE id = ?', [inst.id]);
+    run(
+      'UPDATE student_fee_plans SET discount_amount = ROUND(discount_amount + ?, 2), final_amount = ROUND(final_amount - ?, 2) WHERE id = ?',
+      [inst.amount_due, inst.amount_due, inst.plan_id],
+    );
+  });
+  return inst;
+}
+
 /**
  * Installments with what has been paid against them and where each stands.
  * `paid_on` is the day the last payment towards it landed — the date a fully
@@ -80,6 +280,9 @@ export const PLAN_SELECT = `
          totals.next_due_date, totals.overdue_amount,
          CASE
            WHEN fp.status IN ('cancelled', 'defaulted') THEN fp.status
+           -- a monthly plan that is up to date but still running is not "fully paid"
+           WHEN fp.billing_cycle = 'monthly' AND fp.final_amount - COALESCE(totals.paid, 0) <= ${EPSILON}
+                AND (fp.end_month IS NULL OR fp.billed_through IS NULL OR fp.billed_through < fp.end_month) THEN 'active'
            WHEN fp.final_amount - COALESCE(totals.paid, 0) <= ${EPSILON} THEN 'paid'
            WHEN COALESCE(totals.overdue_amount, 0) > ${EPSILON} THEN 'overdue'
            ELSE 'active'
@@ -110,18 +313,20 @@ export function getPlan(planId) {
      FROM payments p WHERE p.fee_plan_id = ? ORDER BY p.paid_on DESC, p.id DESC`,
     [planId],
   );
-  return plan;
+  return withMonthly(plan);
 }
 
 export function plansForMember(memberId) {
   return all(`${PLAN_SELECT} WHERE fp.member_id = ? ORDER BY fp.created_at DESC, fp.id DESC`, [
     ...planParams(),
     memberId,
-  ]).map((plan) => ({
-    ...plan,
-    components: parseComponents(plan.components),
-    installments: all(`${INSTALLMENT_SELECT} WHERE i.plan_id = ? ORDER BY i.installment_number`, [today(), plan.id]),
-  }));
+  ]).map((plan) =>
+    withMonthly({
+      ...plan,
+      components: parseComponents(plan.components),
+      installments: all(`${INSTALLMENT_SELECT} WHERE i.plan_id = ? ORDER BY i.installment_number`, [today(), plan.id]),
+    }),
+  );
 }
 
 /** Plans for a list view, filtered by the effective status and a search. */
@@ -146,7 +351,7 @@ export function listPlans({ status, q, courseId, batchId, limit = 200 } = {}) {
     ...(status ? [status] : []),
     limit,
   ]);
-  return rows.map((row) => ({ ...row, components: parseComponents(row.components) }));
+  return rows.map((row) => withMonthly({ ...row, components: parseComponents(row.components) }));
 }
 
 /**
@@ -218,7 +423,15 @@ export function feeSummary() {
   const pendingCheques = get(
     "SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total FROM payments WHERE cheque_status = 'pending'",
   );
+  // What the running monthly plans bring in each month, at today's rates.
+  const monthly = get(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(monthly_fee - monthly_discount), 0) AS total FROM student_fee_plans
+      WHERE billing_cycle = 'monthly' AND status = 'active' AND (end_month IS NULL OR end_month >= ?)`,
+    [now.slice(0, 7)],
+  );
   return {
+    monthly_plans: monthly.n,
+    monthly_expected: Math.round(monthly.total * 100) / 100,
     billed: totals.billed,
     concessions: totals.concessions,
     plans: totals.plans,
@@ -292,7 +505,7 @@ export function normaliseSchedule(rows, finalAmount) {
   const sum = clean.reduce((acc, row) => acc + toMinor(row.amount_due), 0);
   if (Math.abs(sum - toMinor(finalAmount)) > 0) {
     throw badRequest(
-      `The installments add up to ${fromMinor(sum)}, but the fee after concession is ${finalAmount}`,
+      `The installments add up to ${fromMinor(sum)}, but the fee after discount is ${finalAmount}`,
       { installments: 'must add up to the payable fee' },
     );
   }
@@ -317,11 +530,14 @@ export function createFeePlan(input) {
     throw notFound('Fee structure not found for this course');
   }
 
+  if (input.billing_cycle === 'monthly') return createMonthlyPlan(input);
+
   const total = Number(input.total_amount);
+  if (!Number.isFinite(total)) throw badRequest('Enter the course fee', { total_amount: 'is required' });
   const discount = Number(input.discount_amount || 0);
-  if (discount > total + EPSILON) throw badRequest('The concession is larger than the fee', { discount_amount: 'too large' });
+  if (discount > total + EPSILON) throw badRequest('The discount is more than the fee', { discount_amount: 'too large' });
   const finalAmount = Math.round((total - discount) * 100) / 100;
-  if (finalAmount <= 0) throw badRequest('A fully waived course needs no fee plan', { discount_amount: 'covers the whole fee' });
+  if (finalAmount <= 0) throw badRequest('The discount covers the full fee, so no fee plan is needed', { discount_amount: 'covers the whole fee' });
 
   const schedule = input.schedule
     ? normaliseSchedule(input.schedule, finalAmount)
@@ -362,6 +578,48 @@ export function createFeePlan(input) {
 }
 
 /**
+ * A monthly plan: the terms are stored, then every month already due (the
+ * first one, usually, collected at admission) is billed in the same
+ * transaction. Ongoing until `end_month`, or until it is cancelled.
+ */
+function createMonthlyPlan(input) {
+  const startDate = input.start_date || today();
+  const terms = {
+    monthly_fee: round2(input.monthly_fee),
+    monthly_discount: round2(input.monthly_discount || 0),
+    billing_day: Math.max(1, Math.min(28, Number(input.billing_day) || defaultBillingDay(startDate))),
+    start_date: startDate,
+    end_month: input.end_month || null,
+  };
+  checkMonthlyTerms(terms);
+  return tx(() => {
+    const info = run(
+      `INSERT INTO student_fee_plans
+         (member_id, course_id, batch_id, fee_structure_id, total_amount, discount_amount, discount_reason, final_amount, components, note,
+          billing_cycle, monthly_fee, monthly_discount, billing_day, start_date, end_month)
+       VALUES (?, ?, ?, ?, 0, 0, ?, 0, ?, ?, 'monthly', ?, ?, ?, ?, ?)`,
+      [
+        input.member_id,
+        input.course_id,
+        input.batch_id ?? null,
+        input.fee_structure_id ?? null,
+        input.discount_reason || null,
+        input.components ?? null,
+        input.note || null,
+        terms.monthly_fee,
+        terms.monthly_discount,
+        terms.billing_day,
+        terms.start_date,
+        terms.end_month,
+      ],
+    );
+    const planId = Number(info.lastInsertRowid);
+    billMonthlyPlans({ planId });
+    return planId;
+  });
+}
+
+/**
  * Replaces the unpaid part of a plan's schedule — moving a due date, or
  * re-splitting what is left into more installments. Installments that have
  * money against them stay as they are; the new rows must add up to what the
@@ -371,6 +629,9 @@ export function rescheduleUnpaid(planId, rows) {
   const plan = getPlan(planId);
   if (!plan) throw notFound('Fee plan not found');
   if (plan.status === 'cancelled') throw badRequest('This fee plan is cancelled');
+  if (plan.billing_cycle === 'monthly') {
+    throw badRequest('A monthly fee plan cannot be rescheduled. Use “Change monthly fee”, or remove the fee for a month.');
+  }
   const kept = plan.installments.filter((i) => i.amount_paid > EPSILON);
   // A part-paid installment is closed off at what was actually paid, so the
   // remainder can be rescheduled with everything else.
@@ -412,24 +673,43 @@ export function rescheduleUnpaid(planId, rows) {
  * overpayment is a refund waiting to happen, and the desk should see it now.
  */
 export function collectPayment(planId, input) {
-  const plan = getPlan(planId);
+  let plan = getPlan(planId);
   if (!plan) throw notFound('Fee plan not found');
   if (plan.status === 'cancelled') throw badRequest('This fee plan is cancelled');
   const amount = Math.round(Number(input.amount) * 100) / 100;
   if (!(amount > 0)) throw badRequest('Enter an amount above zero', { amount: 'must be above zero' });
-  if (amount - plan.balance > EPSILON) {
-    throw conflict(`Only ${plan.balance} is left to pay on this plan`, { amount: 'more than the balance' });
-  }
-
-  let order = plan.installments.filter((i) => i.balance > EPSILON);
-  if (input.installment_id) {
-    const target = order.find((i) => i.id === input.installment_id);
-    if (!target) throw badRequest('That installment is already paid or is not on this plan', { installment_id: 'not payable' });
-    order = [target, ...order.filter((i) => i.id !== target.id)];
-  }
 
   const isCheque = input.method === 'cheque';
   return tx(() => {
+    // Paying ahead on a monthly plan: bill the coming months the extra
+    // covers (up to a year), so the advance lands on them. All inside this
+    // transaction — if the payment is refused, no month stays billed.
+    if (plan.billing_cycle === 'monthly' && plan.status === 'active' && amount - plan.balance > EPSILON) {
+      const terms = get(`SELECT ${MONTHLY_COLUMNS} FROM student_fee_plans WHERE id = ?`, [planId]);
+      let extra = toMinor(amount - plan.balance);
+      for (let n = 0; n < MAX_ADVANCE_MONTHS && extra > 0; n += 1) {
+        const billed = billNextMonth(terms);
+        if (!billed) break;
+        extra -= toMinor(billed.amount);
+      }
+      plan = getPlan(planId);
+    }
+    if (amount - plan.balance > EPSILON) {
+      throw conflict(
+        plan.billing_cycle === 'monthly'
+          ? `Only ${plan.balance} can be taken now. Advance fee is allowed for up to ${MAX_ADVANCE_MONTHS} months, and not after the last month.`
+          : `Only ${plan.balance} is left to pay on this plan`,
+        { amount: 'more than the balance' },
+      );
+    }
+
+    let order = plan.installments.filter((i) => i.balance > EPSILON);
+    if (input.installment_id) {
+      const target = order.find((i) => i.id === input.installment_id);
+      if (!target) throw badRequest('That installment is already paid or is not on this plan', { installment_id: 'not payable' });
+      order = [target, ...order.filter((i) => i.id !== target.id)];
+    }
+
     const info = run(
       `INSERT INTO payments (member_id, amount, method, paid_on, reference, note, fee_plan_id, cheque_no, cheque_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -507,9 +787,10 @@ export function feeReceipt(paymentId) {
     course_name: plan?.course_name,
     batch_name: plan?.batch_name,
     academic_year: plan?.academic_year,
-    plan_total: plan?.total_amount,
-    plan_discount: plan?.discount_amount,
-    plan_final: plan?.final_amount,
+    // A monthly plan's running totals mean nothing on paper; its monthly fee does.
+    ...(plan?.billing_cycle === 'monthly'
+      ? { billing_cycle: 'monthly', monthly_fee: plan.monthly_fee, monthly_discount: plan.monthly_discount || 0, plan_total: null, plan_discount: null, plan_final: null }
+      : { plan_total: plan?.total_amount, plan_discount: plan?.discount_amount, plan_final: plan?.final_amount }),
     components: plan?.components ?? [],
     fee_items: items,
     balance_after: Math.max(0, Math.round(((plan?.final_amount ?? 0) - paidThrough) * 100) / 100),

@@ -981,6 +981,26 @@ export const COACHING_MIGRATIONS = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_site_images_kind ON site_images(kind, sort_order, id)');
   },
+
+  /* ---------------------------------------------- Monthly fee plans --- */
+  // Many institutes charge by the month (₹2,500 every month while the student
+  // attends) rather than a course fee split into installments. A monthly plan
+  // has no fixed total: each month's installment is created as it comes due
+  // (billMonthlyPlans in fees.js) and the plan's total/discount/final grow with
+  // it, so every balance, overdue figure, reminder and receipt keeps working
+  // off the same columns. `billed_through` (YYYY-MM) is the last month billed;
+  // `end_month` (YYYY-MM, optional) is the last month to bill. On a fee
+  // structure with billing_cycle 'monthly', total_fee is the monthly fee.
+  (db) => {
+    ensureColumn(db, 'student_fee_plans', 'billing_cycle', "TEXT NOT NULL DEFAULT 'one_time' CHECK (billing_cycle IN ('one_time', 'monthly'))");
+    ensureColumn(db, 'student_fee_plans', 'monthly_fee', 'REAL CHECK (monthly_fee IS NULL OR monthly_fee >= 0)');
+    ensureColumn(db, 'student_fee_plans', 'monthly_discount', 'REAL NOT NULL DEFAULT 0 CHECK (monthly_discount >= 0)');
+    ensureColumn(db, 'student_fee_plans', 'billing_day', 'INTEGER CHECK (billing_day IS NULL OR billing_day BETWEEN 1 AND 28)');
+    ensureColumn(db, 'student_fee_plans', 'start_date', 'TEXT');
+    ensureColumn(db, 'student_fee_plans', 'end_month', 'TEXT');
+    ensureColumn(db, 'student_fee_plans', 'billed_through', 'TEXT');
+    ensureColumn(db, 'fee_structures', 'billing_cycle', "TEXT NOT NULL DEFAULT 'one_time' CHECK (billing_cycle IN ('one_time', 'monthly'))");
+  },
 ];
 
 /** Widens class_recordings.source to allow 'server' — see the migration above. */

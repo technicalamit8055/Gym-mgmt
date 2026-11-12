@@ -79,13 +79,20 @@ function openCourseForm({ course, onSaved }) {
 function openFeeStructureForm({ course, structure, onSaved }) {
   const editing = Boolean(structure);
   const componentsText = (structure?.components || []).map((c) => `${c.label}: ${c.amount}`).join('\n');
-  openModal({
-    title: editing ? `Edit ${structure.name}` : `New fee structure · ${course.name}`,
-    subtitle: 'The usual price and split for this course. Each student’s own plan is copied from it and can then be adjusted.',
-    icon: 'wallet',
-    body: buildForm(
+  const form = buildForm(
       [
-        { name: 'name', label: 'Name', required: true, full: true, value: structure?.name, placeholder: '3 installments' },
+        { name: 'name', label: 'Name', required: true, full: true, value: structure?.name, placeholder: '3 installments, or Monthly' },
+        {
+          name: 'billing_cycle',
+          label: 'How is the fee collected?',
+          type: 'select',
+          full: true,
+          value: structure?.billing_cycle ?? 'monthly',
+          options: [
+            { value: 'monthly', label: 'Monthly fee · charged every month' },
+            { value: 'one_time', label: 'Course fee · paid in full or in installments' },
+          ],
+        },
         { name: 'total_fee', label: 'Total fee', type: 'number', required: true, min: 0, value: structure?.total_fee },
         {
           name: 'installments',
@@ -124,7 +131,27 @@ function openFeeStructureForm({ course, structure, onSaved }) {
           await onSaved?.();
         },
       },
-    ),
+    );
+  // A monthly structure has one amount, charged every month: the installment
+  // fields go, and "Total fee" becomes "Monthly fee".
+  const cycle = form.querySelector('select[name="billing_cycle"]');
+  const fieldOf = (name) => form.querySelector(`[name="${name}"]`)?.closest('.field');
+  const syncCycle = () => {
+    const monthly = cycle.value === 'monthly';
+    for (const name of ['installments', 'interval_days']) {
+      const node = fieldOf(name);
+      if (node) node.hidden = monthly;
+    }
+    const totalLabel = fieldOf('total_fee')?.querySelector('span');
+    if (totalLabel?.firstChild) totalLabel.firstChild.textContent = monthly ? 'Monthly fee' : 'Total fee';
+  };
+  cycle.addEventListener('change', syncCycle);
+  syncCycle();
+  openModal({
+    title: editing ? `Edit ${structure.name}` : `New fee structure · ${course.name}`,
+    subtitle: 'The usual price and split for this course. Each student’s own plan is copied from it and can then be adjusted.',
+    icon: 'wallet',
+    body: form,
   });
 }
 
@@ -211,11 +238,11 @@ function courseCard(course, reload) {
               h(
                 'div',
                 { class: 'muted cb-small' },
-                f.installments === 1 ? 'Paid in full' : `${f.installments} installments, ${f.interval_days} days apart`,
+                f.billing_cycle === 'monthly' ? 'Charged every month' : f.installments === 1 ? 'Paid in full' : `${f.installments} installments, ${f.interval_days} days apart`,
                 f.components.length ? ` · ${f.components.map((c) => c.label).join(', ')}` : '',
               ),
             ),
-            h('strong', {}, money(f.total_fee)),
+            h('strong', {}, money(f.total_fee), f.billing_cycle === 'monthly' ? ' / month' : ''),
             canManage
               ? h('button', { class: 'btn sm ghost', onclick: () => openFeeStructureForm({ course, structure: f, onSaved: reload }) }, 'Edit')
               : null,

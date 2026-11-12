@@ -186,8 +186,11 @@ export function renderSignup({ context, navigate, rerender }) {
   // Decided once, here, before any account exists — chosen first and above
   // everything else because it retitles every field below it. Pre-selected
   // from how the visitor arrived (the SeatBook landing vs. GymBook's own),
-  // but still just a starting point: either card can be picked.
-  let currentType = landingBrand === 'library' ? 'library' : 'gym';
+  // but still just a starting point: either card can be picked. A link can
+  // name one outright ("#/signup?type=coaching") — CoachBook has no marketing
+  // page of its own, so the landing pages' footer links to it that way.
+  const askedType = new URLSearchParams(window.location.hash.split('?')[1] || '').get('type');
+  let currentType = TYPE_COPY[askedType] ? askedType : landingBrand === 'library' ? 'library' : 'gym';
   const typeGym = h('input', { type: 'radio', name: 'business_type', value: 'gym' });
   const typeLibrary = h('input', { type: 'radio', name: 'business_type', value: 'library' });
   const typeCoaching = h('input', { type: 'radio', name: 'business_type', value: 'coaching' });

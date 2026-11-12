@@ -309,6 +309,9 @@ academicRoutes.delete('/faculty-allocations/:id', managers, (req, res) => {
 
 const FEE_STRUCTURE_FIELDS = {
   name: { type: 'string', required: true, min: 2, max: 80 },
+  // 'monthly': total_fee is the fee charged every month; installments and
+  // interval_days are not used.
+  billing_cycle: { type: 'enum', values: ['one_time', 'monthly'], default: 'one_time' },
   total_fee: { type: 'number', required: true, min: 0 },
   installments: { type: 'int', min: 1, max: 12, default: 1 },
   interval_days: { type: 'int', min: 0, max: 365, default: 30 },

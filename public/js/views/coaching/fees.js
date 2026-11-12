@@ -2,7 +2,7 @@ import { api, session } from '../../api.js';
 import { coaching } from '../../coachingApi.js';
 import { clear, closeModal, confirmDialog, date, dateField, emptyState, h, money, openModal, renderIcon, stat, toast, today } from '../../ui.js';
 import { fill, fullName, INSTALLMENT_STATUS, openAlertSettings, pct, pillTabs, PLAN_STATUS, reportSend, section, selectControl, tone } from './common.js';
-import { feeFields } from './enrollForm.js';
+import { dayOfMonth, feeFields, monthLabel } from './enrollForm.js';
 import { claimedPaymentCount, paymentQueuePane } from '../paymentQueue.js';
 
 /**
@@ -26,7 +26,9 @@ const methodLabel = (m) => METHODS.find((x) => x.value === m)?.label || m;
 
 export function openCollectModal({ plan, installment = null, onDone }) {
   const suggested = installment ? installment.balance : plan.installments.find((i) => i.balance > 0.005)?.balance ?? plan.balance;
-  const amount = h('input', { type: 'number', min: 1, step: '1', value: suggested, max: plan.balance });
+  const monthly = plan.billing_cycle === 'monthly';
+  // A monthly plan can be paid ahead: the server bills the coming months the extra covers.
+  const amount = h('input', { type: 'number', min: 1, step: '1', value: suggested || (monthly ? plan.monthly_net : ''), max: monthly ? undefined : plan.balance });
   const method = h('select', {}, ...METHODS.map((m) => h('option', { value: m.value }, m.label)));
   const chequeNo = h('input', { type: 'text', placeholder: 'Cheque number' });
   const chequeField = h('label', { class: 'field', hidden: true }, h('span', {}, 'Cheque number', h('span', { class: 'req' }, ' *')), chequeNo);
@@ -64,11 +66,14 @@ export function openCollectModal({ plan, installment = null, onDone }) {
 
   openModal({
     title: `Collect fee · ${fullName(plan)}`,
-    subtitle: `${plan.course_name} · ${money(plan.balance)} left to pay${installment ? ` · installment ${installment.installment_number}` : ''}`,
+    subtitle: `${plan.course_name} · ${money(plan.balance)} left to pay${installment ? ` · ${monthly ? installment.label : `installment ${installment.installment_number}`}` : ''}`,
     icon: 'wallet',
     body: h(
       'div',
       { class: 'form-grid' },
+      monthly
+        ? h('p', { class: 'muted cb-small field full' }, `Monthly fee ${money(plan.monthly_net)}. For advance fee, enter more than the balance — the coming months are added and marked paid.`)
+        : null,
       field('Amount', amount),
       field('Method', method),
       chequeField,
@@ -87,7 +92,7 @@ function openReschedule(plan, onDone) {
   const kept = plan.installments.filter((i) => i.amount_paid > 0.005);
   const keptTotal = kept.reduce((acc, i) => acc + i.amount_paid, 0);
   const remaining = Math.round((plan.final_amount - keptTotal) * 100) / 100;
-  const fees = feeFields({ course: { fee_structures: [{ id: '', name: 'Remaining balance', total_fee: remaining, installments: 2, interval_days: 30 }] } });
+  const fees = feeFields({ course: { fee_structures: [{ id: '', name: 'Remaining balance', total_fee: remaining, installments: 2, interval_days: 30 }] }, allowMonthly: false });
   // The total here is what is left, not the course fee: lock it.
   fees.node.querySelector('.cb-check')?.remove();
   const body = h(
@@ -114,6 +119,47 @@ function openReschedule(plan, onDone) {
   openModal({ title: 'Reschedule the unpaid fee', icon: 'calendar', wide: true, body, footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), save] });
 }
 
+/** A monthly plan's terms: fee, concession, billing day, last month. */
+function openMonthlyTerms(plan, onDone) {
+  const fee = h('input', { type: 'number', min: 1, step: '1', value: plan.monthly_fee });
+  const discount = h('input', { type: 'number', min: 0, step: '1', value: plan.monthly_discount || 0 });
+  const day = h('input', { type: 'number', min: 1, max: 28, value: plan.billing_day });
+  const endMonth = h('input', { type: 'month', value: plan.end_month || '', min: plan.billed_through || undefined });
+  const field = (label, control, full = false) => h('label', { class: `field${full ? ' full' : ''}` }, h('span', {}, label), control);
+  const save = h('button', { class: 'btn primary' }, 'Save');
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      await coaching.updateFeePlan(plan.id, {
+        monthly_fee: Number(fee.value),
+        monthly_discount: Number(discount.value) || 0,
+        billing_day: Number(day.value),
+        end_month: endMonth.value || '',
+      });
+      closeModal();
+      toast('Monthly fee updated');
+      await onDone?.();
+    } catch (err) {
+      toast(err.message, 'error');
+      save.disabled = false;
+    }
+  });
+  openModal({
+    title: 'Change the monthly fee',
+    subtitle: plan.billed_through ? `Fee up to ${monthLabel(plan.billed_through)} is already added and will not change. The new fee starts from the next month.` : 'The new fee starts from the first month.',
+    icon: 'calendar',
+    body: h(
+      'div',
+      { class: 'form-grid' },
+      field('Monthly fee', fee),
+      field('Discount per month', discount),
+      field('Fee due date every month (1–28)', day),
+      h('label', { class: 'field' }, h('span', {}, 'Last month'), endMonth, h('small', { class: 'muted' }, 'Blank: keeps going until you stop it. Set it for a student who is leaving.')),
+    ),
+    footer: [h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'), save],
+  });
+}
+
 export async function openPlanModal(planId, { onChanged } = {}) {
   const body = h('div', {}, h('p', { class: 'muted' }, 'Loading…'));
   const paint = async () => {
@@ -122,36 +168,62 @@ export async function openPlanModal(planId, { onChanged } = {}) {
       await paint();
       await onChanged?.();
     };
-    fill(body, 
+    const monthly = plan.billing_cycle === 'monthly';
+    const open = plan.balance > 0.005 && plan.status !== 'cancelled';
+    fill(body,
       h(
         'div',
         { class: 'cb-plan-summary' },
-        h('div', {}, h('span', { class: 'muted cb-small' }, 'Course fee'), h('strong', {}, money(plan.total_amount))),
-        plan.discount_amount
-          ? h('div', {}, h('span', { class: 'muted cb-small' }, `Concession${plan.discount_reason ? ` (${plan.discount_reason})` : ''}`), h('strong', { class: 'cb-green' }, `− ${money(plan.discount_amount)}`))
-          : null,
-        h('div', {}, h('span', { class: 'muted cb-small' }, 'Payable'), h('strong', {}, money(plan.final_amount))),
+        ...(monthly
+          ? [
+              h('div', {}, h('span', { class: 'muted cb-small' }, 'Monthly fee'), h('strong', {}, `${money(plan.monthly_net)} / month`)),
+              plan.monthly_discount
+                ? h('div', {}, h('span', { class: 'muted cb-small' }, `Discount${plan.discount_reason ? ` (${plan.discount_reason})` : ''}`), h('strong', { class: 'cb-green' }, `− ${money(plan.monthly_discount)} / month`))
+                : null,
+              h('div', {}, h('span', { class: 'muted cb-small' }, 'Total fee till now'), h('strong', {}, money(plan.final_amount))),
+            ]
+          : [
+              h('div', {}, h('span', { class: 'muted cb-small' }, 'Course fee'), h('strong', {}, money(plan.total_amount))),
+              plan.discount_amount
+                ? h('div', {}, h('span', { class: 'muted cb-small' }, `Discount${plan.discount_reason ? ` (${plan.discount_reason})` : ''}`), h('strong', { class: 'cb-green' }, `− ${money(plan.discount_amount)}`))
+                : null,
+              h('div', {}, h('span', { class: 'muted cb-small' }, 'Payable'), h('strong', {}, money(plan.final_amount))),
+            ]),
         h('div', {}, h('span', { class: 'muted cb-small' }, 'Paid'), h('strong', { class: 'cb-green' }, money(plan.amount_paid))),
         h('div', {}, h('span', { class: 'muted cb-small' }, 'Balance'), h('strong', { class: plan.balance > 0 ? 'cb-red' : '' }, money(plan.balance))),
         h('div', {}, h('span', { class: 'muted cb-small' }, 'Status'), tone(PLAN_STATUS, plan.effective_status)),
       ),
       plan.components.length ? h('p', { class: 'muted cb-small' }, `Includes ${plan.components.map((c) => `${c.label} ${money(c.amount)}`).join(' · ')}`) : null,
-      h('div', { class: 'cb-subhead' }, 'Installments'),
+      monthly
+        ? h(
+            'p',
+            { class: 'muted cb-small' },
+            `Due on the ${dayOfMonth(plan.billing_day)} of every month`,
+            plan.next_month ? ` · ${plan.next_month.label} is added on its own before ${date(plan.next_month.due_date)}` : '',
+            plan.end_month ? ` · last month ${monthLabel(plan.end_month)}` : ' · runs until stopped',
+          )
+        : null,
+      h('div', { class: 'cb-subhead' }, monthly ? 'Months' : 'Installments'),
       h(
         'div',
         { class: 'table-wrap' },
         h(
           'table',
           { class: 'cb-table' },
-          h('thead', {}, h('tr', {}, ...['#', 'Due', 'Amount', 'Paid', 'Balance', 'Status', ''].map((l) => h('th', {}, l)))),
+          h('thead', {}, h('tr', {}, ...[monthly ? 'Month' : '#', 'Due', 'Amount', 'Paid', 'Balance', 'Status', ''].map((l) => h('th', {}, l)))),
           h(
             'tbody',
             {},
+            ...(monthly && !plan.installments.length
+              ? [h('tr', {}, h('td', { colspan: 7, class: 'muted' }, plan.next_month ? `The first month, ${plan.next_month.label}, is added before ${date(plan.next_month.due_date)}.` : 'No month added yet.'))]
+              : []),
             ...plan.installments.map((inst) =>
               h(
                 'tr',
                 {},
-                h('td', {}, h('div', { class: 'cb-strong' }, inst.installment_number), h('div', { class: 'muted cb-small' }, inst.label || '')),
+                monthly
+                  ? h('td', {}, h('div', { class: 'cb-strong' }, inst.label || `Month ${inst.installment_number}`))
+                  : h('td', {}, h('div', { class: 'cb-strong' }, inst.installment_number), h('div', { class: 'muted cb-small' }, inst.label || '')),
                 h('td', {}, date(inst.due_date)),
                 h('td', {}, money(inst.amount_due)),
                 h('td', {}, money(inst.amount_paid)),
@@ -182,6 +254,27 @@ export async function openPlanModal(planId, { onChanged } = {}) {
                           },
                           renderIcon('whatsapp', { size: 14 }),
                         ),
+                        monthly && inst.amount_paid <= 0.005
+                          ? h(
+                              'button',
+                              {
+                                class: 'btn sm ghost',
+                                title: 'Do not charge for this month (student on leave, institute closed)',
+                                onclick: () =>
+                                  confirmDialog({
+                                    title: `Remove the fee for ${inst.label}?`,
+                                    message: `The ${money(inst.amount_due)} fee for ${inst.label} will be removed and counted as a discount. Use this when the student was on leave or the institute was closed.`,
+                                    confirmLabel: 'Remove fee',
+                                    onConfirm: async () => {
+                                      await coaching.waiveInstallment(inst.id);
+                                      toast(`Fee for ${inst.label} removed`);
+                                      await refresh();
+                                    },
+                                  }),
+                              },
+                              'Remove fee',
+                            )
+                          : null,
                       )
                     : null,
                 ),
@@ -198,10 +291,12 @@ export async function openPlanModal(planId, { onChanged } = {}) {
       h(
         'div',
         { class: 'cb-plan-actions' },
-        plan.balance > 0.005 && plan.status !== 'cancelled'
-          ? h('button', { class: 'btn primary', onclick: () => openCollectModal({ plan, onDone: refresh }) }, renderIcon('wallet', { size: 15 }), 'Collect payment')
+        // A running monthly plan can always take money — paying ahead.
+        open || (monthly && plan.status === 'active' && plan.next_month)
+          ? h('button', { class: 'btn primary', onclick: () => openCollectModal({ plan, onDone: refresh }) }, renderIcon('wallet', { size: 15 }), monthly && !open ? 'Collect advance fee' : 'Collect payment')
           : null,
-        plan.balance > 0.005 && plan.status !== 'cancelled' ? h('button', { class: 'btn', onclick: () => openReschedule(plan, refresh) }, renderIcon('calendar', { size: 15 }), 'Reschedule') : null,
+        open && !monthly ? h('button', { class: 'btn', onclick: () => openReschedule(plan, refresh) }, renderIcon('calendar', { size: 15 }), 'Reschedule') : null,
+        monthly && plan.status === 'active' ? h('button', { class: 'btn', onclick: () => openMonthlyTerms(plan, refresh) }, renderIcon('calendar', { size: 15 }), 'Change monthly fee') : null,
         h('div', { class: 'spacer' }),
         plan.status === 'active'
           ? h(
@@ -211,7 +306,9 @@ export async function openPlanModal(planId, { onChanged } = {}) {
                 onclick: () =>
                   confirmDialog({
                     title: 'Cancel this fee plan?',
-                    message: 'For a student who left: no more reminders, and the unpaid balance stops counting as owed. Money already collected stays on record.',
+                    message: monthly
+                      ? 'For a student who left: no new monthly fee is added, no more reminders, and the unpaid balance is no longer counted as due. Money already collected stays on record. To stop the fee after a set month instead, use “Change monthly fee”.'
+                      : 'For a student who left: no more reminders, and the unpaid balance is no longer counted as due. Money already collected stays on record.',
                     confirmLabel: 'Cancel plan',
                     danger: true,
                     secondaryLabel: 'Mark defaulted instead',
@@ -509,7 +606,9 @@ async function plansPane(state, repaint) {
                     { class: 'clickable', onclick: () => openPlanModal(p.id, { onChanged: repaint }) },
                     h('td', {}, h('div', { class: 'cb-strong' }, fullName(p)), h('div', { class: 'muted cb-small' }, p.member_code)),
                     h('td', {}, h('div', {}, p.course_name), h('div', { class: 'muted cb-small' }, p.batch_name || '')),
-                    h('td', {}, money(p.final_amount), p.discount_amount ? h('div', { class: 'muted cb-small' }, `${money(p.discount_amount)} off`) : null),
+                    p.billing_cycle === 'monthly'
+                      ? h('td', {}, money(p.final_amount), h('div', { class: 'muted cb-small' }, `Monthly · ${money(p.monthly_net)} / month`))
+                      : h('td', {}, money(p.final_amount), p.discount_amount ? h('div', { class: 'muted cb-small' }, `${money(p.discount_amount)} off`) : null),
                     h('td', {}, money(p.amount_paid)),
                     h('td', { class: p.balance > 0 ? 'cb-strong' : 'muted' }, money(p.balance)),
                     h('td', {}, p.next_due_date ? date(p.next_due_date) : '—'),
@@ -608,7 +707,14 @@ export async function renderFees({ setActions, params = [] }) {
         'div',
         { class: 'grid cols-4' },
         stat('Collected this month', money(summary.collected_this_month), `${money(summary.collected, { compact: true })} in all`, { icon: 'wallet', accent: true }),
-        stat('Still to collect', money(summary.outstanding), `${summary.plans} fee plans · ${money(summary.concessions, { compact: true })} in concessions`, { icon: 'hourglass' }),
+        stat(
+          'Still to collect',
+          money(summary.outstanding),
+          summary.monthly_plans
+            ? `${summary.plans} fee plans · ${summary.monthly_plans} monthly bring ${money(summary.monthly_expected, { compact: true })}/month`
+            : `${summary.plans} fee plans · ${money(summary.concessions, { compact: true })} in discounts`,
+          { icon: 'hourglass' },
+        ),
         stat('Overdue', money(summary.overdue_amount), `${summary.overdue_count} installment${summary.overdue_count === 1 ? '' : 's'}`, {
           icon: 'alert',
           trend: summary.overdue_count ? { positive: false, text: 'Follow up' } : null,

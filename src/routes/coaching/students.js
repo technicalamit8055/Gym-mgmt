@@ -6,7 +6,7 @@ import { parse, today } from '../../validate.js';
 import { requireModule } from '../../verticals.js';
 import { studentAttendance } from '../../coaching/attendance.js';
 import { ENROLLMENT_SELECT, enrollStudent, enrollmentsFor } from '../../coaching/enrollment.js';
-import { componentsJson, createFeePlan, getPlan, plansForMember } from '../../coaching/fees.js';
+import { billMonthlyPlans, componentsJson, createFeePlan, getPlan, plansForMember } from '../../coaching/fees.js';
 import { idParam, optional, updateSql } from './shared.js';
 
 /**
@@ -24,6 +24,7 @@ studentRoutes.get('/students/:id/academics', (req, res) => {
   const now = today();
   const monthStart = `${now.slice(0, 7)}-01`;
   const yearAgo = `${Number(now.slice(0, 4)) - 1}${now.slice(4)}`;
+  billMonthlyPlans();
   res.json({
     enrollments: enrollmentsFor(memberId),
     fee_plans: plansForMember(memberId),
@@ -47,7 +48,15 @@ studentRoutes.get('/students/:id/academics', (req, res) => {
 
 const FEE_INPUT = {
   fee_structure_id: { type: 'int', min: 1 },
-  total_amount: { type: 'number', required: true, min: 0 },
+  // 'one_time': a course fee (total_amount) split into installments.
+  // 'monthly': monthly_fee every month on billing_day, from start_date until
+  // end_month (YYYY-MM) or until the plan is cancelled. See fees.js.
+  billing_cycle: { type: 'enum', values: ['one_time', 'monthly'], default: 'one_time' },
+  total_amount: { type: 'number', min: 0 },
+  monthly_fee: { type: 'number', min: 0 },
+  monthly_discount: { type: 'number', min: 0, default: 0 },
+  billing_day: { type: 'int', min: 1, max: 28 },
+  end_month: { type: 'string', max: 7 },
   discount_amount: { type: 'number', min: 0, default: 0 },
   discount_reason: { type: 'string', max: 120 },
   installments: { type: 'int', min: 1, max: 12, default: 1 },
