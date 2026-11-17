@@ -26,6 +26,7 @@ const { closeRegistryDb, tenantDbPath } = await import('../src/tenants.js');
 const { addDays, today } = await import('../src/validate.js');
 const { expireStaleRequests, payLinkFor, upiUri, withPayLink } = await import('../src/onlinePayments.js');
 const { memberToken } = await import('./helpers/memberAuth.js');
+const { sentInMemory } = await import('../src/whatsapp.js');
 
 const GYM = 'pulse-gym';
 const ACADEMY = 'bright-academy';
@@ -184,6 +185,31 @@ describe('online payments at a gym', () => {
     assert.equal(reused.status, 409);
     // Someone else's request is not theirs to claim.
     assert.equal((await call('POST', `/api/portal/pay/${request.id}/claim`, {}, { token: otherAuth })).status, 404);
+  });
+
+  it('WhatsApps "payment to confirm" to the owner and the receptionist', async () => {
+    const bad = await staff('PUT', '/api/online-payments/settings', { alert_phone: '98765 43210, 12' });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.details.alert_phone, 'invalid phone number');
+
+    const saved = await staff('PUT', '/api/online-payments/settings', { alert_phone: '98765 43210, +91 98765 43210; 91234 56789' });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.alert_phone, '98765 43210, 91234 56789', 'the same phone twice is kept once');
+
+    const payer = await newMember('Isha');
+    const payerAuth = await memberToken(call, { staffToken: tokens[GYM], memberId: payer.id, slug: GYM });
+    const req3 = await call('POST', '/api/portal/pay', { kind: 'membership', plan_id: plan.id }, { token: payerAuth });
+    sentInMemory.length = 0;
+    const claimed = await call('POST', `/api/portal/pay/${req3.body.id}/claim`, {}, { token: payerAuth });
+    assert.equal(claimed.status, 200, JSON.stringify(claimed.body));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const alerts = sentInMemory.filter((m) => m.message?.includes('Payment to confirm'));
+    assert.deepEqual(alerts.map((m) => m.jid).sort(), ['919123456789@s.whatsapp.net', '919876543210@s.whatsapp.net']);
+    assert.ok(alerts.every((m) => m.message.includes(req3.body.ref_code)));
+
+    await staff('POST', `/api/online-payments/requests/${req3.body.id}/reject`, {});
+    await staff('PUT', '/api/online-payments/settings', { alert_phone: '' });
   });
 
   it('confirming creates the membership and a UPI payment, once', async () => {

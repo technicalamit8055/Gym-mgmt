@@ -33,6 +33,9 @@ const QUICK_PROMPTS = {
   ],
   diet: [
     ['utensils', 'What should I eat next?'],
+    // Both read the member's last month of food (eating_habits on the server).
+    ['history', 'Plan my day from foods I usually eat'],
+    ['activity', 'Analyse my eating habits'],
     ['barChart', 'How much protein do I have left?'],
     ['fileText', 'Suggest a meal plan'],
     ['target', 'Is today on track for my goal?'],
@@ -67,7 +70,7 @@ const HERO = {
 HERO.diet = HERO.workout;
 const HINTS = {
   workout: 'The coach sees your plan, your history and this session — no need to explain.',
-  diet: 'The coach sees your plan, your history and this session — no need to explain.',
+  diet: 'The coach sees your targets, today’s food and what you usually eat — no need to explain.',
   plan: 'The coach sees this plan as you edit it, your profile and your injuries — no need to explain.',
 };
 /** The diet sheet's "Recommended for you": each card asks the coach for that
@@ -655,6 +658,8 @@ export function mealPlanCard(plan, { onTrackPlan } = {}) {
   );
 
   const t = plan.totals;
+  const foods = plan.meals.flatMap((meal) => meal.items);
+  const usual = foods.filter((item) => item.usual).length;
   return h(
     'section',
     { class: 'mplan', 'aria-label': plan.name },
@@ -666,7 +671,13 @@ export function mealPlanCard(plan, { onTrackPlan } = {}) {
         'div',
         { class: 'mplan-title' },
         h('strong', {}, plan.name),
-        h('small', {}, `${plural(plan.meals.length, 'meal')} · track each food from the food library`),
+        h(
+          'small',
+          {},
+          usual
+            ? `${plural(plan.meals.length, 'meal')} · ${usual} of ${plural(foods.length, 'food')} you already eat`
+            : `${plural(plan.meals.length, 'meal')} · track each food from the food library`,
+        ),
       ),
     ),
     h(
@@ -694,7 +705,12 @@ export function mealPlanCard(plan, { onTrackPlan } = {}) {
             h(
               'li',
               {},
-              h('span', { class: 'mplan-food' }, h('span', {}, item.food_name), h('small', {}, item.portion)),
+              h(
+                'span',
+                { class: 'mplan-food' },
+                h('span', {}, item.food_name, item.usual ? h('em', { class: 'mplan-usual', title: 'You eat this often' }, 'Usual') : null),
+                h('small', {}, item.portion),
+              ),
               h('span', { class: 'mplan-food-num' }, `${item.calories} kcal`, h('small', {}, `${grams(item.protein_g)} protein`)),
             ),
           ),

@@ -21,7 +21,7 @@ const { config } = await import('../src/config.js');
 const { cleanMealPlan, cleanSwap, contextSteps, parsePlanReply, parseReply, parseTranscript, partialAnswer, sanitiseMentions, sanitiseSession, setAiClientForTests, swapOptions } = await import(
   '../src/aiCoach.js'
 );
-const { today } = await import('../src/validate.js');
+const { addDays, today } = await import('../src/validate.js');
 
 const TENANT = 'coachgym';
 
@@ -644,6 +644,93 @@ describe('Coach meal plans', () => {
       meals: [{ meal_type: 'dinner', name: null, items: [{ food_name: 'Dal', portion: '1 serving', calories: 181, protein_g: 0, carbs_g: 0, fats_g: 0 }] }],
       totals: { calories: 181, protein_g: 0, carbs_g: 0, fats_g: 0 },
     });
+  });
+});
+
+describe('Coach eating habits', () => {
+  // Members of their own, so the daily caps above are left alone.
+  let token;
+  let freshToken;
+  const daysAgo = (n) => addDays(today(), -n);
+  const log = (entry) => call('POST', '/api/portal/diets/entries', entry, { token });
+
+  before(async () => {
+    const member = await call('POST', '/api/members', { first_name: 'Ravi', last_name: 'Menon', phone: '9876500031' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: member.body.id }, { token: adminToken });
+    token = await signInMember(call, { staffToken: adminToken, memberId: member.body.id });
+    const fresh = await call('POST', '/api/members', { first_name: 'Meera', last_name: 'Iyer', phone: '9876500032' }, { token: adminToken });
+    await call('POST', '/api/fitness-addons/subscribe', { member_id: fresh.body.id }, { token: adminToken });
+    freshToken = await signInMember(call, { staffToken: adminToken, memberId: fresh.body.id });
+
+    for (let n = 1; n <= 5; n++) {
+      await log({ meal_type: 'breakfast', food_name: 'Oats', quantity: 0.8, serving_unit: '100g', calories: 300, protein_g: 10, log_date: daysAgo(n) });
+      await log({ meal_type: 'lunch', food_name: 'Dal | tadka', calories: 250, protein_g: 12, log_date: daysAgo(n) });
+      if (n <= 4) await log({ meal_type: 'breakfast', food_name: 'Boiled eggs', serving_unit: '2 eggs', calories: 140, protein_g: 12, log_date: daysAgo(n) });
+    }
+    // Once in five days is not a habit; today is diet_today, not a habit; a
+    // month and more ago is out of the window.
+    await log({ meal_type: 'dinner', food_name: 'Pizza', calories: 800, log_date: daysAgo(1) });
+    await log({ meal_type: 'snack', food_name: 'Banana', calories: 100 });
+    await log({ meal_type: 'snack', food_name: 'Samosa', calories: 260, log_date: daysAgo(40) });
+    await log({ meal_type: 'snack', food_name: 'Samosa', calories: 260, log_date: daysAgo(41) });
+  });
+
+  it('tells the coach what the member usually eats, meal by meal', async () => {
+    fake.reply = JSON.stringify({ answer: 'Fine.' });
+    const res = await call('POST', '/api/portal/coach/ask', { question: 'Analyse my eating habits', screen: 'diet' }, { token });
+    assert.equal(res.status, 200);
+    const habits = lastContext().eating_habits;
+    assert.equal(habits.days_logged, 5);
+    assert.deepEqual(habits.usual_foods, {
+      breakfast: ['Oats | 0.8 × 100g | 300 kcal, 10g protein | 5 of 5 days', 'Boiled eggs | 2 eggs | 140 kcal, 12g protein | 4 of 5 days'],
+      // A "|" in a name would split the line, so it is swapped out.
+      lunch: ['Dal / tadka | serving | 250 kcal, 12g protein | 5 of 5 days'],
+    });
+    assert.deepEqual(habits.meal_logged_on_days, { breakfast: 5, lunch: 5, dinner: 1 });
+    // (1490 + 3 × 690 + 550) / 5 kcal; (4 × 34 + 22) / 5 protein.
+    assert.equal(habits.average_logged_day.calories, 822);
+    assert.equal(habits.average_logged_day.protein_g, 32);
+    assert.match(fake.calls[0].config.systemInstruction, /usual_foods/);
+  });
+
+  it('marks the foods in a plan the member already eats', async () => {
+    fake.reply = JSON.stringify({
+      answer: 'Built from your usual foods.',
+      meal_plan: {
+        name: 'Your usual day',
+        meals: [
+          {
+            meal_type: 'breakfast',
+            items: [
+              { food_name: 'oats', portion: '80 g', calories: 300, protein_g: 10, carbs_g: 54, fats_g: 5 },
+              { food_name: 'Whey Protein', portion: '30 g', calories: 120, protein_g: 24, carbs_g: 3, fats_g: 1 },
+            ],
+          },
+        ],
+      },
+    });
+    const res = await call('POST', '/api/portal/coach/ask', { question: 'Plan my day from foods I usually eat', screen: 'diet' }, { token });
+    const [oats, whey] = res.body.meal_plan.meals[0].items;
+    assert.equal(oats.usual, true);
+    assert.ok(!('usual' in whey));
+  });
+
+  it('leaves habits out of workout questions and for a member with nothing logged', async () => {
+    fake.reply = JSON.stringify({ answer: 'Fine.' });
+    await call('POST', '/api/portal/coach/ask', { question: 'How heavy today?', screen: 'workout' }, { token });
+    assert.ok(!('eating_habits' in lastContext()));
+    await call('POST', '/api/portal/coach/ask', { question: 'Analyse my eating habits', screen: 'diet' }, { token: freshToken });
+    assert.ok(!('eating_habits' in lastContext()));
+  });
+
+  it('says it is looking at the usual foods', () => {
+    const steps = contextSteps({
+      screen: 'diet',
+      member: {},
+      last_7_days: [],
+      eating_habits: { days_logged: 12, usual_foods: { breakfast: ['a', 'b'], lunch: ['c'] } },
+    });
+    assert.ok(steps.includes('Looking at what you usually eat — 3 foods over 12 logged days'));
   });
 });
 

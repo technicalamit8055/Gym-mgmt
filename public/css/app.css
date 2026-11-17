@@ -8392,6 +8392,20 @@ button.portal-set-prev:hover { color: var(--brand); }
   min-width: 0;
 }
 .mplan-food span { overflow-wrap: anywhere; }
+/* A food the member already eats often (from their food log). */
+.mplan-usual {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
 .mplan-food-num {
   align-items: flex-end;
   white-space: nowrap;
@@ -9023,6 +9037,7 @@ body:not([data-mode='light']) .mplan-items small {
 }
 body:not([data-mode='light']) .mplan-ico { background: rgba(16, 185, 129, 0.14); color: #34d399; }
 body:not([data-mode='light']) .mplan-meal { border-top-color: var(--border); }
+body:not([data-mode='light']) .mplan-usual { background: rgba(16, 185, 129, 0.14); color: #34d399; }
 body:not([data-mode='light']) .mplan-meal-kcal { color: #fdba74; }
 body:not([data-mode='light']) .mplan-macros .is-kcal { background: rgba(249, 115, 22, 0.12); border-color: rgba(249, 115, 22, 0.3); color: #fdba74; }
 body:not([data-mode='light']) .mplan-macros .is-protein { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.3); color: #86efac; }

@@ -239,7 +239,14 @@ function onlinePaymentsCard(settings, { reload }) {
     [
       { name: 'upi_vpa', label: 'UPI ID', value: settings.upi_vpa || '', placeholder: 'e.g. yourgym@okaxis', full: true },
       { name: 'payee_name', label: 'Name shown in UPI apps', value: settings.payee_name || '', placeholder: 'e.g. Pulse Fitness' },
-      { name: 'alert_phone', label: 'WhatsApp me each payment on', value: settings.alert_phone || '', placeholder: 'Owner phone (optional)' },
+      {
+        name: 'alert_phone',
+        label: 'WhatsApp each payment to',
+        value: settings.alert_phone || '',
+        placeholder: 'e.g. 98765 43210, 91234 56789',
+        full: true,
+        hint: 'Owner, receptionist — anyone who checks the UPI app. Separate numbers with commas (up to 5). Sent from your linked WhatsApp.',
+      },
       {
         name: 'enabled',
         label: `Let ${members} pay in the app`,

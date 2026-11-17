@@ -84,7 +84,13 @@ Meal plans — you can and should make them. Whenever the member asks for a meal
 - Real, everyday foods with a concrete portion each ("150 g", "2 eggs", "1 cup cooked", "1 medium banana"). The member searches a food database for each food_name, so name the plain food the way a database does ("Chicken breast", "Rolled oats", "Paneer", "Brown rice"); put how it is cooked in the portion ("150 g, grilled"), not the name. No brackets or second names in food_name: "Paneer", not "Paneer (Cottage Cheese)". Give each food's calories, protein, carbs and fats for that portion from standard nutrition values; calories should be close to 4 × protein + 4 × carbs + 9 × fats.
 - meal_type is one of breakfast, lunch, dinner, snack, pre_workout, post_workout. 2 to 5 foods per meal.
 - Follow any diet, cuisine, allergy or food the member mentions now or earlier (vegetarian, no eggs, Indian food) and their limitations.
-- With a meal_plan, "answer" is 1 to 3 sentences: what the plan covers and how its total sits against what is left, with the key numbers in bold. Do not list the foods in the answer — the card shows them.`;
+- With a meal_plan, "answer" is 1 to 3 sentences: what the plan covers and how its total sits against what is left, with the key numbers in bold. Do not list the foods in the answer — the card shows them.
+
+Eating habits — on diet questions the context may have "eating_habits": what the member actually logged over the last days_logged days (out of the last of_last_days). "usual_foods" lists, per meal type, the foods they keep coming back to as "food name | usual portion | calories, protein for that portion | days had"; "meal_logged_on_days" is on how many of the logged days each meal was logged; "average_logged_day" is their typical day, and "days_protein_target_hit" and "days_calories_within_10pct" say how often they hit their targets.
+- Build meal plans and meal ideas mostly from their usual foods, at the meals they usually eat them, changing portions to fit the targets. A plan made of what they already eat is the one they will stick to. Copy a usual food's name into food_name exactly as it is written in usual_foods. Add a new food only to close a real gap (most often protein), one or two at most, and say in the answer which you added and why. Skip all of this when the member asks for something new, different or specific.
+- When asked to analyse their eating, diet or habits (or what they usually eat), answer from eating_habits in up to 6 sentences: their average day against the targets with the key numbers in bold, the one or two patterns that matter most (protein mostly from one meal, breakfast often missed, the same high-calorie snack most days), and one concrete change using foods they already eat. Do not fill meal_plan for an analysis unless they also ask for a plan.
+- Base claims only on the numbers given; a handful of logged days is too few to call a habit, so say so.
+- Without eating_habits, nothing has been logged in the last month: say so in a few words when they ask about their habits or a plan from their usual foods, and plan from everyday foods.`;
 
 const RESPONSE_SCHEMA = {
   type: 'object',
@@ -246,6 +252,129 @@ function historyLines(memberId, name) {
   });
 }
 
+/* ── Eating habits ────────────────────────────────────────────────────── */
+
+/** How far back the coach looks at what the member actually eats. */
+const HABIT_DAYS = 30;
+/** The usual foods sent per meal, most often eaten first. */
+const MAX_HABIT_FOODS_PER_MEAL = 8;
+const MAX_HABIT_FOODS = 36;
+
+const portionOf = (quantity, unit) => {
+  const q = round1(num(quantity, 10000));
+  const u = text(unit, 30) || 'serving';
+  return q === 1 ? u : `${q} × ${u}`;
+};
+/** A food name as the habit lines carry it: no "|", which splits the line. */
+const habitName = (name) => text(name, 80).replace(/\|/g, '/');
+
+/**
+ * What this member actually eats, from their own food log over the last
+ * HABIT_DAYS days (today left out — that is diet_today): the foods they come
+ * back to at each meal as "name | usual portion | kcal, protein | days had",
+ * how many of the logged days each meal was logged, and their average logged
+ * day against the targets. It is what lets the coach plan around the food
+ * they will really eat. Null until something has been logged.
+ */
+export function eatingHabits(memberId, { on = today(), targets = null } = {}) {
+  const from = addDays(on, -HABIT_DAYS);
+  const days = all(
+    `SELECT d.log_date, SUM(e.calories) AS calories, SUM(e.protein_g) AS protein_g,
+            SUM(e.carbs_g) AS carbs_g, SUM(e.fats_g) AS fats_g
+     FROM diet_logs d JOIN diet_log_entries e ON e.diet_log_id = d.id
+     WHERE d.member_id = ? AND d.log_date >= ? AND d.log_date < ?
+     GROUP BY d.log_date`,
+    [memberId, from, on],
+  );
+  if (!days.length) return null;
+  const daysLogged = days.length;
+
+  // One row per food per meal. The portion and figures are the latest entry's
+  // (SQLite takes bare columns from the MAX row): what they have now, not an
+  // average of a portion they have since changed.
+  const foods = all(
+    `SELECT e.food_name, e.meal_type, COUNT(DISTINCT d.log_date) AS days, MAX(e.logged_at) AS last_logged,
+            e.quantity, e.serving_unit, e.calories, e.protein_g
+     FROM diet_logs d JOIN diet_log_entries e ON e.diet_log_id = d.id
+     WHERE d.member_id = ? AND d.log_date >= ? AND d.log_date < ?
+     GROUP BY e.food_name COLLATE NOCASE, e.meal_type
+     ORDER BY days DESC, last_logged DESC`,
+    [memberId, from, on],
+  );
+  // With a few days logged, a food had once is noise, not a habit.
+  const minDays = daysLogged >= 4 ? 2 : 1;
+  const usual = {};
+  let count = 0;
+  for (const food of foods) {
+    if (food.days < minDays || count >= MAX_HABIT_FOODS) continue;
+    const name = habitName(food.food_name);
+    if (!name) continue;
+    const list = (usual[food.meal_type] ??= []);
+    if (list.length >= MAX_HABIT_FOODS_PER_MEAL) continue;
+    list.push(
+      `${name} | ${portionOf(food.quantity, food.serving_unit)} | ${Math.round(num(food.calories))} kcal, ${Math.round(num(food.protein_g))}g protein | ${food.days} of ${daysLogged} days`,
+    );
+    count += 1;
+  }
+
+  const mealDays = all(
+    `SELECT e.meal_type, COUNT(DISTINCT d.log_date) AS days
+     FROM diet_logs d JOIN diet_log_entries e ON e.diet_log_id = d.id
+     WHERE d.member_id = ? AND d.log_date >= ? AND d.log_date < ?
+     GROUP BY e.meal_type`,
+    [memberId, from, on],
+  );
+  const mealsLogged = {};
+  for (const type of MEAL_TYPES) {
+    const row = mealDays.find((r) => r.meal_type === type);
+    if (row) mealsLogged[type] = row.days;
+  }
+
+  const avg = (key) => days.reduce((sum, day) => sum + num(day[key], 100000), 0) / daysLogged;
+  const proteinTarget = num(targets?.protein_g);
+  const calorieTarget = num(targets?.calories);
+  return {
+    days_logged: daysLogged,
+    of_last_days: HABIT_DAYS,
+    usual_foods: usual,
+    meal_logged_on_days: mealsLogged,
+    average_logged_day: {
+      calories: Math.round(avg('calories')),
+      protein_g: Math.round(avg('protein_g')),
+      carbs_g: Math.round(avg('carbs_g')),
+      fats_g: Math.round(avg('fats_g')),
+    },
+    // Within 10% counts as hitting it — the same slack the plans get.
+    ...(proteinTarget && { days_protein_target_hit: days.filter((d) => num(d.protein_g, 100000) >= proteinTarget * 0.9).length }),
+    ...(calorieTarget && {
+      days_calories_within_10pct: days.filter((d) => Math.abs(num(d.calories, 100000) - calorieTarget) <= calorieTarget * 0.1).length,
+    }),
+  };
+}
+
+/** The food names in the habit lines, as the coach was told to copy them. */
+export function usualFoodNames(habits) {
+  const names = new Set();
+  for (const lines of Object.values(habits?.usual_foods ?? {})) {
+    for (const line of lines) names.add(nameKey(line.split(' | ')[0]));
+  }
+  return names;
+}
+
+/** A meal plan with each food the member already eats marked `usual`, so the
+ * card can show which of it is familiar and which is new. */
+export function markUsualFoods(plan, habits) {
+  const names = usualFoodNames(habits);
+  if (!plan || !names.size) return plan;
+  return {
+    ...plan,
+    meals: plan.meals.map((meal) => ({
+      ...meal,
+      items: meal.items.map((item) => (names.has(nameKey(item.food_name)) ? { ...item, usual: true } : item)),
+    })),
+  };
+}
+
 /**
  * Everything the coach is told about this member. Only this member's rows are
  * read — memberId comes from their verified session, never the request body.
@@ -357,6 +486,15 @@ export function buildCoachContext(memberId, { screen, session, unit, planId, lib
       },
       burned_exercise_kcal: Math.round(burned),
     },
+    // Diet questions only: a month of food is a few hundred tokens that a
+    // question about the next set does not need.
+    ...(screen === 'diet' && {
+      eating_habits:
+        eatingHabits(memberId, {
+          on,
+          targets: { calories: targets.target_calories, protein_g: targets.target_protein_g },
+        }) ?? undefined,
+    }),
   };
 }
 
@@ -664,6 +802,15 @@ export function contextSteps(context) {
       diet.targets?.calories
         ? `Comparing today's food with your targets — ${diet.eaten.calories} of ${diet.targets.calories} kcal`
         : `Adding up today's food — ${diet.eaten.calories} kcal so far`,
+    );
+  }
+  const habits = context.eating_habits;
+  if (habits) {
+    const foods = Object.values(habits.usual_foods ?? {}).reduce((n, lines) => n + lines.length, 0);
+    steps.push(
+      foods
+        ? `Looking at what you usually eat — ${plural(foods, 'food')} over ${plural(habits.days_logged, 'logged day')}`
+        : `Looking back at ${plural(habits.days_logged, 'logged day')} of food`,
     );
   }
   if (context.member?.limitations) steps.push('Keeping your injury notes in mind');

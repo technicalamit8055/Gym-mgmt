@@ -20,6 +20,7 @@ import {
   contextSteps,
   generatePlan,
   libraryForPlan,
+  markUsualFoods,
   planReviewsToday,
   plansToday,
   questionsToday,
@@ -1674,7 +1675,9 @@ portalRoutes.post('/coach/ask', requireMemberAuth, requireModule('fitness'), req
   const history = recentTurns(req.member.id, screen);
   const unavailable = 'The coach could not answer just now — try again in a moment';
 
-  const save = (reply) => {
+  const save = (raw) => {
+    // Foods the member already eats are marked, for the card's "Usual" tags.
+    const reply = { ...raw, meal_plan: markUsualFoods(raw.meal_plan, context.eating_habits) };
     run(
       `INSERT INTO ai_coach_messages (member_id, screen, question, answer, meal_plan, input_tokens, output_tokens)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,

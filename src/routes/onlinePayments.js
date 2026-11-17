@@ -58,7 +58,7 @@ onlinePaymentRoutes.put('/settings', (req, res) => {
     enabled: { type: 'boolean' },
     upi_vpa: { type: 'string', max: 120 },
     payee_name: { type: 'string', max: 60 },
-    alert_phone: { type: 'string', max: 20 },
+    alert_phone: { type: 'string', max: 200 },
     pay_link_in_reminders: { type: 'boolean' },
   });
   const patch = Object.fromEntries(Object.entries(body).filter(([k]) => Object.hasOwn(req.body ?? {}, k)));

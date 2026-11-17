@@ -9,7 +9,7 @@ import { alertPaymentClaim } from './staffAlerts.js';
 import { DEFAULT_TENANT_SLUG } from './config.js';
 import { tenantPublicUrl, tenantUrl } from './tenant.js';
 import { today } from './validate.js';
-import { getWhatsAppStatus, sendWhatsAppMessage } from './whatsapp.js';
+import { formatPhoneNumber, sendWhatsAppMessage, whatsappReady } from './whatsapp.js';
 
 /**
  * Members paying online, to the gym's (or institute's) own UPI ID.
@@ -36,6 +36,8 @@ const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 /** name@handle — what every UPI app accepts as a payee address. */
 const VPA_RE = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z0-9.\-]{1,63}$/;
 const UTR_RE = /^\d{12}$/;
+/** The owner, a receptionist, a manager… — enough for a desk, not a broadcast list. */
+export const MAX_ALERT_PHONES = 5;
 
 /* ── Settings ────────────────────────────────────────────────────────── */
 
@@ -59,7 +61,7 @@ export function savePaymentSettings(patch) {
     next.upi_vpa = vpa || null;
   }
   if (patch.payee_name !== undefined) next.payee_name = String(patch.payee_name ?? '').trim().slice(0, 60) || null;
-  if (patch.alert_phone !== undefined) next.alert_phone = String(patch.alert_phone ?? '').trim().slice(0, 20) || null;
+  if (patch.alert_phone !== undefined) next.alert_phone = cleanAlertPhones(patch.alert_phone);
   if (patch.pay_link_in_reminders !== undefined) next.pay_link_in_reminders = patch.pay_link_in_reminders ? 1 : 0;
   if (patch.enabled !== undefined) next.enabled = patch.enabled ? 1 : 0;
   if (next.enabled && !next.upi_vpa) {
@@ -71,6 +73,33 @@ export function savePaymentSettings(patch) {
     [next.enabled, next.upi_vpa ?? null, next.payee_name ?? null, next.alert_phone ?? null, next.pay_link_in_reminders],
   );
   return getPaymentSettings();
+}
+
+/** The numbers in the "WhatsApp each payment to" setting, as typed. */
+export const alertPhones = (value) =>
+  String(value ?? '')
+    .split(/[,;\n/]+/)
+    .map((phone) => phone.trim())
+    .filter(Boolean);
+
+/**
+ * "98xxx, 97xxx" → the same list tidied, each one checked, repeats dropped
+ * (98xxx and +91 98xxx are one phone). Null when empty.
+ */
+function cleanAlertPhones(value) {
+  const seen = new Set();
+  const kept = [];
+  for (const phone of alertPhones(value)) {
+    const jid = formatPhoneNumber(phone);
+    if (!jid) throw badRequest(`"${phone}" is not a phone number WhatsApp can reach`, { alert_phone: 'invalid phone number' });
+    if (seen.has(jid)) continue;
+    seen.add(jid);
+    kept.push(phone);
+  }
+  if (kept.length > MAX_ALERT_PHONES) {
+    throw badRequest(`Up to ${MAX_ALERT_PHONES} numbers can get payment alerts`, { alert_phone: `at most ${MAX_ALERT_PHONES} numbers` });
+  }
+  return kept.length ? kept.join(', ') : null;
 }
 
 /* ── The UPI link ────────────────────────────────────────────────────── */
@@ -418,16 +447,24 @@ export function reminderRequest({ memberId, planId = null, installmentId = null 
 
 const money = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
+/**
+ * "Payment to confirm" on WhatsApp to every number in the settings — the
+ * owner, the receptionist — so whoever is at the desk can check the UPI app.
+ * Each number is sent to on its own: one wrong number does not stop the rest.
+ */
 async function alertDesk(request) {
-  const settings = getPaymentSettings();
-  if (!settings.alert_phone || !getWhatsAppStatus().connected) return;
+  const phones = alertPhones(getPaymentSettings().alert_phone);
+  if (!phones.length || !whatsappReady()) return;
   const name = [request.first_name, request.last_name].filter(Boolean).join(' ');
   const message = [
     `💸 *Payment to confirm:* ${money(request.amount)} from *${name}* (${request.member_code}) for ${request.title.toLowerCase()}.`,
     `Ref: ${request.ref_code}${request.utr ? ` · UTR: ${request.utr}` : ''}`,
-    'Check your UPI app, then confirm it in Billing → To confirm.',
+    `Check your UPI app, then confirm it in ${getBusinessType() === 'coaching' ? 'Fees' : 'Billing'} → To confirm.`,
   ].join('\n');
-  await sendWhatsAppMessage({ phone: settings.alert_phone, message, type: 'custom' });
+  const results = await Promise.allSettled(phones.map((phone) => sendWhatsAppMessage({ phone, message, type: 'custom' })));
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') console.error(`[payments] desk alert to ${phones[i]} failed:`, result.reason?.message);
+  });
 }
 
 /** The pieces a pay sheet draws: link, QR, payee. */
