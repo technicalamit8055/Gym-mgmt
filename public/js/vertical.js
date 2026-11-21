@@ -13,18 +13,33 @@ let vertical = 'gym';
 
 /**
  * Light/dark is remembered per app: the staff app defaults to dark, the
- * member app to light. Separate keys so a member's choice never repaints the
- * desk on a shared device, and vice versa. index.html's pre-paint script reads
- * the same keys — keep the two in step.
+ * member app to the phone's own setting (prefers-color-scheme — the Android
+ * WebView reports the system theme since the app theme is DayNight). Separate
+ * keys so a member's choice never repaints the desk on a shared device, and
+ * vice versa. index.html's pre-paint script reads the same keys — keep the
+ * two in step.
  */
 const MODE_KEY = { staff: 'app_mode', member: 'member_app_mode' };
-const DEFAULT_MODE = { staff: 'dark', member: 'light' };
+const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)');
+const defaultMode = (scope) => (scope === 'staff' ? 'dark' : systemDark?.matches ? 'dark' : 'light');
 let modeScope = window.location.hash.startsWith('#/portal') ? 'member' : 'staff';
 
-function storedMode() {
+function savedMode() {
   const saved = localStorage.getItem(MODE_KEY[modeScope]);
-  return saved === 'light' || saved === 'dark' ? saved : DEFAULT_MODE[modeScope];
+  return saved === 'light' || saved === 'dark' ? saved : null;
 }
+
+function storedMode() {
+  return savedMode() || defaultMode(modeScope);
+}
+
+// Until the member picks a mode themselves, the app follows the phone: turning
+// on the system dark theme (or its sunset schedule) repaints it live.
+systemDark?.addEventListener?.('change', () => {
+  if (modeScope !== 'member' || savedMode()) return;
+  currentMode = defaultMode('member');
+  document.body.dataset.mode = currentMode;
+});
 
 let currentMode = storedMode();
 
@@ -74,6 +89,8 @@ export function useMemberMode(on) {
   modeScope = on ? 'member' : 'staff';
   currentMode = storedMode();
   document.body.dataset.mode = currentMode;
+  // app.css gives the member app's dark mode neutral black surfaces.
+  document.body.dataset.app = modeScope;
 }
 
 export function setAppMode(mode) {

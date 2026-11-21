@@ -90,6 +90,16 @@ import {
 import { whatsappReady } from '../whatsapp.js';
 import { notifyMember } from '../notifications.js';
 import { setMemberPhoto } from '../photo.js';
+import {
+  LEADERBOARD_METRICS,
+  LEADERBOARD_PERIODS,
+  compareMembers,
+  exerciseLeaderboard,
+  leaderboardConfig,
+  leaderboardHub,
+  saveSocialSettings,
+  socialSettings,
+} from '../leaderboard.js';
 import { MEMBER_SELECT, publicMember } from './members.js';
 import { dietPlanTree } from './diets.js';
 import { exercisePickerRows, parseDays, sendPlanReview, workoutPlanTree, writeDays } from './workouts.js';
@@ -1530,8 +1540,24 @@ portalRoutes.put('/workouts/logs/:id', requireMemberAuth, requireModule('fitness
         log.id,
       ],
     );
+    // Staff moderation is per exercise in this session, and the sets are about
+    // to be replaced, so carry it over. A removal always sticks; an "it's
+    // real" check only while the edit doesn't push the weight past what was
+    // checked, or approving once would let a member edit their way up.
+    const moderation = all(
+      `SELECT exercise_name, MAX(lb_hidden) AS hidden, MIN(lb_reviewed) AS reviewed, MAX(weight_kg) AS heaviest
+       FROM workout_log_sets WHERE log_id = ? GROUP BY exercise_name`,
+      [log.id],
+    ).filter((row) => row.hidden || row.reviewed);
     run('DELETE FROM workout_log_sets WHERE log_id = ?', [log.id]);
     const stored = insertLogSets(log.id, sets);
+    for (const row of moderation) {
+      if (row.hidden) run('UPDATE workout_log_sets SET lb_hidden = 1 WHERE log_id = ? AND exercise_name = ?', [log.id, row.exercise_name]);
+      const newHeaviest = Math.max(0, ...stored.filter((s) => s.exercise_name === row.exercise_name).map((s) => s.weight_kg));
+      if (row.reviewed && newHeaviest <= row.heaviest) {
+        run('UPDATE workout_log_sets SET lb_reviewed = 1 WHERE log_id = ? AND exercise_name = ?', [log.id, row.exercise_name]);
+      }
+    }
     reconcileEditedRecords(req.member.id, get('SELECT * FROM workout_logs WHERE id = ?', [log.id]), stored, owned);
   });
 
@@ -1555,6 +1581,9 @@ portalRoutes.get('/workouts/prs', requireMemberAuth, requireModule('fitness'), r
        WHERE p.member_id = ? ORDER BY p.est_1rm_kg DESC`,
       [req.member.id],
     ),
+    // Rides along here because the Workout tab already loads this, and it
+    // decides whether the tab shows the leaderboard card.
+    leaderboard_enabled: leaderboardConfig().enabled,
   });
 });
 
@@ -1595,6 +1624,62 @@ portalRoutes.get('/workouts/exercises', requireMemberAuth, requireModule('fitnes
     muscle_groups: listMuscleGroups(),
     equipment: EQUIPMENT_TYPES,
   });
+});
+
+/* ── Gym leaderboards ─────────────────────────────────────────────────── */
+
+/** The gym's off switch reads as "not here": the app hides its entry points
+ * from the flag on /workouts/prs, so this only catches a stale screen. */
+const requireLeaderboards = (_req, _res, next) =>
+  next(leaderboardConfig().enabled ? undefined : notFound('Leaderboards are switched off at this gym'));
+const leaderboardGate = [requireMemberAuth, requireModule('fitness'), requireFitnessAccess, requireLeaderboards];
+
+const leaderboardQuery = (query) => ({
+  metric: LEADERBOARD_METRICS.includes(query.metric) ? query.metric : 'heaviest',
+  period: LEADERBOARD_PERIODS.includes(query.period) ? query.period : 'month',
+});
+
+const leaderboardExercise = (query) => {
+  const name = String(query.exercise ?? '').trim();
+  if (!name || name.length > 120) throw badRequest('Choose an exercise', { exercise: 'required' });
+  return name;
+};
+
+portalRoutes.get('/leaderboard/settings', ...leaderboardGate, (req, res) => {
+  res.json(socialSettings(req.member.id));
+});
+
+portalRoutes.put('/leaderboard/settings', ...leaderboardGate, (req, res) => {
+  const body = parse(req.body, {
+    show_on_leaderboard: { type: 'boolean', required: true },
+    display_name: { type: 'string', max: 30 },
+  });
+  if (body.show_on_leaderboard && socialSettings(req.member.id).blocked) {
+    throw conflict('Your gym has taken you off the leaderboard. Ask the front desk if you think this is a mistake.');
+  }
+  res.json(saveSocialSettings(req.member.id, body));
+});
+
+portalRoutes.get('/leaderboard/hub', ...leaderboardGate, (req, res) => {
+  const { metric, period } = leaderboardQuery(req.query);
+  res.json({ metric, period, settings: socialSettings(req.member.id), items: leaderboardHub({ metric, period, viewerId: req.member.id }) });
+});
+
+/** The exercise name rides in the query string, as on /workouts/exercise-history. */
+portalRoutes.get('/leaderboard', ...leaderboardGate, (req, res) => {
+  const { metric, period } = leaderboardQuery(req.query);
+  res.json(exerciseLeaderboard(leaderboardExercise(req.query), { metric, period, viewerId: req.member.id }));
+});
+
+/** notFound for anyone not on the board, so a member id can't be used to probe
+ * another member's lifts. */
+portalRoutes.get('/leaderboard/compare', ...leaderboardGate, (req, res) => {
+  const { period } = leaderboardQuery(req.query);
+  const otherId = toInt(req.query.member_id, 0);
+  if (!otherId || otherId === req.member.id) throw badRequest('Choose someone to compare with', { member_id: 'required' });
+  const result = compareMembers(leaderboardExercise(req.query), { viewerId: req.member.id, otherId, period });
+  if (!result) throw notFound('This member is not on the leaderboard');
+  res.json(result);
 });
 
 /* ── Ask Coach ────────────────────────────────────────────────────────── */

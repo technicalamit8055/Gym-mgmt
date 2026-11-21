@@ -626,6 +626,9 @@ Object.assign(ICONS, {
   delete: ICONS.trash,
 });
 ICONS.calendarCheck = [...ICONS.classes.slice(0, 4), 'm9 16 2 2 4-4'];
+// The workout keypad: an empty RPE box's gauge and the keypad's backspace.
+ICONS.gauge = ['M4 17a8 8 0 0 1 16 0', 'M12 17l3.5-5', 'M6.3 11.3l1.1 1.1', 'M12 9v1.5', 'M17.7 11.3l-1.1 1.1', { tag: 'circle', cx: 12, cy: 17, r: 1.2 }];
+ICONS.backspace = ['M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z', 'm18 9-6 6', 'm12 9 6 6'];
 
 /**
  * An <svg> node for `name`, or null if there is no such icon — so a caller

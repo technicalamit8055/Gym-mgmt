@@ -19,6 +19,7 @@ import { equipmentRoutes } from './routes/equipment.js';
 import { exerciseMediaRoutes } from './routes/exerciseMedia.js';
 import { expenseRoutes } from './routes/expenses.js';
 import { fitnessAddonRoutes } from './routes/fitnessAddons.js';
+import { leaderboardAdminRoutes } from './routes/leaderboardAdmin.js';
 import { lockerRoutes } from './routes/lockers.js';
 import { marketingRoutes } from './routes/marketing.js';
 import { memberRoutes } from './routes/members.js';
@@ -214,6 +215,7 @@ export function createApp() {
   app.use('/api/workouts', workoutRoutes);
   app.use('/api/diets', dietRoutes);
   app.use('/api/fitness-addons', fitnessAddonRoutes);
+  app.use('/api/leaderboard', leaderboardAdminRoutes);
   app.use('/api/store-hub', storeHubRoutes);
   // CoachBook: courses, batches, admissions, fees, attendance, timetable,
   // tests and study material — one mount, gated per module inside.

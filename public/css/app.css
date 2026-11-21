@@ -261,6 +261,22 @@ body[data-vertical='gym'][data-theme='gold'] {
   --muted: #bfa57a;
 }
 
+/* The member app's dark mode is true black, whatever the gym's preset: the
+   presets above tint every surface with the brand hue (Ultramarine reads as
+   navy), which looks washed out on a phone. Only the accent keeps the gym's
+   colour. Three attributes so it outranks body[data-vertical][data-theme]. */
+body[data-app='member'][data-mode='dark'][data-vertical] {
+  --bg: #000000;
+  --bg-alt: #000000;
+  --surface: #121212;
+  --surface-2: #1c1c1c;
+  --border: #2a2a2a;
+  --text: #f5f5f5;
+  --muted: #a3a3a3;
+  --hairline: rgba(255, 255, 255, 0.06);
+}
+body[data-app='member'][data-mode='dark'][data-vertical] .portal-app { background: var(--bg); }
+
 body[data-vertical='gym'] .btn.primary {
   color: #1a1005;
 }
@@ -280,6 +296,9 @@ body[data-vertical='gym'][data-theme='gold'] .btn.primary {
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
+/* Inside the Android app the page is the whole screen: Android 12+ WebView's
+   overscroll stretch makes it read as a web page coming loose, so turn it off. */
+html.native-app, html.native-app body { overscroll-behavior: none; }
 
 body {
   margin: 0;
@@ -3894,6 +3913,10 @@ body[data-mode='light'] .login {
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   box-shadow: 0 -6px 20px -12px rgba(15, 23, 42, 0.18);
 }
+/* Hidden while the keyboard is up (portal.js sets is-typing on focus), the
+   way a native app's tab bar stays behind the keyboard. Phones only: the
+   wide layout's sidebar tab bar has no keyboard to dodge. */
+.portal-frame:not(.is-wide) .portal-app.is-typing .portal-tabbar { display: none; }
 .portal-tab {
   flex: 1; min-width: 0; max-width: 104px;
   display: flex; flex-direction: column; align-items: center; gap: 5px;
@@ -4521,7 +4544,7 @@ body:not([data-mode='light']) .bk-tag.best { color: #fdba74; background: rgba(25
 
 /* Pages */
 .bk-page {
-  position: fixed; inset: 0; z-index: 40; overflow-y: auto; overscroll-behavior: contain;
+  position: fixed; inset: 0; z-index: 40; overflow-y: auto; overscroll-behavior: none;
   background: var(--bg); color: var(--text);
   animation: bk-in 0.24s var(--ease);
 }
@@ -6024,7 +6047,7 @@ body:not([data-mode='light']) .portal-pay {
    fixed can't do on mobile (WebView and phone browsers ignore it). */
 .portal-login-stage {
   position: relative; overflow-x: hidden; overflow-y: auto; isolation: isolate;
-  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none; -webkit-overflow-scrolling: touch;
   width: min(100%, 520px); height: 100%;
   display: flex; flex-direction: column; align-items: center; gap: clamp(12px, 2.6dvh, 22px);
   /* Sizes below follow the screen height so the sign-in steps fit one screen
@@ -8629,7 +8652,7 @@ button.portal-set-prev:hover { color: var(--brand); }
   bottom: calc(100% - 4px);
   max-height: min(280px, 45vh);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
@@ -9586,7 +9609,7 @@ body:not([data-mode='light']) .coach-plan-extras .pc-sug { background: var(--sur
 }
 .portal-wheel {
   position: relative; width: min(200px, 60%); height: 144px; padding: 48px 0; box-sizing: border-box;
-  overflow-y: auto; scroll-snap-type: y mandatory; overscroll-behavior: contain; scrollbar-width: none;
+  overflow-y: auto; scroll-snap-type: y mandatory; overscroll-behavior: none; scrollbar-width: none;
   -webkit-mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
   mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
   border-radius: 12px; outline: none;
@@ -9681,7 +9704,7 @@ body:not([data-mode='light']) .coach-plan-extras .pc-sug { background: var(--sur
 .portal-summary-modal .modal-head { flex: none; border-bottom: none; padding: 20px 22px 0; }
 .portal-summary-modal .modal-head h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .portal-summary-modal .modal-head .icon-btn svg { width: 22px; height: 22px; }
-.portal-summary-modal .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 6px; }
+.portal-summary-modal .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: none; padding-top: 6px; }
 .modal.portal-summary-modal > .modal-foot {
   flex: none; flex-direction: column; align-items: stretch; gap: 10px;
   padding: 12px 22px 22px; border-top: 1px solid var(--border); background: none;
@@ -10240,7 +10263,7 @@ body:not([data-mode='light']) .portal-add-food { border-color: color-mix(in srgb
 
 .qt-list {
   display: flex; flex-direction: column; height: min(48vh, 440px);
-  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  overflow-y: auto; overscroll-behavior: none; -webkit-overflow-scrolling: touch;
 }
 .qt-section {
   position: sticky; top: 0; z-index: 1; padding: 10px 2px 6px; background: var(--surface);
@@ -10429,7 +10452,7 @@ body:not([data-mode='light']) .portal-add-food { border-color: color-mix(in srgb
 .qt-tracked-toggle > .svg-icon { flex: none; color: var(--muted); }
 @media (hover: hover) { .qt-tracked-toggle:hover { background: var(--surface-2); } }
 .qt-tracked-list {
-  display: flex; flex-direction: column; max-height: min(40vh, 320px); overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; max-height: min(40vh, 320px); overflow-y: auto; overscroll-behavior: none;
   margin-bottom: 6px; padding: 0 4px 6px; border-bottom: 1px solid var(--border);
 }
 .qt-tracked-head {
@@ -12616,7 +12639,7 @@ body .pf-form > .modal-foot .btn.primary {
    header stays pinned to the sheet's top edge rather than to the backdrop's,
    and the height does not jump as the list loads. */
 .modal.portal-pick-screen { display: flex; flex-direction: column; height: min(860px, calc(100dvh - 96px)); }
-.modal.portal-pick-screen .modal-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.modal.portal-pick-screen .modal-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: none; }
 @media (max-width: 560px) {
   .modal.portal-pick-screen { flex: none; height: calc(100dvh - 36px - var(--safe-top)); }
 }
@@ -12755,6 +12778,39 @@ video.portal-pick-thumb { pointer-events: none; }
 .portal-filter-art.is-icon { background: var(--surface); color: var(--text); }
 .portal-filter-label { flex: 1; min-width: 0; font-size: 15.5px; }
 .portal-filter-tick { flex: none; color: var(--brand); display: grid; }
+
+/* The exercise library's Muscle Group grid: picture cards two to a row under
+   section captions, several picked at once, Clear / Show N results below. */
+.modal.portal-mgrid-modal .modal-body { padding: 4px 16px 16px; background: var(--surface); }
+.portal-mgrid-caption { margin: 18px 0 12px; color: var(--muted); font-size: 15px; font-weight: 500; }
+.portal-mgrid-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.portal-mgrid-card {
+  display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 80px; padding: 12px;
+  border: 2px solid transparent; border-radius: 14px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; text-align: left;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.portal-mgrid-card:active { transform: scale(0.97); }
+.portal-mgrid-card.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 18%, var(--surface-2));
+}
+.portal-mgrid-art {
+  flex: none; width: 56px; height: 56px; border-radius: 50%; overflow: hidden;
+  display: grid; place-items: center; background: #fff;
+}
+.portal-mgrid-art img { width: 100%; height: 100%; object-fit: cover; }
+.portal-mgrid-art.is-icon { background: var(--surface); color: var(--text); }
+.portal-mgrid-label { min-width: 0; font-size: 15.5px; line-height: 1.25; overflow-wrap: anywhere; }
+.modal.portal-mgrid-modal .modal-foot { padding: 12px 16px calc(12px + var(--safe-bottom)); background: var(--surface); border-top: 1px solid var(--border); }
+.portal-mgrid-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
+.portal-mgrid-clear, .portal-mgrid-show {
+  height: 48px; border: none; border-radius: 12px; cursor: pointer; font: inherit; font-size: 15.5px; font-weight: 600;
+}
+.portal-mgrid-clear { background: var(--surface-2); color: var(--text); }
+.portal-mgrid-clear:disabled { opacity: 0.5; cursor: default; }
+.portal-mgrid-show { background: var(--brand); color: #fff; }
 
 /* Create Exercise. */
 .portal-create-sheet { display: flex; flex-direction: column; gap: 16px; padding-bottom: 6px; }
@@ -13510,7 +13566,7 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .sa-head { display: flex; align-items: center; gap: 6px; padding: 12px 12px 10px 16px; border-bottom: 1px solid var(--border); }
 .sa-head strong { font-size: 15px; }
 .sa-head .spacer { flex: 1; }
-.sa-list { overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
+.sa-list { overflow-y: auto; overscroll-behavior: none; padding: 6px; }
 .sa-item {
   display: flex; align-items: flex-start; gap: 12px; width: 100%;
   padding: 10px; border: 0; border-radius: 10px; background: none; color: inherit;
@@ -13615,3 +13671,328 @@ button.portal-pr-card:hover, button.portal-pr-feature:hover { border-color: colo
 .tpl-tile h3 { margin: 4px 0 0; }
 .tpl-tile p { margin: 0; flex: 1; line-height: 1.5; }
 .tpl-tile .btn { margin-top: 6px; }
+
+/* ============================================ Workout logger, Hevy layout
+ * Flat rather than carded: a sticky bar (name, options, Finish), a stats
+ * strip with the worked muscles' body maps, then each exercise as a section
+ * with Rest / Note chips, a SET · PREVIOUS · KG · REPS · RPE · ✓ table and a
+ * full-width Add Set. Last in the file so it wins over the card styles above.
+ * ========================================================================= */
+.portal-session { gap: 0; }
+.portal-session-bar {
+  flex-direction: row; align-items: center; gap: 6px;
+  margin: -18px -18px 0; padding: 10px 18px; border: none; border-radius: 0;
+  border-bottom: 1px solid var(--border); box-shadow: none;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+.portal-session-name { flex: 1; font-size: 17px; font-weight: 600; }
+.portal-session-more { margin-right: 0; width: 36px; height: 36px; }
+.portal-session-bar .portal-session-btn.is-finish {
+  height: 38px; padding: 0 18px; border-radius: 10px; font-size: 15.5px; font-weight: 600; box-shadow: none;
+}
+
+.portal-session-totals {
+  display: flex; align-items: center; gap: 0;
+  margin: 0 -18px; padding: 14px 18px; border: none; border-radius: 0; box-shadow: none;
+  background: none; border-bottom: 1px solid var(--border);
+}
+.portal-session-totals .portal-session-stat {
+  flex: 1; align-items: flex-start; gap: 4px; padding: 0; border: none; background: none;
+  font: inherit; color: var(--text); text-align: left;
+}
+.portal-session-totals .portal-session-stat + .portal-session-stat { border-left: none; }
+.portal-session-totals .portal-session-stat > span {
+  font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted);
+}
+.portal-session-totals .portal-session-stat strong {
+  font-size: 17px; font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.portal-session-stat.is-duration { cursor: pointer; }
+.portal-session-totals .portal-session-stat.is-duration strong { color: var(--brand); }
+.portal-session-totals .portal-session-stat.is-paused strong { color: var(--muted); animation: portal-paused-blink 1.6s ease-in-out infinite; }
+.portal-session-body { flex: none; display: flex; gap: 4px; }
+.portal-session-body img {
+  width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #fff;
+}
+
+.portal-ex-card {
+  gap: 10px; margin: 0 -18px; padding: 18px 18px 16px;
+  border: none; border-radius: 0; background: none; box-shadow: none;
+}
+.portal-ex-card + .portal-ex-card { border-top: 1px solid var(--border); }
+.portal-ex-head { gap: 12px; margin-bottom: 0; }
+.portal-ex-title {
+  gap: 2px; padding: 0; border: none; background: none; cursor: pointer; font: inherit; text-align: left; color: inherit;
+}
+.portal-ex-name { color: var(--brand); font-size: 17px; font-weight: 600; }
+.portal-ex-menu { width: 36px; height: 36px; margin-right: -8px; color: var(--text); }
+
+.portal-ex-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+.portal-ex-chip {
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px;
+  border: none; border-radius: 10px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.portal-ex-chip:active { transform: scale(0.97); }
+.portal-ex-note {
+  width: 100%; min-height: 32px; padding: 4px 0; resize: none; overflow: hidden;
+  border: none; outline: none; background: none; color: var(--text); font: inherit; font-size: 15px; line-height: 1.4;
+}
+.portal-ex-note::placeholder { color: var(--muted); }
+
+/* SET · PREVIOUS · KG · REPS · RPE · ✓ */
+.portal-set-row { gap: 8px; }
+.portal-set-row.has-rpe {
+  grid-template-columns: 34px minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr) 40px 36px;
+}
+.portal-set-row.is-single.has-rpe { grid-template-columns: 34px minmax(0, 1.25fr) minmax(0, 2fr) 40px 36px; }
+.portal-set-header { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; padding: 4px 0 2px; }
+.portal-set-header-check { display: grid; place-items: center; }
+.portal-set-row:not(.portal-set-header) { margin: 0 -18px; padding: 5px 18px; }
+.portal-set-row + .portal-set-row:not(.portal-set-header) { margin-top: -10px; }
+.portal-set-type { width: 34px; height: 38px; border-radius: 9px; font-size: 15px; }
+.portal-set-prev {
+  font-size: 13px; line-height: 1.25; white-space: normal;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.portal-set-input {
+  height: 40px; border-radius: 10px; border: 1px solid var(--border); background: transparent;
+  font-size: 16px; font-weight: 600;
+}
+.portal-set-input:focus { border-color: var(--amber); box-shadow: none; background: transparent; }
+.portal-set-rpe {
+  height: 40px; min-width: 0; padding: 0; border: none; border-radius: 10px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.portal-set-check { width: 36px; height: 38px; border-radius: 10px; }
+.portal-set-row.completed .portal-set-rpe { background: transparent; }
+
+.portal-ex-add-set {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; height: 44px; margin-top: 4px; border: none; border-radius: 10px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 15.5px; font-weight: 500;
+}
+.portal-ex-add-set:active { transform: scale(0.99); }
+
+.portal-session > .portal-add-ex {
+  margin-top: 10px; height: 46px; border: none; border-radius: 10px;
+  background: var(--brand); color: #fff; font-size: 15.5px;
+}
+.portal-session-discard {
+  height: 46px; margin: 10px 0 24px; border: none; border-radius: 10px; cursor: pointer;
+  background: var(--surface-2); color: var(--red); font: inherit; font-size: 15.5px; font-weight: 600;
+}
+
+/* On a phone the rest countdown docks edge to edge just above the tab bar,
+   and at the very bottom while the keyboard is up (the tab bar hides then and
+   the WebView resizes), the way Hevy docks it over its keypad. */
+@media (max-width: 639px) {
+  .portal-rest-timer {
+    left: 0; right: 0; transform: none; width: auto; bottom: calc(78px + var(--safe-bottom));
+    border: none; border-top: 1px solid var(--border); border-radius: 0;
+    padding: 12px 18px; flex-direction: column-reverse;
+    background: var(--surface); z-index: 45;
+  }
+  .portal-rest-timer .portal-rest-bar { margin: -12px -18px 0; height: 3px; border-radius: 0; }
+  .portal-rest-timer .portal-rest-bar > i { border-radius: 0; }
+  .portal-app.is-typing .portal-rest-timer { bottom: 0; }
+}
+
+/* "Unusual Reps Value" and "Log Set RPE": centred sheets. */
+.modal.portal-warn-modal .modal-head { display: none; }
+.portal-warn { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 0 4px; text-align: center; }
+.portal-warn-icon { color: var(--amber); display: grid; }
+.portal-warn-title { margin: 4px 0 0; font-size: 17px; font-weight: 600; }
+.portal-warn-sub { margin: 0; color: var(--muted); font-size: 14.5px; }
+.portal-warn-q { margin: 14px 0 10px; font-size: 15.5px; }
+.portal-warn-q strong { font-weight: 700; }
+.portal-warn-btn {
+  width: 100%; height: 48px; border: none; border-radius: 12px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 15.5px; font-weight: 500;
+}
+.portal-warn-btn + .portal-warn-btn { margin-top: 2px; }
+.portal-warn-btn.is-primary { background: var(--brand); color: #fff; }
+.modal.portal-warn-modal .modal-body, .modal.portal-rpe-modal .modal-body { background: var(--surface); }
+.portal-rpe { display: flex; flex-direction: column; gap: 12px; }
+.portal-rpe-sub { margin: -4px 0 0; text-align: center; color: var(--muted); font-size: 14px; }
+.portal-rpe-list { display: flex; flex-direction: column; gap: 6px; }
+.portal-rpe-row {
+  display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 14px;
+  border: 2px solid transparent; border-radius: 12px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; text-align: left;
+}
+.portal-rpe-row strong { width: 34px; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.portal-rpe-row span { color: var(--muted); font-size: 14.5px; }
+.portal-rpe-row.active { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 16%, var(--surface-2)); }
+
+/* ------------------------------------------------ Workout keypad (Hevy's)
+ * Docked at the bottom while a set box or an RPE box is active: digits on
+ * the left, hide / + / − / next down the right. The tab bar and the coach
+ * button step aside, and the rest bar rides on top of it. */
+.portal-app { --kp-h: calc(268px + var(--safe-bottom)); }
+.wk-pad {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
+  height: var(--kp-h); padding: 10px 10px calc(10px + var(--safe-bottom));
+  display: grid; grid-template-columns: 3fr 1fr; gap: 8px;
+  background: var(--bg-alt); border-top: 1px solid var(--border);
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+.wk-pad.hidden { display: none; }
+.wk-pad-main { min-width: 0; display: flex; }
+.wk-pad-digits { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 8px; }
+.wk-pad-side { display: grid; grid-auto-rows: 1fr; gap: 8px; }
+.wk-key {
+  display: grid; place-items: center; min-width: 0; border: none; border-radius: 12px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 26px; font-weight: 500;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s ease, transform 0.08s ease;
+}
+.wk-key:active { background: color-mix(in srgb, var(--text) 16%, var(--surface-2)); transform: scale(0.97); }
+.wk-key.is-side { background: var(--surface); }
+.wk-key.is-off { opacity: 0.35; pointer-events: none; }
+.wk-key.is-next { background: var(--brand); color: #fff; }
+.wk-key.is-done { background: var(--green); color: #fff; }
+
+/* RPE: big number, what it means, and an eight-stop slider. */
+.wk-rpe {
+  position: relative; flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 14px 12px; border-radius: 14px; background: var(--surface-2);
+}
+.wk-rpe-help {
+  position: absolute; top: 10px; left: 10px; width: 26px; height: 26px; border-radius: 50%;
+  border: none; background: var(--surface); color: var(--muted); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.wk-rpe-value { font-size: 40px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.wk-rpe-title { font-size: 16px; font-weight: 600; }
+.wk-rpe-sub { font-size: 13.5px; color: var(--muted); }
+.wk-rpe-track {
+  width: 100%; margin-top: 12px; height: 36px; padding: 0 4px; border-radius: 999px;
+  display: grid; grid-template-columns: repeat(8, 1fr); align-items: center;
+  background: var(--surface); touch-action: none; cursor: pointer;
+}
+.wk-rpe-stop {
+  justify-self: center; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.wk-rpe-stop.on { background: var(--green); color: #fff; font-weight: 700; transform: scale(1.12); }
+
+/* The box the keypad is typing into. */
+.portal-set-input.kp-active, .portal-set-rpe.kp-active { border: 1.5px solid var(--amber); }
+.portal-set-rpe:not(.has-value) { color: var(--muted); }
+
+.portal-frame:not(.is-wide) .portal-app.has-keypad .portal-tabbar { display: none; }
+.portal-app.has-keypad .coach-fab, .portal-app.has-keypad [class*='coach-fab'] { display: none; }
+/* Room to scroll the last set above the keypad and rest bar. */
+.portal-app.has-keypad .portal-content { padding-bottom: calc(var(--kp-h) + 90px); }
+@media (max-width: 639px) {
+  .portal-app.has-keypad .portal-rest-timer { bottom: var(--kp-h); }
+}
+/* Keypad boxes are read-only to keep the phone keyboard shut; they still
+   look like ordinary boxes (only a running stopwatch reads as locked). */
+.portal-set-input[data-pad][readonly] { color: var(--text); font-weight: 600; caret-color: transparent; }
+
+/* The logger's pinned head: bar + stats strip as one sticky block, flush
+   under the app header, on the page colour so rows scroll cleanly beneath. */
+.portal-session-head {
+  position: sticky; top: 0; z-index: 12;
+  margin: -18px -18px 0; background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.portal-session-head .portal-session-bar {
+  position: static; margin: 0; padding: 10px 18px 6px; border-bottom: none; background: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.portal-session-head .portal-session-totals {
+  margin: 0; padding: 6px 18px 12px; border-bottom: none; gap: 12px;
+}
+.portal-session-head .portal-session-stat { min-width: 0; }
+.portal-session-head .portal-session-stat strong { font-size: clamp(15px, 4.4vw, 17px); }
+.portal-session-head .portal-session-body img { width: 36px; height: 36px; }
+@media (max-width: 360px) {
+  .portal-session-head .portal-session-body { display: none; }
+}
+/* Centre the RPE box's gauge or number. */
+.portal-set-rpe { display: grid; place-items: center; }
+.portal-set-rpe svg { display: block; }
+
+/* ── Gym leaderboards & head-to-head (portal.js leaderboardPanel / openLeaderboardCompare) ── */
+.portal-exd-tabs.is-4 { grid-template-columns: repeat(4, 1fr); }
+.portal-exd-tabs.is-4 .portal-exd-tab { font-size: 12.5px; padding-left: 2px; padding-right: 2px; }
+.portal-lb { display: flex; flex-direction: column; gap: 12px; }
+.portal-lb-seg { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; }
+.portal-lb-seg.is-period .portal-pick-chip { font-size: 12.5px; padding-top: 5px; padding-bottom: 5px; }
+.portal-lb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; }
+.portal-lb-head h3 { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+.portal-lb-settings { border: 0; background: var(--surface-2); color: var(--muted); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; }
+.portal-lb-sub { margin: -8px 0 0; font-size: 13px; color: var(--muted); }
+.portal-lb-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); overflow: hidden; }
+.portal-lb-row { display: grid; grid-template-columns: 30px 40px 1fr auto; align-items: center; gap: 12px; padding: 11px 14px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); text-align: left; font: inherit; width: 100%; }
+.portal-lb-row:last-child { border-bottom: 0; }
+button.portal-lb-row { cursor: pointer; }
+button.portal-lb-row:hover { background: var(--surface-2); }
+.portal-lb-row.is-me { background: var(--brand-soft); }
+.portal-lb-rank { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+.portal-lb-rank.medal-1 { background: #facc15; color: #1f1600; }
+.portal-lb-rank.medal-2 { background: #cbd5e1; color: #1e293b; }
+.portal-lb-rank.medal-3 { background: #c2763a; color: #fff; }
+.portal-lb-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: var(--surface-2); flex: none; }
+.portal-lb-avatar.is-initials { display: grid; place-items: center; font-weight: 700; font-size: 14px; color: var(--muted); }
+.portal-lb-avatar.is-tiny { width: 26px; height: 26px; font-size: 10px; }
+.portal-lb-avatar.is-large { width: 92px; height: 92px; font-size: 28px; border: 3px solid var(--border); }
+.portal-lb-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.portal-lb-value { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.portal-lb-gap { text-align: center; color: var(--muted); letter-spacing: 3px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.portal-lb-joincard { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: var(--brand-soft); border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent); }
+.portal-lb-joincard-icon { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--brand); color: #fff; }
+.portal-lb-joincard strong { display: block; font-size: 14.5px; }
+.portal-lb-joincard span { display: block; font-size: 12.5px; color: var(--muted); }
+.portal-lb-visibility { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: var(--surface-2); color: var(--muted); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.portal-lb-boards { display: flex; flex-direction: column; gap: 8px; }
+.portal-lb-board { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; width: 100%; }
+.portal-lb-board:hover { background: var(--surface-2); }
+.portal-lb-board-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.portal-lb-board-text strong { font-size: 14.5px; }
+.portal-lb-board-text span { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-lb-board-rank { font-weight: 800; color: var(--brand); }
+.portal-lb-ordinal sup { font-size: 0.6em; margin-left: 1px; }
+.portal-lb-entry { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.portal-lb-entry-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(135deg, #facc15, #f59e0b); color: #1f1600; }
+.portal-lb-entry-text strong { display: block; font-size: 15px; }
+.portal-lb-entry-text span { display: block; font-size: 12.5px; color: var(--muted); }
+.portal-lb-join { display: flex; flex-direction: column; gap: 8px; }
+.portal-lb-join p { margin: 0 0 6px; color: var(--muted); font-size: 14px; }
+.portal-lb-join-label { font-weight: 600; font-size: 13px; }
+.portal-lb-join-actions { display: flex; gap: 8px; justify-content: flex-end; width: 100%; }
+
+.portal-cmp { display: flex; flex-direction: column; gap: 16px; }
+.portal-cmp-hero { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 8px; padding: 18px 0 6px; background: linear-gradient(170deg, transparent 45%, var(--surface-2) 45%); border-radius: 16px; }
+.portal-cmp-side { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; min-width: 0; }
+.portal-cmp-side strong { font-size: 16px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-cmp-side.is-me .portal-lb-avatar { border-color: var(--brand); }
+.portal-cmp-vs { margin-top: 28px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; font-weight: 800; font-size: 14px; }
+.portal-cmp-badge { background: #facc15; color: #1f1600; font-weight: 800; font-size: 12px; letter-spacing: 0.04em; padding: 4px 10px; border-radius: 8px; }
+.portal-cmp-exercise { display: flex; align-items: center; gap: 12px; }
+.portal-cmp-exercise strong { font-size: 15px; }
+.portal-cmp-metric { display: flex; flex-direction: column; gap: 8px; }
+.portal-cmp-metric-head { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.portal-cmp-change { display: inline-flex; align-items: center; gap: 3px; font-size: 14px; font-weight: 700; }
+.portal-cmp-change.down { color: #ef4444; }
+.portal-cmp-change.up { color: #22c55e; }
+.portal-cmp-bar { display: grid; grid-template-columns: 26px 1fr minmax(64px, auto); align-items: center; gap: 10px; }
+.portal-cmp-bar > span { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
+.portal-cmp-track { height: 12px; border-radius: 999px; background: transparent; }
+.portal-cmp-track i { display: block; height: 100%; border-radius: inherit; background: var(--surface-2); }
+.portal-cmp-bar.is-me .portal-cmp-track i { background: var(--brand); }
+
+/* Staff leaderboard moderation (fitnessPlans.js renderLeaderboardModeration) */
+.fit-lb-actions { display: inline-flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.fit-lb-jump { color: #ef4444; font-weight: 700; font-size: 12px; }
+.fit-lb-ok { color: #22c55e; font-weight: 700; }
+.fit-lb-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.fit-lb-filters select { flex: 1 1 160px; min-width: 0; }
+.fit-lb-help { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 13.5px; color: var(--muted); }
+.portal-lb-joincard.is-blocked { background: var(--surface-2); border-color: var(--border); }
+.portal-lb-joincard.is-blocked .portal-lb-joincard-icon { background: var(--border); color: var(--muted); }

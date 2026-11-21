@@ -1,6 +1,7 @@
 package com.gymbook.member;
 
 import android.os.Bundle;
+import android.view.View;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
@@ -15,6 +16,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(HealthConnectPlugin.class);
         registerPlugin(OrientationPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // No Android 12+ overscroll stretch on the page: a native screen stops
+        // dead at its ends (app.css turns it off for inner scrollers too).
+        if (bridge != null) bridge.getWebView().setOverScrollMode(View.OVER_SCROLL_NEVER);
 
         // A class played full screen fills the screen (FullscreenChromeClient).
         FullscreenChromeClient chromeClient = bridge == null ? null : new FullscreenChromeClient(bridge);

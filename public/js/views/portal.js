@@ -39,7 +39,7 @@ import {
   writeToHealthConnect,
 } from '../healthConnect.js';
 import { flushMemberSync, memberSynced } from '../memberSync.js';
-import { EFFORTS, suggestNextSet } from '../nextSet.js';
+import { suggestNextSet } from '../nextSet.js';
 import { cropAndResizeImage } from '../photo.js';
 import { openWorkoutShare } from '../shareCards.js';
 import { clearWidgets, refreshWidgets, setWidgetHandler } from '../widgets.js';
@@ -805,6 +805,96 @@ function openFilterSheet({ title, allLabel, options, current, onPick }) {
   });
 }
 
+/* The muscle grid's sections, in the order they're shown. Anything the
+ * server adds later and isn't listed lands in "Other". */
+const MUSCLE_SECTIONS = [
+  ['Upper Body', ['abdominals', 'biceps', 'chest', 'forearms', 'lats', 'lower_back', 'neck', 'shoulders', 'traps', 'triceps', 'upper_back']],
+  ['Lower Body', ['abductors', 'adductors', 'calves', 'glutes', 'hamstrings', 'quadriceps']],
+];
+
+/** The bundled body-map picture for a muscle, used until the gym uploads its own. */
+const muscleArtUrl = (key) => (MUSCLE_KEYS.includes(key) ? `/images/muscles/${key}.webp` : null);
+
+/**
+ * The exercise library's "Muscle Group" sheet: a two-column grid of picture
+ * cards under Upper Body / Lower Body / Other, several picked at once. The
+ * footer clears them or applies them, its button counting the exercises the
+ * pick would show before the member commits.
+ */
+function openMuscleGridSheet({ options, current, countFor, onApply }) {
+  const picked = new Set(current);
+  const cards = new Map();
+  const showButton = h('button', { class: 'portal-mgrid-show', type: 'button' });
+  const clearButton = h('button', { class: 'portal-mgrid-clear', type: 'button' }, 'Clear Filters');
+
+  const paint = () => {
+    for (const [key, card] of cards) {
+      const on = picked.has(key);
+      card.classList.toggle('active', on);
+      card.setAttribute('aria-pressed', String(on));
+    }
+    const n = countFor(picked);
+    showButton.textContent = `Show ${n} result${n === 1 ? '' : 's'}`;
+    clearButton.disabled = picked.size === 0;
+  };
+
+  const card = (option) => {
+    const src = option.media_url || muscleArtUrl(option.key);
+    const button = h(
+      'button',
+      {
+        class: 'portal-mgrid-card',
+        type: 'button',
+        onclick: () => {
+          sound.tapHaptic?.();
+          if (picked.has(option.key)) picked.delete(option.key);
+          else picked.add(option.key);
+          paint();
+        },
+      },
+      h(
+        'span',
+        { class: `portal-mgrid-art${src ? '' : ' is-icon'}` },
+        src ? h('img', { src, alt: '', loading: 'lazy', decoding: 'async' }) : renderIcon(option.icon, { size: 22 }),
+      ),
+      h('span', { class: 'portal-mgrid-label' }, option.label),
+    );
+    cards.set(option.key, button);
+    return button;
+  };
+
+  const listed = new Set(MUSCLE_SECTIONS.flatMap(([, keys]) => keys));
+  const byKey = new Map(options.map((o) => [o.key, o]));
+  const sections = [
+    ...MUSCLE_SECTIONS.map(([label, keys]) => [label, keys.map((k) => byKey.get(k)).filter(Boolean)]),
+    ['Other', options.filter((o) => !listed.has(o.key))],
+  ].filter(([, items]) => items.length);
+
+  clearButton.addEventListener('click', () => {
+    picked.clear();
+    paint();
+  });
+  showButton.addEventListener('click', () => {
+    closeModal();
+    onApply(picked);
+  });
+
+  openModal({
+    title: 'Muscle Group',
+    className: 'portal-filter-modal portal-mgrid-modal',
+    body: h(
+      'div',
+      { class: 'portal-mgrid' },
+      ...sections.flatMap(([label, items]) => [
+        h('h3', { class: 'portal-mgrid-caption' }, label),
+        h('div', { class: 'portal-mgrid-grid' }, ...items.map(card)),
+      ]),
+    ),
+    footer: h('div', { class: 'portal-mgrid-foot' }, clearButton, showButton),
+  });
+  paint();
+}
+
 /**
  * Hevy's Create Exercise form: a name, the equipment and the primary muscle,
  * each of the last two picked from the same sheets the filters use.
@@ -898,7 +988,8 @@ function openCreateExercise({ name = '', muscles, equipment, onCreate }) {
 function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   let library = null;
   let query = '';
-  const filter = { muscle: '', equipment: '' };
+  // muscle is a set: the grid sheet picks several at once.
+  const filter = { muscle: new Set(), equipment: '' };
   let muscles = MUSCLE_KEYS.map((key) => ({ key, label: titleCase(key), media_url: null }));
   let equipment = EQUIPMENT_KEYS;
   // Hevy-style multi-select: rows toggle in and out, and they are added in
@@ -994,7 +1085,7 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   }
 
   const matchesFilters = (e) =>
-    (!filter.muscle || e.muscle_group === filter.muscle) && (!filter.equipment || e.equipment === filter.equipment);
+    (!filter.muscle.size || filter.muscle.has(e.muscle_group)) && (!filter.equipment || e.equipment === filter.equipment);
 
   function paintList() {
     if (!library) return;
@@ -1021,7 +1112,13 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
       );
     }
 
-    const heading = needle ? 'Results' : filter.muscle ? `${muscleName(filter.muscle)} Exercises` : 'All Exercises';
+    const heading = needle
+      ? 'Results'
+      : filter.muscle.size === 1
+        ? `${muscleName([...filter.muscle][0])} Exercises`
+        : filter.muscle.size
+          ? 'Filtered Exercises'
+          : 'All Exercises';
     list.append(h('h3', { class: 'portal-pick-caption' }, heading));
     if (!matches.length) {
       list.append(
@@ -1043,11 +1140,28 @@ function openExercisePicker(onAdd, { title = 'Add Exercise' } = {}) {
   function paintFilters() {
     equipmentButton.textContent = filter.equipment ? titleCase(filter.equipment) : 'All Equipment';
     equipmentButton.classList.toggle('active', Boolean(filter.equipment));
-    muscleButton.textContent = filter.muscle ? muscleName(filter.muscle) : 'All Muscles';
-    muscleButton.classList.toggle('active', Boolean(filter.muscle));
+    const muscleCount = filter.muscle.size;
+    muscleButton.textContent =
+      muscleCount === 1 ? muscleName([...filter.muscle][0]) : muscleCount ? `${muscleCount} Muscles` : 'All Muscles';
+    muscleButton.classList.toggle('active', muscleCount > 0);
   }
   function pickFilter(kind) {
     const isMuscle = kind === 'muscle';
+    if (isMuscle) {
+      // The count ignores the search box, like the list under it does once cleared.
+      const equipmentOk = (e) => !filter.equipment || e.equipment === filter.equipment;
+      openMuscleGridSheet({
+        options: muscleOptions(),
+        current: filter.muscle,
+        countFor: (picked) => (library ?? []).filter((e) => equipmentOk(e) && (!picked.size || picked.has(e.muscle_group))).length,
+        onApply: (picked) => {
+          filter.muscle = new Set(picked);
+          paintFilters();
+          paintList();
+        },
+      });
+      return;
+    }
     openFilterSheet({
       title: isMuscle ? 'Muscle Group' : 'Equipment',
       allLabel: isMuscle ? 'All Muscles' : 'All Equipment',
@@ -2705,13 +2819,21 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
     pace: (v, axis) => (axis ? durationLabel(v) : `${durationLabel(v)} /km`),
   };
 
+  // Leaderboards rank by weight, so only weighted exercises get the tab.
+  const hasLeaderboard = logType === 'weight_reps' && leaderboardsOn;
+  if (active === 'leaderboard' && !hasLeaderboard) active = 'summary';
+  let boardPanel = null;
+  const tabList = [
+    ['summary', 'Summary'],
+    ['history', 'History'],
+    ['howto', 'How to'],
+    ...(hasLeaderboard ? [['leaderboard', 'Leaderboard']] : []),
+  ];
+  if (hasLeaderboard) tabs.classList.add('is-4');
+
   function paintTabs() {
     clear(tabs).append(
-      ...[
-        ['summary', 'Summary'],
-        ['history', 'History'],
-        ['howto', 'How to'],
-      ].map(([key, label]) =>
+      ...tabList.map(([key, label]) =>
         h(
           'button',
           {
@@ -2956,6 +3078,12 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
       panel.append(exerciseDemoBody(item));
       return;
     }
+    if (active === 'leaderboard') {
+      // Built once so switching tabs keeps the chosen metric and period.
+      boardPanel ??= leaderboardPanel(item);
+      panel.append(boardPanel);
+      return;
+    }
     if (failed) {
       panel.append(h('div', { class: 'portal-empty' }, failed));
       return;
@@ -3000,6 +3128,345 @@ function openExerciseDetail(exercise, { tab = 'summary' } = {}) {
       failed = err.message || 'Could not load this exercise’s history';
       paint();
     });
+}
+
+/* ── Gym leaderboards ──────────────────────────────────────────────────── */
+
+/** Whether this gym has leaderboards on; refreshed every time the Workout tab
+ * loads (from /workouts/prs). Starts on so a deep link still shows the tab. */
+let leaderboardsOn = true;
+
+const LB_METRICS = [
+  { key: 'heaviest', label: 'Heaviest Weight', short: 'Heaviest' },
+  { key: 'e1rm', label: 'One Rep Max', short: '1RM' },
+  { key: 'volume', label: 'Best Set (Volume)', short: 'Volume' },
+];
+const LB_PERIODS = [
+  { key: 'month', label: 'This month' },
+  { key: 'all', label: 'All time' },
+];
+
+function lbAvatar(row, className = '') {
+  const [first = '', second = ''] = String(row?.name ?? '').split(' ');
+  return row?.photo_url
+    ? h('img', { class: `portal-lb-avatar ${className}`, src: row.photo_url, alt: '', loading: 'lazy' })
+    : h('span', { class: `portal-lb-avatar is-initials ${className}` }, initials(first, second));
+}
+
+const ordinal = (n) => {
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th');
+  return h('span', { class: 'portal-lb-ordinal' }, String(n), h('sup', {}, tail));
+};
+
+/** The one-time "show me on the board?" sheet, with a nickname field. */
+function openLeaderboardJoin(settings, onSaved) {
+  const nameInput = h('input', {
+    class: 'input',
+    type: 'text',
+    maxlength: 30,
+    placeholder: settings.default_name,
+    value: settings.display_name ?? '',
+  });
+  const save = async (show) => {
+    try {
+      const saved = await api.portal.saveLeaderboardSettings({ show_on_leaderboard: show, display_name: nameInput.value.trim() });
+      closeModal();
+      toast(show ? 'You’re on your gym’s leaderboard' : 'You’re hidden from the leaderboard');
+      onSaved?.(saved);
+    } catch (err) {
+      toast(err.message || 'Could not save', 'error');
+    }
+  };
+  openModal({
+    title: 'Gym leaderboard',
+    icon: 'trophy',
+    className: 'portal-lb-join-modal',
+    body: h(
+      'div',
+      { class: 'portal-lb-join' },
+      h('p', {}, 'Show your best lifts on your gym’s leaderboard? Only members of your gym can see it, and you can hide yourself any time.'),
+      h('label', { class: 'portal-lb-join-label' }, 'Name others see'),
+      nameInput,
+      h('small', { class: 'muted' }, `Leave blank to show as “${settings.default_name}”.`),
+    ),
+    footer: h(
+      'div',
+      { class: 'portal-lb-join-actions' },
+      h('button', { class: 'btn', type: 'button', onclick: () => save(false) }, settings.show_on_leaderboard ? 'Hide me' : 'Not now'),
+      h('button', { class: 'btn primary', type: 'button', onclick: () => save(true) }, settings.show_on_leaderboard ? 'Save' : 'Join leaderboard'),
+    ),
+  });
+}
+
+function lbSegment(options, current, onPick, className = '') {
+  return h(
+    'div',
+    { class: `portal-lb-seg ${className}` },
+    ...options.map((o) =>
+      h('button', { class: `portal-pick-chip${o.key === current ? ' active' : ''}`, type: 'button', onclick: () => onPick(o.key) }, o.short ?? o.label),
+    ),
+  );
+}
+
+/** One ranked row; `onOpen` is null for the viewer's own row. */
+function lbRow(row, onOpen) {
+  const medal = row.rank <= 3 ? ` medal-${row.rank}` : '';
+  return h(
+    onOpen ? 'button' : 'div',
+    { class: `portal-lb-row${row.is_me ? ' is-me' : ''}`, type: onOpen ? 'button' : undefined, onclick: onOpen ?? undefined },
+    h('span', { class: `portal-lb-rank${medal}` }, String(row.rank)),
+    lbAvatar(row),
+    h('span', { class: 'portal-lb-name' }, row.name),
+    h('span', { class: 'portal-lb-value' }, weightLabel(row.value_kg)),
+  );
+}
+
+/**
+ * The Leaderboard tab of the exercise screen: this gym's members ranked on one
+ * exercise. Tapping someone opens the head-to-head.
+ */
+function leaderboardPanel(item) {
+  const name = item.exercise_name ?? item.name;
+  let metric = 'heaviest';
+  let period = 'month';
+  let data = null;
+  let failed = null;
+  let seq = 0;
+  const root = h('div', { class: 'portal-lb' });
+
+  async function load() {
+    const mine = ++seq;
+    data = null;
+    failed = null;
+    paint();
+    try {
+      const res = await api.portal.leaderboard({ exercise: name, metric, period });
+      if (mine !== seq) return;
+      data = res;
+    } catch (err) {
+      if (mine !== seq) return;
+      failed = err.message || 'Could not load the leaderboard';
+    }
+    paint();
+  }
+
+  async function openJoin() {
+    try {
+      openLeaderboardJoin(await api.portal.leaderboardSettings(), load);
+    } catch (err) {
+      toast(err.message || 'Could not load your settings', 'error');
+    }
+  }
+
+  function paint() {
+    const def = LB_METRICS.find((m) => m.key === metric);
+    clear(root).append(
+      lbSegment(LB_METRICS, metric, (key) => {
+        metric = key;
+        load();
+      }),
+      lbSegment(LB_PERIODS, period, (key) => {
+        period = key;
+        load();
+      }, 'is-period'),
+      h(
+        'div',
+        { class: 'portal-lb-head' },
+        h('h3', {}, `Leaderboard · ${def.label}`),
+        data?.joined ? h('button', { class: 'portal-lb-settings', type: 'button', onclick: openJoin, 'aria-label': 'Leaderboard settings' }, renderIcon('settings', { size: 16 })) : null,
+      ),
+      h('p', { class: 'portal-lb-sub' }, `Members of your gym · ${LB_PERIODS.find((p) => p.key === period).label}`),
+    );
+    if (failed) return root.append(h('div', { class: 'portal-empty' }, failed));
+    if (!data) return root.append(h('div', { class: 'portal-loading' }, 'Loading…'));
+
+    if (data.blocked) {
+      root.append(
+        h(
+          'div',
+          { class: 'portal-lb-joincard is-blocked' },
+          h('span', { class: 'portal-lb-joincard-icon' }, renderIcon('eyeOff', { size: 20 })),
+          h('div', {}, h('strong', {}, 'You’re not on the leaderboard'), h('span', {}, 'Your gym has taken you off it. Ask the front desk if you think this is a mistake.')),
+        ),
+      );
+    } else if (!data.joined) {
+      root.append(
+        h(
+          'div',
+          { class: 'portal-lb-joincard' },
+          h('span', { class: 'portal-lb-joincard-icon' }, renderIcon('trophy', { size: 20 })),
+          h(
+            'div',
+            {},
+            h('strong', {}, data.me ? `You’d be #${data.me.rank} here` : 'Join your gym’s leaderboard'),
+            h('span', {}, 'Others at your gym can’t see you until you join.'),
+          ),
+          h('button', { class: 'btn primary sm', type: 'button', onclick: openJoin }, 'Join'),
+        ),
+      );
+    }
+
+    if (!data.items.length) {
+      root.append(
+        h(
+          'div',
+          { class: 'portal-exd-empty' },
+          h('span', { class: 'portal-exd-empty-icon' }, renderIcon('trophy', { size: 24 })),
+          h('strong', {}, 'No one on the board yet'),
+          h('span', {}, period === 'month' ? `Log ${name} this month to take first place.` : `Log ${name} to take first place.`),
+        ),
+      );
+      return root;
+    }
+
+    const list = h('div', { class: 'portal-lb-list' });
+    for (const row of data.items) list.append(lbRow(row, row.is_me ? null : () => openLeaderboardCompare(item, row.member_id, period)));
+    // The viewer below the cut, or ranked-if-joined, pinned at the bottom.
+    if (data.me && !data.items.some((r) => r.is_me)) {
+      list.append(h('div', { class: 'portal-lb-gap' }, '•••'), lbRow({ ...data.me, name: data.joined ? 'You' : 'You (hidden)' }, null));
+    }
+    root.append(list);
+    return root;
+  }
+
+  load();
+  return root;
+}
+
+/** Hevy-style head-to-head: two avatars, VS, and three pairs of bars. */
+async function openLeaderboardCompare(item, memberId, period = 'all') {
+  const name = item.exercise_name ?? item.name;
+  let res;
+  try {
+    res = await api.portal.leaderboardCompare({ exercise: name, member_id: memberId, period });
+  } catch (err) {
+    toast(err.message || 'Could not load the comparison', 'error');
+    return;
+  }
+
+  const side = (person, who) =>
+    h(
+      'div',
+      { class: `portal-cmp-side${who === 'me' ? ' is-me' : ''}` },
+      lbAvatar(person, 'is-large'),
+      h('strong', {}, who === 'me' ? 'You' : person.name),
+      res.stronger === who ? h('span', { class: 'portal-cmp-badge' }, 'STRONGER') : null,
+    );
+
+  const bars = res.metrics.map((m) => {
+    const def = LB_METRICS.find((d) => d.key === m.metric);
+    const top = Math.max(m.mine, m.theirs) || 1;
+    const bar = (value, me) =>
+      h(
+        'div',
+        { class: `portal-cmp-bar${me ? ' is-me' : ''}` },
+        lbAvatar(me ? res.me : res.them, 'is-tiny'),
+        h('div', { class: 'portal-cmp-track' }, h('i', { style: `width:${Math.max(4, (value / top) * 100)}%` })),
+        h('span', {}, value ? weightLabel(value) : '—'),
+      );
+    let change = null;
+    if (m.gap_pct !== 0 && m.mine && m.theirs) {
+      const behind = m.gap_pct > 0;
+      change = h(
+        'span',
+        { class: `portal-cmp-change ${behind ? 'down' : 'up'}` },
+        renderIcon(behind ? 'trendDown' : 'trendUp', { size: 14 }),
+        `${Math.abs(m.gap_pct)}%`,
+      );
+    }
+    return h('div', { class: 'portal-cmp-metric' }, h('div', { class: 'portal-cmp-metric-head' }, def.label, change), bar(m.mine, true), bar(m.theirs, false));
+  });
+
+  openModal({
+    title: 'Comparison',
+    className: 'portal-pick-modal portal-cmp-modal',
+    body: h(
+      'div',
+      { class: 'portal-cmp' },
+      h('div', { class: 'portal-cmp-hero' }, side(res.me, 'me'), h('span', { class: 'portal-cmp-vs' }, 'VS'), side(res.them, 'them')),
+      h(
+        'div',
+        { class: 'portal-cmp-exercise' },
+        pickerThumb(item),
+        h('div', { class: 'portal-pick-text' }, h('strong', {}, name), item.muscle_group ? h('span', { class: 'portal-pick-sub' }, titleCase(item.muscle_group)) : null),
+      ),
+      h('p', { class: 'portal-lb-sub' }, LB_PERIODS.find((p) => p.key === res.period)?.label ?? ''),
+      ...bars,
+    ),
+  });
+}
+
+/** Every board at the gym: the featured lifts and anything enough members train. */
+async function openLeaderboardHub() {
+  let metric = 'heaviest';
+  let period = 'month';
+  const body = h('div', { class: 'portal-lb portal-lb-hub' });
+  openModal({ title: 'Gym leaderboard', className: 'portal-pick-modal portal-lb-modal', body });
+
+  async function load() {
+    clear(body).append(h('div', { class: 'portal-loading' }, 'Loading…'));
+    let res;
+    try {
+      res = await api.portal.leaderboardHub({ metric, period });
+    } catch (err) {
+      clear(body).append(h('div', { class: 'portal-empty' }, err.message || 'Could not load the leaderboard'));
+      return;
+    }
+    clear(body).append(
+      lbSegment(LB_METRICS, metric, (key) => {
+        metric = key;
+        load();
+      }),
+      lbSegment(LB_PERIODS, period, (key) => {
+        period = key;
+        load();
+      }, 'is-period'),
+      res.settings.show_on_leaderboard
+        ? h(
+            'button',
+            { class: 'portal-lb-visibility', type: 'button', onclick: () => openLeaderboardJoin(res.settings, load) },
+            renderIcon('eye', { size: 15 }),
+            `Visible as ${res.settings.display_name || res.settings.default_name}`,
+          )
+        : h(
+            'div',
+            { class: 'portal-lb-joincard' },
+            h('span', { class: 'portal-lb-joincard-icon' }, renderIcon('trophy', { size: 20 })),
+            h('div', {}, h('strong', {}, 'Join your gym’s leaderboard'), h('span', {}, 'See where you rank and compare lifts with other members.')),
+            h('button', { class: 'btn primary sm', type: 'button', onclick: () => openLeaderboardJoin(res.settings, load) }, 'Join'),
+          ),
+      h(
+        'div',
+        { class: 'portal-lb-boards' },
+        ...res.items.map((board) =>
+          h(
+            'button',
+            {
+              class: 'portal-lb-board',
+              type: 'button',
+              onclick: () => openExerciseDetail({ name: board.exercise_name, muscle_group: board.muscle_group, equipment: board.equipment }, { tab: 'leaderboard' }),
+            },
+            pickerThumb({ name: board.exercise_name, muscle_group: board.muscle_group, equipment: board.equipment }),
+            h(
+              'div',
+              { class: 'portal-lb-board-text' },
+              h('strong', {}, board.exercise_name),
+              h(
+                'span',
+                {},
+                board.leader
+                  ? `👑 ${board.leader.name} · ${weightLabel(board.leader.value_kg)}`
+                  : 'No one yet. Take first place',
+              ),
+            ),
+            board.me ? h('span', { class: 'portal-lb-board-rank' }, ordinal(board.me.rank)) : null,
+            renderIcon('chevronRight', { size: 16 }),
+          ),
+        ),
+      ),
+    );
+  }
+  load();
 }
 
 /* ── Rest timer ────────────────────────────────────────────────────────── */
@@ -7914,12 +8381,16 @@ function renderPortalApp(ctx, initialMe) {
 
     function setRow(exercise, set, index) {
       const type = logTypeOf(exercise);
-      const previous = exercise.previous;
+      // Like Hevy, PREVIOUS is this row's own set from last session: working
+      // set 2 shows last time's set 2 (warmups aren't in last_session, so they
+      // fall back to the single last set). Timed types only have that one.
+      const previous = previousSetOf(exercise, set, index);
       // Last session's set in this exercise's own terms. A row from before the
       // exercise had a type (a plank logged as 0 kg × 0) says nothing, so it is
       // shown as no history rather than as a dash dressed up as a button.
-      const previousText = previous ? setSummary(previous, type) : null;
-      const hasPrevious = Boolean(previousText) && previousText !== '—';
+      const previousSummary = previous ? setSummary(previous, type) : null;
+      const hasPrevious = Boolean(previousSummary) && previousSummary !== '—';
+      const previousText = hasPrevious && Number(previous.rpe) > 0 ? `${previousSummary} @ ${Number(previous.rpe)} rpe` : previousSummary;
       // Like Hevy, the badge is the set number and doubles as the set-type
       // switch: warmups don't count towards the numbering and show a W, drop
       // and failure sets their own letter.
@@ -7959,7 +8430,17 @@ function renderPortalApp(ctx, initialMe) {
       const oneRm = type === 'weight_reps' ? estimate1rm(Number(set.weight_kg) || 0, Number(set.reps) || 0) : 0;
       const beatsPrevious = previous && oneRm > estimate1rm(previous.weight_kg, previous.reps);
 
-      const fillFromPrevious = () => fillSetFromPrevious(exercise, set);
+      const fillFromPrevious = () => {
+        if (previous && previous !== exercise.previous && (type === 'weight_reps' || type === 'reps')) {
+          if (type === 'weight_reps') {
+            set.weight_kg = Number(previous.weight_kg) || 0;
+            set.weight_display = String(toDisplayWeight(set.weight_kg));
+          }
+          set.reps = Number(previous.reps) || 0;
+        } else {
+          fillSetFromPrevious(exercise, set);
+        }
+      };
 
       const check = h(
         'button',
@@ -7967,45 +8448,80 @@ function renderPortalApp(ctx, initialMe) {
           class: `portal-set-check${set.completed ? ' done' : ''}${set.completed && justTicked === set ? ' pop' : ''}`,
           type: 'button',
           'aria-label': set.completed ? 'Mark set as not done' : 'Mark set as done',
-          onclick: () => toggleSet(exercise, set),
+          onclick: () => {
+            const unusual = set.completed || set.unusual_ok ? null : unusualValueOf(exercise, set, previous);
+            if (!unusual) return toggleSet(exercise, set);
+            openUnusualSheet({
+              exercise,
+              set,
+              index,
+              unusual,
+              onEdit: () => {
+                const node = unusual.field === 'weight' ? weightNode : repsNode;
+                node?.focus();
+                node?.select?.();
+              },
+              onDismiss: () => {
+                set.unusual_ok = true;
+                toggleSet(exercise, set);
+              },
+            });
+          },
         },
         renderIcon('check', { size: 18, stroke: 2.4 }),
       );
 
+      let weightNode = null;
+      let repsNode = null;
+      // Every box the keypad types into says which set and field it is, so
+      // the keypad can find it again after a repaint rebuilds the rows.
+      const kp = (field) => ({ 'data-kp': `${state.exercises.indexOf(exercise)}:${index}:${field}` });
+      // Read-only text, not inputmode="none": Gboard still opens over a number
+      // box that asks for no keyboard, and a number box drops a half-typed "60.".
+      const padInput = (field) =>
+        padTouch
+          ? { type: 'text', inputmode: 'none', readonly: true, 'data-pad': '1', onfocus: (event) => keypad.open(event.target, field) }
+          : {};
       const weightInput = () =>
-        h('input', {
+        (weightNode = h('input', {
           class: 'portal-set-input',
           type: 'number',
           inputmode: 'decimal',
           min: 0,
           step: 0.5,
           'aria-label': `Weight in ${weightUnit.get()}`,
+          ...kp('weight'),
+          ...padInput('weight'),
           placeholder: hasPrevious ? String(toDisplayWeight(previous.weight_kg)) : '0',
           value: set.weight_display ?? '',
           oninput: (event) => {
             set.weight_display = event.target.value;
             set.weight_kg = toKg(event.target.value);
+            set.unusual_ok = false;
             persist();
             paintMeta();
           },
-        });
+        }));
 
       const repsInput = () =>
-        h('input', {
+        (repsNode = h('input', {
           class: 'portal-set-input',
           type: 'number',
           inputmode: 'numeric',
           min: 0,
           step: 1,
           'aria-label': 'Reps',
+          ...kp('reps'),
+          ...padInput('reps'),
           placeholder: hasPrevious && previous.reps ? String(previous.reps) : '0',
           value: set.reps ?? '',
           oninput: (event) => {
             set.reps = Number(event.target.value);
+            set.unusual_ok = false;
             persist();
             paintMeta();
           },
-        });
+        }));
 
       const distanceInput = () =>
         h('input', {
@@ -8015,6 +8531,8 @@ function renderPortalApp(ctx, initialMe) {
           min: 0,
           step: 0.01,
           'aria-label': 'Distance in km',
+          ...kp('distance'),
+          ...padInput('distance'),
           placeholder: hasPrevious && previous.distance_km ? String(previous.distance_km) : '0',
           value: set.distance_km ?? '',
           oninput: (event) => {
@@ -8030,9 +8548,11 @@ function renderPortalApp(ctx, initialMe) {
         inputmode: 'numeric',
         autocomplete: 'off',
         'aria-label': 'Time — digits fill in from the right',
+        ...kp('time'),
+        ...(running ? {} : padInput('time')),
         placeholder: hasPrevious && previous.duration_seconds ? durationLabel(previous.duration_seconds) : '0:00',
         value: running || Number(set.duration_seconds) > 0 ? durationLabel(elapsedOf(set)) : '',
-        readonly: running,
+        readonly: running || padTouch,
         oninput: (event) => {
           const digits = timeDigitsOf(event.target.value);
           set.duration_seconds = digits ? digitsToSeconds(digits) : 0;
@@ -8067,6 +8587,17 @@ function renderPortalApp(ctx, initialMe) {
         },
         renderIcon(running ? 'pause' : 'play', { size: 14, stroke: 2.4 }),
       );
+
+      // RPE, Hevy's last column, for counted sets: what the next-set
+      // suggestion reads to decide whether there was anything left in the tank.
+      const rpeCell = h('button', {
+        class: 'portal-set-rpe',
+        type: 'button',
+        ...kp('rpe'),
+        onclick: (event) => keypad.open(event.currentTarget, 'rpe'),
+      });
+      paintRpeCell(rpeCell, set);
+      const counted = type === 'weight_reps' || type === 'reps';
 
       const inputs = {
         weight_reps: () => [weightInput(), repsInput()],
@@ -8126,51 +8657,11 @@ function renderPortalApp(ctx, initialMe) {
         }
       }
 
-      // "How did it feel?" under the set just ticked; once answered it shrinks
-      // to a small tag that reopens it.
-      const effortInfo = EFFORTS.find((e) => e.rpe === Number(set.rpe));
-      let effortNode = null;
-      if (set.completed && effortSet === set) {
-        effortNode = h(
-          'div',
-          { class: 'portal-set-effort' },
-          h('span', { class: 'portal-set-effort-q' }, 'How was it?'),
-          ...EFFORTS.map((effort) =>
-            h(
-              'button',
-              {
-                class: `portal-effort-chip is-${effort.key}${effort.rpe === Number(set.rpe) ? ' on' : ''}`,
-                type: 'button',
-                onclick: () => {
-                  set.rpe = effort.rpe;
-                  effortSet = null;
-                  persist();
-                  paint();
-                },
-              },
-              effort.label,
-            ),
-          ),
-        );
-      } else if (set.completed && effortInfo) {
-        effortNode = h(
-          'button',
-          {
-            class: `portal-set-effort-tag is-${effortInfo.key}`,
-            type: 'button',
-            title: 'Change how this set felt',
-            onclick: () => {
-              effortSet = set;
-              paint();
-            },
-          },
-          effortInfo.label,
-        );
-      }
-
       return h(
         'div',
-        { class: `portal-set-row${inputs.length === 1 ? ' is-single' : ''}${set.completed ? ' completed' : ''}` },
+        {
+          class: `portal-set-row${inputs.length === 1 ? ' is-single' : ''}${counted ? ' has-rpe' : ''}${set.completed ? ' completed' : ''}`,
+        },
         typeButton,
         hasPrevious
           ? h(
@@ -8189,9 +8680,11 @@ function renderPortalApp(ctx, initialMe) {
             )
           : h('div', { class: 'portal-set-prev is-empty' }, '—'),
         ...inputs,
+        counted ? rpeCell : null,
         check,
-        effortNode,
-        oneRm > 0
+        // Only a set that beats last time earns the line: an estimate on every
+        // row is noise between the numbers the member is actually typing.
+        oneRm > 0 && beatsPrevious
           ? h(
               'div',
               {
@@ -8206,6 +8699,427 @@ function renderPortalApp(ctx, initialMe) {
         suggestNode,
       );
     }
+
+    /** This row's set from last session (see setRow), or null. */
+    function previousSetOf(exercise, set, index) {
+      const type = logTypeOf(exercise);
+      const last = exercise.last_session;
+      if ((type === 'weight_reps' || type === 'reps') && Array.isArray(last) && last.length && set.set_type !== 'warmup') {
+        const working = exercise.sets.slice(0, index).filter((s) => s.set_type !== 'warmup').length;
+        if (last[working]) return last[working];
+      }
+      return exercise.previous ?? null;
+    }
+
+    /**
+     * A number that's probably a typo — 58 reps where last time was 10, or
+     * 250 kg where last time was 40. Ticking such a set asks first, the way
+     * Hevy does, so one slipped digit doesn't become a PR in the history.
+     */
+    function unusualValueOf(exercise, set, previous) {
+      const type = logTypeOf(exercise);
+      if (type !== 'weight_reps' && type !== 'reps') return null;
+      const reps = Number(set.reps) || 0;
+      const prevReps = Number(previous?.reps) || 0;
+      if (reps > 100 || (prevReps > 0 ? reps > Math.max(prevReps * 2.5, prevReps + 15) : reps > 50)) {
+        return { field: 'reps', title: 'Unusual Reps Value', question: ['Did you really just do ', String(reps), ' reps?'] };
+      }
+      if (type === 'weight_reps') {
+        const kg = Number(set.weight_kg) || 0;
+        const prevKg = Number(previous?.weight_kg) || 0;
+        if (kg > 500 || (prevKg > 0 && kg > prevKg * 2.5 && kg - prevKg > 20)) {
+          return { field: 'weight', title: 'Unusual Weight Value', question: ['Did you really just lift ', weightLabel(kg), '?'] };
+        }
+      }
+      return null;
+    }
+
+    function openUnusualSheet({ exercise, index, unusual, onEdit, onDismiss }) {
+      openModal({
+        title: unusual.title,
+        className: 'portal-filter-modal portal-warn-modal',
+        body: h(
+          'div',
+          { class: 'portal-warn' },
+          h('span', { class: 'portal-warn-icon' }, renderIcon('alert', { size: 30, stroke: 2.2 })),
+          h('h3', { class: 'portal-warn-title' }, unusual.title),
+          h('p', { class: 'portal-warn-sub' }, `Set ${index + 1} – ${exercise.exercise_name}`),
+          h('p', { class: 'portal-warn-q' }, unusual.question[0], h('strong', {}, unusual.question[1]), unusual.question[2]),
+          h(
+            'button',
+            {
+              class: 'portal-warn-btn is-primary',
+              type: 'button',
+              onclick: () => {
+                closeModal();
+                onEdit();
+              },
+            },
+            'Edit Set',
+          ),
+          h(
+            'button',
+            {
+              class: 'portal-warn-btn',
+              type: 'button',
+              onclick: () => {
+                closeModal();
+                onDismiss();
+              },
+            },
+            'Dismiss warning',
+          ),
+        ),
+      });
+    }
+
+    const RPE_SCALE = [
+      [10, 'Max effort — no reps left'],
+      [9.5, 'Maybe one more rep'],
+      [9, 'One more rep left'],
+      [8.5, 'One, maybe two more reps'],
+      [8, 'Two more reps left'],
+      [7.5, 'Two, maybe three more reps'],
+      [7, 'Three more reps left'],
+      [6, 'Four or more reps left'],
+    ];
+    function openRpeSheet(exercise, set, index) {
+      const pick = (value) => {
+        closeModal();
+        set.rpe = value;
+        persist();
+        paint();
+      };
+      openModal({
+        title: 'Log Set RPE',
+        className: 'portal-filter-modal portal-rpe-modal',
+        body: h(
+          'div',
+          { class: 'portal-rpe' },
+          h('p', { class: 'portal-rpe-sub' }, `Set ${index + 1} – ${exercise.exercise_name}`),
+          h(
+            'div',
+            { class: 'portal-rpe-list' },
+            ...RPE_SCALE.map(([value, text]) =>
+              h(
+                'button',
+                { class: `portal-rpe-row${Number(set.rpe) === value ? ' active' : ''}`, type: 'button', onclick: () => pick(value) },
+                h('strong', {}, String(value)),
+                h('span', {}, text),
+              ),
+            ),
+          ),
+          set.rpe != null ? h('button', { class: 'portal-warn-btn', type: 'button', onclick: () => pick(null) }, 'Clear RPE') : null,
+        ),
+      });
+    }
+
+    /** "1min 30s", "45s", "Off" — how Hevy writes a rest. */
+    const restText = (seconds) => {
+      if (!seconds) return 'Off';
+      const m = Math.floor(seconds / 60);
+      const sec = seconds % 60;
+      return [m ? `${m}min` : '', sec || !m ? `${sec}s` : ''].filter(Boolean).join(' ');
+    };
+    function openRestPicker(exercise) {
+      actionSheet(
+        'Rest Timer',
+        [0, 30, 45, 60, 90, 120, 150, 180, 240, 300].map((seconds) => ({
+          icon: (exercise.rest_seconds ?? 90) === seconds ? 'check' : 'timer',
+          label: restText(seconds),
+          onClick: () => {
+            exercise.rest_seconds = seconds;
+            persist();
+            paint();
+          },
+        })),
+      );
+    }
+
+    /** An RPE box: its number, or a gauge saying "not logged yet". */
+    function paintRpeCell(cell, set) {
+      const has = set.rpe != null;
+      cell.classList.toggle('has-value', has);
+      cell.setAttribute('aria-label', has ? `RPE ${Number(set.rpe)}, change` : 'Log RPE');
+      clear(cell).append(has ? String(Number(set.rpe)) : renderIcon('gauge', { size: 20, stroke: 2 }));
+    }
+
+    const RPE_STEPS = [6, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+    const RPE_INFO = {
+      10: ['Max Effort', 'No more reps left'],
+      9.5: ['Near Max', 'Maybe 1 more rep'],
+      9: ['Very Hard', 'Could do 1 more rep'],
+      8.5: ['Hard', 'Could do 1-2 more reps'],
+      8: ['Hard', 'Could do 2 more reps'],
+      7.5: ['Moderate Effort', 'Could do 2-3 more reps'],
+      7: ['Moderate Effort', 'Could do 3 more reps'],
+      6: ['Moderate Effort', 'Could do 4 more reps'],
+    };
+
+    /**
+     * The logger's own keypad, docked at the bottom like Hevy's: digits on the
+     * left; hide, +, − and next on the right. Tapping an RPE box swaps the
+     * digits for an effort slider and next for a green tick. The phone's
+     * keyboard never opens (inputmode="none"); keys type into the box by
+     * dispatching its own input event, so the box's handlers save as before.
+     */
+    const keypad = (() => {
+      let target = null; // { key: "ex:set:field", field }
+      let fresh = false; // the first key replaces what the box holds
+      let refocusing = false;
+      const main = h('div', { class: 'wk-pad-main' });
+      const side = h('div', { class: 'wk-pad-side' });
+      const pad = h('div', { class: 'wk-pad hidden', role: 'group', 'aria-label': 'Keypad' }, main, side);
+      // Keys never take the focus, so the box being typed into keeps it.
+      pad.addEventListener('pointerdown', (event) => event.preventDefault());
+      pad.addEventListener('mousedown', (event) => event.preventDefault());
+
+      const appEl = () => body.closest('.portal-app');
+      const node = () => (target ? body.querySelector(`[data-kp="${target.key}"]`) : null);
+      const setOf = () => {
+        const [ex, idx] = target.key.split(':').map(Number);
+        return state.exercises[ex]?.sets[idx] ?? null;
+      };
+      const key = (content, onPress, cls = '') =>
+        h('button', { class: `wk-key ${cls}`, type: 'button', onclick: () => (sound.tapHaptic?.(), onPress()) }, content);
+
+      function write(value) {
+        const el = node();
+        if (!el) return;
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      function typeDigit(d) {
+        const el = node();
+        if (!el) return;
+        let v = fresh ? '' : el.value;
+        fresh = false;
+        if (d === '.') {
+          if (!['weight', 'distance'].includes(target.field) || v.includes('.')) return;
+          if (v === '') v = '0';
+        }
+        if (target.field === 'reps' && v.replace(/\D/g, '').length >= 4) return;
+        // A lone 0 is replaced by the next digit: "0", "5" types 5, not 05.
+        if (v === '0' && d !== '.' && target.field !== 'time') v = '';
+        write(v + d);
+      }
+      function backspace() {
+        const el = node();
+        if (!el) return;
+        const v = fresh ? '' : el.value.slice(0, -1);
+        fresh = false;
+        write(v);
+      }
+      function nudge(dir) {
+        const el = node();
+        if (!el) return;
+        const step = { weight: weightUnit.get() === 'lb' ? 5 : 2.5, reps: 1, distance: 0.1 }[target.field];
+        if (!step) return;
+        const next = Math.max(0, Math.round(((Number(el.value) || Number(el.placeholder) || 0) + dir * step) * 100) / 100);
+        fresh = false;
+        write(String(next));
+      }
+      function goNext() {
+        // KG -> REPS -> that set's RPE -> the next set's KG, as Hevy steps.
+        const boxes = [...body.querySelectorAll('input[data-pad], .portal-set-rpe[data-kp]')].filter(
+          (el) => !el.closest('.portal-set-row.completed'),
+        );
+        const at = boxes.indexOf(node());
+        const next = at >= 0 ? boxes[at + 1] : null;
+        if (!next) close();
+        else if (next.matches('.portal-set-rpe')) open(next, 'rpe');
+        else next.focus();
+      }
+
+      function digits() {
+        const dot = ['weight', 'distance'].includes(target.field);
+        clear(main).append(
+          h(
+            'div',
+            { class: 'wk-pad-digits' },
+            ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => key(d, () => typeDigit(d))),
+            dot ? key('.', () => typeDigit('.')) : h('span'),
+            key('0', () => typeDigit('0')),
+            key(renderIcon('backspace', { size: 24, stroke: 1.8 }), backspace),
+          ),
+        );
+        const timed = target.field === 'time';
+        clear(side).append(
+          key(renderIcon('keyboard', { size: 22 }), close, 'is-side'),
+          key(renderIcon('plus', { size: 24 }), () => nudge(1), `is-side${timed ? ' is-off' : ''}`),
+          key(renderIcon('minus', { size: 24 }), () => nudge(-1), `is-side${timed ? ' is-off' : ''}`),
+          key(renderIcon('arrowRight', { size: 26, stroke: 2.2 }), goNext, 'is-next'),
+        );
+      }
+
+      function rpePanel() {
+        const set = setOf();
+        const value = h('strong', { class: 'wk-rpe-value' });
+        const title = h('div', { class: 'wk-rpe-title' });
+        const sub = h('div', { class: 'wk-rpe-sub' });
+        const stops = RPE_STEPS.map((v) => h('span', { class: 'wk-rpe-stop' }, String(v)));
+        const track = h('div', { class: 'wk-rpe-track' }, ...stops);
+        const show = () => {
+          const v = set?.rpe != null ? Number(set.rpe) : null;
+          value.textContent = v != null ? String(v) : '–';
+          title.textContent = v != null ? RPE_INFO[v]?.[0] ?? '' : 'Rate your effort';
+          sub.textContent = v != null ? RPE_INFO[v]?.[1] ?? '' : 'Slide to how hard that set was';
+          stops.forEach((el, i) => el.classList.toggle('on', RPE_STEPS[i] === v));
+        };
+        const pick = (v) => {
+          if (!set || set.rpe === v) return;
+          set.rpe = v;
+          persist();
+          const cell = node();
+          if (cell) paintRpeCell(cell, set);
+          show();
+        };
+        const fromX = (x) => {
+          const r = track.getBoundingClientRect();
+          const i = Math.round(((x - r.left) / r.width) * RPE_STEPS.length - 0.5);
+          pick(RPE_STEPS[Math.max(0, Math.min(RPE_STEPS.length - 1, i))]);
+        };
+        track.addEventListener('pointerdown', (event) => {
+          track.setPointerCapture(event.pointerId);
+          fromX(event.clientX);
+        });
+        track.addEventListener('pointermove', (event) => {
+          if (track.hasPointerCapture(event.pointerId)) fromX(event.clientX);
+        });
+        const [exIdx, setIdx] = target.key.split(':').map(Number);
+        clear(main).append(
+          h(
+            'div',
+            { class: 'wk-rpe' },
+            h(
+              'button',
+              {
+                class: 'wk-rpe-help',
+                type: 'button',
+                'aria-label': 'What is RPE?',
+                onclick: () => openRpeSheet(state.exercises[exIdx], set, setIdx),
+              },
+              '?',
+            ),
+            value,
+            title,
+            sub,
+            track,
+          ),
+        );
+        const step = (dir) => {
+          const cur = set?.rpe != null ? RPE_STEPS.indexOf(Number(set.rpe)) : dir > 0 ? -1 : RPE_STEPS.length;
+          pick(RPE_STEPS[Math.max(0, Math.min(RPE_STEPS.length - 1, cur + dir))]);
+        };
+        clear(side).append(
+          key(renderIcon('keyboard', { size: 22 }), close, 'is-side'),
+          key(renderIcon('plus', { size: 24 }), () => step(1), 'is-side'),
+          key(renderIcon('minus', { size: 24 }), () => step(-1), 'is-side'),
+          key(renderIcon('check', { size: 26, stroke: 2.4 }), confirmRpe, 'is-done'),
+        );
+        show();
+      }
+
+      /** Focuses the first box of the next set still to do after `key`'s box;
+       * the keypad stays up until the member puts it away. */
+      function advanceFrom(fromKey) {
+        const all = [...body.querySelectorAll('input[data-pad], .portal-set-rpe[data-kp]')];
+        const at = all.findIndex((el) => el.dataset.kp === fromKey);
+        const next = all.slice(at + 1).find((el) => el.matches('input') && !el.closest('.portal-set-row.completed'));
+        if (next) next.focus();
+        else close();
+      }
+
+      /** The RPE panel's green tick: ticks the set (asking first about a
+       * typo-looking number, as the row's own tick does) and moves on. */
+      function confirmRpe() {
+        const fromKey = target.key;
+        const [exIdx, setIdx] = fromKey.split(':').map(Number);
+        const exercise = state.exercises[exIdx];
+        const set = exercise?.sets[setIdx];
+        if (!set || set.completed) return advanceFrom(fromKey);
+        const unusual = set.unusual_ok ? null : unusualValueOf(exercise, set, previousSetOf(exercise, set, setIdx));
+        if (!unusual) {
+          toggleSet(exercise, set);
+          return advanceFrom(fromKey);
+        }
+        close();
+        openUnusualSheet({
+          exercise,
+          set,
+          index: setIdx,
+          unusual,
+          onEdit: () => body.querySelector(`[data-kp="${exIdx}:${setIdx}:${unusual.field}"]`)?.focus(),
+          onDismiss: () => {
+            set.unusual_ok = true;
+            toggleSet(exercise, set);
+            advanceFrom(fromKey);
+          },
+        });
+      }
+
+      function mark() {
+        for (const el of body.querySelectorAll('.kp-active')) el.classList.remove('kp-active');
+        node()?.classList.add('kp-active');
+      }
+
+      function open(el, field) {
+        if (refocusing) return;
+        const sameRpe = field === 'rpe' && target?.key === el.dataset.kp;
+        target = { key: el.dataset.kp, field };
+        fresh = true;
+        if (field === 'rpe') {
+          if (document.activeElement?.matches?.('input[data-kp]')) document.activeElement.blur();
+          if (!sameRpe) rpePanel();
+        } else {
+          digits();
+        }
+        pad.classList.toggle('is-rpe', field === 'rpe');
+        pad.classList.remove('hidden');
+        appEl()?.classList.add('has-keypad');
+        mark();
+        // Keep the box in view above the keypad.
+        requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+      }
+
+      function close() {
+        if (!target && pad.classList.contains('hidden')) return;
+        target = null;
+        pad.classList.add('hidden');
+        appEl()?.classList.remove('has-keypad');
+        for (const el of body.querySelectorAll('.kp-active')) el.classList.remove('kp-active');
+        if (document.activeElement?.matches?.('input[data-kp]')) document.activeElement.blur();
+      }
+
+      /** After a repaint: point back at the rebuilt box, or close if it's gone. */
+      function refresh() {
+        if (!target) return;
+        const el = node();
+        if (!el) return close();
+        mark();
+        if (target.field !== 'rpe' && document.activeElement !== el) {
+          refocusing = true;
+          el.focus({ preventScroll: true });
+          refocusing = false;
+        }
+      }
+
+      // A tap anywhere but the keypad or another box puts it away.
+      const onOutside = (event) => {
+        if (!target || pad.contains(event.target) || event.target.closest?.('[data-kp]')) return;
+        close();
+      };
+      document.addEventListener('pointerdown', onOutside, true);
+      registerCleanup(() => {
+        close();
+        document.removeEventListener('pointerdown', onOutside, true);
+      });
+
+      return { node: pad, open, close, refresh };
+    })();
+    // Only touch screens get the keypad for the number boxes; a laptop keeps
+    // its real keyboard. RPE always uses the panel.
+    const padTouch = Boolean(window.matchMedia?.('(pointer: coarse)').matches);
 
     function moveExercise(from, to) {
       if (to < 0 || to >= state.exercises.length) return;
@@ -8238,12 +9152,31 @@ function renderPortalApp(ctx, initialMe) {
     }
 
     function exerciseCard(exercise, exIndex) {
+      const type = logTypeOf(exercise);
+      const counted = type === 'weight_reps' || type === 'reps';
       const columns = {
         weight_reps: [weightHeading(exercise), 'Reps'],
         reps: ['Reps'],
         duration: ['Time'],
         distance_duration: ['Km', 'Time'],
-      }[logTypeOf(exercise)];
+      }[type];
+      // The note opens under the chips; one already started stays open.
+      const noteBox =
+        exercise.note != null
+          ? h('textarea', {
+              class: 'portal-ex-note',
+              rows: 1,
+              maxlength: 300,
+              placeholder: 'Add notes here...',
+              value: exercise.note,
+              oninput: (event) => {
+                exercise.note = event.target.value;
+                event.target.style.height = 'auto';
+                event.target.style.height = `${event.target.scrollHeight}px`;
+                persist();
+              },
+            })
+          : null;
       return h(
         'div',
         { class: 'portal-ex-card' },
@@ -8252,104 +9185,86 @@ function renderPortalApp(ctx, initialMe) {
           { class: 'portal-ex-head' },
           exerciseThumbButton(exercise),
           h(
-            'div',
-            { class: 'portal-ex-title' },
-            h('div', { class: 'portal-ex-name' }, exercise.exercise_name),
-            h(
-              'div',
-              { class: 'portal-ex-meta' },
-              h('span', { class: 'portal-muscle-badge' }, capitalise(muscleLabel(exercise.muscle_group))),
-              exercise.target_reps ? h('span', { class: 'portal-ex-target' }, `Target ${exercise.target_sets} × ${exercise.target_reps}`) : null,
-            ),
+            'button',
+            { class: 'portal-ex-title', type: 'button', onclick: () => openExerciseDetail(exercise) },
+            h('span', { class: 'portal-ex-name' }, exercise.exercise_name),
+            exercise.target_reps ? h('span', { class: 'portal-ex-target' }, `Target ${exercise.target_sets} × ${exercise.target_reps}`) : null,
           ),
           h(
-            'div',
-            { class: 'portal-ex-actions' },
-            h(
-              'button',
-              {
-                class: 'portal-rest-chip',
-                type: 'button',
-                title: 'Rest between sets — tap to change',
-                onclick: () => {
-                  // Off is in the cycle: a cardio block or a single hold
-                  // often wants no rest clock at all.
-                  const cycle = [0, ...REST_PRESETS];
-                  exercise.rest_seconds = cycle[(cycle.indexOf(exercise.rest_seconds ?? 90) + 1) % cycle.length];
-                  persist();
-                  paint();
-                },
-              },
-              renderIcon('timer', { size: 16 }),
-              h('span', {}, exercise.rest_seconds === 0 ? 'Off' : `${exercise.rest_seconds ?? 90}s`),
-            ),
-            h(
-              'button',
-              {
-                class: 'portal-ex-menu',
-                type: 'button',
-                title: 'Exercise options',
-                'aria-label': `${exercise.exercise_name} options`,
-                onclick: () => openExerciseMenu(exercise, exIndex),
-              },
-              renderIcon('more', { size: 20, stroke: 2.5 }),
-            ),
+            'button',
+            {
+              class: 'portal-ex-menu',
+              type: 'button',
+              title: 'Exercise options',
+              'aria-label': `${exercise.exercise_name} options`,
+              onclick: () => openExerciseMenu(exercise, exIndex),
+            },
+            renderIcon('more', { size: 22, stroke: 2.5 }),
           ),
         ),
         h(
           'div',
-          { class: `portal-set-row portal-set-header${columns.length === 1 ? ' is-single' : ''}` },
+          { class: 'portal-ex-chips' },
+          h(
+            'button',
+            { class: 'portal-ex-chip', type: 'button', title: 'Rest between sets', onclick: () => openRestPicker(exercise) },
+            renderIcon('timer', { size: 18 }),
+            h('span', {}, `Rest: ${restText(exercise.rest_seconds ?? 90)}`),
+          ),
+          noteBox
+            ? null
+            : h(
+                'button',
+                {
+                  class: 'portal-ex-chip',
+                  type: 'button',
+                  onclick: () => {
+                    exercise.note = '';
+                    persist();
+                    paint();
+                    body.querySelectorAll('.portal-ex-card')[exIndex]?.querySelector('.portal-ex-note')?.focus();
+                  },
+                },
+                renderIcon('edit', { size: 17 }),
+                h('span', {}, 'Note'),
+              ),
+        ),
+        noteBox,
+        h(
+          'div',
+          { class: `portal-set-row portal-set-header${columns.length === 1 ? ' is-single' : ''}${counted ? ' has-rpe' : ''}` },
           h('span', {}, 'Set'),
           h('span', {}, 'Previous'),
           ...columns.map((label) => h('span', {}, label)),
-          h('span', {}, ''),
+          counted ? h('span', {}, 'RPE') : null,
+          h('span', { class: 'portal-set-header-check' }, renderIcon('check', { size: 16, stroke: 2.4 })),
         ),
         ...exercise.sets.map((set, index) => setRow(exercise, set, index)),
         h(
-          'div',
-          { class: 'portal-ex-foot' },
-          h(
-            'button',
-            {
-              class: 'portal-ex-btn is-add',
-              type: 'button',
-              onclick: () => {
-                const last = exercise.sets[exercise.sets.length - 1];
-                // A new set inherits the previous one's load: on a straight-sets
-                // day that is what it will be, and it is one fewer thing to type.
-                exercise.sets.push({
-                  set_type: 'normal',
-                  weight_display: last?.weight_display ?? '',
-                  weight_kg: last?.weight_kg ?? 0,
-                  reps: last?.reps ?? '',
-                  duration_seconds: last?.duration_seconds ?? 0,
-                  distance_km: last?.distance_km ?? '',
-                  completed: false,
-                });
-                persist();
-                paint();
-              },
+          'button',
+          {
+            class: 'portal-ex-add-set',
+            type: 'button',
+            onclick: () => {
+              const last = exercise.sets[exercise.sets.length - 1];
+              // A new set inherits the previous one's load: on a straight-sets
+              // day that is what it will be, and it is one fewer thing to type.
+              // Sets are removed from the set number's sheet, as in Hevy.
+              exercise.sets.push({
+                set_type: 'normal',
+                weight_display: last?.weight_display ?? '',
+                weight_kg: last?.weight_kg ?? 0,
+                reps: last?.reps ?? '',
+                duration_seconds: last?.duration_seconds ?? 0,
+                distance_km: last?.distance_km ?? '',
+                completed: false,
+              });
+              persist();
+              paint();
             },
-            renderIcon('plus', { size: 18, stroke: 2.2 }),
-            h('span', {}, 'Add set'),
-          ),
-          h(
-            'button',
-            {
-              class: 'portal-ex-btn is-remove',
-              type: 'button',
-              // The last set stays: an exercise with no rows is removed from
-              // its menu, not by emptying it.
-              disabled: exercise.sets.length <= 1,
-              onclick: () => {
-                exercise.sets.pop();
-                persist();
-                paint();
-              },
-            },
-            renderIcon('trash', { size: 17 }),
-            h('span', {}, 'Remove set'),
-          ),
+          },
+          renderIcon('plus', { size: 18, stroke: 2.2 }),
+          h('span', {}, 'Add Set'),
         ),
       );
     }
@@ -8397,6 +9312,8 @@ function renderPortalApp(ctx, initialMe) {
             // two should not have a 0 kg × 0 set in their history.
             .filter((row) => row.set.completed || row.reps > 0 || row.duration_seconds > 0 || row.distance_km > 0)
             .map(({ set, ...values }, index) => ({
+              // The exercise's note rides on its first set (sets carry notes).
+              notes: index === 0 && exercise.note?.trim() ? exercise.note.trim().slice(0, 300) : undefined,
               exercise_name: exercise.exercise_name,
               muscle_group: exercise.muscle_group,
               set_number: index + 1,
@@ -8539,20 +9456,47 @@ function renderPortalApp(ctx, initialMe) {
     }
 
     const metaNode = h('div', { class: 'portal-session-totals' });
+    const durationNode = h('strong', { class: 'portal-session-duration' });
     function paintMeta() {
       const t = totals();
-      const stat = (icon, value, label) =>
-        h(
-          'div',
-          { class: 'portal-session-stat' },
-          h('div', { class: 'portal-session-stat-value' }, renderIcon(icon, { size: 20, stroke: 2.2 }), h('strong', {}, value)),
-          h('span', {}, label),
-        );
+      // The muscles this session works most, as the body-map thumbnails Hevy
+      // keeps at the end of the strip.
+      const weightOf = new Map();
+      for (const ex of state.exercises) {
+        const done = ex.sets.filter((s) => s.completed).length || 0.1;
+        weightOf.set(ex.muscle_group, (weightOf.get(ex.muscle_group) ?? 0) + done);
+      }
+      const top = [...weightOf.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([key]) => muscleArtUrl(key))
+        .filter(Boolean)
+        .slice(0, 2);
+      const stat = (label, value) => h('div', { class: 'portal-session-stat' }, h('span', {}, label), value);
       clear(metaNode).append(
-        stat('weight', weightLabel(Math.round(t.volume * 10) / 10), 'Volume'),
-        stat('sets', String(t.sets), 'Sets'),
-        stat('refresh', String(t.reps), 'Reps'),
+        h(
+          'button',
+          {
+            class: `portal-session-stat is-duration${state.paused_at ? ' is-paused' : ''}`,
+            type: 'button',
+            title: 'Edit duration',
+            onclick: openDurationSheet,
+          },
+          h('span', {}, state.paused_at ? 'Paused' : 'Duration'),
+          durationNode,
+        ),
+        stat('Volume', h('strong', {}, weightLabel(Math.round(t.volume * 10) / 10))),
+        stat('Sets', h('strong', {}, String(t.sets))),
+        top.length ? h('div', { class: 'portal-session-body' }, ...top.map((src) => h('img', { src, alt: '', decoding: 'async' }))) : null,
       );
+      paintDuration();
+    }
+    /** "58s", "12min 5s", "1h 4min" — the strip's duration, as Hevy writes it. */
+    function paintDuration() {
+      const total = Math.max(0, Math.floor(sessionSeconds(state)));
+      const hours = Math.floor(total / 3600);
+      const mins = Math.floor((total % 3600) / 60);
+      const secs = total % 60;
+      durationNode.textContent = hours ? `${hours}h ${mins}min` : mins ? `${mins}min ${secs}s` : `${secs}s`;
     }
 
     const finishBtn = h('button', { class: 'portal-session-btn is-finish', type: 'button' }, 'Finish');
@@ -8781,88 +9725,58 @@ function renderPortalApp(ctx, initialMe) {
             paint();
           },
         },
+        sound.getSoundEnabled()
+          ? { icon: 'volumeX', label: 'Mute sounds', onClick: () => sound.setSoundEnabled(false) }
+          : { icon: 'volume', label: 'Unmute sounds', onClick: () => sound.setSoundEnabled(true) },
         { icon: 'trash', label: 'Discard workout', danger: true, onClick: confirmDiscard },
       ]);
     }
 
     function paint() {
-      const soundOn = sound.getSoundEnabled();
       runningHolds = [];
       clear(body).append(
+        // The bar and the stats strip pin together at the top while the
+        // exercises scroll under them, as Hevy's do.
         h(
+          'div',
+          { class: 'portal-session-head' },
+          h(
           'div',
           { class: 'portal-session-bar' },
           h(
-            'div',
-            { class: 'portal-session-top' },
-            h(
-              'button',
-              { class: 'portal-session-name', type: 'button', title: 'Rename workout', onclick: openRename },
-              h('span', {}, state.workout_name),
-              renderIcon('edit', { size: 17 }),
-            ),
-            h(
-              'div',
-              { class: 'portal-session-top-actions' },
-              h(
-                'button',
-                { class: 'portal-session-more', type: 'button', title: 'Workout options', 'aria-label': 'Workout options', onclick: openSessionMenu },
-                renderIcon('more', { size: 22, stroke: 2.6 }),
-              ),
-            ),
+            'button',
+            { class: 'portal-session-name', type: 'button', title: 'Rename workout', onclick: openRename },
+            h('span', {}, state.workout_name),
+            renderIcon('edit', { size: 16 }),
           ),
           h(
-            'div',
-            { class: 'portal-session-row' },
-            h(
-              'button',
-              {
-                class: `portal-session-time${state.paused_at ? ' is-paused' : ''}`,
-                type: 'button',
-                title: 'Edit duration',
-                'aria-label': state.paused_at ? 'Workout paused — edit duration' : 'Edit duration',
-                onclick: openDurationSheet,
-              },
-              renderIcon(state.paused_at ? 'pause' : 'timer', { size: 20, stroke: 2 }),
-              clockNode,
-            ),
-            h(
-              'div',
-              { class: 'portal-session-actions' },
-              h(
-                'button',
-                {
-                  class: 'portal-sound-toggle',
-                  type: 'button',
-                  'aria-label': soundOn ? 'Mute sounds' : 'Unmute sounds',
-                  title: soundOn ? 'Mute sounds' : 'Unmute sounds',
-                  onclick: () => {
-                    sound.setSoundEnabled(!soundOn);
-                    paint();
-                  },
-                },
-                renderIcon(soundOn ? 'volume' : 'volumeX', { size: 17 }),
-              ),
-              h('button', { class: 'portal-session-btn is-discard', type: 'button', onclick: confirmDiscard }, 'Discard'),
-              finishBtn,
-            ),
+            'button',
+            { class: 'portal-session-more', type: 'button', title: 'Workout options', 'aria-label': 'Workout options', onclick: openSessionMenu },
+            renderIcon('more', { size: 22, stroke: 2.6 }),
           ),
+          finishBtn,
+          ),
+          metaNode,
         ),
-        metaNode,
         ...state.exercises.map(exerciseCard),
         h(
           'button',
           { class: 'portal-add-ex', type: 'button', onclick: openAddExercise },
           renderIcon('plus', { size: 20, stroke: 2.2 }),
-          h('span', {}, 'Add exercise'),
+          h('span', {}, 'Add Exercise'),
         ),
+        h('button', { class: 'portal-session-discard', type: 'button', onclick: confirmDiscard }, 'Discard Workout'),
         rest.node,
       );
       paintMeta();
+      // A note box sized to what it already holds.
+      for (const box of body.querySelectorAll('.portal-ex-note')) box.style.height = `${box.scrollHeight}px`;
+      keypad.refresh();
     }
 
     const paintClock = () => {
       clockNode.textContent = clockFrom(sessionSeconds(state));
+      paintDuration();
       for (const { set, node } of runningHolds) node.value = durationLabel(elapsedOf(set));
     };
     paintClock();
@@ -8878,7 +9792,7 @@ function renderPortalApp(ctx, initialMe) {
     // The coach button is a sibling of the body for the same reason as the
     // Diet tab's +: the body's entry animation would pin it to the body. It
     // also stays out of paint(), so a repaint never rebuilds it.
-    return h('div', { class: 'portal-session-wrap' }, body, coachFab('workout', () => askCoach()));
+    return h('div', { class: 'portal-session-wrap' }, body, keypad.node, coachFab('workout', () => askCoach()));
   }
 
   /* ---------------------------------------------------- Member-built plans */
@@ -9802,6 +10716,18 @@ function renderPortalApp(ctx, initialMe) {
         miniStat('weight', history.stats.total_workouts, 'Workouts', 'orange'),
         miniStat('trendUp', Math.round(history.stats.lifetime_volume_kg / 1000), 'Tonnes lifted', 'green'),
         miniStat('trophy', prs.items.length, 'Records', 'purple'),
+      ),
+    );
+
+    /* Gym leaderboard entry */
+    leaderboardsOn = prs.leaderboard_enabled !== false;
+    if (leaderboardsOn) body.append(
+      h(
+        'button',
+        { class: 'portal-lb-entry', type: 'button', onclick: openLeaderboardHub },
+        h('span', { class: 'portal-lb-entry-icon' }, renderIcon('trophy', { size: 20 })),
+        h('span', { class: 'portal-lb-entry-text' }, h('strong', {}, 'Gym leaderboard'), h('span', {}, 'See where you rank and compare lifts')),
+        renderIcon('chevronRight', { size: 18 }),
       ),
     );
 
@@ -12769,11 +13695,29 @@ function renderPortalApp(ctx, initialMe) {
   // A student opening the institute on a laptop (to watch lectures, sit a
   // test) gets a full-screen layout with a sidebar instead of the phone
   // frame; see .portal-frame.is-wide in app.css.
-  return h(
-    'div',
-    { class: isCoaching() ? 'portal-frame is-wide' : 'portal-frame' },
-    h('div', { class: 'portal-app' }, topbar, content, tabbar),
-  );
+  const app = h('div', { class: 'portal-app' }, topbar, content, tabbar);
+  // A native app's tab bar stays behind the keyboard; in the WebView the page
+  // resizes and the bar rides up over what the member is typing into (the
+  // logger's KG / REPS boxes). While a typing field has focus, the bar goes.
+  // focusout waits a tick so hopping KG -> REPS doesn't flash it back in.
+  const isTypingField = (el) =>
+    el?.isContentEditable ||
+    el?.tagName === 'TEXTAREA' ||
+    (el?.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|color|file|image|hidden)$/.test(el.type));
+  let typingTimer = null;
+  app.addEventListener('focusin', (e) => {
+    if (!isTypingField(e.target)) return;
+    clearTimeout(typingTimer);
+    app.classList.add('is-typing');
+  });
+  app.addEventListener('focusout', () => {
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      if (!isTypingField(document.activeElement)) app.classList.remove('is-typing');
+    }, 60);
+  });
+
+  return h('div', { class: isCoaching() ? 'portal-frame is-wide' : 'portal-frame' }, app);
 }
 
 /* --------------------------------------------------------------- entry --- */

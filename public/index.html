@@ -43,11 +43,13 @@
       }
       // Set before first paint so the boot sequence (which awaits network
       // calls before setVertical() runs) never flashes the wrong mode. The
-      // member app defaults to light, the staff app to dark (see vertical.js).
+      // member app defaults to the phone's theme, the staff app to dark (see
+      // vertical.js).
       var memberApp = location.hash.indexOf('#/portal') === 0;
       var savedMode = localStorage.getItem(memberApp ? 'member_app_mode' : 'app_mode');
+      var systemDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
       document.body.dataset.mode =
-        savedMode === 'light' || savedMode === 'dark' ? savedMode : memberApp ? 'light' : 'dark';
+        savedMode === 'light' || savedMode === 'dark' ? savedMode : memberApp && !systemDark ? 'light' : 'dark';
       // A signed-out member lands on the portal sign-in, which is always
       // black and gold whatever the mode — so the boot splash in front of it
       // goes dark too, rather than flashing white first. Flagged on <html>

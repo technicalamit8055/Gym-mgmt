@@ -1894,6 +1894,240 @@ async function renderAddonSettings(reload) {
   );
 }
 
+/* ── Leaderboard moderation ─────────────────────────────────────────────── */
+
+const LB_METRIC_OPTIONS = [
+  { value: 'heaviest', label: 'Heaviest weight' },
+  { value: 'e1rm', label: 'One rep max (est.)' },
+  { value: 'volume', label: 'Best set volume' },
+];
+const kg = (n) => `${Math.round(Number(n) * 10) / 10} kg`;
+const memberLink = (r) =>
+  h(
+    'div',
+    {},
+    h('a', { href: `#/members/${r.member_id}` }, r.member_name || 'Member'),
+    r.display_name ? h('div', { class: 'muted', style: 'font-size:12px' }, `shows as “${r.display_name}”`) : null,
+  );
+
+function blockMember(row, reload) {
+  const reason = h('input', { class: 'input', type: 'text', maxlength: 200, placeholder: 'Optional, e.g. kept logging fake lifts' });
+  confirmDialog({
+    title: `Take ${row.member_name} off the leaderboard?`,
+    // confirmDialog wraps this in a <p>, so spans rather than block elements.
+    message: h(
+      'span',
+      { style: 'display:grid;gap:10px' },
+      h('span', {}, 'They disappear from every board and can’t rejoin until you unblock them. Their own workout history and records stay as they are.'),
+      reason,
+    ),
+    confirmLabel: 'Block',
+    danger: true,
+    onConfirm: async () => {
+      await api.blockLeaderboardMember(row.member_id, reason.value.trim());
+      toast(`${row.member_name} is off the leaderboard`);
+      await reload();
+    },
+  });
+}
+
+async function liftAction(action, row, reload) {
+  await api.leaderboardLift(action, { log_id: row.log_id, exercise_name: row.exercise_name });
+  toast({ remove: 'Lift removed from the leaderboard', restore: 'Lift restored', approve: 'Marked as checked' }[action]);
+  await reload();
+}
+
+async function renderLeaderboardModeration(reload) {
+  if (!session.can('admin', 'manager', 'trainer')) {
+    return h('div', { class: 'empty' }, 'Only owners, managers and trainers can moderate the leaderboard.');
+  }
+  const data = await api.leaderboardOverview();
+  const canEdit = session.managesBilling;
+
+  /* Settings */
+  const form = buildForm(
+    [
+      {
+        name: 'enabled',
+        label: 'Gym leaderboard in the member app',
+        type: 'select',
+        value: data.settings.enabled ? '1' : '0',
+        options: [
+          { value: '1', label: 'On: members can rank and compare lifts' },
+          { value: '0', label: 'Off: hide leaderboards everywhere' },
+        ],
+        full: true,
+      },
+      {
+        name: 'default_visible',
+        label: 'Members who haven’t chosen',
+        type: 'select',
+        value: data.settings.default_visible ? '1' : '0',
+        options: [
+          { value: '0', label: 'Hidden until they join (recommended)' },
+          { value: '1', label: 'Shown unless they hide themselves' },
+        ],
+        full: true,
+        hint: 'A member’s own choice always wins. Only members who never answered the join prompt follow this.',
+      },
+    ],
+    {
+      submitLabel: 'Save',
+      onSubmit: async (values) => {
+        await api.updateLeaderboardSettings({ enabled: values.enabled === '1', default_visible: values.default_visible === '1' });
+        toast('Leaderboard settings saved');
+        await reload();
+      },
+    },
+  );
+  form.querySelector('.modal-foot').style.padding = '8px 0 0';
+  if (!canEdit) for (const input of form.querySelectorAll('input, select, textarea, button')) input.disabled = true;
+
+  /* Lifts to check */
+  const flagged = table(
+    [
+      { label: 'Member', render: memberLink },
+      { label: 'Exercise', render: (r) => r.exercise_name },
+      { label: 'Lift', render: (r) => h('strong', {}, `${kg(r.weight_kg)} × ${r.reps}`) },
+      {
+        label: 'Previous best',
+        render: (r) => h('span', {}, kg(r.previous_best_kg), h('span', { class: 'fit-lb-jump' }, ` +${Math.round((r.weight_kg / r.previous_best_kg - 1) * 100)}%`)),
+      },
+      { label: 'Date', render: (r) => r.log_date },
+      {
+        label: '',
+        align: 'right',
+        render: (r) =>
+          h(
+            'div',
+            { class: 'fit-lb-actions' },
+            h('button', { class: 'btn sm', type: 'button', onclick: clickAsync(() => liftAction('approve', r, reload)) }, 'It’s real'),
+            h('button', { class: 'btn sm danger', type: 'button', onclick: clickAsync(() => liftAction('remove', r, reload)) }, 'Remove'),
+            h('button', { class: 'btn sm ghost', type: 'button', onclick: () => blockMember(r, reload) }, 'Block'),
+          ),
+      },
+    ],
+    data.flagged,
+    { empty: 'Nothing to check. Big jumps over a member’s previous best show up here.' },
+  );
+
+  /* Board viewer */
+  const exerciseSelect = h('select', {}, ...data.exercises.map((name) => h('option', { value: name }, name)));
+  const metricSelect = h('select', {}, ...LB_METRIC_OPTIONS.map((o) => h('option', { value: o.value }, o.label)));
+  const periodSelect = h('select', {}, h('option', { value: 'all' }, 'All time'), h('option', { value: 'month' }, 'This month'));
+  const boardBody = h('div', {});
+  async function loadBoard() {
+    clear(boardBody).append(h('div', { class: 'empty' }, 'Loading…'));
+    try {
+      const res = await api.leaderboardBoard({ exercise: exerciseSelect.value, metric: metricSelect.value, period: periodSelect.value });
+      clear(boardBody).append(
+        table(
+          [
+            { label: '#', render: (r) => h('strong', {}, String(r.rank)) },
+            { label: 'Member', render: memberLink },
+            { label: 'Best set', render: (r) => `${kg(r.weight_kg)} × ${r.reps}` },
+            { label: 'Score', render: (r) => h('span', {}, kg(r.value_kg), r.reviewed ? h('span', { class: 'fit-lb-ok', title: 'Checked by staff' }, ' ✓') : null) },
+            { label: 'Date', render: (r) => r.log_date },
+            {
+              label: '',
+              align: 'right',
+              render: (r) =>
+                h(
+                  'div',
+                  { class: 'fit-lb-actions' },
+                  h('button', { class: 'btn sm danger', type: 'button', onclick: clickAsync(() => liftAction('remove', r, reload)) }, 'Remove lift'),
+                  h('button', { class: 'btn sm ghost', type: 'button', onclick: () => blockMember(r, reload) }, 'Block'),
+                ),
+            },
+          ],
+          res.items,
+          { empty: 'No one on this board yet' },
+        ),
+      );
+    } catch (err) {
+      clear(boardBody).append(h('div', { class: 'empty' }, err.message || 'Could not load the board'));
+    }
+  }
+  for (const el of [exerciseSelect, metricSelect, periodSelect]) el.addEventListener('change', loadBoard);
+  loadBoard();
+
+  /* Removed and blocked */
+  const hidden = table(
+    [
+      { label: 'Member', render: memberLink },
+      { label: 'Exercise', render: (r) => r.exercise_name },
+      { label: 'Heaviest', render: (r) => kg(r.weight_kg) },
+      { label: 'Date', render: (r) => r.log_date },
+      {
+        label: '',
+        align: 'right',
+        render: (r) => h('button', { class: 'btn sm', type: 'button', onclick: clickAsync(() => liftAction('restore', r, reload)) }, 'Restore'),
+      },
+    ],
+    data.hidden,
+    { empty: 'No lifts removed' },
+  );
+  const blocked = table(
+    [
+      { label: 'Member', render: memberLink },
+      { label: 'Reason', render: (r) => h('span', { class: 'muted' }, r.blocked_reason || '—') },
+      {
+        label: '',
+        align: 'right',
+        render: (r) =>
+          h(
+            'button',
+            {
+              class: 'btn sm',
+              type: 'button',
+              onclick: clickAsync(async () => {
+                await api.unblockLeaderboardMember(r.member_id);
+                toast(`${r.member_name} can join the leaderboard again`);
+                await reload();
+              }),
+            },
+            'Unblock',
+          ),
+      },
+    ],
+    data.blocked,
+    { empty: 'No one blocked' },
+  );
+
+  const card = (icon, title, ...children) =>
+    h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h3', { class: 'fit-card-title' }, renderIcon(icon, { size: 16 }), ` ${title}`)), ...children);
+
+  return h(
+    'div',
+    { class: 'grid', style: 'gap:16px' },
+    h(
+      'div',
+      { class: 'grid cols-2 top' },
+      card(
+        'settings',
+        'Leaderboard settings',
+        canEdit ? null : h('p', { class: 'muted', style: 'font-size:13px' }, 'Only an owner or manager can change these.'),
+        form,
+      ),
+      card(
+        'trophy',
+        'How moderation works',
+        h(
+          'ul',
+          { class: 'fit-lb-help' },
+          h('li', {}, 'Lifts that jump 50% or more over a member’s previous best (and by 10 kg or more) in the last 30 days land in “Lifts to check”.'),
+          h('li', {}, 'Remove takes that exercise in that session off every board. The member’s own history and records keep it.'),
+          h('li', {}, 'Block takes a member off the leaderboard entirely until you unblock them.'),
+          h('li', {}, 'Members never see who removed a lift or why.'),
+        ),
+      ),
+    ),
+    card('alert', `Lifts to check${data.flagged.length ? ` (${data.flagged.length})` : ''}`, flagged),
+    card('barChart', 'Boards', h('div', { class: 'fit-lb-filters' }, exerciseSelect, metricSelect, periodSelect), boardBody),
+    h('div', { class: 'grid cols-2 top' }, card('eyeOff', 'Removed lifts', hidden), card('lock', 'Blocked members', blocked)),
+  );
+}
+
 /* ── View ──────────────────────────────────────────────────────────────── */
 
 const TABS = [
@@ -1902,6 +2136,7 @@ const TABS = [
   { key: 'exercises', label: 'Exercise library', icon: 'activity', render: renderExerciseLibrary },
   { key: 'foods', label: 'Food library', icon: 'flame', render: renderFoodLibrary },
   { key: 'pricing', label: 'Pricing & add-on', icon: 'wallet', render: renderAddonSettings },
+  { key: 'leaderboard', label: 'Leaderboard', icon: 'trophy', render: renderLeaderboardModeration },
 ];
 
 export async function renderFitnessPlans() {

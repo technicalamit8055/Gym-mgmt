@@ -1839,6 +1839,34 @@ const MIGRATIONS = [
       )
     `);
   },
+  // Gym leaderboards (src/leaderboard.js): whether a member shows up on them
+  // and under what name. No row means "never asked", which reads as hidden.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS member_social (
+        member_id           INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        show_on_leaderboard INTEGER NOT NULL DEFAULT 0,
+        display_name        TEXT,
+        updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workout_logs_date_member ON workout_logs(log_date, member_id)');
+  },
+  // Staff moderation of the leaderboards: the gym's on/off and default
+  // visibility, a per-set "removed from the board" (lb_hidden) and "checked,
+  // it's real" (lb_reviewed), and blocking a member from the boards outright.
+  (db) => {
+    ensureColumn(db, 'fitness_addon_settings', 'leaderboard_enabled', 'INTEGER NOT NULL DEFAULT 1');
+    ensureColumn(db, 'fitness_addon_settings', 'leaderboard_default_visible', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(db, 'workout_log_sets', 'lb_hidden', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(db, 'workout_log_sets', 'lb_reviewed', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(db, 'member_social', 'staff_blocked', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(db, 'member_social', 'blocked_reason', 'TEXT');
+    ensureColumn(db, 'member_social', 'blocked_at', 'TEXT');
+    // 1 when the member answered the join prompt themselves; 0 on a row staff
+    // created by blocking, which must not read as the member opting out.
+    ensureColumn(db, 'member_social', 'member_decided', 'INTEGER NOT NULL DEFAULT 1');
+  },
 ];
 
 // Carries the current request's tenant DB file through the async call chain,

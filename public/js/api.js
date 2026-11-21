@@ -3,6 +3,8 @@
  * Capacitor injects window.Capacitor before any page script runs.
  */
 export const isNativeApp = Boolean(window.Capacitor?.isNativePlatform?.());
+// app.css keys native-only rules (no overscroll stretch) off this class.
+if (isNativeApp) document.documentElement.classList.add('native-app');
 
 /**
  * The native app serves its bundled copy of public/ from https://localhost,
@@ -937,6 +939,12 @@ export const api = {
 
   fitnessAddonSettings: () => request('GET', '/fitness-addons/settings'),
   updateFitnessAddonSettings: (payload) => request('PUT', '/fitness-addons/settings', payload),
+  leaderboardOverview: () => request('GET', '/leaderboard/overview'),
+  updateLeaderboardSettings: (payload) => request('PUT', '/leaderboard/settings', payload),
+  leaderboardBoard: (params) => request('GET', `/leaderboard/board${query(params)}`),
+  leaderboardLift: (action, payload) => request('POST', `/leaderboard/lifts/${action}`, payload),
+  blockLeaderboardMember: (id, reason) => request('POST', `/leaderboard/members/${id}/block`, { reason }),
+  unblockLeaderboardMember: (id) => request('POST', `/leaderboard/members/${id}/unblock`),
   fitnessAddons: (params) => request('GET', `/fitness-addons${query(params)}`),
   memberFitnessAddon: (memberId) => request('GET', `/fitness-addons/members/${memberId}`),
   sellFitnessAddon: (payload) => request('POST', '/fitness-addons/subscribe', payload),
@@ -1008,6 +1016,11 @@ export const api = {
     personalRecords: () => request('GET', '/portal/workouts/prs', undefined, { member: true }),
     exercises: (params) => request('GET', `/portal/workouts/exercises${query(params)}`, undefined, { member: true }),
     exerciseHistory: (name) => request('GET', `/portal/workouts/exercise-history${query({ name })}`, undefined, { member: true }),
+    leaderboardSettings: () => request('GET', '/portal/leaderboard/settings', undefined, { member: true }),
+    saveLeaderboardSettings: (data) => request('PUT', '/portal/leaderboard/settings', data, { member: true }),
+    leaderboardHub: (params) => request('GET', `/portal/leaderboard/hub${query(params)}`, undefined, { member: true }),
+    leaderboard: (params) => request('GET', `/portal/leaderboard${query(params)}`, undefined, { member: true }),
+    leaderboardCompare: (params) => request('GET', `/portal/leaderboard/compare${query(params)}`, undefined, { member: true }),
     // Ask Coach (public/js/coach.js): whether this gym has it and how many
     // questions are left today, and one question with the live session.
     coachStatus: () => request('GET', '/portal/coach/status', undefined, { member: true }),
