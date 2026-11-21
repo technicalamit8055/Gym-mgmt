@@ -468,6 +468,9 @@ portalRoutes.put('/state/:key', requireMemberAuth, (req, res) => {
  * recognise their own phone, which is all the Devices screen needs. Order
  * matters: Edge and Samsung Internet also say "Chrome", and Chrome "Safari". */
 function describeDevice(ua = '') {
+  // The ChatGPT connector's sign-in (routes/mcp.js) — named plainly, since
+  // signing it out here is how a member disconnects ChatGPT.
+  if (/^ChatGPT \(GymVym connector\)/.test(ua ?? '')) return { device: 'ChatGPT', mobile: false };
   const browser =
     [
       [/EdgA?\/|Edg\//, 'Edge'],

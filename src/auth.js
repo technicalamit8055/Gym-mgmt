@@ -155,10 +155,39 @@ function renewMemberToken(member, tenantSlug, sid) {
   return memberToken(member, tenantSlug, sid, exp);
 }
 
+/**
+ * Any claims object as a signed token — for surfaces with their own `scope`
+ * (the ChatGPT connector's codes and tokens, src/routes/mcp.js).
+ */
+export function signClaims(claims) {
+  const payload = b64url(JSON.stringify(claims));
+  return `${payload}.${sign(payload)}`;
+}
+
+/**
+ * What a ChatGPT connector token (`scope: 'mcp'`, src/routes/mcp.js) may do
+ * in the member API: exactly the calls its tools make, and nothing else. It
+ * rides on a real member_sessions row, so the member sees "ChatGPT" on their
+ * Devices screen and signing it out there cuts ChatGPT off — but a token
+ * lifted from ChatGPT still cannot change a password, pay, or read the
+ * member's profile.
+ */
+const MCP_ALLOWED = [
+  ['GET', /^\/api\/portal\/workouts\/(current|routines|routines\/\d+|logs|logs\/\d+|prs|exercise-history|exercises)$/],
+  ['POST', /^\/api\/portal\/workouts\/routines$/],
+  ['PUT', /^\/api\/portal\/workouts\/routines\/\d+$/],
+  ['GET', /^\/api\/portal\/diets\/summary$/],
+];
+const mcpMayCall = (req) => {
+  const path = `${req.baseUrl}${req.path}`.replace(/\/+$/, '');
+  return MCP_ALLOWED.some(([method, re]) => method === req.method && re.test(path));
+};
+
 export function requireMemberAuth(req, res, next) {
   const header = req.get('authorization') || '';
   const claims = readToken(header.startsWith('Bearer ') ? header.slice(7) : header);
-  if (!claims || claims.scope !== 'member') {
+  const viaChatGpt = claims?.scope === 'mcp';
+  if (!claims || (claims.scope !== 'member' && !(viaChatGpt && mcpMayCall(req)))) {
     return next(unauthorized('Your session has expired, please sign in again'));
   }
 
@@ -182,7 +211,11 @@ export function requireMemberAuth(req, res, next) {
      WHERE id = ? AND last_seen_at < datetime('now', '-60 seconds')`,
     [req.get('user-agent')?.slice(0, 400) ?? null, session.id],
   );
-  if (needsRenewal(claims)) res.set(RENEWED_TOKEN_HEADER, renewMemberToken(member, claims.tenant, session.id));
+  // A ChatGPT token is renewed through its own refresh grant, never into a
+  // full member token.
+  if (!viaChatGpt && needsRenewal(claims)) {
+    res.set(RENEWED_TOKEN_HEADER, renewMemberToken(member, claims.tenant, session.id));
+  }
 
   req.member = member;
   req.memberSessionId = session.id;

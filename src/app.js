@@ -24,6 +24,7 @@ import { lockerRoutes } from './routes/lockers.js';
 import { marketingRoutes } from './routes/marketing.js';
 import { memberRoutes } from './routes/members.js';
 import { documentFileRoutes, memberDocumentRoutes } from './routes/memberDocuments.js';
+import { mcpRoutes } from './routes/mcp.js';
 import { memberPhotoRoutes } from './routes/memberPhotos.js';
 import { announcementImageRoutes, notificationRoutes, portalNotificationRoutes } from './routes/notifications.js';
 import { paymentRoutes } from './routes/payments.js';
@@ -134,6 +135,11 @@ export function createApp() {
   // (a registered redirect URI cannot vary by gym), so it finds its own
   // institute from the sign-in's state — see routes/coaching/youtube.js.
   app.get('/api/youtube/callback', handleYoutubeCallback);
+
+  // GymVym for ChatGPT: the MCP endpoint and its OAuth sign-in live at fixed
+  // platform-wide paths (ChatGPT is given one URL for every gym), and find
+  // the member's gym from the gym code they type — see routes/mcp.js.
+  app.use(mcpRoutes);
 
   app.use(resolveTenant);
 
